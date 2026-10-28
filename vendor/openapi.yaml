@@ -14,7 +14,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -4935,6 +4935,239 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/live:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: contribute
+      operationId: startScreenLive
+      x-rate-limit-policies:
+        - name: live-project
+          quota: 600
+          windowSeconds: 60
+        - name: live-screen
+          quota: 60
+          windowSeconds: 60
+        - name: live-ip
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Starts live view of the named screen, or renews the one it has (docs/player-compatibility.md §6.10): sub-second video of what the screen plays, from the Player through a media relay to the dashboard. A screen has one live session, shared by every viewer. Its lease runs duration_s from now (30 to 3600, default 300) and a start or renewal sets lease_until to the later of its current end and that instant, never past max_until, the hour after the session began. The session ends when the lease passes with no renewal, at max_until, on DELETE, or when the Player ends it; the Player stops publishing within about 20 seconds of the lease ending. A new session appends the per-screen runtime command player.live_publish (details live_id, at, expires_at sixty seconds later, max_until; never delivered after expires_at); a renewal sends it again only when the Player never joined and the last command expired. The screen must be active and online and its host hint must declare the live_view capability: 409 live_unsupported (update the Player, or use a screenshot), 409 live_unavailable (offline), screen_archived. 404 feature_unavailable when the server has no media relay configured. 201 is a new session, 200 a renewed one; both return the LiveSession with a viewer_url that opens the dashboard viewer. State requested lasts until the Player publishes: poll GET until publisher.connected. Live view is free and exempt from the 1-credit API meter, like a screenshot.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveStartRequest'
+      responses:
+        '201':
+          description: A new live session; the Player was asked to publish.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSession'
+        '200':
+          description: The screen's live session, renewed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSession'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenLive
+      description: 'Returns the screen''s live session after lazy expiry: idle when it has none, requested while the Player has been asked to publish, publishing once the media relay holds its video, ended with ended_reason (stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped; an open enum) for ten minutes after it ended. publisher.connected is true only while the Player''s last report, at most 45 seconds old, said it is connected; it is the Player''s own word, not proof of picture. 404 feature_unavailable when the server has no media relay configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: The screen's live session.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSession'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: contribute
+      operationId: stopScreenLive
+      description: 'Ends the screen''s live session (ended_reason stopped), appends player.live_stop (details live_id, at, expires_at sixty seconds later), and closes its tracks on the media relay. 204 also when the screen has no live session. A Player that misses the command stops at its next heartbeat. 404 feature_unavailable when the server has no media relay configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '204':
+          description: Stopped, or there was nothing to stop.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/live/viewers:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: contribute
+      operationId: createScreenLiveViewer
+      x-rate-limit-policies:
+        - name: live-viewer-screen
+          quota: 30
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Opens a viewer of the screen''s live session: a new media relay session that subscribes to the Player''s video, and the relay''s WebRTC offer. Apply offer with setRemoteDescription on an RTCPeerConnection built with ice_servers (short-lived credentials), create the answer, wait for ICE gathering to complete or two seconds, then PUT the answer to /api/screens/{id}/live/viewers/{viewer_id} within two minutes. Candidates travel inside the SDP; there is no separate candidate call. 409 live_not_ready while the session is requested, 409 live_unavailable when the screen has no live session or it ended (the detail names ended_reason). 404 feature_unavailable when the server has no media relay configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: A viewer and the relay's offer.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveViewer'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/live/viewers/{viewer_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    put:
+      x-screenrig-access: contribute
+      operationId: answerScreenLiveViewer
+      description: 'Applies the viewer''s WebRTC answer to the relay''s offer. A viewer answers once, within two minutes of its offer; an unknown, expired, already answered or another screen''s viewer_id is 404 not_found. 204 once the relay accepts the answer; media then flows from the relay to the viewer. 404 feature_unavailable when the server has no media relay configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: viewer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^lvv_[a-z2-7]{26}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveViewerAnswer'
+      responses:
+        '204':
+          description: The relay accepted the answer.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/events:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -7670,6 +7903,311 @@ paths:
       responses:
         '204':
           description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sources:
+    get:
+      x-screenrig-access: read
+      operationId: listSources
+      description: >-
+        Lists the project's data sources, newest first, at most 200 a page. A data source keeps one card's dynamic properties current from an outside address on a schedule (docs/sources.md). Each source shows its status: the last attempt, the last success, the last change written, the next run, the failure count and the last error. Secrets are never returned; each is shown as set with a masked hint. next_cursor is passed back as after for the next page, null when there are no more.
+      security:
+        - projectBearer: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The project's data sources.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createSource
+      description: >-
+        Creates a data source that writes one card's dynamic properties from an outside address. kind selects the adapter (ics reads an iCalendar or webcal:// address); config holds the kind's settings and secrets its credentials, which are stored sealed and shown only as a masked hint. The source runs within seconds and then every refresh_seconds. A failed run never writes: the card keeps its last good document and the source's status shows the error. One source writes one card (source_target_taken), the card must be one the kind can fill (source_target_unsupported), and a project has at most 200 sources (source_limit_reached). Use POST /api/sources/test first to see the document the source would write. Appends source.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceCreate'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          description: invalid_request with field errors (config.calendars[0].key, secrets.calendar_url.lobby), or source_secret_required when a secret the kind needs is missing.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: source_target_taken (the card already has a source; source_id names it), source_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: source_target_unsupported; supported_cards lists the card types the kind can fill.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sources/test:
+    post:
+      x-screenrig-access: write
+      operationId: testSource
+      description: >-
+        Previews a data source without saving or writing anything: fetches the address, shapes the answer for the target card and validates the document against the card, then returns the document, whether the card accepts it (valid, with validation_error naming the path when it does not), the run's warnings and counts. Pass source_id to test a saved source with the other members as overrides; otherwise kind, target and config are required. A secret a saved source keeps is used as stored, unless the override changes where it points (source_secret_required). A fetch or shaping failure is source_test_failed with the fixed source_error. At most 30 previews a minute per project.
+      security:
+        - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceTestRequest'
+      responses:
+        '200':
+          description: The preview.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceTestResult'
+        '400':
+          description: invalid_request or source_secret_required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: The saved source named by source_id was not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: source_test_failed (source_error holds code, message and upstream_status) or source_target_unsupported.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sources/{source_id}:
+    parameters:
+      - $ref: '#/components/parameters/SourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getSource
+      description: One data source with its status. ETag is the revision, for If-Match on the next change.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: One data source.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateSource
+      description: >-
+        Changes a data source. config replaces the whole config; secrets merges (a string sets or replaces one, null removes it). A secret not sent keeps its value unless the change points the source somewhere its stored scope does not cover (source_secret_required at secrets.<name>: enter it again). A change to the target, config, secrets, refresh_seconds or enabled resets the failure count and runs the source within seconds; a rename does not. enabled false stops the schedule and keeps the card's last document. If-Match guards the revision. Appends source.updated.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceUpdate'
+      responses:
+        '200':
+          description: The changed source.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          description: invalid_request or source_secret_required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: source_target_taken or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: source_target_unsupported.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteSource
+      description: Deletes the data source. The card keeps the last document the source wrote. If-Match guards the revision. Appends source.deleted.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sources/{source_id}/refresh:
+    parameters:
+      - $ref: '#/components/parameters/SourceID'
+    post:
+      x-screenrig-access: write
+      operationId: refreshSource
+      description: >-
+        Syncs the source now, inline (up to 60 seconds), and returns it with its new status. A failed sync answers 200 with status.state error and the error; it never writes. A refresh starts the source over: the failure count resets and the address is read in full. source_busy (Retry-After) while a scheduled sync holds the source. At most 6 refreshes a minute per source.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The source after the sync.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: source_busy.
+          headers:
+            Retry-After:
+              required: true
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
   /api/feeds/{family}:
@@ -11494,6 +12032,262 @@ paths:
         '403':
           $ref: '#/components/responses/RuntimeProblem'
         '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/live/{live_id}/join:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: joinRuntimeLive
+      x-rate-limit-policies:
+        - name: runtime-live
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-live-ip
+          quota: 300
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'A Player that received player.live_publish joins the session (docs/player-compatibility.md §6.10.2): it gets short-lived TURN ice_servers, the lease, the video limits it may publish and the heartbeat period. The live_id must be the screen''s current session, else 410 live_session_ended (stop publishing, keep playing). Auth is the paired runtime cookie or ScreenRig-Session.'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      parameters:
+        - name: live_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^lv_[a-z2-7]{26}$"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeLiveJoinRequest'
+      responses:
+        '200':
+          description: The session the Player publishes to.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeLiveJoin'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '410':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/live/{live_id}/offer:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: offerRuntimeLive
+      x-rate-limit-policies:
+        - name: runtime-live
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-live-ip
+          quota: 300
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'The Player sends its gathered sendonly offer: exactly one video m-section, ICE gathering complete or two seconds old, no separate candidates ever. The backend opens a fresh media relay session for it, replacing any earlier publisher of the session, and returns the relay''s answer, which the Player applies with setRemoteDescription. No video m-section, or two, is invalid_request. A relay failure is dependency_unavailable. 410 live_session_ended when the live_id is not the screen''s current session.'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      parameters:
+        - name: live_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^lv_[a-z2-7]{26}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeLiveOffer'
+      responses:
+        '200':
+          description: The relay''s answer.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeLiveOffer'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '410':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/live/{live_id}/heartbeat:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: heartbeatRuntimeLive
+      x-rate-limit-policies:
+        - name: runtime-live
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-live-ip
+          quota: 300
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'The Player reports its connection state and what its encoder sends every 20 seconds. The answer carries the lease; a lapsed lease or max_until ends the session here with 410 live_session_ended, and the Player stops publishing. The report is the Player''s own word and feeds publisher.connected on the project API.'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      parameters:
+        - name: live_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^lv_[a-z2-7]{26}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeLiveHeartbeat'
+      responses:
+        '200':
+          description: The session is live; lease_until and max_until are its limits.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeLiveHeartbeatAnswer'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '410':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/live/{live_id}/stopped:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: stoppedRuntimeLive
+      x-rate-limit-policies:
+        - name: runtime-live
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-live-ip
+          quota: 300
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'The Player reports it stopped publishing. The reason is an open enum (stopped, lease_ended, superseded, consent_denied, consent_timeout, projection_stopped, capture_failed, encoder_unavailable, connection_failed, relay_refused); a reason this server does not know reads player_stopped. 204 always, also for a live_id that is not the screen''s current session.'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      parameters:
+        - name: live_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^lv_[a-z2-7]{26}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeLiveStopped'
+      responses:
+        '204':
+          description: Recorded.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '410':
           $ref: '#/components/responses/RuntimeProblem'
         '429':
           $ref: '#/components/responses/RuntimeRateLimitedProblem'
@@ -17596,6 +18390,7 @@ components:
     CommandID: {name: command_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$"}, description: "The id of one of the screen's commands: the id in Screen.commands, the reboot_id or reload_id of the 202 answer."}
     PlaylistPageID: {name: page_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, description: Playlist page id string.}
     ApplicationID: {name: application_id, in: path, required: true, schema: {type: string}}
+    SourceID: {name: source_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}, description: The id of one of the project's data sources.}
     KVWebhookID: {name: webhook_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$"}, description: The id of one of the application's key/value webhooks.}
     FeedbackID: {name: id, in: path, required: true, schema: {type: string, pattern: '^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$'}}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
@@ -22581,6 +23376,121 @@ components:
         duration_ms: {type: integer, minimum: 2000, maximum: 600000}
         at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
+    LiveStartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        duration_s: {type: integer, minimum: 30, maximum: 3600, default: 300, description: "How long the lease runs from now, in seconds."}
+    SessionDescription:
+      type: object
+      additionalProperties: false
+      required: [type, sdp]
+      properties:
+        type: {type: string, enum: [offer, answer]}
+        sdp: {type: string, description: "The session description. Candidates are inside it; a peer gathers for at most two seconds and sends once."}
+    IceServer:
+      type: object
+      required: [urls]
+      description: An RTCIceServer. Port 53 URLs are removed because browsers block them and nothing trickles.
+      properties:
+        urls: {type: array, minItems: 1, items: {type: string}}
+        username: {type: string}
+        credential: {type: string, description: "Short-lived TURN credential, valid past max_until by five minutes. Never logged."}
+    LiveSession:
+      type: object
+      required: [state, screen_id, viewer_url]
+      description: A screen's live session. Open schema.
+      properties:
+        state: {type: string, enum: [idle, requested, publishing, ended]}
+        screen_id: {type: string}
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$", description: "Absent while idle."}
+        created_at: {type: string, format: date-time}
+        lease_until: {type: string, format: date-time, description: "The session ends at this instant unless a viewer renews it."}
+        max_until: {type: string, format: date-time, description: "The hard end of the session: an hour after it began."}
+        publisher:
+          type: object
+          required: [connected, connection, reported_at]
+          description: The Player's last report. Absent until it reported.
+          properties:
+            connected: {type: boolean, description: "True only while the last report, at most 45 seconds old, said connected. The Player's word, not proof of picture."}
+            connection: {type: string}
+            reported_at: {type: string, format: date-time}
+            width: {type: integer}
+            height: {type: integer}
+            fps: {type: number}
+        ended_at: {type: string, format: date-time}
+        ended_reason: {type: string, description: "Why it ended: stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped. An open enum."}
+        viewer_url: {type: string, description: "The dashboard page that shows the live view of this screen."}
+    LiveViewer:
+      type: object
+      required: [viewer_id, live_id, offer, ice_servers, expires_at]
+      description: A viewer's relay offer. Open schema.
+      properties:
+        viewer_id: {type: string, pattern: "^lvv_[a-z2-7]{26}$"}
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$"}
+        offer: {$ref: '#/components/schemas/SessionDescription'}
+        ice_servers: {type: array, items: {$ref: '#/components/schemas/IceServer'}}
+        expires_at: {type: string, format: date-time, description: "The answer is accepted until this instant."}
+    LiveViewerAnswer:
+      type: object
+      additionalProperties: false
+      required: [answer]
+      properties:
+        answer: {$ref: '#/components/schemas/SessionDescription'}
+    RuntimeLiveJoinRequest:
+      type: object
+      description: Empty. The body may be omitted.
+    RuntimeLiveJoin:
+      type: object
+      required: [live_id, ice_servers, lease_until, max_until, heartbeat_ms, video]
+      description: What a Player publishes to and within what limits. Open schema.
+      properties:
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$"}
+        ice_servers: {type: array, items: {$ref: '#/components/schemas/IceServer'}}
+        lease_until: {type: string, format: date-time}
+        max_until: {type: string, format: date-time}
+        heartbeat_ms: {type: integer, enum: [20000]}
+        video:
+          type: object
+          required: [codec, profile_level_id, max_width, max_height, max_fps, max_bitrate_kbps, keyframe_interval_ms]
+          properties:
+            codec: {type: string, enum: [h264]}
+            profile_level_id: {type: string, enum: ["42e01f"], description: "H.264 Constrained Baseline, packetization-mode 1."}
+            max_width: {type: integer}
+            max_height: {type: integer}
+            max_fps: {type: integer}
+            max_bitrate_kbps: {type: integer}
+            keyframe_interval_ms: {type: integer, description: "A keyframe at least this often, and on PLI."}
+    RuntimeLiveOffer:
+      type: object
+      required: [sdp]
+      description: A session description without its type, as the Player's offer and the relay's answer.
+      properties:
+        sdp: {type: string, description: "One sendonly video m-section; ICE gathering complete or two seconds old."}
+    RuntimeLiveHeartbeat:
+      type: object
+      required: [connection]
+      description: The Player's own report. Open schema.
+      properties:
+        connection: {type: string, enum: [new, connecting, connected, disconnected, failed, closed]}
+        video:
+          type: object
+          properties:
+            width: {type: integer}
+            height: {type: integer}
+            fps: {type: number}
+            encoder: {type: string, maxLength: 64}
+    RuntimeLiveHeartbeatAnswer:
+      type: object
+      required: [lease_until, max_until]
+      properties:
+        lease_until: {type: string, format: date-time}
+        max_until: {type: string, format: date-time}
+    RuntimeLiveStopped:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, description: "stopped, lease_ended, superseded, consent_denied, consent_timeout, projection_stopped, capture_failed, encoder_unavailable, connection_failed or relay_refused. An open enum; an unknown reason reads player_stopped."}
     ScreenSuspendWrite:
       type: object
       additionalProperties: false
@@ -22766,6 +23676,93 @@ components:
     FeedPending: {type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: {key: {type: string}, state: {type: string, enum: [pending]}, retry_after_seconds: {type: integer}}}
     CardDataSummary: {type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}}}
     CardDataList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/CardDataSummary"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    SourceKind: {type: string, enum: [ics, sheets, csv, json, microsoft365, google_calendar, square, shopify], description: "Where the data comes from. ics reads iCalendar and webcal:// addresses (the other kinds are described in /docs/sources). A kind that is not available answers invalid_request at kind."}
+    SourceTarget: {type: object, additionalProperties: false, required: [card_id], properties: {card_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$", description: "The card instance whose dynamic properties the source writes. One source writes one card."}}}
+    SourceSecretView: {type: object, additionalProperties: false, required: [set, hint, updated_at], properties: {set: {type: boolean, enum: [true]}, hint: {type: string, description: "A masked hint: the last characters of a token, or the scheme and host of an address. The value is never returned."}, updated_at: {type: string, format: date-time}}}
+    SourceError: {type: object, additionalProperties: false, required: [code, message, at], properties: {code: {type: string, enum: [unreachable, timeout, too_large, http_status, auth_failed, not_shared, parse_failed, rate_limited, mapping_failed, card_data_invalid, target_missing, payment_required, config_invalid, internal], description: "Branch on the code; the message is fixed text that names no address and no secret."}, message: {type: string}, upstream_status: {type: integer, description: "The HTTP status the address answered, when it answered one."}, at: {type: string, format: date-time}}}
+    SourceStatus:
+      type: object
+      additionalProperties: false
+      required: [state, last_attempt_at, last_success_at, last_change_at, next_run_at, failures, error, warnings, stats]
+      description: >-
+        What the last runs did. state is pending (not run yet), ok (the last fetch succeeded and the card accepted the document), error (the last run failed and the card kept its last good document) or disabled. ok does not judge whether the upstream data is right or current, nor whether any screen shows the card.
+      properties:
+        state: {type: string, enum: [pending, ok, error, disabled]}
+        last_attempt_at: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
+        last_success_at: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
+        last_change_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When a run last wrote a document that differed from the stored one."}
+        next_run_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: Null while disabled.}
+        failures: {type: integer, minimum: 0, description: Consecutive failed runs.}
+        error: {anyOf: [{$ref: "#/components/schemas/SourceError"}, {type: "null"}]}
+        warnings: {type: array, items: {type: string}, description: "What the last successful run noticed and worked around: a time zone it could not place, events cut at a limit."}
+        stats: {type: object, additionalProperties: {type: integer}, description: "Counts from the last successful run, such as calendars and events."}
+    Source:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, revision, status, created_at, updated_at]
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind: {$ref: "#/components/schemas/SourceKind"}
+        target: {$ref: "#/components/schemas/SourceTarget"}
+        enabled: {type: boolean}
+        config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources."}
+        secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked."}
+        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        revision: {type: integer, minimum: 1}
+        status: {$ref: "#/components/schemas/SourceStatus"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    SourceList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Source"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    SourceCreate:
+      type: object
+      additionalProperties: false
+      required: [name, kind, target, config]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind: {$ref: "#/components/schemas/SourceKind"}
+        target: {$ref: "#/components/schemas/SourceTarget"}
+        config: {type: object, additionalProperties: true, description: "The kind's settings (/docs/sources). For ics: calendars (1 to 60, each with a key), days, time_zone, private_title."}
+        secrets: {type: object, additionalProperties: {type: string, writeOnly: true}, description: "Credentials by name, stored sealed. For ics: calendar_url.<key>, the calendar's address (webcal://, https:// or http://), one per calendar."}
+        refresh_seconds: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60)."}
+        enabled: {type: boolean, default: true}
+    SourceUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        target: {$ref: "#/components/schemas/SourceTarget"}
+        config: {type: object, additionalProperties: true, description: Replaces the whole config.}
+        secrets: {type: object, additionalProperties: {anyOf: [{type: string, writeOnly: true}, {type: "null"}]}, description: "Merged into the stored secrets: a string sets or replaces one, null removes it."}
+        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        enabled: {type: boolean}
+    SourceTestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        source_id: {type: string, description: "A saved source to test; the other members override it."}
+        kind: {$ref: "#/components/schemas/SourceKind"}
+        target: {$ref: "#/components/schemas/SourceTarget"}
+        config: {type: object, additionalProperties: true}
+        secrets: {type: object, additionalProperties: {type: string, writeOnly: true}}
+    SourceTestResult:
+      type: object
+      additionalProperties: false
+      required: [document, valid, warnings, stats, fetched_at]
+      properties:
+        document: {type: object, additionalProperties: true, description: "The dynamic properties the source would write to the card."}
+        valid: {type: boolean, description: Whether the target card accepts the document.}
+        validation_error:
+          type: object
+          additionalProperties: false
+          required: [path, reason]
+          description: Where the card refuses the document, when valid is false.
+          properties:
+            path: {type: string}
+            reason: {type: string}
+        warnings: {type: array, items: {type: string}}
+        stats: {type: object, additionalProperties: {type: integer}}
+        fetched_at: {type: string, format: date-time}
     KVWrite: {type: object, additionalProperties: false, required: [value_base64], properties: {value_base64: {type: string, contentEncoding: base64, maxLength: 1398104}, content_type: {type: string, minLength: 1, maxLength: 127, default: application/octet-stream}}}
     KVEntry: {type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, value_base64: {type: string, contentEncoding: base64}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}}}
     KVSummary: {type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string}, updated_at: {type: string}}}
@@ -25275,6 +26272,12 @@ x-problem-codes:
   - card_layout_invalid
   - card_layout_conflict
   - card_data_invalid
+  - source_limit_reached
+  - source_target_unsupported
+  - source_target_taken
+  - source_busy
+  - source_secret_required
+  - source_test_failed
   - card_media_invalid
   - revision_conflict
   - invalid_range
@@ -25339,6 +26342,10 @@ x-problem-codes:
   - play_page_unsupported
   - identify_unsupported
   - page_not_on_screen
+  - live_unsupported
+  - live_unavailable
+  - live_not_ready
+  - live_session_ended
   - wall_unsupported
   - playlist_format_mismatch
   - webhook_limit_reached

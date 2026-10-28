@@ -670,6 +670,39 @@ export interface ScreenPlayPageAccepted {
   expires_at: string;
 }
 
+export type LiveState = "idle" | "requested" | "publishing" | "ended";
+
+/** The Player's last live view report. connected is its own word, at most 45 seconds old. */
+export interface LivePublisher {
+  connected: boolean;
+  connection: string;
+  reported_at: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+/** GET|POST /api/screens/{id}/live: the screen's live view session. Open schema. */
+export interface LiveSession {
+  state: LiveState;
+  screen_id: string;
+  live_id?: string;
+  created_at?: string;
+  lease_until?: string;
+  max_until?: string;
+  publisher?: LivePublisher;
+  ended_at?: string;
+  /** stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped; an open enum. */
+  ended_reason?: string;
+  /** The dashboard page that shows the live view of the screen. */
+  viewer_url: string;
+}
+
+/** Write body for POST /api/screens/{id}/live; duration_s is omitted so the server can default it (300). */
+export interface LiveStartRequest {
+  duration_s?: number;
+}
+
 /**
  * Nested playlist identity for the manifest upgrade read model. `name` is
  * resolved by playlist id; null when unknown. revision is >= 1 and is the
