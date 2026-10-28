@@ -1,0 +1,276 @@
+[
+  {
+    "data": {
+      "allChannels": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "d1000000-0000-4000-8000-000000000001",
+            "name": "Lobby channel",
+            "width": 1920,
+            "height": 1080,
+            "layoutId": "c1000000-0000-4000-8000-000000000001",
+            "draftOf": null,
+            "type": "DEFAULT",
+            "content": {
+              "zones": {
+                "zone1": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000001"
+                        },
+                        "props": {
+                          "duration": 10000
+                        }
+                      }
+                    },
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000002"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                },
+                "zone2": {
+                  "props": {
+                    "default_durations": {
+                      "image": 4000,
+                      "app": 60000,
+                      "link": 30000
+                    }
+                  },
+                  "list": [
+                    {
+                      "list_id": "9a000000-link",
+                      "content": {
+                        "_ref": {
+                          "type": "link",
+                          "id": "9a000000-0000-4000-8000-000000000001"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    },
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000003"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    },
+                    {
+                      "list_id": "d1000000-channel",
+                      "content": {
+                        "_ref": {
+                          "type": "channel",
+                          "id": "d1000000-0000-4000-8000-000000000002"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    },
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000001"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      },
+                      "rules": [
+                        {
+                          "time": [],
+                          "day_of_week": {
+                            "mon": true,
+                            "tue": true,
+                            "wed": true,
+                            "thu": true,
+                            "fri": true,
+                            "sat": false,
+                            "sun": false
+                          },
+                          "date": [],
+                          "exclusive": true
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "hidden": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "77000000-app",
+                      "content": {
+                        "_ref": {
+                          "type": "app",
+                          "id": "77000000-0000-4000-8000-000000000002"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": "d1000000-0000-4000-8000-000000000002",
+            "name": "Fullscreen channel",
+            "width": null,
+            "height": null,
+            "layoutId": "c1000000-0000-4000-8000-000000000002",
+            "draftOf": null,
+            "type": "DEFAULT",
+            "content": "{\"zones\": {\"zone1\": {\"props\": {}, \"list\": [{\"list_id\": \"b1000000-playlist\", \"content\": {\"_ref\": {\"type\": \"playlist\", \"id\": \"b1000000-0000-4000-8000-000000000001\"}, \"props\": {\"duration\": 0}}}]}}}"
+          },
+          {
+            "id": "d1000000-0000-4000-8000-000000000003",
+            "name": "Blank",
+            "width": 1920,
+            "height": 1080,
+            "layoutId": null,
+            "draftOf": null,
+            "type": "BLANK",
+            "content": {
+              "zones": {}
+            }
+          },
+          {
+            "id": "d1000000-0000-4000-8000-000000000004",
+            "name": "Lobby channel (draft)",
+            "width": 1920,
+            "height": 1080,
+            "layoutId": "c1000000-0000-4000-8000-000000000001",
+            "draftOf": "d1000000-0000-4000-8000-000000000001",
+            "type": "DEFAULT",
+            "content": {
+              "zones": {}
+            }
+          },
+          {
+            "id": "d1000000-0000-4000-8000-000000000005",
+            "name": "Quarters",
+            "width": 1920,
+            "height": 1080,
+            "layoutId": "c1000000-0000-4000-8000-000000000003",
+            "draftOf": null,
+            "type": "DEFAULT",
+            "content": {
+              "zones": {
+                "zone1": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000001"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                },
+                "zone2": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000005"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": "d1000000-0000-4000-8000-000000000006",
+            "name": "No layout",
+            "width": 1280,
+            "height": 720,
+            "layoutId": null,
+            "draftOf": null,
+            "type": "DEFAULT",
+            "content": {
+              "zones": {
+                "zone1": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000001"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                },
+                "zone2": {
+                  "props": {},
+                  "list": [
+                    {
+                      "list_id": "f1000000-file",
+                      "content": {
+                        "_ref": {
+                          "type": "file",
+                          "id": "f1000000-0000-4000-8000-000000000005"
+                        },
+                        "props": {
+                          "duration": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+]

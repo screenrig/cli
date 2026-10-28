@@ -2386,6 +2386,99 @@ export function memoryBackend(options: {
     return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
   }));
 
+  // Card webhooks: /api/cards/{id}/kv-webhooks write a card's data document.
+  // At most 20 per card; the secret and the signing secret are returned only
+  // by the request that issued them. A card id starting crd_MISSING is not in
+  // the project.
+  const cardWebhooks = new Map<string, Record<string, unknown>>();
+  let cardWebhookSigningSequence = 0;
+  const cardWebhookSigningSecret = () => `whsec_${String(++cardWebhookSigningSequence).padStart(43, "S")}`;
+  const cardWebhookCard = (req: TransportRequest): string | undefined => {
+    const cardId = decodeURIComponent(req.path.split("/")[3] ?? "");
+    return cardId.startsWith("crd_MISSING") ? undefined : cardId;
+  };
+  const cardWebhookFor = (req: TransportRequest): Record<string, unknown> | undefined => {
+    const webhook = cardWebhooks.get(decodeURIComponent(req.path.split("/")[5] ?? ""));
+    return webhook && webhook.card_id === cardWebhookCard(req) ? webhook : undefined;
+  };
+  const cardMissing = () => problem(404, "card_not_found", "Card was not found.");
+  const cardWebhookMissing = () => notFound("The key/value webhook was not found on this card.");
+  const cardWebhookView = (webhook: Record<string, unknown>) => ({ ...webhook });
+  const mappingProblem = (mapping: unknown): TransportResponse | undefined =>
+    mapping === undefined || mapping === null || (typeof mapping === "object" && !Array.isArray(mapping)) ? undefined
+      : problem(400, "invalid_request", "mapping must be a JSON object that becomes the card's data document.");
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    return { status: 200, headers: {}, body: { items: [...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).map(cardWebhookView) } };
+  });
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => kvWebhookReplay(req, () => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if ([...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).length >= 20) {
+      return problem(409, "kv_webhook_limit_reached", "The card already has the maximum of 20 key/value webhooks.");
+    }
+    kvWebhookSequence += 1;
+    const id = `kvw_${String(kvWebhookSequence).padStart(22, "A")}`;
+    const webhook: Record<string, unknown> = {
+      id, card_id: cardId, description: body.description ?? "", mapping: body.mapping ?? null, enabled: true, signing: body.signing === true,
+      url: `https://api.screenrig.ai/api/cards/${cardId}/kv-webhooks/${id}/write`,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    cardWebhooks.set(id, webhook);
+    return {
+      status: 201, headers: { "cache-control": "no-store" },
+      body: { ...webhook, secret: kvWebhookSecret(), ...(webhook.signing ? { signing_secret: cardWebhookSigningSecret() } : {}) },
+    };
+  }));
+  transport.on("PATCH", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; enabled?: boolean; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if (body.description !== undefined) webhook.description = body.description;
+    if (body.mapping !== undefined) webhook.mapping = body.mapping;
+    if (body.enabled !== undefined) webhook.enabled = body.enabled;
+    let signingSecret: string | undefined;
+    if (body.signing !== undefined) {
+      if (body.signing && !webhook.signing) signingSecret = cardWebhookSigningSecret();
+      webhook.signing = body.signing;
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), ...(signingSecret ? { signing_secret: signingSecret } : {}) } };
+  }));
+  transport.on("DELETE", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    cardWebhooks.delete(webhook.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/rotate-secret$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    if ((req.body as { signing?: boolean } | undefined)?.signing) {
+      if (!webhook.signing) return problem(400, "invalid_request", "This webhook does not sign, so it has no signing secret to rotate.");
+      return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), signing_secret: cardWebhookSigningSecret() } };
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), secret: kvWebhookSecret() } };
+  }));
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/deliveries$/, (req) => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    if (!cardWebhookFor(req)) return cardWebhookMissing();
+    const limit = Number(req.query?.limit ?? 100);
+    const items = [
+      { at: "2026-08-14T17:00:02.000Z", outcome: "invalid", reason: "card_data_invalid", detail: "document.title: must be at most 120 characters", status: 409, bytes: 311, request_id: "req_two" },
+      { at: "2026-08-14T17:00:01.000Z", outcome: "written", status: 200, bytes: 98, revision: 3, request_id: "req_one" },
+    ];
+    return { status: 200, headers: {}, body: { items: items.slice(0, limit) } };
+  });
+
   // Content campaigns: at most 100 per project, listed in precedence order
   // (priority, then newest). A write bumps the revision, If-Match guards it,
   // and an exact Idempotency-Key replay returns the same answer. A playlist id
@@ -2553,7 +2646,45 @@ export function memoryBackend(options: {
     const effective = screen.takeover ? { id: screen.takeover.playlist_id, source: "takeover" }
       : playingCampaign ? { id: playingCampaign.playlist_id, source: "campaign", entry_id: playingCampaign.id }
       : screen.playlist_id ? { id: screen.playlist_id, source: "default" } : null;
-    return { status: 200, headers: {}, body: { screen_id: screen.id, effective_playlist: effective, items } };
+    const body: Record<string, unknown> = { screen_id: screen.id, effective_playlist: effective, items };
+    if (req.query?.at !== undefined || req.query?.to !== undefined) {
+      // The explanation at an instant, simplified like the standings: the clock
+      // is not read, so the answer at any time is the answer now. A time
+      // without a zone is read as the screen's own clock; one with a zone is
+      // that instant.
+      const instantOf = (field: string, value: string | undefined): { instant: string; local?: string } | TransportResponse => {
+        if (value === undefined) return { instant: new Date().toISOString() };
+        const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+        const civil = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value) && Number.isFinite(Date.parse(`${value}Z`));
+        if (!zoned && !civil) return campaignInvalid(field, "must be an RFC 3339 instant with a zone, or a time on the screen's clock");
+        if (civil && !screen.timezone) return campaignInvalid(field, "is a time on the screen's clock and the screen has no timezone; give an RFC 3339 instant with a zone");
+        return zoned ? { instant: new Date(value).toISOString() } : { instant: new Date(`${value.slice(0, 16)}:00Z`).toISOString(), local: value.slice(0, 16) };
+      };
+      const start = instantOf("at", req.query?.at);
+      if ("status" in start) return start;
+      const end = req.query?.to === undefined ? undefined : instantOf("to", req.query.to);
+      if (end && "status" in end) return end;
+      if (end && Date.parse(end.instant) <= Date.parse(start.instant)) return campaignInvalid("to", "must be after at");
+      const verdicts: Array<Record<string, unknown>> = [];
+      if (screen.takeover) verdicts.push({ kind: "takeover", playlist_id: screen.takeover.playlist_id, verdict: "won", ...(screen.takeover.until ? { until: screen.takeover.until } : {}) });
+      for (const item of items) {
+        const campaign = campaigns.get(item.campaign_id as string)!;
+        const row = { kind: "campaign", id: item.campaign_id, playlist_id: campaign.playlist_id };
+        if (item.status === "playing") verdicts.push({ ...row, verdict: "won" });
+        else if (item.status === "outranked") verdicts.push({ ...row, verdict: "outranked", by: item.reason === "takeover" ? { kind: "takeover" } : { kind: "campaign", id: item.by } });
+        else verdicts.push({ ...row, verdict: "off", reason: item.status === "blocked" ? item.reason : item.status });
+      }
+      body.at = {
+        instant: start.instant,
+        ...(screen.timezone ? { timezone: screen.timezone } : {}),
+        ...(start.local ? { local: start.local } : {}),
+        effective_playlist: effective,
+        verdicts,
+        ...(end ? { timeline: [{ from: start.instant, to: end.instant, ...(effective ? { playlist_id: effective.id } : {}), source: effective?.source ?? "default", ...(effective && "entry_id" in effective ? { entry_id: effective.entry_id } : {}) }] } : {}),
+        not_judged: [{ code: "configuration_history", detail: "The screen's takeover and playlist schedule and the project's campaigns are read as they are now, not as they were or will have been changed by then." }],
+      };
+    }
+    return { status: 200, headers: {}, body };
   });
 
   return transport;

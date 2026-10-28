@@ -1,0 +1,100 @@
+[
+  {
+    "id": "01J9FX00000000000000000A01",
+    "title": "Welcome",
+    "type": "image",
+    "mimetype": "image/png",
+    "asset_url": "https://assets.example.com/screenly/welcome",
+    "source_url": "https://assets.example.com/screenly/welcome",
+    "status": "finished",
+    "source_size": 2048,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  },
+  {
+    "id": "01J9FX00000000000000000A02",
+    "title": "Promo",
+    "type": "video",
+    "mimetype": "video/mp4",
+    "asset_url": "https://assets.example.com/screenly/promo",
+    "source_url": "https://assets.example.com/screenly/promo",
+    "status": "finished",
+    "source_size": 900000,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00",
+    "duration": 20
+  },
+  {
+    "id": "01J9FX00000000000000000A03",
+    "title": "Menu board",
+    "type": "web",
+    "mimetype": "text/html",
+    "asset_url": "https://menu.example.com/board",
+    "source_url": "https://menu.example.com/board",
+    "status": "finished",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  },
+  {
+    "id": "01J9FX00000000000000000A04",
+    "title": "Lobby camera",
+    "type": "streaming",
+    "mimetype": "",
+    "asset_url": "rtsp://cam.example.com/lobby",
+    "source_url": "rtsp://cam.example.com/lobby",
+    "status": "finished",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  },
+  {
+    "id": "01J9FX00000000000000000A05",
+    "title": "Weather app",
+    "type": "edge-app",
+    "mimetype": "",
+    "asset_url": "https://assets.example.com/screenly/weather",
+    "source_url": "https://assets.example.com/screenly/weather",
+    "status": "finished",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  },
+  {
+    "id": "01J9FX00000000000000000A06",
+    "title": "Still processing",
+    "type": "image",
+    "mimetype": "image/jpeg",
+    "asset_url": "https://assets.example.com/screenly/pending",
+    "source_url": "https://assets.example.com/screenly/pending",
+    "status": "processing",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  },
+  {
+    "id": "01J9FX00000000000000000A07",
+    "title": "Theme",
+    "type": "audio",
+    "mimetype": "audio/mpeg",
+    "asset_url": "https://assets.example.com/screenly/theme",
+    "source_url": "https://assets.example.com/screenly/theme",
+    "status": "finished",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00",
+    "duration": 95
+  },
+  {
+    "id": "01J9FX00000000000000000A08",
+    "title": "Handbook",
+    "type": "pdf",
+    "mimetype": "application/pdf",
+    "asset_url": "https://assets.example.com/screenly/handbook",
+    "source_url": "https://assets.example.com/screenly/handbook",
+    "status": "finished",
+    "source_size": 0,
+    "team_id": "01J9FX0000000000000000T001",
+    "created_at": "2026-09-01T09:00:00+00:00"
+  }
+]

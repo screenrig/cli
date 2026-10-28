@@ -1,0 +1,110 @@
+{
+  "account": "http://192.168.1.50",
+  "label": "192.168.1.50",
+  "media": [
+    {
+      "id": "a1b2c3d4e5f60718293a4b5c6d7e0001",
+      "name": "Welcome poster",
+      "filename": "b1d6f0a2.png",
+      "kind": "image",
+      "fetch": {
+        "asset": "a1b2c3d4e5f60718293a4b5c6d7e0001"
+      },
+      "original": true
+    },
+    {
+      "id": "a1b2c3d4e5f60718293a4b5c6d7e0002",
+      "name": "Intro",
+      "filename": "0c2e9f10.mp4",
+      "kind": "video",
+      "fetch": {
+        "asset": "a1b2c3d4e5f60718293a4b5c6d7e0002"
+      },
+      "original": true
+    }
+  ],
+  "playlists": [
+    {
+      "id": "loop",
+      "name": "Lobby Pi loop",
+      "items": [
+        {
+          "media_id": "a1b2c3d4e5f60718293a4b5c6d7e0001",
+          "duration_s": 12
+        },
+        {
+          "media_id": "a1b2c3d4e5f60718293a4b5c6d7e0002"
+        },
+        {
+          "url": "https://status.example.com/",
+          "title": "Status board",
+          "duration_s": 30
+        }
+      ],
+      "shuffle": true,
+      "notes": [
+        "Intro was set to start on 2026-11-15; it now plays at once.",
+        "Intro played only on Mon, Tue, Wed, Thu and Fri; it now plays every day.",
+        "Intro played only from 09:00 to 17:00; it now plays all day.",
+        "3 items had an end date; they now stay in the playlist until you remove them."
+      ]
+    }
+  ],
+  "layouts": [],
+  "groups": [],
+  "screens": [
+    {
+      "id": "device",
+      "name": "Lobby Pi",
+      "group_ids": [],
+      "content": {
+        "playlist_id": "loop"
+      },
+      "timezone": "Europe/Stockholm",
+      "notes": []
+    }
+  ],
+  "schedules": [],
+  "not_imported": [
+    {
+      "kind": "item",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0004",
+      "name": "Lobby camera",
+      "reason": "It is a live stream.",
+      "next": "Add the stream address as a stream page in a playlist."
+    },
+    {
+      "kind": "media",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0005",
+      "name": "Switched off",
+      "reason": "It is switched off on the device."
+    },
+    {
+      "kind": "media",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0006",
+      "name": "Last winter",
+      "reason": "It has passed its end date."
+    },
+    {
+      "kind": "media",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0007",
+      "name": "Remote picture",
+      "reason": "It plays from a web address, not from a file on the device.",
+      "next": "Upload the file with media upload, or add the address as a web page in a playlist."
+    },
+    {
+      "kind": "media",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0008",
+      "name": "Converting",
+      "reason": "The device is still processing it.",
+      "next": "Run the same command again when the device has finished."
+    },
+    {
+      "kind": "media",
+      "source_id": "a1b2c3d4e5f60718293a4b5c6d7e0009",
+      "name": "Strange",
+      "reason": "Its type is not image, video, webpage or streaming."
+    }
+  ],
+  "notes": []
+}

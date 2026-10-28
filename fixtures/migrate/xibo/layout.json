@@ -1,0 +1,396 @@
+[
+  {
+    "layoutId": 302,
+    "ownerId": 1,
+    "campaignId": 501,
+    "parentId": 301,
+    "publishedStatusId": 1,
+    "publishedStatus": "Published",
+    "backgroundImageId": null,
+    "schemaVersion": 3,
+    "layout": "Split",
+    "description": "",
+    "backgroundColor": "#000",
+    "status": 1,
+    "retired": 0,
+    "backgroundzIndex": 0,
+    "width": 1920,
+    "height": 1080,
+    "orientation": "landscape",
+    "displayOrder": null,
+    "duration": 20,
+    "regions": [
+      {
+        "regionId": 41,
+        "layoutId": 302,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Draft main",
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "left": 0,
+        "zIndex": 1,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 0,
+        "regionPlaylist": {
+          "playlistId": 1041,
+          "ownerId": 1,
+          "name": "Draft main",
+          "regionId": 41,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 21,
+              "playlistId": 1041,
+              "ownerId": 1,
+              "type": "image",
+              "duration": 10,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 10,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                101
+              ],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      }
+    ],
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "layoutId": 301,
+    "ownerId": 1,
+    "campaignId": 501,
+    "parentId": null,
+    "publishedStatusId": 1,
+    "publishedStatus": "Published",
+    "backgroundImageId": 101,
+    "schemaVersion": 3,
+    "layout": "Split",
+    "description": "",
+    "backgroundColor": "#000",
+    "status": 1,
+    "retired": 0,
+    "backgroundzIndex": 0,
+    "width": 1920,
+    "height": 1080,
+    "orientation": "landscape",
+    "displayOrder": null,
+    "duration": 20,
+    "regions": [
+      {
+        "regionId": 31,
+        "layoutId": 301,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Main",
+        "width": 1280,
+        "height": 1080,
+        "top": 0,
+        "left": 0,
+        "zIndex": 1,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 0,
+        "regionPlaylist": {
+          "playlistId": 1031,
+          "ownerId": 1,
+          "name": "Main",
+          "regionId": 31,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 11,
+              "playlistId": 1031,
+              "ownerId": 1,
+              "type": "video",
+              "duration": 0,
+              "displayOrder": 2,
+              "useDuration": 0,
+              "calculatedDuration": 30,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                102
+              ],
+              "audio": [],
+              "permissions": []
+            },
+            {
+              "widgetId": 10,
+              "playlistId": 1031,
+              "ownerId": 1,
+              "type": "image",
+              "duration": 8,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 8,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                101
+              ],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      },
+      {
+        "regionId": 32,
+        "layoutId": 301,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Side",
+        "width": 640,
+        "height": 1080,
+        "top": 0,
+        "left": 1280,
+        "zIndex": 2,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 0,
+        "regionPlaylist": {
+          "playlistId": 1032,
+          "ownerId": 1,
+          "name": "Side",
+          "regionId": 32,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 12,
+              "playlistId": 1032,
+              "ownerId": 1,
+              "type": "webpage",
+              "duration": 30,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 30,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [
+                {
+                  "widgetId": 12,
+                  "type": "attrib",
+                  "option": "uri",
+                  "value": "https://example.com/ticker"
+                }
+              ],
+              "mediaIds": [],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      },
+      {
+        "regionId": 33,
+        "layoutId": 301,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Drawer",
+        "width": 100,
+        "height": 100,
+        "top": 0,
+        "left": 0,
+        "zIndex": 3,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 1,
+        "regionPlaylist": {
+          "playlistId": 1033,
+          "ownerId": 1,
+          "name": "Drawer",
+          "regionId": 33,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 13,
+              "playlistId": 1033,
+              "ownerId": 1,
+              "type": "image",
+              "duration": 10,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 10,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                101
+              ],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      }
+    ],
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "layoutId": 303,
+    "ownerId": 1,
+    "campaignId": 503,
+    "parentId": null,
+    "publishedStatusId": 1,
+    "publishedStatus": "Published",
+    "backgroundImageId": null,
+    "schemaVersion": 3,
+    "layout": "Closed for the season",
+    "description": "",
+    "backgroundColor": "#000",
+    "status": 1,
+    "retired": 1,
+    "backgroundzIndex": 0,
+    "width": 1920,
+    "height": 1080,
+    "orientation": "landscape",
+    "displayOrder": null,
+    "duration": 20,
+    "regions": [
+      {
+        "regionId": 51,
+        "layoutId": 303,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Main",
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "left": 0,
+        "zIndex": 1,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 0,
+        "regionPlaylist": {
+          "playlistId": 1051,
+          "ownerId": 1,
+          "name": "Main",
+          "regionId": 51,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 14,
+              "playlistId": 1051,
+              "ownerId": 1,
+              "type": "image",
+              "duration": 10,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 10,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                101
+              ],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      }
+    ],
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "layoutId": 304,
+    "ownerId": 1,
+    "campaignId": 504,
+    "parentId": null,
+    "publishedStatusId": 1,
+    "publishedStatus": "Published",
+    "backgroundImageId": null,
+    "schemaVersion": 3,
+    "layout": "Cafe menu",
+    "description": "",
+    "backgroundColor": "#000",
+    "status": 1,
+    "retired": 0,
+    "backgroundzIndex": 0,
+    "width": 1920,
+    "height": 1080,
+    "orientation": "landscape",
+    "displayOrder": null,
+    "duration": 20,
+    "regions": [
+      {
+        "regionId": 61,
+        "layoutId": 304,
+        "ownerId": 1,
+        "type": "playlist",
+        "name": "Menu",
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "left": 0,
+        "zIndex": 1,
+        "regionOptions": [],
+        "permissions": [],
+        "duration": 20,
+        "isDrawer": 0,
+        "regionPlaylist": {
+          "playlistId": 1061,
+          "ownerId": 1,
+          "name": "Menu",
+          "regionId": 61,
+          "isDynamic": 0,
+          "widgets": [
+            {
+              "widgetId": 15,
+              "playlistId": 1061,
+              "ownerId": 1,
+              "type": "image",
+              "duration": 15,
+              "displayOrder": 1,
+              "useDuration": 1,
+              "calculatedDuration": 15,
+              "fromDt": 0,
+              "toDt": 2147483647,
+              "schemaVersion": 2,
+              "widgetOptions": [],
+              "mediaIds": [
+                101
+              ],
+              "audio": [],
+              "permissions": []
+            }
+          ],
+          "permissions": []
+        }
+      }
+    ],
+    "tags": [],
+    "folderId": 1
+  }
+]
