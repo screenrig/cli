@@ -3,9 +3,9 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
-import type { CampaignStatus, Screen, ScreenVerdict } from "./adapters/protocol.js";
+import type { CampaignStatus, Screen, ScreenCampaigns, ScreenVerdict } from "./adapters/protocol.js";
 import {
-  campaignAudienceText, campaignCountsText, campaignExplainTime, campaignInstant, campaignStandingDetail, campaignWhenText, campaignWindow, campaignWindowSpec,
+  campaignAudienceText, campaignCountsText, campaignExplainLines, campaignExplainTime, campaignInstant, campaignStandingDetail, campaignWhenText, campaignWindow, campaignWindowSpec,
   verdictDetail,
 } from "./campaigns.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -627,9 +627,14 @@ test("campaign explain --at asks about another time and shows a verdict per cand
   assert.match(withTimeline.stdout, /^Switches from 2026-12-24 18:00 America\/Los_Angeles to 2026-12-25 18:00 America\/Los_Angeles$/m);
   assert.match(withTimeline.stdout, /^FROM\s+TO\s+PLAYS$/m);
 
-  // --to alone starts now; a plain explain sends no query and has no at block.
-  await cli(["--json", "campaign", "explain", A, "--to", "2099-01-01T00:00:00Z"], transport, env);
+  // --to alone starts now, and no span is too long to ask; a plain explain
+  // sends no query and has no at block.
+  const far = await cli(["--json", "campaign", "explain", A, "--to", "2099-01-01T00:00:00Z"], transport, env);
+  assert.equal(far.code, 0, far.stdout);
   assert.deepEqual(transport.calls.at(-1)!.query, { to: "2099-01-01T00:00:00Z" });
+  const season = await cli(["--json", "campaign", "explain", A, "--at", "2026-11-01T00:00", "--to", "2027-01-06T00:00"], transport, env);
+  assert.equal(season.code, 0, season.stdout);
+  assert.deepEqual(transport.calls.at(-1)!.query, { at: "2026-11-01T00:00", to: "2027-01-06T00:00" });
   const plain = await cli(["--json", "campaign", "explain", A], transport, env);
   assert.equal(transport.calls.at(-1)!.query, undefined);
   assert.equal(plain.envelope.data.at, undefined);
@@ -644,6 +649,22 @@ test("campaign explain --at asks about another time and shows a verdict per cand
   const exact = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00:00Z"], transport, env);
   assert.equal(exact.code, 0, exact.stdout);
   assert.equal(exact.envelope.data.at.local, undefined);
+});
+
+test("campaign explain says when a long timeline stopped early and where to ask again", () => {
+  const view = {
+    screen_id: A, items: [],
+    at: {
+      instant: "2026-11-01T00:00:00Z", timezone: "Europe/London", local: "2026-11-01T00:00", effective_playlist: { id: PLAYLIST, source: "default" },
+      verdicts: [], not_judged: [],
+      timeline: [{ from: "2026-11-01T00:00:00Z", to: "2090-01-01T00:00:00Z", playlist_id: PLAYLIST, source: "default" }],
+      timeline_truncated: true,
+    },
+  } as unknown as ScreenCampaigns;
+  const lines = campaignExplainLines(A, view);
+  assert.match(lines.join("\n"), /^Switches from 2026-11-01 00:00 Europe\/London to 2090-01-01 00:00 Europe\/London \(stopped early; ask again with --at 2090-01-01T00:00:00Z\)$/m);
+  view.at!.timeline_truncated = false;
+  assert.doesNotMatch(campaignExplainLines(A, view).join("\n"), /stopped early/);
 });
 
 test("campaign explain checks --at and --to before any request", async () => {
