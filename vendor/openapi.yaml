@@ -14584,7 +14584,7 @@ paths:
     get:
       operationId: getRuntimeCardData
       description: >-
-        Returns a card data or feed document, the card data or feed key of a card primitive in the screen's current manifest. A key is readable only while a desired, active, or transition-grace grant of the session's screen lists it; knowing a key is never enough. Feed keys start with feed: and read the system feed namespace (screenrig.weather/v1 and the other feed schemas); every other key reads the card data of the screen's project. The body is the document itself. ETag is the sha256 of its bytes and If-None-Match answers 304; keep the last good document for offline playback and refetch on screen.card_data_changed for the key. 404 means no document is stored yet; keep the card hidden.
+        Returns a card data or feed document, the card data or feed key of a card primitive in the screen's current manifest, or the key of a page's visibility.data condition. A key is readable only while a desired, active, or transition-grace grant of the session's screen lists it; knowing a key is never enough. Feed keys start with feed: and read the system feed namespace (screenrig.weather/v1 and the other feed schemas), as do the weather conditions keys that start with feed.conditions.v1: (a page's {screen.weather} condition, filled in each screen's manifest); every other key reads the card data of the screen's project. The body is the document itself. ETag is the sha256 of its bytes and If-None-Match answers 304; keep the last good document for offline playback and refetch on screen.card_data_changed for the key. 404 means no document is stored yet; keep the card hidden.
       security:
         - runtimeCookie: []
         - nativeSessionAuthorization: []
@@ -23891,7 +23891,12 @@ components:
       required: [key]
       description: "A card-data predicate, evaluated before civil time. Missing or expired data never matches. The page also respects its ordinary time bounds. Requires host capability page.conditions; older hosts receive the page disabled."
       properties:
-        key: {type: string, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Project card data key or card instance ID; feed keys are not accepted."}
+        key:
+          type: string
+          maxLength: 256
+          pattern: "^(?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}|\\{screen\\.weather\\})$"
+          description: >-
+            Project card data key or card instance ID; feed keys are not accepted. The key {screen.weather} reads the weather conditions of each screen's own location: the document has condition (clear, cloud, fog, rain, snow, storm or wind), band (freezing below 0 degrees Celsius, cold 0 to 9, mild 10 to 17, warm 18 to 24, hot from 25), temperatureC (whole degrees) and isDay. Point path at one of them, for example path /condition with equals rain. The condition is the current observation for the screen's 0.25 degree cell, about hourly, not a forecast. A screen without a location never matches.
         path: {type: string, maxLength: 256, description: "RFC 6901 pointer with at most 16 segments; absent or empty tests the document itself."}
         equals:
           description: "Optional scalar equality. Omitting it tests existence, including a present null or false."
