@@ -269,6 +269,36 @@ paths:
                   accepted: {type: boolean, const: true}
         default:
           $ref: '#/components/responses/Problem'
+  /website/setup-codes:
+    servers:
+      - url: https://screenrig.ai
+        description: Website origin
+    post:
+      operationId: createWebsiteSetupCode
+      security: []
+      summary: Get the visitor's setup code
+      description: >-
+        Anonymous same-origin call from the website's agent prompts. Answers the setup code of the request's first-party visitor cookie (sr_vid), minting it the first time: the same visitor gets the same code while it is valid (90 days from minting). A person pastes it into their agent with the setup prompt and the agent passes it to CLI enrollment, which links the new project to that visit. Requires the website Origin. A request without exactly one well-formed visitor cookie answers 204 and mints nothing. The code grants nothing; it only names a visit. At most 60 new codes per client IP per hour (IPv6 grouped by /64); all requests share a 120-per-IP-per-minute limit. Retry-After is authoritative.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: The visitor's setup code.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebsiteSetupCode'
+        '204':
+          description: The request carried no visitor cookie, so there is no visit to name.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+        default:
+          $ref: '#/components/responses/Problem'
   /website/demo-requests:
     servers:
       - url: https://screenrig.ai
@@ -4537,6 +4567,592 @@ paths:
                 $ref: '#/components/schemas/ScreenCampaigns'
         default:
           $ref: '#/components/responses/Problem'
+  /api/bi-connections:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listBIConnections
+      description: 'Lists the project''s BI connections, oldest first, 200 to a page; pass next_cursor back as cursor for the next. A secret is never returned: secret shows whether it is set and its last 4 characters.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnectionList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIConnection
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request, including an address that is not a public Internet host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIConnection
+      description: 'One connection, with its last test.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One connection.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateBIConnection
+      description: 'Changes a connection''s name, address, organization or secret (a sent secret replaces it; an omitted one is kept). A changed address or secret clears last_test and retires every render cached for its views. Appends bi_connection.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionPatch'
+      responses:
+        '200':
+          description: The updated connection.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteBIConnection
+      description: 'Deletes a connection that no view uses; while views use it the answer is resource_conflict naming their ids. Appends bi_connection.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '409':
+          description: resource_conflict, views use the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testBIConnection
+      description: 'Calls the BI system with the connection''s secret and stores the answer as last_test. For Grafana the checks are token (GET /api/search accepts it) and image_renderer (the plugin is listed; a missing plugin is a warning because a remote rendering service does not show as one). It does not judge per-dashboard permissions, data-source health or the reachability of a remote renderer: test a view to render for real. A refusal from Grafana is a failed check, not an error. For Power BI the checks are token (Microsoft Entra accepts the app) and workspaces (the app can list workspaces; it counts them and none fails the check, naming the workspace access step). It does not judge capacity, row-level security or access to any one report: test a view, which generates a real embed token.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The checks.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BITestReport'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}/browse:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: browseBIConnection
+      description: 'Lists what the connection''s token can show. Grafana: its dashboards (query searches titles; next_cursor pages), or with dashboard set that dashboard''s panels (rows flattened) under dashboard. Power BI: the workspaces the app can see (id, name; query keeps names containing it), or with workspace set that workspace''s reports (id, name, embed_url) under workspace.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+        - name: dashboard
+          in: query
+          required: false
+          description: A dashboard uid; lists its panels.
+          schema: {type: string, maxLength: 128}
+        - name: workspace
+          in: query
+          required: false
+          description: A Power BI workspace id; lists its reports.
+          schema: {type: string, maxLength: 36}
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+      responses:
+        '200':
+          description: Dashboards or panels.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIBrowse'
+        '409':
+          description: bi_upstream_refused, the BI system refused the connection credentials or permissions.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: bi_upstream_unavailable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listBIViews
+      description: 'Lists the project''s BI views, oldest first, 200 to a page; pass next_cursor back as cursor for the next. Each carries embed_url, the address an iframe primitive shows (content_fit fill); it is null where this server has no embed host.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of views.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIView
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. Appends bi_view.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request, including a url that is not a dashboard address of the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found, the connection is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIView
+      description: 'One view, with embed_url and how it last fared on glass (status).'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One view.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateBIView
+      description: 'Changes a view''s name, target (url or target replaces the whole target), cadence or fit. A new target clears status, and every render cached for the old one is retired. A view keeps its connection and kind. Appends bi_view.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewPatch'
+      responses:
+        '200':
+          description: The updated view.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteBIView
+      description: 'Deletes a view. A screen that still shows its embed_url answers not_found on glass until its playlist changes. Appends bi_view.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testBIView
+      description: 'Renders a connection view for real (1920x1080, outside the shared cache and without touching status), or fetches a public dashboard link and checks that its page may be framed by the view''s embed host (allow_embedding in Grafana). It does not judge what the picture shows. A Grafana failure is a failed check, not an error. A Power BI connection view generates a real embed token for its report (checks report and embed_token); it does not judge the pages it names, capacity or what the report shows, and a dataset with row-level security is refused by Power BI with its own message, shown in the check. A Power BI public link is fetched and its framing headers read.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The checks.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewTest'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}/image:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIViewImage
+      description: 'Draws a Grafana view now as a PNG (a Power BI view answers not_found), outside the shared cache, so a test shows exactly what Grafana renders at that size. The embed page itself uses the shared render.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: width
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 10000, default: 1920}
+        - name: height
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 10000, default: 1080}
+      responses:
+        '200':
+          description: The rendered PNG.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '409':
+          description: bi_upstream_refused, the BI system refused the connection credentials or permissions.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: bi_upstream_unavailable, including a Grafana without an image renderer.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/triggers:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -16850,6 +17466,188 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/bi-connections:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBIConnectionsInProject
+      description: 'Lists the project''s BI connections, oldest first, 200 to a page; pass next_cursor back as cursor for the next. A secret is never returned: secret shows whether it is set and its last 4 characters.'
+      security:
+        - projectBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnectionList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIConnectionInProject
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request, including an address that is not a public Internet host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/bi-views:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBIViewsInProject
+      description: 'Lists the project''s BI views, oldest first, 200 to a page; pass next_cursor back as cursor for the next. Each carries embed_url, the address an iframe primitive shows (content_fit fill); it is null where this server has no embed host.'
+      security:
+        - projectBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of views.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIViewInProject
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. Appends bi_view.created.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request, including a url that is not a dashboard address of the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found, the connection is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/triggers:
     parameters:
       - name: project_id
@@ -21404,6 +22202,12 @@ components:
         screens_per_project: {type: integer, enum: [50], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
         features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
+    WebsiteSetupCode:
+      type: object
+      required: [code, expires_at]
+      properties:
+        code: {type: string, pattern: '^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$', description: "Two groups of four Crockford base32 characters."}
+        expires_at: {type: string, format: date-time, description: "When enrollment stops accepting it: 90 days after it was minted."}
     CLIEnrollmentRequest:
       type: object
       additionalProperties: false
@@ -21457,6 +22261,10 @@ components:
         project_name:
           $ref: '#/components/schemas/ProjectName'
           description: Legacy explicit project name. Omission creates Screens in a new organization.
+        setup_code:
+          type: string
+          pattern: ^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$
+          description: Optional setup code the person copied from the website with the setup prompt (two groups of four letters and digits, case and hyphen ignored). It links the new project to that website visit; an unknown or expired code is ignored and never fails enrollment. It grants nothing.
         organization:
           $ref: '#/components/schemas/ProjectName'
     Project:
@@ -25605,6 +26413,174 @@ components:
       properties:
         code: {type: string, enum: [configuration_history, playlist_content, page_rules, player_state, archived]}
         detail: {type: string}
+    BIConnectionConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        url: {type: string, maxLength: 2048, description: "Grafana's address: http or https on a public Internet host, with an optional path prefix such as /grafana, and no query or fragment. The server calls it with the connection's token."}
+        org_id: {type: integer, minimum: 1, default: 1, description: The Grafana organization the token belongs to.}
+        tenant_id: {type: string, maxLength: 253, description: "Power BI: the Directory (tenant) ID of the Microsoft Entra tenant, a GUID, or its domain such as contoso.onmicrosoft.com. Not common, organizations or consumers."}
+        client_id: {type: string, maxLength: 36, description: "Power BI: the Application (client) ID of the Entra app registration, a GUID. The secret is its client secret value."}
+    BISecret:
+      type: object
+      additionalProperties: false
+      required: [set, hint]
+      description: How a stored secret shows. The secret itself is never returned.
+      properties:
+        set: {type: boolean}
+        hint: {type: string, description: The last 4 characters of a secret of 12 or more; empty otherwise.}
+    BICheck:
+      type: object
+      additionalProperties: false
+      required: [name, ok]
+      properties:
+        name: {type: string, description: "What was checked: token, image_renderer, render, public_link or framing (Grafana); token, workspaces, report, embed_token, public_link or framing (Power BI)."}
+        ok: {type: boolean}
+        warn: {type: boolean, description: "With ok true: something the check could not judge."}
+        detail: {type: string}
+    BITestReport:
+      type: object
+      additionalProperties: false
+      required: [at, ok, checks]
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean, description: True when no check failed; warnings do not fail it.}
+        checks: {type: array, items: {$ref: "#/components/schemas/BICheck"}}
+    BIViewTest:
+      type: object
+      additionalProperties: false
+      required: [at, ok, checks]
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean}
+        checks: {type: array, items: {$ref: "#/components/schemas/BICheck"}}
+        width: {type: integer, description: The size of the test render.}
+        height: {type: integer}
+        bytes: {type: integer, description: The size of the test render's PNG.}
+    BIConnection:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, name, config, embed_origin, secret, last_test, revision, created_at, updated_at]
+      description: A project's access to one BI system. Every connection belongs to one project.
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?bic_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        kind: {type: string, enum: [grafana, powerbi]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        embed_origin: {anyOf: [{type: string}, {type: "null"}], description: "The origin of the project's embed host, where its views' pages are served; null where this server has none."}
+        secret: {$ref: "#/components/schemas/BISecret"}
+        last_test: {anyOf: [{$ref: "#/components/schemas/BITestReport"}, {type: "null"}]}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BIConnectionList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/BIConnection"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    BIConnectionWrite:
+      type: object
+      additionalProperties: false
+      required: [name, kind, config, secret]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind: {type: string, enum: [grafana, powerbi]}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        secret: {type: string, minLength: 1, maxLength: 4096, description: "The service-account token (Grafana) or the app's client secret value (Power BI). Sealed on arrival; the CLI reads it from a file or stdin, never an argument."}
+    BIConnectionPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        secret: {type: string, minLength: 1, maxLength: 4096, description: Replaces the stored secret.}
+    BITarget:
+      type: object
+      additionalProperties: false
+      description: "What a view shows. Grafana with a connection: dashboard_uid (and optionally one panel). Power BI with a connection: workspace_id and report_id, with pages or rotate_all_pages. Without a connection: only public_url."
+      properties:
+        dashboard_uid: {type: string, maxLength: 128, description: "The part after /d/ in a dashboard's address."}
+        panel_id: {type: integer, minimum: 0, description: Show this panel alone (d-solo) instead of the dashboard.}
+        org_id: {type: integer, minimum: 1, description: The connection's organization when omitted.}
+        from: {type: string, maxLength: 64, description: "A Grafana time such as now-6h."}
+        to: {type: string, maxLength: 64, description: "A Grafana time such as now."}
+        vars: {type: object, maxProperties: 50, propertyNames: {pattern: "^var-[A-Za-z0-9_-]{1,64}$"}, additionalProperties: {type: string, maxLength: 200}, description: "Template variables, keyed var-name."}
+        theme: {type: string, enum: [dark, light], default: dark}
+        timezone: {type: string, maxLength: 64}
+        public_url: {type: string, maxLength: 2048, description: "A public link that needs no connection and plays live from its host: a Grafana public dashboard (Grafana must allow embedding), or for kind powerbi a Publish to web link https://app.powerbi.com/view?r=..."}
+        workspace_id: {type: string, maxLength: 36, description: "Power BI: the workspace id, the part after /groups/ in the report's address."}
+        report_id: {type: string, maxLength: 36, description: "Power BI: the report id, the part after /reports/ in its address."}
+        pages: {type: array, maxItems: 50, items: {type: string, minLength: 1, maxLength: 200}, description: "Power BI: page names (ReportSection...) or display names, shown in this order. Two or more need rotate_s on the view. Empty shows the report's own first page."}
+        rotate_all_pages: {type: boolean, description: "Power BI: rotate through every visible page of the report (needs rotate_s). Not with pages."}
+    BIViewError:
+      type: object
+      additionalProperties: false
+      required: [at, code, detail]
+      properties:
+        at: {type: string, format: date-time}
+        code: {type: string, enum: [bi_upstream_refused, bi_upstream_unavailable]}
+        detail: {type: string}
+    BIViewStatus:
+      type: object
+      additionalProperties: false
+      required: [last_ok_at, last_error]
+      description: How the view last fared on glass. It changes only when the outcome changes.
+      properties:
+        last_ok_at: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
+        last_error: {anyOf: [{$ref: "#/components/schemas/BIViewError"}, {type: "null"}]}
+    BIView:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, name, target, refresh_s, rotate_s, fit, revision, status, embed_url, created_at, updated_at]
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?biv_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        connection_id: {type: string, description: Absent for a view of a public link.}
+        kind: {type: string, enum: [grafana, powerbi]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, description: "Grafana: how often the image is drawn again, 30 to 86400 (a public link reloads this often). Power BI: how often the report refreshes its data, 60 to 86400, or 0 for never (a DirectQuery report or one with automatic page refresh updates itself)."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, description: "Power BI: how long each page shows when the target lists two or more pages or sets rotate_all_pages, 10 to 3600; 0 otherwise. Always 0 for Grafana and public links."}
+        fit: {type: string, enum: [contain, cover, fill]}
+        revision: {type: integer, minimum: 1}
+        status: {$ref: "#/components/schemas/BIViewStatus"}
+        embed_url: {anyOf: [{type: string}, {type: "null"}], description: "Put this in an iframe primitive with content_fit fill. It holds no credential; a screen's manifest adds its own ticket. Null where this server has no embed host."}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BIViewList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/BIView"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    BIViewWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: "Set connection_id with exactly one of url and target, or kind (grafana or powerbi) with target.public_url alone."
+      properties:
+        connection_id: {type: string}
+        kind: {type: string, enum: [grafana], description: Required without a connection_id; otherwise it must match the connection.}
+        name: {type: string, minLength: 1, maxLength: 80}
+        url: {type: string, maxLength: 2048, description: "A /d/{uid}/... dashboard address on the connection's host. The server reads orgId, viewPanel (N or panel-N) or panelId, from, to, var-* and theme from it."}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, default: 300, description: "Grafana 30 to 86400; Power BI 0 or 60 to 86400."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, default: 0, description: "Power BI: 0 or 10 to 3600; required for a target that rotates pages."}
+        fit: {type: string, enum: [contain, cover, fill], default: contain}
+    BIViewPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        url: {type: string, maxLength: 2048}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600}
+        fit: {type: string, enum: [contain, cover, fill]}
+    BIBrowse:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      description: "Grafana: dashboards (uid, title, folder, tags), or with dashboard set that dashboard's panels (id, title, type) and the dashboard itself. Power BI: workspaces (id, name), or with workspace set that workspace's reports (id, name, embed_url) and the workspace itself."
+      properties:
+        dashboard: {type: object, additionalProperties: false, properties: {uid: {type: string}, title: {type: string}}}
+        workspace: {type: object, additionalProperties: false, properties: {id: {type: string}}}
+        items: {type: array, maxItems: 1000, items: {type: object, additionalProperties: true}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
     Trigger:
       type: object
       additionalProperties: false
@@ -27307,6 +28283,8 @@ x-problem-codes:
   - recovery_not_offered
   - invitation_limit_reached
   - trigger_limit_reached
+  - bi_upstream_refused
+  - bi_upstream_unavailable
   - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit
