@@ -2,7 +2,7 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, suspendMessageOption } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
@@ -11,19 +11,19 @@ import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
+import { handleScreenCompositionRemoved } from "../playlist-revisions.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
   const screen = root.command("screen").description("Pair, configure, and inspect screens");
 
-  screen.command("changes").description("List this screen's issued composition changes retained for 30 days")
-    .argument("<id>", "Screen identifier")
-    .action(bind(handleScreenChanges));
-  screen.command("revert").description("Restore the preceding composition of one explicit current screen change")
-    .argument("<id>", "Screen identifier")
-    .requiredOption("--change-id <ID>", "Current retained change ID from screen changes")
-    .requiredOption("--expect-rev <REVISION>", "Current screen revision (If-Match)", revision)
-    .action(bind(handleScreenRevert));
+  // Removed with per-screen composition history, kept one release as hidden commands that only name their replacement.
+  for (const name of ["changes", "revert"]) {
+    screen.command(name, { hidden: true })
+      .argument("[args...]")
+      .allowUnknownOption()
+      .action(bind(handleScreenCompositionRemoved));
+  }
 
   screen.command("publish").description("Publish a prepared playlist after rendering and inspecting its local preview")
     .argument("<id>", "Screen identifier")

@@ -5,6 +5,7 @@ import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidat
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
+import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
@@ -123,6 +124,23 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("list").description("List playlists")
     .action(bind(handlePlaylistList));
+
+  playlist.command("revisions").description("List a playlist's revisions, newest first, one page at a time")
+    .argument("<id>", "Playlist identifier")
+    .option("--after <CURSOR>", "Continue from the data.next_cursor of the previous page")
+    .action(bind(handlePlaylistRevisions));
+
+  const revisionGroup = playlist.command("revision").description("Inspect one stored revision of a playlist");
+  revisionGroup.command("show").description("Show one revision and the playlist as it stood at that revision")
+    .argument("<id>", "Playlist identifier")
+    .requiredOption("--revision <N>", "Revision to show, as playlist revisions numbers it (required)", positiveInteger("revision"))
+    .action(bind(handlePlaylistRevisionShow));
+
+  playlist.command("promote").description("Make an earlier revision current again by copying it forward as a new revision")
+    .argument("<id>", "Playlist identifier")
+    .requiredOption("--revision <N>", "Revision to copy forward, as playlist revisions numbers it (required)", positiveInteger("revision"))
+    .requiredOption("--expect-rev <REVISION>", "The playlist's current revision, from playlist show or the current row of playlist revisions (If-Match; required)", revision)
+    .action(bind(handlePlaylistPromote));
 
   playlist.command("delete").description("Delete a playlist")
     .argument("<id>", "Playlist identifier")

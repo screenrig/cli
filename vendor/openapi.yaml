@@ -2388,6 +2388,86 @@ paths:
           description: Unset
         default:
           $ref: '#/components/responses/Problem'
+  /api/playlists/{id}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listPlaylistRevisions
+      description: >-
+        The playlist's revisions, newest first: each revision a write stored (a create, a replace, a patch, a structure change, an applied review, a promote) with its name, its page count, the kind of change and who made it. History begins with the revision a playlist held when revision history was first recorded: until its next write the list holds that revision alone, with change baseline. Revisions are kept for as long as the playlist is. At most 50 per page; next_cursor while more remain, null on the last page.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: The playlist's revisions, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistRevisionList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/revisions/{revision}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getPlaylistRevision
+      description: >-
+        One revision of the playlist and the playlist as it stood at that revision: its name, pages, soundtrack and format, with revision set to this one. A revision the playlist never had, or one from before its history began, is not_found.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/PlaylistRevisionNumber'
+      responses:
+        '200':
+          description: The revision and the playlist at that revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistRevisionDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/revisions/{revision}/promote:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: promotePlaylistRevision
+      description: >-
+        Makes an earlier revision current again by copying it forward: its pages, soundtrack and format become a new revision, the current one plus one, whose change is promoted and restored_from names the revision copied. The playlist keeps its current name, earlier revisions stay as they were, and every screen that shows the playlist updates as for any other write. If-Match is required and names the current revision (invalid_request when absent, revision_conflict when stale). The pages are resolved again as a structure change resolves them: a selector matches today's media, and media or a web app the revision named that is gone or not ready refuses the promote with the problem a write would get. A revision whose content is the current content changes nothing and answers the current playlist. Needs a credential that publishes live (forbidden for one whose writes are proposed for review) or a dashboard session of the project owner or a member who can approve (approver_required); a playlist no person approved yet is playlist_not_approved (409).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/PlaylistRevisionNumber'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The playlist with the copied revision current; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/comment/playlist/{id}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -3218,80 +3298,6 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
-  /api/screens/{id}/changes:
-    parameters:
-      - $ref: '#/components/parameters/ProjectTarget'
-    get:
-      x-screenrig-access: read
-      operationId: listScreenCompositionChanges
-      description: Lists up to 50 newest issued or queued composition changes retained for 30 days. A change ID is the desired manifest revision issued or queued for this screen. History starts when composition retention is enabled; a row without previous_change_id has no preceding retained composition.
-      security:
-        - projectBearer: []
-      parameters:
-        - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '200':
-          description: Retained screen composition changes.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items, retention_days]
-                properties:
-                  retention_days:
-                    type: integer
-                    const: 30
-                  items:
-                    type: array
-                    maxItems: 50
-                    items:
-                      $ref: '#/components/schemas/ScreenCompositionChange'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/screens/{id}/revert:
-    parameters:
-      - $ref: '#/components/parameters/ProjectTarget'
-    post:
-      x-screenrig-access: write
-      operationId: revertScreenCompositionChange
-      description: Reverts the named current issued change on one screen by forking its preceding immutable composition into a new playlist and assigning it atomically. Requires a live-write credential, If-Match and an explicit change_id. A takeover, an intervening newer publication or screen change, expired history or unavailable dependency refuses the write. Other screens and source playlists remain unchanged. Card data stays current and expiry is preserved. Exact idempotency retries return the same accepted assignment. Acceptance is separate from the Player's manifest_upgrade activation state.
-      security:
-        - projectBearer: []
-      parameters:
-        - $ref: '#/components/parameters/ResourceID'
-        - $ref: '#/components/parameters/IfMatch'
-        - $ref: '#/components/parameters/OptionalIdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [change_id]
-              properties:
-                change_id:
-                  type: string
-                  pattern: '^man_'
-                  maxLength: 128
-      responses:
-        '200':
-          description: The screen assignment is accepted. Observe screen.manifest_activated or manifest_upgrade to confirm Player activation.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accepted, reverted_change_id, screen]
-                properties:
-                  accepted:
-                    type: boolean
-                    const: true
-                  reverted_change_id:
-                    type: string
-                  screen:
-                    $ref: '#/components/schemas/Screen'
-        default:
-          $ref: '#/components/responses/Problem'
   /api/screens/{id}/reload:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -20248,6 +20254,7 @@ components:
     EventOrder: {name: order, in: query, required: false, schema: {type: string, enum: [asc, desc], default: asc}, description: "asc pages oldest first with after; desc pages newest first with before. before implies desc; order=asc with before is refused."}
     EventLogFrom: {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the start of the window (inclusive). Defaults to 24 hours before to; a newest-first page without from reaches back to the project's event retention instead."}
     EventLogTo: {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the end of the window (exclusive). Defaults to now. The window is at most 31 days."}
+    PlaylistRevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the playlist, as listPlaylistRevisions numbers them."}
     ListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 256}, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request."}
     EventListLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit."}
     PlaybackScreenID: {name: screen_id, in: query, required: false, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_"}}
@@ -24057,6 +24064,35 @@ components:
         created_at: {type: string, format: date-time, description: "When the playlist was created. Read-only."}
         updated_at: {type: string, format: date-time, description: "When the playlist's name, pages, soundtrack or format last changed. Read-only."}
         warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a write that succeeded: what its author should act on. Absent when there is nothing to act on, and on every read."}
+    PlaylistRevision:
+      type: object
+      required: [revision, created_at, change, name, page_count, current]
+      description: >-
+        One stored revision of a playlist. change says what made it: created (the first revision), edited (a replace, patch, structure change or applied review), promoted (a copy of an earlier revision, named by restored_from), or baseline (the revision the playlist held when its history began, before any write recorded one). A value this reader does not know reads as edited.
+      properties:
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time, description: "When the write that stored it committed; a baseline carries the time the playlist was last updated before its history began."}
+        change: {type: string, enum: [created, edited, promoted, baseline]}
+        restored_from: {type: integer, minimum: 1, description: "The revision a promote copied; present only when change is promoted."}
+        name: {type: string, description: "The playlist's name at this revision."}
+        page_count: {type: integer, minimum: 0}
+        current: {type: boolean, description: "This revision is the playlist's current one."}
+        author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
+    PlaylistRevisionAuthor:
+      type: object
+      required: [type, name]
+      description: Who made the revision, as the project's event log names them; absent when the write named no one (a baseline, or system work).
+      properties:
+        type: {type: string, enum: [person, agent]}
+        id: {type: string}
+        name: {type: string}
+    PlaylistRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/PlaylistRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    PlaylistRevisionDetail:
+      type: object
+      required: [revision, playlist]
+      properties:
+        revision: {$ref: "#/components/schemas/PlaylistRevision"}
+        playlist: {$ref: "#/components/schemas/PlaylistV2", description: "The playlist as it stood at this revision: its name, pages, soundtrack and format, and revision set to this one."}
     PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     PlaylistAudioWrite:
       type: object
@@ -24107,26 +24143,6 @@ components:
         until: {type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil upper bound in the screen timezone. When both bounds are present, from must be strictly earlier than until."}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/PageVisibilityWindow"}}
         data: {$ref: "#/components/schemas/PageDataCondition"}
-    ScreenCompositionChange:
-      type: object
-      required: [screen_id, change_id, playlist_id, playlist_revision, created_at, expires_at]
-      properties:
-        screen_id:
-          type: string
-        change_id:
-          type: string
-        previous_change_id:
-          type: string
-        playlist_id:
-          type: string
-        playlist_revision:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        expires_at:
-          type: string
-          format: date-time
     PageDataCondition:
       type: object
       additionalProperties: false

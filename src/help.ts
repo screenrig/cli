@@ -34,12 +34,13 @@ export interface HelpDocument {
   notes: string[];
 }
 
-/** Canonical and alias paths of every descendant leaf, in tree order. */
+/** Canonical and alias paths of every visible descendant leaf, in tree order; hidden commands stay out of discovery. */
 export function leafCommandPaths(command: Command): string[] {
   const paths: string[] = [];
+  const children = (node: Command): Command[] => node.createHelp().visibleCommands(node);
   const visit = (node: Command): void => {
-    if (node.commands.length) {
-      node.commands.forEach(visit);
+    if (children(node).length) {
+      children(node).forEach(visit);
       return;
     }
     const path = commandPath(node);
@@ -47,7 +48,7 @@ export function leafCommandPaths(command: Command): string[] {
     paths.push(path.join(" "));
     for (const alias of node.aliases()) paths.push([...path.slice(0, -1), alias].join(" "));
   };
-  command.commands.forEach(visit);
+  children(command).forEach(visit);
   return paths;
 }
 
