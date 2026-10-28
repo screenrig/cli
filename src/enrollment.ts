@@ -38,6 +38,8 @@ export interface EnrollmentState {
   organization?: string;
   /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
   intent?: EnrollmentIntent;
+  /** Website setup code (upper-case XXXX-XXXX), fixed for the lifetime of one pending enrollment. */
+  setupCode?: string;
   credentialFormat: "oauth";
 }
 
@@ -69,6 +71,12 @@ export async function ensureCredential(options: {
    * silently mutating the request behind the same idempotency key.
    */
   enrollmentIntent?: EnrollmentIntent;
+  /**
+   * Normalized website setup code for a new enrollment. A pending enrollment
+   * keeps the code it was created with, and a changed or added one is rejected
+   * for the same reason as a changed intent.
+   */
+  enrollmentSetupCode?: string;
   generateClientId?: () => string;
   generateIdempotencyKey?: () => string;
 }): Promise<ResolvedConfig> {
@@ -117,6 +125,12 @@ export async function ensureCredential(options: {
       if (existingEnrollment?.intent && options.enrollmentIntent && existingEnrollment.intent !== options.enrollmentIntent) {
         throw configError("Pending enrollment is bound to a different purpose. Resume it without changing --intent, or discard it with agent enroll --force.");
       }
+      if (existingEnrollment && options.enrollmentSetupCode !== undefined
+        && existingEnrollment.setup_code !== options.enrollmentSetupCode) {
+        throw configError(existingEnrollment.setup_code
+          ? "Pending enrollment is bound to a different setup code. Resume it without changing --setup-code, or discard it with agent enroll --force."
+          : "Pending enrollment was started without a setup code. Resume it without --setup-code, or discard it with agent enroll --force.");
+      }
       if (existingEnrollment && options.enrollmentProjectName !== undefined
         && existingEnrollment.project_name !== options.enrollmentProjectName) {
         throw configError("Pending enrollment is bound to a different project name. Resume it without changing --project-name, or discard it with agent enroll --force.");
@@ -130,6 +144,7 @@ export async function ensureCredential(options: {
         throw configError("Enrollment requires exactly one of --email ADDRESS or --agentid-claim CODE. Run screenrig agent enroll --email ADDRESS --organization NAME or screenrig agent enroll --agentid-claim CODE --organization NAME.");
       }
       const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
+      const setupCode = existingEnrollment?.setup_code ?? options.enrollmentSetupCode;
       const projectName = existingEnrollment ? existingEnrollment.project_name : options.enrollmentProjectName;
       const organization = existingEnrollment ? existingEnrollment.organization : options.enrollmentOrganization;
       // Only the oauth format is issued: a pending enrollment that did not ask for it starts again under a new key.
@@ -144,6 +159,7 @@ export async function ensureCredential(options: {
         ...(projectName !== undefined ? { project_name: projectName } : {}),
         ...(organization !== undefined ? { organization } : {}),
         ...(intent ? { intent } : {}),
+        ...(setupCode !== undefined ? { setup_code: setupCode } : {}),
       };
       if (!/^cli_[A-Za-z0-9_-]{43}$/.test(enrollment.client_id)) {
         throw configError("Enrollment client state is invalid.");
@@ -167,6 +183,7 @@ export async function ensureCredential(options: {
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
         ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),
+        ...(enrollment.setup_code !== undefined ? { setupCode: enrollment.setup_code } : {}),
         credentialFormat: enrollment.credential_format,
         });
       } catch (error) {

@@ -447,6 +447,17 @@ test("agent enroll declares mutually exclusive credential sources", () => {
   assert.equal(enroll.usage.split("Provide at most one").length, 2, "notes should appear only once");
 });
 
+test("agent enroll documents --setup-code as an optional addition to either credential source", () => {
+  const enroll = invoke(["agent", "enroll", "--help"]).data;
+  const option = enroll.options.find((candidate) => candidate.name === "--setup-code");
+  assert.equal(option?.description, "Link the new project to the website visit that showed this setup code, such as K7QX-2MPD");
+  assert.equal(option?.required, false);
+  assert.ok(enroll.relationships.every((relationship) => !relationship.options.includes("--setup-code")), "the code is never required or exclusive");
+  assert.ok(enroll.examples.includes('screenrig agent enroll --email operator@example.com --organization "Lobby" --setup-code K7QX-2MPD'));
+  assert.match(enroll.usage, /--setup-code CODE passes the setup code a person copied from the website[^.]*\(two groups of four letters and digits, case and hyphen ignored, sent as XXXX-XXXX\) and works with --email or --agentid-claim/);
+  assert.match(enroll.usage, /A pending enrollment keeps its original email or AgentID claim, name, purpose, and setup code\./);
+});
+
 
 test("explicit JSON inventory can be scoped to a group", () => {
   assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));

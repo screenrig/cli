@@ -66,7 +66,9 @@ or `SCREENRIG_CONFIG`; `SCREENRIG_API_URL` and `--api-url` override the API URL
 against the origin it was issued for, so keep one profile per environment.
 
 - `screenrig agent enroll --email ADDRESS --organization NAME` starts a new
-  project. Other commands do not enroll and exit 3 with `not_enrolled`.
+  project. Other commands do not enroll and exit 3 with `not_enrolled`. Add
+  `--setup-code CODE` when the website's setup prompt shows a setup code; it
+  links the new project to that website visit and grants nothing.
 - `screenrig login` signs in with a person's approval (a dashboard URL and code);
   `screenrig logout` revokes the session. `agent status` shows the granted
   access and capabilities.
