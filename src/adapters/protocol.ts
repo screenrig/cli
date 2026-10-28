@@ -140,6 +140,13 @@ export interface CLIEnrollmentRequest {
    * changing billing-plan assignment. Omitted means signage (screens=true).
    */
   intent?: EnrollmentIntent;
+  /**
+   * Website setup code, upper-case XXXX-XXXX, from the setup prompt the person
+   * copied. It names their website visit so the server can link the new
+   * project to it; it grants nothing, and an unknown or expired code never
+   * fails enrollment.
+   */
+  setup_code?: string;
   name?: string;
   agent_type?: string;
   platform?: string;

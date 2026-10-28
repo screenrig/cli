@@ -26,6 +26,7 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
     .option("--organization <NAME>", "Create the organization containing Screens")
     .addOption(new Option("--project-name <NAME>", "Resume a retained enrollment's exact project name").hideHelp())
     .addOption(new Option("--intent <INTENT>", "Choose the project's purpose: signage (default) or advertising").choices(["signage", "advertising"]))
+    .option("--setup-code <CODE>", "Link the new project to the website visit that showed this setup code, such as K7QX-2MPD")
     .option("--name <NAME>", "Set this agent installation name")
     .option("--force", "Discard a pending enrollment before enrolling")
     .action(bind(handleAgentEnroll));
