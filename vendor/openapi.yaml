@@ -4694,7 +4694,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateBIConnection
-      description: 'Changes a connection''s name, address, organization or secret (a sent secret replaces it; an omitted one is kept). A changed address or secret clears last_test and retires every render cached for its views. Appends bi_connection.updated. If-Match guards the revision.'
+      description: 'Changes a connection''s name, address, organization or secret (a sent secret replaces it; an omitted one is kept). Moving a Grafana or Tableau connection to another origin (scheme, host or port) needs the secret in the same request, answered invalid_request at secret otherwise: the stored secret is only sent to the address it was saved for. A changed address or secret clears last_test and retires every render cached for its views. Appends bi_connection.updated. If-Match guards the revision.'
       security:
         - projectBearer: []
         - dashboardSession: []
