@@ -546,21 +546,27 @@ test("every operational command has examples that parse and stdin help matches i
 test("notifications help, JSON help and preflight agree on option relationships and write scope", () => {
   const create = invoke(["notifications", "create", "--help"]).data;
   assert.deepEqual(create.relationships, [
-    { kind: "exactlyOne", options: ["--email", "--webhook"] },
+    { kind: "exactlyOne", options: ["--email", "--webhook", "--slack", "--teams", "--pagerduty", "--telegram"] },
     { kind: "atLeastOne", options: ["--conditions", "--events"] },
     { kind: "requires", options: ["--email", "--conditions"] },
     { kind: "requires", options: ["--events", "--webhook"] },
+    { kind: "together", options: ["--telegram", "--telegram-chat"] },
   ]);
-  assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook"]);
-  assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook", "--slack", "--teams", "--pagerduty", "--telegram"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email", "--slack", "--teams", "--pagerduty", "--telegram"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--telegram")?.conflicts, ["--email", "--webhook", "--slack", "--teams", "--pagerduty"]);
+  for (const name of ["--slack", "--teams", "--pagerduty", "--telegram"]) {
+    assert.match(create.options.find((option) => option.name === name)?.description ?? "", /\bstdin\b/, `${name} reads its credential from stdin`);
+  }
   assert.equal(create.options.find((option) => option.name === "--tag")?.type, "value");
   assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing/);
-  for (const sentence of ["Provide exactly one of --email or --webhook.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook."]) {
+  for (const sentence of ["Provide exactly one of --email or --webhook or --slack or --teams or --pagerduty or --telegram.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook.", "Provide --telegram and --telegram-chat together."]) {
     assert.equal(create.usage.split(sentence).length, 2, `${sentence} appears once in the human help`);
   }
   const update = commandHelp(["notifications", "update"]);
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
-  assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url"] });
+  assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url", "--destination"] });
+  assert.match(update.options.find((option) => option.name === "--destination")?.description ?? "", /\bstdin\b/);
   assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens"]);
   assert.deepEqual(update.options.find((option) => option.name === "--description")?.conflicts, ["--clear-description"]);
   assert.match(update.options.find((option) => option.name === "--snooze")?.description ?? "", /30m, 1h, 4h, 2d.*off/);
@@ -576,7 +582,7 @@ test("notifications help, JSON help and preflight agree on option relationships 
     assert.match(commandHelp(["notifications", name]).notes.join("\n"), /needs Manage access/i, `${name} states its write scope`);
   }
   assert.deepEqual(commandHelp(["notifications"]).commands.map((child) => child.name), ["create", "list", "show", "update", "delete", "rotate-secret", "test", "deliveries"]);
-  assert.match(commandHelp(["notifications"]).usage, /at most 20\s+notifications, email and webhook together/);
+  assert.match(commandHelp(["notifications"]).usage, /at most 20\s+notifications of every channel/);
   assert.match(commandHelp(["webhooks"]).usage, /Email and screen alerts[\s\S]*are screenrig notifications/);
 });
 

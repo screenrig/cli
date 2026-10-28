@@ -1454,9 +1454,10 @@ export interface WebhookDeliveryList {
 export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "crashing";
 
 /**
- * GET/PATCH /api/notifications/{id}: an email or webhook notification. The
- * signing secret is never part of this shape. Readers treat a channel other
- * than email or webhook as one they cannot edit.
+ * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty
+ * or Telegram notification. The signing secret and a chat or pager destination
+ * are never part of this shape. Readers treat a channel they do not know as one
+ * they cannot edit.
  */
 export interface Notification {
   channel: string;
@@ -1465,6 +1466,8 @@ export interface Notification {
   description?: string;
   disabled_at?: string;
   disabled_reason?: "delivery_failures";
+  /** Slack, Teams, PagerDuty and Telegram only: the destination masked to its host and last four characters. */
+  destination_hint?: string;
   enabled: boolean;
   /** Webhook only. */
   event_types?: string[];
@@ -1480,6 +1483,8 @@ export interface Notification {
   screen_tags: string[];
   snoozed_until?: string;
   status: "active" | "failing" | "disabled";
+  /** Telegram only: the chat messages go to. */
+  telegram_chat_id?: string;
   updated_at: string;
   /** Webhook only; empty with url_redacted true below effective Manage. */
   url?: string;
@@ -1496,14 +1501,18 @@ export interface NotificationList {
 }
 
 export interface NotificationWrite {
-  channel: "email" | "webhook";
+  channel: "email" | "webhook" | "slack" | "teams" | "pagerduty" | "telegram";
   conditions?: string[];
   description?: string;
+  /** Slack, Teams, PagerDuty and Telegram only: the write-only webhook URL, routing key or bot token. */
+  destination?: string;
   enabled?: boolean;
   event_types?: string[];
   hold_minutes?: number;
   recipients?: string[];
   screen_tags?: string[];
+  /** Telegram only: the chat id or @channelname. */
+  telegram_chat_id?: string;
   url?: string;
 }
 
@@ -1511,6 +1520,8 @@ export interface NotificationPatch {
   conditions?: string[];
   /** An empty string clears the description. */
   description?: string;
+  /** Slack, Teams, PagerDuty and Telegram only: replaces the credential. */
+  destination?: string;
   enabled?: boolean;
   event_types?: string[];
   hold_minutes?: number;
@@ -1518,6 +1529,8 @@ export interface NotificationPatch {
   screen_tags?: string[];
   /** null ends the snooze. */
   snoozed_until?: string | null;
+  /** Telegram only: replaces the chat. */
+  telegram_chat_id?: string;
   url?: string;
 }
 

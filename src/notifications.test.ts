@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { PassThrough, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
@@ -47,7 +47,7 @@ async function enrolled(): Promise<Env> {
   return { fs, cwd, configPath };
 }
 
-async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
+async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger, stdin?: string): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const outP = collect(stdout);
@@ -58,6 +58,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: 
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
     ...(logger ? { logger } : {}),
+    ...(stdin !== undefined ? { stdin: Readable.from([stdin]), isStdinTty: () => false } : {}),
   };
   const code = await run(runtime);
   stdout.end();
@@ -310,7 +311,7 @@ test("notification_limit_reached counts both channels: exit 5, guidance, no save
   const refused = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "screen_offline"], transport, env);
   assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
   assert.equal(refused.envelope.error!.code, "notification_limit_reached");
-  assert.match(refused.envelope.error!.detail, /maximum of 20 notifications, email and webhook together/);
+  assert.match(refused.envelope.error!.detail, /maximum of 20 notifications of every channel together/);
   assert.equal(refused.envelope.error!.next!.command, "screenrig notifications list");
   assert.match(refused.envelope.error!.next!.reason, /notifications delete ID/);
   assert.equal(refused.envelope.warnings, undefined);
@@ -468,7 +469,7 @@ test("notifications update validates before any request and leaves channel rules
 
   const before = transport.calls.length;
   for (const [args, message] of [
-    [[], /Provide at least one of --email or --url or --conditions or --clear-conditions or --events/],
+    [[], /Provide at least one of --email or --url or --destination or --telegram-chat or --conditions or --clear-conditions or --events/],
     [["--enable", "--disable"], /--enable cannot be used with --disable/],
     [["--description", "x", "--clear-description"], /--clear-description cannot be used with --description|--description cannot be used with --clear-description/],
     [["--tag", "Lobby", "--all-screens"], /--all-screens cannot be used with --tag|--tag cannot be used with --all-screens/],
@@ -756,4 +757,172 @@ test("a receiver URL withheld from a Read only credential is said, never printed
   // A Manage credential's URL prints as before, with no note.
   assert.equal(notificationTableLines([{ ...notification, url: "https://hooks.example.net/in", url_redacted: undefined }]).length, 2);
   assert.deepEqual(notificationTableLines([]), ["No notifications"]);
+});
+
+// Built from parts so the fixture is not mistaken for a real incoming-webhook URL by secret scanners.
+const slackUrl = (...parts: string[]): string => ["https://hooks.slack.com/services", ...parts].join("/");
+const SLACK_URL = slackUrl("T0123ABCD", "B0123ABCD", "x9Zq0123456789abcdefghij");
+const TEAMS_URL = "https://prod-12.westus.logic.azure.com:443/workflows/0a1b2c3d/triggers/manual/paths/invoke?api-version=2016-06-01&sig=ZmFrZXNpZ25hdHVyZQ";
+const PAGERDUTY_KEY = "R0123456789abcdefghijklmnopqrstu";
+const TELEGRAM_TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
+/** The fragments of each credential that must reach no output, config or log. */
+const CREDENTIAL_PARTS = ["x9Zq0123456789abcdefghij", "ZmFrZXNpZ25hdHVyZQ", "R0123456789abcdefghijklmnopqrstu", "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"];
+
+test("notifications create posts to Slack, Teams, PagerDuty and Telegram with a sealed destination", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { logger, events } = createMemoryLogger({ command: ["notifications", "create"] });
+  const cases: Array<{ flags: string[]; body: Record<string, unknown>; hint: string; channel: string }> = [
+    { flags: ["--slack", SLACK_URL], channel: "slack", hint: "https://hooks.slack.com/…/ghij", body: { channel: "slack", destination: SLACK_URL, conditions: ["screen_offline"] } },
+    { flags: ["--teams", TEAMS_URL], channel: "teams", hint: "prod-12.westus.logic.azure.com/…VyZQ", body: { channel: "teams", destination: TEAMS_URL, conditions: ["screen_offline"] } },
+    { flags: ["--pagerduty", PAGERDUTY_KEY], channel: "pagerduty", hint: "…rstu", body: { channel: "pagerduty", destination: PAGERDUTY_KEY, conditions: ["screen_offline"] } },
+    {
+      flags: ["--telegram", TELEGRAM_TOKEN, "--telegram-chat", "-1001234567890"], channel: "telegram", hint: "…Dsaw",
+      body: { channel: "telegram", destination: TELEGRAM_TOKEN, telegram_chat_id: "-1001234567890", conditions: ["screen_offline"] },
+    },
+  ];
+  for (const test of cases) {
+    const created = await cli(["--json", "notifications", "create", ...test.flags, "--conditions", "screen_offline"], transport, env, logger);
+    assert.equal(created.code, 0, created.stdout);
+    const call = notificationCalls(transport).at(-1)!;
+    assert.equal(call.method, "POST");
+    assert.deepEqual(call.body, test.body);
+    assert.ok(call.headers?.["idempotency-key"], "create always sends an Idempotency-Key");
+    assert.match(created.envelope.data.id, /^ntf_/);
+    assert.equal(created.envelope.data.channel, test.channel);
+    assert.equal(created.envelope.data.destination_hint, test.hint);
+    assert.equal(created.envelope.data.destination, undefined);
+    assert.equal(created.envelope.data.secret, undefined);
+    assert.ok(!created.envelope.warnings?.length, "a chat notification has no secret to warn about");
+    for (const part of CREDENTIAL_PARTS) assert.ok(!created.stdout.includes(part), `${test.channel} answer holds ${part}`);
+
+    const human = await cli(["--human", "notifications", "create", ...test.flags, "--conditions", "storage_full"], transport, env);
+    assert.equal(human.code, 0, human.stderr);
+    assert.match(human.stdout, new RegExp(`^channel: ${test.channel}$`, "m"));
+    assert.ok(human.stdout.includes(`destination: ${test.hint} (the credential is sealed and never shown)`), human.stdout);
+    for (const part of CREDENTIAL_PARTS) assert.ok(!human.stdout.includes(part), `${test.channel} human output holds ${part}`);
+  }
+  const config = await readFile(env.configPath, "utf8");
+  const logged = JSON.stringify(events);
+  for (const part of CREDENTIAL_PARTS) {
+    assert.ok(!config.includes(part), `config holds ${part}`);
+    assert.ok(!logged.includes(part), `operation log holds ${part}`);
+  }
+  assert.doesNotMatch(config, /pending_writes/, "a completed create clears its recovery entry");
+
+  const listed = await cli(["--human", "notifications", "list"], transport, env);
+  assert.match(listed.stdout, /https:\/\/hooks\.slack\.com\/…\/ghij/);
+  assert.match(listed.stdout, /…Dsaw -> -1001234567890/);
+  for (const part of CREDENTIAL_PARTS) assert.ok(!listed.stdout.includes(part), `list holds ${part}`);
+});
+
+test("a - credential is read from one line of stdin and never from the arguments", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "notifications", "create", "--slack", "-", "--conditions", "screen_offline"], transport, env, undefined, `${SLACK_URL}\nignored second line\n`);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { channel: "slack", destination: SLACK_URL, conditions: ["screen_offline"] });
+  const telegram = await cli(["--json", "notifications", "create", "--telegram", "-", "--telegram-chat", "@opsroom", "--conditions", "crashing"], transport, env, undefined, `  ${TELEGRAM_TOKEN}\r\n`);
+  assert.equal(telegram.code, 0, telegram.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { channel: "telegram", destination: TELEGRAM_TOKEN, telegram_chat_id: "@opsroom", conditions: ["crashing"] });
+  const before = notificationCalls(transport).length;
+  const empty = await cli(["--json", "notifications", "create", "--pagerduty", "-", "--conditions", "screen_offline"], transport, env, undefined, "\n");
+  assert.equal(empty.code, ExitCode.Usage, empty.stdout);
+  assert.match(empty.envelope.error!.detail, /--pagerduty - reads the credential from one line of stdin, and stdin had none/);
+  const tty = await cli(["--json", "notifications", "create", "--pagerduty", "-", "--conditions", "screen_offline"], transport, env);
+  assert.equal(tty.code, ExitCode.Usage, tty.stdout);
+  assert.match(tty.envelope.error!.detail, /Pipe input when using '-'/);
+  assert.equal(notificationCalls(transport).length, before, "a credential that could not be read sends nothing");
+
+  const id = created.envelope.data.id as string;
+  const replaced = await cli(["--json", "notifications", "update", id, "--destination", "-"], transport, env, undefined, `${slackUrl("T9", "B9", "replacedSecret1234")}\n`);
+  assert.equal(replaced.code, 0, replaced.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { destination: slackUrl("T9", "B9", "replacedSecret1234") });
+  assert.equal(replaced.envelope.data.destination_hint, "https://hooks.slack.com/…/1234");
+  assert.ok(!replaced.stdout.includes("replacedSecret"));
+});
+
+test("notifications create refuses a channel mix and a Telegram token without its chat before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const cases: Array<[string[], RegExp]> = [
+    [["--slack", SLACK_URL, "--teams", TEAMS_URL, "--conditions", "screen_offline"], /--slack cannot be used with --teams|--teams cannot be used with --slack/],
+    [["--slack", SLACK_URL, "--email", "owner", "--conditions", "screen_offline"], /--slack cannot be used with --email|--email cannot be used with --slack/],
+    [["--slack", SLACK_URL], /Provide at least one of --conditions or --events/],
+    [["--telegram", TELEGRAM_TOKEN, "--conditions", "screen_offline"], /Provide --telegram and --telegram-chat together/],
+    [["--telegram-chat", "-100123", "--slack", SLACK_URL, "--conditions", "screen_offline"], /Provide --telegram and --telegram-chat together/],
+    [["--telegram", TELEGRAM_TOKEN, "--telegram-chat", "my chat", "--conditions", "screen_offline"], /--telegram-chat takes a chat id such as -1001234567890/],
+    [["--pagerduty", PAGERDUTY_KEY, "--events", "screen.*", "--conditions", "screen_offline"], /--events requires --webhook/],
+    [["--slack", SLACK_URL, "--url", SLACK_URL, "--conditions", "screen_offline"], /notifications create does not accept --url/],
+  ];
+  for (const [args, message] of cases) {
+    const refused = await cli(["--json", "notifications", "create", ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, args.join(" "));
+    for (const part of CREDENTIAL_PARTS) assert.ok(!refused.stdout.includes(part) && !refused.stderr.includes(part), `a usage error echoes ${part}`);
+  }
+  assert.equal(notificationCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("a destination the server rejects is a status-derived failure with guidance and no echo", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const bad = "https://example.org/services/T0123ABCD/B0123ABCD/leakedSecretValue";
+  const refused = await cli(["--json", "notifications", "create", "--slack", bad, "--conditions", "screen_offline"], transport, env);
+  assert.equal(refused.code, ExitCode.Client, refused.stdout);
+  assert.equal(refused.envelope.error!.code, "notification_destination_rejected");
+  assert.match(refused.envelope.error!.detail, /^The destination was rejected: destination must be a slack credential/);
+  assert.match(refused.envelope.error!.detail, /Nothing was created or changed/);
+  assert.equal(refused.envelope.error!.next!.command, "screenrig notifications create --slack - --conditions screen_offline");
+  assert.ok(!refused.stdout.includes("leakedSecretValue"));
+  const office = await cli(["--json", "notifications", "create", "--teams", "https://contoso.webhook.office.com/webhookb2/leakedSecretValue", "--conditions", "screen_offline"], transport, env);
+  assert.equal(office.envelope.error!.code, "notification_destination_rejected");
+  assert.match(office.envelope.error!.detail, /Office 365 connector URLs are retired; create a Teams Workflows webhook/);
+
+  const created = await cli(["--json", "notifications", "create", "--pagerduty", PAGERDUTY_KEY, "--conditions", "screen_offline"], transport, env);
+  const id = created.envelope.data.id as string;
+  const update = await cli(["--json", "notifications", "update", id, "--destination", "short"], transport, env);
+  assert.equal(update.code, ExitCode.Client, update.stdout);
+  assert.equal(update.envelope.error!.next!.command, `screenrig notifications update ${id} --destination -`);
+  assert.doesNotMatch(await readFile(env.configPath, "utf8"), /pending_writes/, "a refusal saves no key");
+});
+
+test("notifications update replaces a destination or a Telegram chat and a chat notification has no signing secret", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const telegram = (await cli(["--json", "notifications", "create", "--telegram", TELEGRAM_TOKEN, "--telegram-chat", "-1001234567890", "--conditions", "screen_offline"], transport, env)).envelope.data as { id: string };
+  const chat = await cli(["--json", "notifications", "update", telegram.id, "--telegram-chat", "@opsroom"], transport, env);
+  assert.equal(chat.code, 0, chat.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { telegram_chat_id: "@opsroom" });
+  assert.equal(chat.envelope.data.telegram_chat_id, "@opsroom");
+  const both = await cli(["--json", "notifications", "update", telegram.id, "--destination", "987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", "--expect-rev", "2"], transport, env);
+  assert.equal(both.code, 0, both.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { destination: "987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw" });
+  assert.equal(notificationCalls(transport).at(-1)!.headers?.["if-match"], '"2"');
+  const refused = await cli(["--json", "notifications", "update", telegram.id, "--email", "owner", "--destination", "x"], transport, env);
+  assert.equal(refused.code, ExitCode.Usage, refused.stdout);
+  assert.match(refused.envelope.error!.detail, /--email cannot be used with --destination|--destination cannot be used with --email|Provide at most one of --email or --url or --destination/);
+  const rotate = await cli(["--json", "notifications", "rotate-secret", telegram.id], transport, env);
+  assert.equal(rotate.code, ExitCode.Client, rotate.stdout);
+  const slack = (await cli(["--json", "notifications", "create", "--slack", SLACK_URL, "--conditions", "screen_offline"], transport, env)).envelope.data as { id: string };
+  const wrongField = await cli(["--json", "notifications", "update", slack.id, "--telegram-chat", "@opsroom"], transport, env);
+  assert.equal(wrongField.code, ExitCode.Client, wrongField.stdout);
+  assert.equal(wrongField.envelope.error!.code, "invalid_request");
+  const tested = await cli(["--json", "notifications", "test", slack.id], transport, env);
+  assert.equal(tested.code, 0, tested.stdout);
+  assert.equal(tested.envelope.data.test, true);
+});
+
+test("notification lines and tables show the masked destination of a chat channel", () => {
+  const items: Notification[] = [
+    { id: "ntf_SLACKAAAAAAAAAAAAAAAA", channel: "slack", destination_hint: "https://hooks.slack.com/…/ghij", conditions: ["screen_offline"], screen_tags: [], hold_minutes: 10, enabled: true, revision: 1, status: "active", created_at: "2026-10-28T10:00:00Z", updated_at: "2026-10-28T10:00:00Z" },
+    { id: "ntf_TELEGRAMAAAAAAAAAAAAA", channel: "telegram", destination_hint: "…Dsaw", telegram_chat_id: "@opsroom", conditions: ["crashing"], screen_tags: [], hold_minutes: 0, enabled: true, revision: 3, status: "failing", created_at: "2026-10-28T10:00:00Z", updated_at: "2026-10-28T10:00:00Z" },
+  ] as Notification[];
+  const lines = notificationLines(items[1]);
+  assert.ok(lines.includes("destination: …Dsaw (the credential is sealed and never shown)"), lines.join("\n"));
+  assert.ok(lines.includes("telegram_chat: @opsroom"));
+  const table = notificationTableLines(items).join("\n");
+  assert.match(table, /https:\/\/hooks\.slack\.com\/…\/ghij/);
+  assert.match(table, /…Dsaw -> @opsroom/);
+  assert.doesNotMatch(table, /withheld/);
 });

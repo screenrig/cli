@@ -1918,9 +1918,11 @@ export function memoryBackend(options: {
     return { status: 200, headers: {}, body: { items, next_cursor: next } };
   });
 
-  // Notifications, email and webhook: ntf_ ids for email, whk_ ids for a
-  // webhook, the 20-per-project limit shared with the webhook routes above, a
-  // secret only on a webhook's create and rotate-secret.
+  // Notifications: ntf_ ids for email and the chat and pager channels, whk_ ids
+  // for a webhook, the 20-per-project limit shared with the webhook routes
+  // above, a secret only on a webhook's create and rotate-secret. A chat or
+  // pager destination is checked per channel, stored as its masked hint only,
+  // and never answered.
   const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
   transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
   let notificationSequence = 0;
@@ -1929,6 +1931,29 @@ export function memoryBackend(options: {
     status: 400,
     headers: { "content-type": "application/problem+json" },
     body: { status: 400, code: "invalid_request", title: "Invalid request", detail, errors: [{ field, code: "invalid", detail }] },
+  });
+  const chatChannels = ["slack", "teams", "pagerduty", "telegram"];
+  const destinationReason = (channel: string, value: unknown): string | undefined => {
+    const text = typeof value === "string" ? value : "";
+    let host = "";
+    try { host = new URL(text).hostname; } catch { /* not a URL */ }
+    const fits = channel === "slack" ? /^https:\/\/hooks\.slack\.com\/(services|workflows|triggers)\/./.test(text)
+      : channel === "teams" ? host.endsWith(".logic.azure.com") || host.endsWith(".powerplatform.com")
+      : channel === "pagerduty" ? /^[A-Za-z0-9]{32}$/.test(text)
+      : /^\d{3,20}:[A-Za-z0-9_-]{30,64}$/.test(text);
+    if (channel === "teams" && /\.webhook\.office\.com$/.test(host)) return "Office 365 connector URLs are retired; create a Teams Workflows webhook";
+    return fits ? undefined : `destination must be a ${channel} credential in the shape the service issues it`;
+  };
+  const destinationHint = (channel: string, value: string): string => {
+    const tail = value.slice(-4);
+    if (channel === "slack") return `https://hooks.slack.com/…/${tail}`;
+    if (channel === "teams") return `${new URL(value).hostname}/…${tail}`;
+    return `…${tail}`;
+  };
+  const destinationRejected = (reason: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "notification_destination_rejected", title: "Notification destination is not valid for its channel", detail: `${reason}.`, errors: [{ field: "destination", code: "rejected", detail: `${reason}.` }] },
   });
   const notificationFor = (req: TransportRequest): Record<string, unknown> | undefined => notifications.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   /** A refusal for what a notification of this channel cannot hold, or undefined when it is whole. */
@@ -1941,6 +1966,10 @@ export function memoryBackend(options: {
       if (!conditions.length) return invalidRequest("An email notification needs at least one condition.", "conditions");
       return undefined;
     }
+    if (chatChannels.includes(notification.channel as string)) {
+      if (!conditions.length) return invalidRequest(`A ${notification.channel} notification needs at least one condition.`, "conditions");
+      return undefined;
+    }
     if (!notification.url) return invalidRequest("A webhook needs a url.", "url");
     const rejected = webhookUrlRejected(notification.url);
     if (rejected) return rejectedUrl(rejected);
@@ -1950,17 +1979,28 @@ export function memoryBackend(options: {
   transport.on("GET", "/api/notifications", () => ({ status: 200, headers: {}, body: { items: [...notifications.values()] } }));
   transport.on("POST", "/api/notifications", (req) => webhookReplay(req, () => {
     const body = (req.body ?? {}) as Record<string, any>;
-    if (body.channel !== "email" && body.channel !== "webhook") return invalidRequest("channel must be email or webhook.", "channel");
+    const chat = chatChannels.includes(body.channel);
+    if (body.channel !== "email" && body.channel !== "webhook" && !chat) return invalidRequest("channel must be email, webhook, slack, teams, pagerduty or telegram.", "channel");
     const email = body.channel === "email";
-    const foreign = email ? ["url", "event_types"] : ["recipients"];
+    const foreign = email ? ["url", "event_types", "destination", "telegram_chat_id"]
+      : chat ? ["url", "event_types", "recipients", ...(body.channel === "telegram" ? [] : ["telegram_chat_id"])]
+      : ["recipients", "destination", "telegram_chat_id"];
     const wrong = foreign.find((field) => body[field] !== undefined);
-    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : chat ? `a ${body.channel}` : "a webhook"} notification.`, wrong);
+    if (chat) {
+      if (typeof body.destination !== "string" || !body.destination) return invalidRequest(`destination is required for a ${body.channel} notification.`, "destination");
+      const reason = destinationReason(body.channel, body.destination);
+      if (reason) return destinationRejected(reason);
+      if (body.channel === "telegram" && typeof body.telegram_chat_id !== "string") return invalidRequest("telegram_chat_id is required for a telegram notification.", "telegram_chat_id");
+    }
     notificationSequence += 1;
     const notification: Record<string, unknown> = {
-      id: `${email ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
+      id: `${email || chat ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
       ...(body.description ? { description: body.description } : {}),
       conditions: body.conditions ?? [], screen_tags: body.screen_tags ?? [], hold_minutes: body.hold_minutes ?? 10,
-      ...(email ? { recipients: body.recipients } : { url: body.url, event_types: body.event_types ?? [] }),
+      ...(email ? { recipients: body.recipients }
+        : chat ? { destination_hint: destinationHint(body.channel, body.destination), ...(body.channel === "telegram" ? { telegram_chat_id: body.telegram_chat_id } : {}) }
+        : { url: body.url, event_types: body.event_types ?? [] }),
       enabled: body.enabled ?? true, revision: 1, status: body.enabled === false ? "disabled" : "active",
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
@@ -1969,7 +2009,7 @@ export function memoryBackend(options: {
     if (webhooks.size + notifications.size >= 20) return problem(409, "notification_limit_reached", "The project already has the maximum of 20 notifications.");
     notifications.set(notification.id as string, notification);
     notificationDeliveries.set(notification.id as string, []);
-    return { status: 201, headers: { "cache-control": "no-store" }, body: email ? { ...notification } : { ...notification, secret: webhookSecret() } };
+    return { status: 201, headers: { "cache-control": "no-store" }, body: email || chat ? { ...notification } : { ...notification, secret: webhookSecret() } };
   }));
   transport.on("GET", /^\/api\/notifications\/[^/]+$/, (req) => {
     const notification = notificationFor(req);
@@ -1982,11 +2022,20 @@ export function memoryBackend(options: {
     if (stale) return stale;
     const body = (req.body ?? {}) as Record<string, any>;
     const email = notification.channel === "email";
-    const wrong = (email ? ["url", "event_types"] : ["recipients"]).find((field) => body[field] !== undefined);
-    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    const chat = chatChannels.includes(notification.channel as string);
+    const foreign = email ? ["url", "event_types", "destination", "telegram_chat_id"]
+      : chat ? ["url", "event_types", "recipients", ...(notification.channel === "telegram" ? [] : ["telegram_chat_id"])]
+      : ["recipients", "destination", "telegram_chat_id"];
+    const wrong = foreign.find((field) => body[field] !== undefined);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : chat ? `a ${notification.channel}` : "a webhook"} notification.`, wrong);
     const next: Record<string, unknown> = { ...notification };
-    for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types"]) {
+    for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types", "telegram_chat_id"]) {
       if (body[field] !== undefined) next[field] = body[field];
+    }
+    if (body.destination !== undefined) {
+      const reason = destinationReason(notification.channel as string, body.destination);
+      if (reason) return destinationRejected(reason);
+      next.destination_hint = destinationHint(notification.channel as string, body.destination);
     }
     if (body.description !== undefined) {
       if (body.description) next.description = body.description;

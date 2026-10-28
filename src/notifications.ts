@@ -1,13 +1,22 @@
 import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
+import { readAuthoringText } from "./authoring-input.js";
+import type { CliRuntime } from "./runtime.js";
 import type { Notification, NotificationDelivery } from "./adapters/protocol.js";
 import { fleetLinkTags } from "./fleet-links.js";
 import { normalizeInstant } from "./screen-control.js";
 import { table } from "./webhooks.js";
 
-/** Backend Notification.id shape (vendor/openapi.yaml): ntf_ for an email notification, whk_ for a webhook. */
+/** Backend Notification.id shape (vendor/openapi.yaml): whk_ for a webhook, ntf_ for every other channel. */
 export const NOTIFICATION_ID_PATTERN = /^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$/;
 export const NOTIFICATIONS_MAX = 20;
+/** The chat and pager channels and the create flag that names each one's credential (NotificationWrite.destination). */
+export const NOTIFICATION_CHAT_CHANNELS = [
+  { channel: "slack", flag: "slack" }, { channel: "teams", flag: "teams" },
+  { channel: "pagerduty", flag: "pagerduty" }, { channel: "telegram", flag: "telegram" },
+] as const;
+/** The credential reads at most this many bytes from stdin. */
+const DESTINATION_STDIN_MAX_BYTES = 4096;
 /** NotificationCondition (vendor/openapi.yaml): the screen state changes a notification fires on. */
 export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "crashing"] as const;
 export const NOTIFICATION_RECIPIENTS_MAX = 20;
@@ -29,7 +38,7 @@ export function notificationDeliveryCursor(value: string): string {
 export function notificationId(value: string | undefined, command: string): string {
   if (!value) throw usageError(`notifications ${command} requires <id>.`);
   if (!NOTIFICATION_ID_PATTERN.test(value)) {
-    throw usageError("A notification id looks like ntf_ (email) or whk_ (webhook) followed by 16 to 24 letters, digits, - or _.", {
+    throw usageError("A notification id looks like ntf_ (email, Slack, Teams, PagerDuty, Telegram) or whk_ (webhook) followed by 16 to 24 letters, digits, - or _.", {
       command: "screenrig notifications list",
       reason: "List this project's notifications and their ids.",
     });
@@ -46,6 +55,28 @@ export function notificationConditions(value: string): string[] {
   if (unknown !== undefined) throw usageError(`--conditions does not take ${JSON.stringify(unknown)}; use ${names}.`);
   if (new Set(conditions).size !== conditions.length) throw usageError("--conditions must not repeat a condition.");
   return conditions;
+}
+
+/** The chat of a Telegram notification: a numeric chat id (negative for a group or channel) or @channelname. The server owns the credential checks. */
+export function notificationTelegramChat(value: string): string {
+  if (!/^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/.test(value)) {
+    throw usageError("--telegram-chat takes a chat id such as -1001234567890 or a channel name such as @mychannel.");
+  }
+  return value;
+}
+
+/**
+ * A chat or pager credential from its flag: the value itself, or, for -, one
+ * line of stdin, so the credential stays out of shell history and the process
+ * list. Whether it fits its channel is the server's check
+ * (notification_destination_rejected).
+ */
+export async function notificationDestination(value: string, flag: string, runtime: CliRuntime): Promise<string> {
+  if (value !== "-") return value;
+  const text = await readAuthoringText("-", runtime, DESTINATION_STDIN_MAX_BYTES);
+  const line = text.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (!line) throw usageError(`${flag} - reads the credential from one line of stdin, and stdin had none.`);
+  return line;
 }
 
 /** Comma-separated recipients: owner, or the user id of a project member. The server checks membership. */
@@ -134,10 +165,21 @@ export function notificationProblem(error: unknown, id?: string): unknown {
       },
     }, error.exitCode, error.warnings);
   }
+  if (problem.code === "notification_destination_rejected") {
+    const reason = problem.detail.trim().replace(/\.$/, "");
+    return new CliError({
+      ...problem,
+      detail: `The destination was rejected: ${reason}. Nothing was created or changed.`,
+      next: problem.next ?? {
+        command: id ? `screenrig notifications update ${id} --destination -` : "screenrig notifications create --slack - --conditions screen_offline",
+        reason: "Pipe the credential exactly as Slack, Teams, PagerDuty or Telegram issued it on stdin, so it stays out of your shell history.",
+      },
+    }, error.exitCode, error.warnings);
+  }
   if (problem.code === "notification_limit_reached") {
     return new CliError({
       ...problem,
-      detail: `This project already has the maximum of ${NOTIFICATIONS_MAX} notifications, email and webhook together. Nothing was created.`,
+      detail: `This project already has the maximum of ${NOTIFICATIONS_MAX} notifications of every channel together. Nothing was created.`,
       next: problem.next ?? {
         command: "screenrig notifications list",
         reason: "Delete a notification you no longer need with screenrig notifications delete ID, then rerun create.",
@@ -170,6 +212,8 @@ export function notificationLines(notification: Notification | undefined): strin
     `id: ${notification.id}`,
     `channel: ${notification.channel}`,
     ...(notification.recipients ? [`recipients: ${notification.recipients.join(", ")}`] : []),
+    ...(notification.destination_hint ? [`destination: ${notification.destination_hint} (the credential is sealed and never shown)`] : []),
+    ...(notification.telegram_chat_id ? [`telegram_chat: ${notification.telegram_chat_id}`] : []),
     ...(notification.url !== undefined || notification.url_redacted ? [`url: ${withheld(notification) ? READ_ONLY_URL : notification.url ?? ""}`] : []),
     `conditions: ${(notification.conditions ?? []).join(", ") || "none"}`,
     ...(notification.event_types?.length ? [`event_types: ${notification.event_types.join(", ")}`] : []),
@@ -190,6 +234,7 @@ export function notificationLines(notification: Notification | undefined): strin
 
 function destination(notification: Notification): string {
   if (notification.recipients) return notification.recipients.join(",");
+  if (notification.destination_hint) return notification.telegram_chat_id ? `${notification.destination_hint} -> ${notification.telegram_chat_id}` : notification.destination_hint;
   return withheld(notification) ? "(withheld)" : notification.url ?? "";
 }
 
