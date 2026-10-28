@@ -190,6 +190,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
+import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, parseRetryAfter, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
@@ -8410,15 +8411,17 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       content.push(record);
     } else if (RESOURCE_ID_PATTERNS.release.test(input)) {
       content.push({ primitive: "application", release_id: input });
-    } else if (/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    } else if (iframeSnippetSource(input) !== undefined || /^[a-z][a-z0-9+.-]*:/i.test(input)) {
+      // A pasted <iframe> embed code gives its src; the server rebuilds a
+      // Google or Microsoft document link when the playlist is written.
       let url: URL;
-      try { url = new URL(input); } catch { throw usageError("Provide a valid http or https iframe URL."); }
+      try { url = new URL(iframeSnippetSource(input) ?? input); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
       if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) throw usageError("Iframe URLs must use http or https.");
       content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
     } else {
       const sourcePath = path.resolve(runtime.cwd(), input);
       try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }
-      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, or http(s) URL."); }
+      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, http(s) URL, or iframe embed code."); }
       files.set(content.length, sourcePath);
       // Audio files become soundtrack tracks, not pages, so the preflight
       // shape check must see them as audio before anything uploads.
