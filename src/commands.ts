@@ -21,6 +21,7 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { glassLines } from "./screen-glass.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
@@ -6007,6 +6008,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
+      ...glassLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...replacedByLines(screen),

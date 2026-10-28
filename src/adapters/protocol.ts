@@ -612,6 +612,24 @@ export interface ScreenCommand {
   done_at?: string;
 }
 
+/** Screen.glass: the backend's conclusions about the picture. Readers keep a member and a verdict they do not know. */
+export interface ScreenGlass {
+  /** The loop_stalled check; absent for a screen it never found stalled. */
+  playback?: ScreenGlassPlayback;
+}
+
+export interface ScreenGlassPlayback {
+  /** stalled: no media start arrived for longer than the loop allows. playing: one arrived after. unjudged: the screen stopped meeting the conditions under which the check judges. */
+  verdict: "playing" | "stalled" | "unjudged";
+  /** When the verdict began; for stalled, the instant the loop's allowance ran out. */
+  since: string;
+  /** Server receipt time of the latest media start the check had seen. */
+  last_media_start_at?: string;
+  /** The silence in seconds the loop allowed. Present with a stalled verdict. */
+  threshold_s?: number;
+  judged_at: string;
+}
+
 /** Screen.suspension: present while the screen shows a notice instead of its content. */
 export interface ScreenSuspension {
   message: string;
@@ -775,6 +793,8 @@ export interface Screen {
   commands?: ScreenCommand[];
   /** Present while the screen shows a notice instead of its content (screen suspend). Read-only. */
   suspension?: ScreenSuspension;
+  /** What the backend concluded about the screen's picture from the reports it received. A check with nothing to say is absent. Read-only. */
+  glass?: ScreenGlass;
   /**
    * Present while the paired Player cannot show the application or iframe
    * primitives its manifest carries. at is when the condition began. The
@@ -1313,7 +1333,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "crashing";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email or webhook notification. The

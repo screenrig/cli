@@ -14,7 +14,7 @@ export function registerAlertsCommands(root: Command, bind: CommandActionBinder)
     "Alerts:",
     "  An alert is one screen and one condition while it lasts: it opens when the",
     "  condition begins (screen_offline, display_disconnected, running_hot,",
-    "  storage_full, content_stuck or not_playing) and resolves when it clears. A",
+    "  storage_full, content_stuck, not_playing or loop_stalled) and resolves when it clears. A",
     "  screen has at most one open alert per condition; crashing is a notice, never",
     "  an alert. Resolved alerts stay for the plan's event retention. attention is",
     "  true for an open alert that is not acknowledged, snoozed or muted, the count",

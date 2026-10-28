@@ -26,7 +26,7 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "Notifications:",
     "  A notification sends an email or a signed webhook POST when a screen changes",
     "  state: screen_offline, display_disconnected, running_hot, storage_full,",
-    "  content_stuck, not_playing or crashing. A condition notifies once it has lasted",
+    "  content_stuck, not_playing, loop_stalled or crashing. A condition notifies once it has lasted",
     "  --hold minutes (default 10), and a resolved notice follows when it clears after",
     "  a notice went out; crashing is sent at once. A notice sends nothing when the",
     "  screen's alert is acknowledged or snoozed during the hold, or a mute covers the",
