@@ -28,7 +28,8 @@ import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-fi
 import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
-import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
+import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
+import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
@@ -9199,10 +9200,43 @@ export const handleFleetLinksList = commandHandler(async (args, runtime, resolve
 
 export const handleFleetLinksShow = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "show");
+  const wantsProvisioning = flagBool(args.flags, "android-provisioning");
+  const origin = wantsProvisioning ? siteOrigin(resolved.apiUrl) : undefined;
+  if (wantsProvisioning && origin === undefined) throw unsupportedSiteError();
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await fleetLinkCall(client, { method: "GET", path: `${FLEET_LINKS_PATH}/${id}` }, id);
-  return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  if (origin === undefined) return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  return fleetLinkAndroidProvisioning(response, client, origin, runtime);
 });
+
+/**
+ * `fleet-links show --android-provisioning`: the payload the dashboard's QR code
+ * encodes, from the link's secret and the site's `managed` Android build. The
+ * secret comes from the link as returned (a Read only credential gets none) and
+ * the payload is printed once, under a sensitive label, never logged.
+ */
+async function fleetLinkAndroidProvisioning(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, origin: string, runtime: CliRuntime): Promise<CommandResult> {
+  const answered = response.body as FleetLink | undefined;
+  const secret = answered && typeof answered === "object" && !fleetLinkUrlProblem(answered.url) ? fleetLinkSecret(answered.url) : undefined;
+  if (secret === undefined) {
+    throw new CliError(makeProblem("fleet_link_secret_unavailable", "Fleet link secret unavailable", 403,
+      answered?.url_redacted === true
+        ? "A Read only credential receives no fleet link URL, so the provisioning payload cannot carry the link's secret."
+        : "The fleet link was returned without a usable URL, so the provisioning payload cannot carry its secret.",
+      { next: { command: "screenrig login --access manage", reason: "A Manage sign-in receives the fleet link URL." } }));
+  }
+  const artifact = await fetchManagedArtifact(origin, runtime.siteFetch ?? globalThis.fetch);
+  const provisioning = androidProvisioning(artifact, origin, secret);
+  if (provisioning === undefined) {
+    throw unexpectedResponseError(`The managed Android build lists a path outside ${origin}/android/, so no download location is built for it.`);
+  }
+  const id = String(answered?.id ?? "");
+  return {
+    envelope: successEnvelope({ id, provisioning }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: [`Android device owner provisioning for fleet link ${id}`, PROVISIONING_NOTICE, "", JSON.stringify(provisioning)].join("\n"),
+  };
+}
 
 export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "update");

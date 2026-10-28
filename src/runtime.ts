@@ -31,6 +31,8 @@ export interface CliRuntime {
   isStderrTty?: () => boolean;
   /** The fetch migrate uses for the vendor it reads; the global fetch when absent. Tests inject a fixture router. */
   vendorFetch?: typeof fetch;
+  /** The fetch for files the site serves beside the dashboard (the Android build list); the global fetch when absent. Tests inject a fixture. */
+  siteFetch?: typeof fetch;
 }
 
 export interface SignedRawPutRequest {
