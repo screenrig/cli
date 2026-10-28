@@ -213,8 +213,11 @@ export function campaignTiming(schedule: SourceSchedule): TimingResult {
   } else {
     const length = minutes(end) - minutes(start);
     if (length <= 0) return { ok: false, reason: "It ends before it starts." };
-    if (length >= 1440) lossy.push("Each occurrence lasted 24 hours or more; it now runs all day on its days.");
-    else {
+    if (length >= 1440) {
+      // Midnight to the next midnight is exactly a whole day on its days: nothing changed, so nothing is said.
+      const wholeDay = length === 1440 && start.hour === 0 && start.minute === 0;
+      if (!wholeDay) lossy.push("Each occurrence lasted 24 hours or more; it now runs all day on its days.");
+    } else {
       window.start = clock(start);
       window.end = clock(end);
     }

@@ -1,6 +1,7 @@
 import { open, rm, type FileHandle } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import type { ProblemNext } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { CliError, makeProblem } from "../problems.js";
 import { USER_AGENT } from "../user-agent.js";
@@ -12,7 +13,9 @@ export const VENDOR_RETRIES = 5;
 export const VENDOR_RETRY_AFTER_MAX_S = 120;
 export const VENDOR_BACKOFF_CAP_MS = 30_000;
 const MAX_REDIRECTS = 5;
+/** How long a request may wait for the answer's headers. The body has its own idle limit. */
 const REQUEST_TIMEOUT_MS = 60_000;
+/** How long a body may go without a byte before the transfer is dropped. */
 const IDLE_TIMEOUT_MS = 60_000;
 
 export interface VendorHttpOptions {
@@ -28,10 +31,14 @@ export interface VendorHttpOptions {
   now: () => number;
   random?: () => number;
   log?: (request: VendorRequestLog) => void;
+  /** Milliseconds to wait for a response's headers (default 60 s). */
+  requestTimeoutMs?: number;
+  /** Milliseconds a body may stay silent before it is dropped (default 60 s). */
+  idleTimeoutMs?: number;
 }
 
-function problem(code: string, title: string, status: number, detail: string, exit: ExitCode, hint?: string): CliError {
-  return new CliError(makeProblem(code, title, status, detail, hint ? { hint } : undefined), exit);
+function problem(code: string, title: string, status: number, detail: string, exit: ExitCode, hint?: string, next?: ProblemNext): CliError {
+  return new CliError(makeProblem(code, title, status, detail, hint || next ? { ...(hint ? { hint } : {}), ...(next ? { next } : {}) } : undefined), exit);
 }
 
 export function vendorRefused(name: string, status: number, credentialNames: readonly string[]): CliError {
@@ -55,6 +62,21 @@ export function vendorRateLimited(name: string, detail: string): CliError {
 export function vendorUnavailable(name: string, detail: string, status: number): CliError {
   return problem("vendor_unavailable", "Vendor unavailable", status, `${name} could not be reached or kept failing: ${detail}`,
     status >= 500 ? ExitCode.Server : ExitCode.Network, "Check the vendor's status and your network, then run the same command again; reruns continue where this one stopped.");
+}
+
+/** A file address the vendor listed no longer serves its file, and the host that answered was sent no credential. */
+export function vendorFileGone(name: string, vendor: string, status: number): CliError {
+  return problem("vendor_file_gone", "Vendor file address no longer works", 410,
+    `A file address ${name} listed answered HTTP ${status} from a host that was sent no key: the address has expired or is protected, and the key is not the cause. Run migrate scan again to refresh the file addresses, then run the same apply again.`, ExitCode.Client,
+    "A file that still fails after a new scan can be supplied with --files.",
+    { command: `screenrig migrate scan --from ${vendor}`, reason: "Reads the account again, with the same options and --dir, which refreshes the file addresses." });
+}
+
+/** A file download that went silent: only that file is dropped. */
+export function vendorFileStalled(name: string): CliError {
+  return problem("vendor_file_stalled", "Vendor file download stalled", 408,
+    `${name} stopped sending a file, so that download was dropped.`, ExitCode.Timeout,
+    "Run the same apply again: the file is downloaded from the start.");
 }
 
 export function vendorBadResponse(name: string, detail: string): CliError {
@@ -95,6 +117,20 @@ function headerObject(headers: Headers): Record<string, string> {
     result[name.toLowerCase()] = value;
   });
   return result;
+}
+
+/**
+ * The system error code in a fetch failure's cause chain (ENOTFOUND, ECONNREFUSED,
+ * DEPTH_ZERO_SELF_SIGNED_CERT): a short fixed word, never a message or an address.
+ */
+function causeCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(code)) return code;
+    current = current.cause;
+  }
+  return undefined;
 }
 
 export function createVendorHttp(options: VendorHttpOptions): VendorHttp {
@@ -162,19 +198,30 @@ class Client implements VendorClient {
   private async once(url: URL, method: string, headers: Record<string, string>, body: string | undefined): Promise<Response> {
     await this.acquire();
     const started = this.http.now();
+    // The request limit runs only until the headers arrive: a body that is still flowing is never cut off by it.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.http.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
+    timer.unref?.();
     try {
       const response = await this.http.fetch(url.toString(), {
         method,
         headers,
         ...(body === undefined ? {} : { body }),
         redirect: "manual",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: controller.signal,
       });
       this.http.log?.({ vendor: this.http.vendor, method, status: response.status, ms: this.http.now() - started });
       return response;
-    } catch {
-      this.http.log?.({ vendor: this.http.vendor, method, status: 0, ms: this.http.now() - started });
-      throw new NetworkFailure();
+    } catch (error) {
+      const cause = timedOut ? "REQUEST_TIMEOUT" : causeCode(error);
+      this.http.log?.({ vendor: this.http.vendor, method, status: 0, ms: this.http.now() - started, ...(cause ? { cause } : {}) });
+      throw new NetworkFailure(cause);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -186,7 +233,7 @@ class Client implements VendorClient {
         response = await this.once(url, method, headers, body);
       } catch (error) {
         if (!(error instanceof NetworkFailure)) throw error;
-        if (attempt >= VENDOR_RETRIES) throw vendorUnavailable(this.http.name, "the connection failed or timed out", 0);
+        if (attempt >= VENDOR_RETRIES) throw vendorUnavailable(this.http.name, `the connection failed or timed out${error.code ? ` (${error.code})` : ""}`, 0);
         await this.http.sleep(backoffMs(attempt, this.random));
         continue;
       }
@@ -204,8 +251,11 @@ class Client implements VendorClient {
     }
   }
 
-  /** Follows redirects by hand: the credential goes only to the base origin. */
-  private async perform(start: URL, init: VendorRequestInit): Promise<Response> {
+  /**
+   * Follows redirects by hand: the credential goes only to the base origin. Returns the
+   * final answer and the address it came from.
+   */
+  private async perform(start: URL, init: VendorRequestInit): Promise<{ response: Response; url: URL }> {
     let url = start;
     let method = (init.method ?? "GET").toUpperCase();
     let body: string | undefined = init.form !== undefined ? new URLSearchParams(init.form).toString()
@@ -222,7 +272,7 @@ class Client implements VendorClient {
       };
       const response = await this.hop(url, method, headers, body);
       const location = response.headers.get("location");
-      if (!REDIRECTS.has(response.status) || !location) return response;
+      if (!REDIRECTS.has(response.status) || !location) return { response, url };
       await response.body?.cancel().catch(() => undefined);
       if (redirects >= MAX_REDIRECTS) throw vendorBadResponse(this.http.name, "it redirected more than 5 times");
       let next: URL;
@@ -235,6 +285,9 @@ class Client implements VendorClient {
       if (response.status !== 307 && response.status !== 308 && method !== "GET" && method !== "HEAD") {
         method = "GET";
         body = undefined;
+      } else if (body !== undefined && !sameOrigin(next, url)) {
+        // A 307 or 308 repeats the body, which can hold the client secret: it goes only where the credential goes.
+        throw vendorBadResponse(this.http.name, "it redirected a request with a body to another address, so the request was not repeated there");
       }
       url = next;
     }
@@ -257,12 +310,12 @@ class Client implements VendorClient {
       }
     }
     const what = `${(init.method ?? "GET").toUpperCase()} ${/^([a-z][a-z0-9+.-]*:)?\/\//i.test(path) ? url.pathname : path.split("?")[0]}`;
-    const response = await this.perform(url, init);
+    const { response } = await this.perform(url, init);
     if (response.status < 200 || response.status >= 300) {
       await response.body?.cancel().catch(() => undefined);
       throw this.fail(response.status, what);
     }
-    const text = await response.text();
+    const text = await this.readText(response);
     let parsed: unknown;
     if (text !== "") {
       try {
@@ -272,6 +325,33 @@ class Client implements VendorClient {
       }
     }
     return { status: response.status, headers: headerObject(response.headers), body: parsed as T };
+  }
+
+  /** A whole small body, dropped if it goes silent for the idle limit. */
+  private async readText(response: Response): Promise<string> {
+    if (!response.body) return "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const idleMs = this.http.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+    let text = "";
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const silent = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new NetworkFailure("IDLE_TIMEOUT")), idleMs);
+        timer.unref?.();
+      });
+      try {
+        const next = await Promise.race([reader.read(), silent]);
+        if (next.done) return text + decoder.decode();
+        text += decoder.decode(next.value, { stream: true });
+      } catch (error) {
+        await reader.cancel().catch(() => undefined);
+        const code = error instanceof NetworkFailure ? error.code : causeCode(error);
+        throw vendorUnavailable(this.http.name, `an answer stopped arriving${code ? ` (${code})` : ""}`, 0);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
   }
 
   async json<T = unknown>(path: string, init: VendorRequestInit = {}): Promise<T> {
@@ -302,9 +382,13 @@ class Client implements VendorClient {
       throw vendorBadResponse(this.http.name, "a file address could not be read");
     }
     if (target.protocol !== "http:" && target.protocol !== "https:") throw vendorBadResponse(this.http.name, "a file address is not http or https");
-    const response = await this.perform(target, { headers: { accept: "*/*" } });
+    const { response, url: answered } = await this.perform(target, { headers: { accept: "*/*" } });
     if (response.status < 200 || response.status >= 300) {
       await response.body?.cancel().catch(() => undefined);
+      // The host that answered was sent no credential, so its refusal says the address is stale, not that the key is wrong.
+      if (answered.origin !== this.origin && (response.status === 401 || response.status === 403 || response.status === 410)) {
+        throw vendorFileGone(this.http.name, this.http.vendor, response.status);
+      }
       throw this.fail(response.status, "a file download");
     }
     if (!response.body) throw vendorBadResponse(this.http.name, "a file download had no body");
@@ -312,7 +396,7 @@ class Client implements VendorClient {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arm = (): void => {
       clearTimeout(timer);
-      timer = setTimeout(() => idle.abort(), IDLE_TIMEOUT_MS);
+      timer = setTimeout(() => idle.abort(), this.http.idleTimeoutMs ?? IDLE_TIMEOUT_MS);
       timer.unref?.();
     };
     let bytes = 0;
@@ -342,7 +426,9 @@ class Client implements VendorClient {
       await handle.close().catch(() => undefined);
       await rm(destination, { force: true });
       if (error instanceof CliError) throw error;
-      throw vendorUnavailable(this.http.name, "a file download stopped before it finished", 0);
+      if (idle.signal.aborted) throw vendorFileStalled(this.http.name);
+      const code = causeCode(error);
+      throw vendorUnavailable(this.http.name, `a file download stopped before it finished${code ? ` (${code})` : ""}`, 0);
     } finally {
       clearTimeout(timer);
     }
@@ -350,7 +436,11 @@ class Client implements VendorClient {
   }
 }
 
-class NetworkFailure extends Error {}
+class NetworkFailure extends Error {
+  constructor(readonly code?: string) {
+    super("network failure");
+  }
+}
 
 /**
  * A whole offset-paged listing. A listing ends on an empty page, a short page, the

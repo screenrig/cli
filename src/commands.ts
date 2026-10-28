@@ -21,7 +21,9 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { glassLines } from "./screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
+import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
 import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { outageLines } from "./screen-outage.js";
@@ -34,7 +36,7 @@ import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaign
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -6026,6 +6028,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
+      ...glassLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...replacedByLines(screen),
@@ -8886,11 +8889,13 @@ export const handleWebhooksDeliveries = commandHandler(async (args, runtime, res
   };
 });
 
-// Notifications: /api/notifications, email and webhook channels. A webhook's
-// signing secret is printed once in data.secret (create, rotate-secret) and
-// never reaches config, logs, or the write-recovery ledger, as for webhooks; an
-// email notification has no secret. Both channels share the 20-per-project
-// limit and the revision guard (webhookRevisionHeaders).
+// Notifications: /api/notifications, email, webhook, Slack, Teams, PagerDuty
+// and Telegram channels. A webhook's signing secret is printed once in
+// data.secret (create, rotate-secret) and never reaches config, logs, or the
+// write-recovery ledger, as for webhooks; the other channels have no secret. A
+// chat or pager credential (destination) is only ever sent, never printed back:
+// the notification shows a masked destination_hint. Every channel shares the
+// 20-per-project limit and the revision guard (webhookRevisionHeaders).
 const NOTIFICATIONS_PATH = "/api/notifications";
 
 async function notificationCall(
@@ -8944,15 +8949,28 @@ async function notificationSecretResult(response: Awaited<ReturnType<ApiClient["
 export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
   const email = flagString(args.flags, "email");
   const webhook = flagString(args.flags, "webhook");
-  if ((email === undefined) === (webhook === undefined)) throw usageError("notifications create requires exactly one of --email or --webhook.");
+  const chat = NOTIFICATION_CHAT_CHANNELS.flatMap(({ channel, flag }) => {
+    const value = flagString(args.flags, flag);
+    return value === undefined ? [] : [{ channel, flag: `--${flag}`, value }];
+  });
+  if ((email === undefined ? 0 : 1) + (webhook === undefined ? 0 : 1) + chat.length !== 1) {
+    throw usageError("notifications create requires exactly one of --email, --webhook, --slack, --teams, --pagerduty or --telegram.");
+  }
+  const telegramChat = flagString(args.flags, "telegram-chat");
+  if ((chat[0]?.channel === "telegram") !== (telegramChat !== undefined)) {
+    throw usageError("--telegram and --telegram-chat go together: the bot token and the chat it posts to.");
+  }
   const conditions = flagString(args.flags, "conditions");
   const events = flagString(args.flags, "events");
   const tags = flagString(args.flags, "tag");
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
   const body: NotificationWrite = {
-    channel: email !== undefined ? "email" : "webhook",
-    ...(email !== undefined ? { recipients: notificationRecipients(email) } : { url: webhookUrl(webhook!, "--webhook") }),
+    channel: email !== undefined ? "email" : webhook !== undefined ? "webhook" : chat[0]!.channel,
+    ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
+    ...(webhook !== undefined ? { url: webhookUrl(webhook, "--webhook") } : {}),
+    ...(chat.length ? { destination: await notificationDestination(chat[0]!.value, chat[0]!.flag, runtime) } : {}),
+    ...(telegramChat !== undefined ? { telegram_chat_id: telegramChat } : {}),
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
@@ -8998,6 +9016,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const id = notificationId(args.positionals[2], "update");
   const email = flagString(args.flags, "email");
   const url = flagString(args.flags, "url");
+  const destination = flagString(args.flags, "destination");
+  const telegramChat = flagString(args.flags, "telegram-chat");
   const conditions = flagString(args.flags, "conditions");
   const events = flagString(args.flags, "events");
   const tags = flagString(args.flags, "tag");
@@ -9007,6 +9027,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const patch: NotificationPatch = {
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
     ...(url !== undefined ? { url: webhookUrl(url) } : {}),
+    ...(destination !== undefined ? { destination: await notificationDestination(destination, "--destination", runtime) } : {}),
+    ...(telegramChat !== undefined ? { telegram_chat_id: telegramChat } : {}),
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(flagBool(args.flags, "clear-conditions") ? { conditions: [] } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
@@ -9021,7 +9043,7 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   // --snooze derives its instant from the clock, so a rerun fingerprints
@@ -10119,6 +10141,30 @@ export const handleScreenLiveStop = commandHandler(async (args, runtime, resolve
   const session = liveSessionBody(response.body);
   if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
+}, true);
+
+// Save JPEG frames of a screen's live stream: start the session, wait for the
+// Player to publish, start frames, then read each new frame once.
+export const handleScreenLiveFrame = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "frame");
+  const count = flagNumber(args.flags, "count") ?? 1;
+  if (!Number.isInteger(count) || count < 1) throw usageError("--count must be a whole number of at least 1.");
+  const interval = flagString(args.flags, "interval");
+  const intervalMs = interval === undefined ? LIVE_FRAME_INTERVAL_DEFAULT_MS : liveFrameIntervalMs(interval);
+  const duration = flagString(args.flags, "duration");
+  const wait = flagString(args.flags, "wait");
+  const plan = {
+    screenId: id,
+    count,
+    intervalMs,
+    leaseSeconds: liveFrameLeaseSeconds(duration === undefined ? undefined : liveDurationSeconds(duration), count, intervalMs),
+    waitMs: wait === undefined ? LIVE_WAIT_DEFAULT_MS : liveWaitMs(wait),
+    stop: flagBool(args.flags, "stop"),
+    output: await resolveFrameOutput(runtime.cwd(), flagString(args.flags, "output"), count),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const result = await captureLiveFrames(plan, client, { now: () => runtime.now().getTime(), sleep: runtime.sleep });
+  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: liveFramesHumanLines(result) };
 }, true);
 
 // Put a notice on a screen instead of its content. Single screen only.

@@ -167,11 +167,11 @@ test("a CMS that caps the page size is read to the end by X-Total-Count", async 
   assert.equal(gridRequests(everything, "/library").length, 1);
 });
 
-test("an event is read in the display's zone, the CMS zone when it follows each display's clock, and UTC with a note when nothing is known", async () => {
+test("an event synced to the displays' zones is read in each display's zone; any other is read in the CMS zone, or UTC with a note when nothing is known", async () => {
   const withZone = (await (await session(cms(), { timezone: "America/Toronto" })).scan()).schedules;
   const without = (await (await session(cms())).scan()).schedules;
   const byId = (list: typeof withZone, id: string) => list.find((schedule) => schedule.id === id)!;
-  // One moment, two displays: 12:00 UTC is 07:00 in Toronto and 05:00 in Phoenix.
+  // Synced to each display's zone (syncTimezone 1): one moment, two displays. 12:00 UTC is 07:00 in Toronto and 05:00 in Phoenix.
   const toronto = byId(without, "1@America/Toronto");
   const phoenix = byId(without, "1@America/Phoenix");
   assert.deepEqual([toronto.start, toronto.end, toronto.repeat?.until], ["2026-11-02T07:00", "2026-11-02T11:00", "2026-12-18"]);
@@ -180,13 +180,14 @@ test("an event is read in the display's zone, the CMS zone when it follows each 
   assert.deepEqual(phoenix.targets, { group_ids: [], screen_ids: ["2"] });
   assert.equal(toronto.priority, 10);
   assert.ok(toronto.notes.some((note) => /several time zones/.test(note)));
-  // An event that follows each display's clock reads in the CMS zone, and keeps its group.
+  // The default (syncTimezone 0) shows the CMS clock's digits and each display plays them on its own clock: read in the CMS zone,
+  // kept as one schedule with its group, and with no zone of its own, so the report claims no change.
   assert.equal(byId(withZone, "3").start, "2026-11-03T09:00");
-  assert.equal(byId(withZone, "3").timezone, "America/Toronto");
+  assert.equal(byId(withZone, "3").timezone, undefined);
   assert.deepEqual(byId(withZone, "3").targets, { group_ids: ["601"], screen_ids: [] });
   assert.deepEqual(byId(withZone, "3").repeat, { every: "day", interval: 2 });
   assert.equal(byId(without, "3").start, "2026-11-03T14:00");
-  assert.equal(byId(without, "3").timezone, "UTC");
+  assert.equal(byId(without, "3").timezone, undefined);
   assert.ok(byId(without, "3").notes.some((note) => /read as UTC.*--timezone/.test(note)));
   // A display with no zone takes the CMS zone, else UTC.
   assert.equal(byId(withZone, "12").start, "2026-11-04T04:00");
@@ -202,6 +203,35 @@ test("an event is read in the display's zone, the CMS zone when it follows each 
   // An always-on event that reaches displays in two zones has no times to read, so it is not split.
   assert.deepEqual(byId(withZone, "14").targets, { group_ids: ["601"], screen_ids: [] });
   assert.equal(without.filter((schedule) => schedule.id.startsWith("14")).length, 1);
+});
+
+test("on the default setting a 09:00 to 17:00 event plays 09:00 to 17:00 on every display, and the report claims no change", async () => {
+  // The CMS is in Toronto and the display in Phoenix. Xibo shows the CMS clock's digits and the display plays them on its own clock.
+  const base = cms();
+  const event = {
+    eventId: 40, name: "Office hours", eventTypeId: 1, campaignId: 501, displayGroups: [{ displayGroupId: 702, displayGroup: "Cafe wall", isDisplaySpecific: 1, isDynamic: 0 }],
+    criteria: [], fromDt: 1793628000, toDt: 1793656800, isPriority: 0, recurrenceType: "Week", recurrenceDetail: 1, recurrenceRange: 1797656340,
+    recurrenceRepeatsOn: "1,2,3,4,5", recurrenceMonthlyRepeatsOn: null, campaign: "Office hours", dayPartId: 2, isAlways: 0, isCustom: 1, syncTimezone: 0, maxPlaysPerHour: 0, isGeoAware: 0,
+  };
+  const only = (async (input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).pathname === "/api/schedule"
+    ? Response.json([event], { headers: { "X-Total-Count": "1" } })
+    : base.fetch(input, init))) as typeof fetch;
+  const catalog = await (await session({ ...base, fetch: only }, { timezone: "America/Toronto" })).scan();
+  const [schedule] = catalog.schedules;
+  assert.deepEqual([catalog.schedules.length, schedule!.id, schedule!.start, schedule!.end, schedule!.timezone], [1, "40", "2026-11-02T09:00", "2026-11-02T17:00", undefined]);
+  assert.deepEqual(schedule!.targets, { group_ids: [], screen_ids: ["2"] });
+  assert.deepEqual(schedule!.notes, []);
+  const t = await setup();
+  try {
+    const result = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--timezone", "America/Toronto"], {
+      env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: only,
+    });
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(result.json.data.lossy.filter((entry: { kind: string; source_id: string }) => entry.kind === "schedule" && entry.source_id === "40"), []);
+    assert.equal(result.json.data.importable.schedules, 1);
+  } finally {
+    await t.cleanup();
+  }
 });
 
 test("every event that campaigns cannot express is listed with its reason", async () => {

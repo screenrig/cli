@@ -14,7 +14,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -2978,6 +2978,47 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/playlist:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenPlaylist
+      description: >-
+        A signed-in person assigns the screen's playlist with updateScreen's assignment: the playlist must belong to the project and have an approved version (playlist_not_approved), and a playlist with a format needs a screen whose wall has the same shape (409 playlist_format_mismatch). The screen revision moves by one and the manifest is reissued from the new playlist; while a takeover, a campaign or a schedule entry is effective the playlist becomes the default behind it. Events carry the person as their actor. The write is live, so only the project owner or a member who can approve makes it (approver_required); a staff session needs its write lease. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenPlaylistPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/public-id/rotate:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -5168,6 +5209,169 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/live/frames:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: contribute
+      operationId: startScreenLiveFrames
+      x-rate-limit-policies:
+        - name: live-frames-project
+          quota: 600
+          windowSeconds: 60
+        - name: live-frames-screen
+          quota: 60
+          windowSeconds: 60
+        - name: live-frames-ip
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Starts JPEG frames of the screen''s live session, for an agent that has HTTPS and no WebRTC: the media relay decodes the Player''s published video and delivers one JPEG about every second, and GET /api/screens/{id}/live/frame returns the latest. The session must be publishing (409 live_not_ready until then, 409 live_unavailable when there is none or it ended; start one with POST /api/screens/{id}/live). Frames are started once per session: asking again answers the same adapter''s progress, and a Player that reconnects ends its frames, so ask again. state is starting until the first frame arrives, streaming while frames arrive, and silent when the adapter is older than fifteen seconds and none has arrived in that time (last_frame_at, when present, says when frames last came). The frames end with the session. 404 feature_unavailable when the server has no media relay or no frames origin configured. Live frames are free and exempt from the 1-credit API meter, like a screenshot. They are what the Player''s encoder sent, scaled and lossy; they do not replace a screenshot as proof of layout.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '202':
+          description: The frame adapter, and how far it has come.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveFrames'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/live/frame:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenLiveFrame
+      x-rate-limit-policies:
+        - name: live-frame-screen
+          quota: 240
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Returns the latest JPEG frame of the screen''s live session. Without after it returns the latest frame there is; with after (the ScreenRig-Captured-At of the frame you already have) it returns the first frame captured later, waiting up to five seconds for one, so a loop that passes each answer''s ScreenRig-Captured-At back as after receives every new frame once. ScreenRig-Captured-At is when the backend received the frame. When no new frame comes in time the answer is 409 live_not_ready with Retry-After: 1; 409 resource_conflict answers a session whose frames were not started (POST /api/screens/{id}/live/frames first, and again after the Player reconnects); 409 live_unavailable answers a session that has ended or whose adapter is silent. Frames are relay-decoded JPEGs of the live stream, at most 1280 by 720: they show what the Player encoded and sent, not a screenshot. They end with the session (max_until at the latest). 404 feature_unavailable when the server has no media relay or no frames origin configured. Free and exempt from the 1-credit API meter.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: after
+          in: query
+          required: false
+          description: Return a frame captured after this instant (RFC 3339, as in ScreenRig-Captured-At).
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: The frame.
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                enum:
+                  - image/jpeg
+            Content-Length:
+              schema:
+                type: integer
+            ETag:
+              description: The strong SHA-256 of the JPEG.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ScreenRig-Live-Id:
+              schema:
+                type: string
+                pattern: "^lv_[a-z2-7]{26}$"
+            ScreenRig-Captured-At:
+              description: When the backend received the frame, RFC 3339 with nanoseconds. Pass it back as after.
+              schema:
+                type: string
+                format: date-time
+            ScreenRig-Frame-Width:
+              schema:
+                type: integer
+            ScreenRig-Frame-Height:
+              schema:
+                type: integer
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /live/frames:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: connectLiveFrames
+      security: []
+      description: 'The media relay''s frame adapter connects here with a WebSocket upgrade; no client, agent or Player calls it. The token is the credential: POST /api/screens/{id}/live/frames hands it to the relay inside the adapter''s endpoint and stores only its SHA-256. Each binary message the relay sends is one protobuf Packet (field 1 sequenceNumber, field 2 timestamp, field 5 payload) whose payload is one whole JPEG of at most 2 MiB; anything else is skipped. The backend keeps the latest frame for fifteen seconds. One connection per token: a newer one replaces the older. The connection is closed with 1000 when the live session ends, and a token of an ended session is refused with 401 before the upgrade. 404 feature_unavailable when the server has no frames origin configured.'
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: The adapter's token, 43 characters.
+          schema: {type: string}
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket.
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/events:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -9607,6 +9811,421 @@ paths:
                 $ref: '#/components/schemas/ServiceClientResult'
         default:
           $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncAccounts
+      description: 'Lists the project''s media sync accounts, newest first (200 per page; next_cursor continues). Each shows its tenant and client id, its state and its last test; the client secret is never returned, only whether one is set and its last four characters.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncCursor'
+      responses:
+        '200':
+          description: The project's accounts.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccountList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createMediaSyncAccount
+      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncAccountWrite'
+      responses:
+        '201':
+          description: Created, with its secret masked.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccount'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getMediaSyncAccount
+      description: 'One media sync account, with its secret masked.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One account.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccount'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateMediaSyncAccount
+      description: 'Changes the name, tenant, client id or secret; an omitted secret keeps the stored one. A change of credentials discards the last test. Appends media_sync_account.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncAccountPatch'
+      responses:
+        '200':
+          description: Updated account.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccount'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteMediaSyncAccount
+      description: 'Deletes the account. Refused 409 resource_conflict while a sync reads through it; the detail names those syncs. Appends media_sync_account.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '409':
+          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testMediaSyncAccount
+      description: 'Signs in with the account''s app and reports what Microsoft granted it: whether the credentials work and which Graph application permissions the token carries (Sites.Selected, Files.Read.All and the like). Sites.Selected is reported with a warning, because each site needs a grant for the app. It does not judge a site''s grant, a folder, or consent beyond what the token carries. The result is stored as last_test. A failed check is ok false in the answer, not a problem.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: What the app's token carries.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncTest'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-syncs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncs
+      description: 'Lists the project''s media syncs, newest first (200 per page; next_cursor continues), optionally of one account_id or state. Each shows its source folder, the media folder it fills, its cadence, state, next run and the summary of its last run.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncCursor'
+        - $ref: '#/components/parameters/MediaSyncAccountFilter'
+        - $ref: '#/components/parameters/MediaSyncStateFilter'
+      responses:
+        '200':
+          description: The project's syncs.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createMediaSync
+      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncWrite'
+      responses:
+        '201':
+          description: Created, due now.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSync'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: media_sync_source_refused (the provider refused the app, its permission or the folder), resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: media_sync_source_unavailable — the provider could not be reached or answered with a failure.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-syncs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getMediaSync
+      description: 'One media sync with the summary of its last run.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One sync.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSync'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateMediaSync
+      description: 'Changes the name, every (seconds between runs), state (active or paused; active also resumes a sync an error stopped) or folder_id. A new folder_id points the sync at another media folder and makes its next run read the whole source again, which puts every synced file there. Appends media_sync.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncPatch'
+      responses:
+        '200':
+          description: Updated sync.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSync'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteMediaSync
+      description: 'Stops the sync and forgets which source file became which media. The media and its folder stay. Appends media_sync.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-syncs/{id}/run:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: runMediaSync
+      description: 'Makes the sync due now and answers 202; a worker runs it within about 30 seconds and the answer of GET /api/media-syncs/{id} shows its last_run. A sync an error stopped runs again; a paused sync is refused until it is resumed.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          description: The sync, due now.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSync'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/fleet-links:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10087,7 +10706,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10260,7 +10879,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listNotifications
-      description: Lists the project's notifications, email and webhook, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      description: Lists the project's notifications, of every channel, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10302,7 +10921,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Notification'
         '400':
-          description: invalid_request or webhook_url_rejected.
+          description: invalid_request, webhook_url_rejected or notification_destination_rejected.
           content:
             application/problem+json:
               schema:
@@ -10345,7 +10964,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateNotification
-      description: Changes any of description (empty clears it), conditions, screen_tags, hold_minutes, recipients (email), url and event_types (webhook), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
+      description: Changes any of description (empty clears it), conditions, screen_tags, hold_minutes, recipients (email), url and event_types (webhook), destination and telegram_chat_id (Slack, Teams, PagerDuty and Telegram), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10370,7 +10989,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Notification'
         '400':
-          description: invalid_request or webhook_url_rejected.
+          description: invalid_request, webhook_url_rejected or notification_destination_rejected.
           content:
             application/problem+json:
               schema:
@@ -10420,7 +11039,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: rotateNotificationSecret
-      description: 'Webhook notifications only (an email notification is invalid_request). Replaces the signing secret and returns the notification with the new one in secret; the old secret stops signing at once, and at most one attempt already in flight may still arrive signed with the old one, so accept both briefly. Appends notification.updated with details.changed [secret]. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
+      description: 'Webhook notifications only (any other channel is invalid_request). Replaces the signing secret and returns the notification with the new one in secret; the old secret stops signing at once, and at most one attempt already in flight may still arrive signed with the old one, so accept both briefly. Appends notification.updated with details.changed [secret]. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10441,7 +11060,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Notification'
         '400':
-          description: invalid_request — the notification sends email.
+          description: invalid_request — the notification is not a webhook.
           content:
             application/problem+json:
               schema:
@@ -10471,7 +11090,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Appends a notification.test project event and queues one delivery of it to this notification only (no other notification receives notification.test). A webhook receives the event as its body; an email notification sends a test email to its recipients. It works on a disabled or snoozed notification, is attempted once without retries, and never changes the notification's failure state. Poll the deliveries log for its outcome.
+      description: Appends a notification.test project event and queues one delivery of it to this notification only (no other notification receives notification.test). A webhook receives the event as its body; an email notification sends a test email to its recipients; a Slack, Teams or Telegram notification posts a test message; a PagerDuty notification triggers an information event and resolves it at once. It works on a disabled or snoozed notification, is attempted once without retries, and never changes the notification's failure state. Poll the deliveries log for its outcome.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -17606,6 +18225,162 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       parameters: []
+  /api/projects/{project_id}/media-sync-accounts:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncAccountsInProject
+      description: 'Lists the project''s media sync accounts, newest first (200 per page; next_cursor continues). Each shows its tenant and client id, its state and its last test; the client secret is never returned, only whether one is set and its last four characters.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncCursor'
+      responses:
+        '200':
+          description: The project's accounts.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccountList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createMediaSyncAccountInProject
+      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncAccountWrite'
+      responses:
+        '201':
+          description: Created, with its secret masked.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccount'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/media-syncs:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncsInProject
+      description: 'Lists the project''s media syncs, newest first (200 per page; next_cursor continues), optionally of one account_id or state. Each shows its source folder, the media folder it fills, its cadence, state, next run and the summary of its last run.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncCursor'
+        - $ref: '#/components/parameters/MediaSyncAccountFilter'
+        - $ref: '#/components/parameters/MediaSyncStateFilter'
+      responses:
+        '200':
+          description: The project's syncs.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createMediaSyncInProject
+      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaSyncWrite'
+      responses:
+        '201':
+          description: Created, due now.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSync'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: media_sync_source_refused (the provider refused the app, its permission or the folder), resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: media_sync_source_unavailable — the provider could not be reached or answered with a failure.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/fleet-links:
     parameters:
       - name: project_id
@@ -17750,7 +18525,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -17841,7 +18616,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listNotificationsInProject
-      description: Lists the project's notifications, email and webhook, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      description: Lists the project's notifications, of every channel, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
       security:
         - projectBearer: []
       responses:
@@ -17881,7 +18656,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Notification'
         '400':
-          description: invalid_request or webhook_url_rejected.
+          description: invalid_request, webhook_url_rejected or notification_destination_rejected.
           content:
             application/problem+json:
               schema:
@@ -18416,6 +19191,9 @@ components:
       description: >-
         Unicode application name encoded as RFC 8187 UTF-8'' followed by percent-encoded UTF-8 bytes (empty language, exact UTF-8 charset). Mutually exclusive with ScreenRig-Application-Name. Invalid escapes, invalid UTF-8, controls, and duplicate header values are rejected. Leading and trailing whitespace is trimmed; the decoded name is limited to 120 Unicode scalar values. Neither name header may rename a release update. This avoids raw Unicode in HTTP header values.
       schema: {type: string, maxLength: 1447}
+    MediaSyncCursor: {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+    MediaSyncAccountFilter: {name: account_id, in: query, required: false, schema: {type: string}, description: Lists only the syncs that read through this account.}
+    MediaSyncStateFilter: {name: state, in: query, required: false, schema: {type: string, enum: [active, paused, error]}, description: Lists only the syncs in this state.}
     IfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict."}
     OptionalIfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict."}
     AfterCursor: {name: after, in: query, required: false, schema: {type: string}, description: "A cursor from a previous response: ev1_ for project events (and the event streams). The Player log (source=log) pages with lg1_ or ev1_ cursors by where the server keeps it; treat them as opaque and pass back the one a page returned. A cursor of another kind is refused with invalid_request."}
@@ -22490,7 +23268,7 @@ components:
     PlaylistMediaSelectorByAll: {type: object, additionalProperties: false, required: [by], properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
     PlaylistMediaSelectorByTag: {type: object, additionalProperties: false, required: [by], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
     PlaylistMediaSelectorByFolder: {type: object, additionalProperties: false, required: [by, folder_id], description: "The ready files of the primitive directly inside one media folder (GET /api/media-folders), not those of its subfolders, ordered and paced like by:all. Like a tag, the folder is read again at every selector resolve, so moving files in or out changes what playing screens show from their next loop. Writing a playlist requires the folder to exist in the project; it may be empty. A folder that holds no ready file of the primitive, or is deleted later, matches nothing. Players receive it as by:all; the server resolves the folder.", properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [folder]}, folder_id: {type: string, pattern: "^([a-z]+_)?mfd_[A-Za-z0-9]{1,64}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
-    PlaylistResolvedMedia: {type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: {media_id: {type: string, pattern: "^med_"}, intrinsic_size: {$ref: "#/components/schemas/PlaylistIntrinsicSize"}}}
+    PlaylistResolvedMedia: {type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: {media_id: {type: string, pattern: "^med_"}, intrinsic_size: {$ref: "#/components/schemas/PlaylistIntrinsicSize"}, content_epoch: {type: integer, minimum: 1, description: "How many times the media's bytes were replaced under the same id (a media sync's changed file); absent until the first. It makes a replacement change the playlist's content so its screens fetch the new bytes. Clients must not send it."}}}
     CanvasColor: {type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA.}
     LinearGradientStop:
       type: object
@@ -22592,6 +23370,14 @@ components:
         location:
           anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
           description: "Where the screen is: the object replaces the whole location and null clears it."
+    ScreenPlaylistPatch:
+      type: object
+      additionalProperties: false
+      required: [playlist_id]
+      description: >-
+        An assignment of a screen's playlist (patchScreenPlaylist). The body has no other member.
+      properties:
+        playlist_id: {type: string, minLength: 1, description: "The playlist the screen shows: its default, behind a takeover, a campaign that holds or a matching schedule entry."}
     PairScreen: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, label: {type: string, minLength: 1, maxLength: 120}}}
     ProvisionScreen: {type: object, additionalProperties: false, properties: {label: {type: string, minLength: 1, maxLength: 120}}}
     ScreenProvisioning: {type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: {screen: {$ref: "#/components/schemas/Screen"}, public_url: {type: string, format: uri}, provisioning_url: {type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time}}}
@@ -22718,6 +23504,7 @@ components:
         fleet_link_id: {type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted."}
         observation: {$ref: "#/components/schemas/ScreenObservation"}
         status: {$ref: "#/components/schemas/ScreenStatus"}
+        glass: {$ref: "#/components/schemas/ScreenGlass"}
         last_page_failure: {$ref: "#/components/schemas/PageFailure"}
         manifest_upgrade: {$ref: "#/components/schemas/ScreenManifestUpgrade"}
         comments: {type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization."}
@@ -23154,6 +23941,39 @@ components:
         icon: {type: string, minLength: 1, description: "The chip's icon name in the catalogue (packages/overlay/icons). Absent when chip is null."}
         observed_at: {type: string, format: date-time, description: Player clock at the report. Last write wins; a report that changes nothing keeps the stored value.}
         received_at: {type: string, format: date-time, description: Server receipt time of the stored report. Not taken from the player clock.}
+    ScreenGlass:
+      type: object
+      additionalProperties: false
+      description: >-
+        What the backend concluded about the screen's picture from the reports it received, never from what the Player says about itself. A check that has nothing to say leaves its member absent. Read-only on the project API. Never authorization or admission. ScreenPatch cannot write it.
+      properties:
+        playback:
+          type: object
+          additionalProperties: false
+          required: [verdict, since, judged_at]
+          description: >-
+            The loop_stalled check. It judges a screen that is online, on schedule, showing a current multi-page playlist with media on it, and whose Player numbers its media starts (context.play_seq): when no media start has reached the backend for 1.5 times the loop's longest run between media starts (at least a minute) plus three minutes of reporting slack, the verdict is stalled. A verdict is written only when it changes, so a screen that was never found stalled has none. It does not judge a screen whose display is off, standing by or disconnected; one under a takeover or suspended; a video wall; a loop of one page, or with no page that always starts media, or with a page whose time on screen the playlist does not fix (an adslot break, an application-timed page); a Player that sends no play number; an offline screen, one whose status is an error or whose content update is not current; and it judges nothing while no screen at all has reported a media start in the last two minutes.
+          properties:
+            verdict: {type: string, enum: [playing, stalled, unjudged], description: "stalled: no media start arrived for longer than the loop allows. playing: a media start arrived after the screen was found stalled. unjudged: the screen was stalled and then stopped meeting the conditions under which the check judges."}
+            since: {type: string, format: date-time, description: "When the verdict began: for stalled, the instant the loop's allowance ran out; for playing, the receipt of the start that ended the stall; for unjudged, the sweep that stopped judging."}
+            last_media_start_at: {type: string, format: date-time, description: Server receipt time of the latest media start the check had seen when it wrote the verdict. Not the Player clock.}
+            threshold_s: {type: integer, minimum: 1, description: The silence in seconds the loop allowed before the screen counted as stalled. Present with a stalled verdict.}
+            judged_at: {type: string, format: date-time, description: When the verdict was written.}
+    ScreenGlassChangedDetails:
+      type: object
+      additionalProperties: false
+      required: [check, verdict, previous, since, evidence]
+      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other.
+      properties:
+        check: {type: string, enum: [playback]}
+        verdict: {type: string, enum: [playing, stalled, unjudged]}
+        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged]}, {type: "null"}], description: "The verdict before; null when the check had none."}
+        since: {type: string, format: date-time}
+        evidence:
+          type: object
+          additionalProperties: true
+          description: >-
+            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason.
     ScreenStatusChangedDetails:
       type: object
       additionalProperties: false
@@ -23421,6 +24241,14 @@ components:
         ended_at: {type: string, format: date-time}
         ended_reason: {type: string, description: "Why it ended: stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped. An open enum."}
         viewer_url: {type: string, description: "The dashboard page that shows the live view of this screen."}
+    LiveFrames:
+      type: object
+      required: [live_id, state]
+      description: Progress of a live session's frame adapter. Open schema.
+      properties:
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$"}
+        state: {type: string, enum: [starting, streaming, silent], description: "starting: no frame yet. streaming: a frame arrived in the last fifteen seconds. silent: the adapter is older than fifteen seconds and none arrived in that time."}
+        last_frame_at: {type: string, format: date-time, description: "When a frame last arrived. Absent while starting."}
     LiveViewer:
       type: object
       required: [viewer_id, live_id, offer, ice_servers, expires_at]
@@ -24038,6 +24866,151 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: The signing secret. Store it; it is not shown again.}
+    MediaSyncAccountConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        tenant_id: {type: string, description: "The organization's Entra tenant: its directory id (a GUID) or primary domain."}
+        client_id: {type: string, description: "The app registration's application (client) id, a GUID."}
+    MediaSyncSecret:
+      type: object
+      additionalProperties: false
+      required: [set, hint]
+      description: How an answer shows an account's client secret. The value is never returned.
+      properties:
+        set: {type: boolean}
+        hint: {type: string, maxLength: 4, description: "The secret's last four characters; empty when it is too short to show any."}
+    MediaSyncCheck:
+      type: object
+      additionalProperties: false
+      required: [name, ok, detail]
+      properties:
+        name: {type: string, enum: [credentials, permissions]}
+        ok: {type: boolean}
+        warn: {type: boolean, description: "A finding that does not fail the account but should be read."}
+        detail: {type: string}
+    MediaSyncTest:
+      type: object
+      additionalProperties: false
+      required: [at, ok, checks]
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean, description: "True when no check failed; a warning does not fail it."}
+        checks: {type: array, items: {$ref: "#/components/schemas/MediaSyncCheck"}}
+    MediaSyncAccount:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, name, config, secret, state, revision, created_at, updated_at]
+      description: The credentials of the project's own Microsoft Entra app, which syncs read through. The client secret is sealed and never returned.
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msa_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        kind: {type: string, enum: [microsoft365]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
+        secret: {$ref: "#/components/schemas/MediaSyncSecret"}
+        state: {type: string, enum: [ready, pending_consent, reconnect_required]}
+        last_test: {$ref: "#/components/schemas/MediaSyncTest"}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MediaSyncAccountList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSyncAccount"}}, next_cursor: {type: string, nullable: true}}}
+    MediaSyncAccountWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, name, config, secret]
+      properties:
+        kind: {type: string, enum: [microsoft365]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {type: object, additionalProperties: false, required: [tenant_id, client_id], properties: {tenant_id: {type: string}, client_id: {type: string}}}
+        secret: {type: string, minLength: 1, maxLength: 1024, description: "The value of one of the app's client secrets (not its id)."}
+    MediaSyncAccountPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
+        secret: {type: string, minLength: 1, maxLength: 1024, description: "Replaces the stored secret; omit it to keep the stored one."}
+    MediaSyncSource:
+      type: object
+      additionalProperties: false
+      required: [web_url, drive_id, item_id]
+      properties:
+        web_url: {type: string, description: "The source folder's address as SharePoint names it."}
+        drive_id: {type: string}
+        item_id: {type: string}
+    MediaSyncSkipped:
+      type: object
+      additionalProperties: false
+      required: [name, reason]
+      properties:
+        name: {type: string}
+        reason: {type: string, enum: [unsupported_type, too_large, storage, subfolder, download_failed, unreadable, in_use], description: "unsupported_type: the library takes png, jpeg, webp, gif, mp4, webm and mp3. too_large: over the library's limit for the type. storage: the project's library is full or has no credit for more. subfolder: only the files directly in the folder sync. download_failed: the download did not work and is retried next run. unreadable: the library could not read the file. in_use: removed at the source but still held by a screen or playlist, so it waits in the Removed subfolder."}
+        detail: {type: string}
+    MediaSyncRunError:
+      type: object
+      additionalProperties: false
+      required: [code, detail]
+      properties:
+        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error."}
+        detail: {type: string}
+    MediaSyncRun:
+      type: object
+      additionalProperties: false
+      required: [at, status, added, updated, removed, pending_delete, skipped_total]
+      description: The summary of a sync's latest run.
+      properties:
+        at: {type: string, format: date-time}
+        status: {type: string, enum: [ok, partial, error], description: "partial: a file that should have synced did not (see skipped)."}
+        added: {type: integer, minimum: 0}
+        updated: {type: integer, minimum: 0, description: Files whose bytes were replaced under the same media id.}
+        removed: {type: integer, minimum: 0}
+        pending_delete: {type: integer, minimum: 0, description: "Removed files still held by a screen or playlist, waiting in the Removed subfolder."}
+        skipped: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/MediaSyncSkipped"}, description: The first skipped files; skipped_total counts them all.}
+        skipped_total: {type: integer, minimum: 0}
+        error: {$ref: "#/components/schemas/MediaSyncRunError"}
+    MediaSync:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, account_id, provider, name, folder_id, every_s, state, source, next_run_at, revision, created_at, updated_at]
+      description: One source folder kept in step with one media folder.
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msy_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        account_id: {type: string}
+        provider: {type: string, enum: [sharepoint]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        folder_id: {type: string, description: The media folder the files land in; a folder selector on it plays them.}
+        every_s: {type: integer, minimum: 300, maximum: 86400}
+        state: {type: string, enum: [active, paused, error], description: "error: the media folder or the source folder was deleted; repair it (update with a folder_id, or delete the sync)."}
+        source: {$ref: "#/components/schemas/MediaSyncSource"}
+        next_run_at: {type: string, format: date-time}
+        last_run: {$ref: "#/components/schemas/MediaSyncRun"}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MediaSyncList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSync"}}, next_cursor: {type: string, nullable: true}}}
+    MediaSyncWrite:
+      type: object
+      additionalProperties: false
+      required: [provider, account_id, url]
+      properties:
+        provider: {type: string, enum: [sharepoint]}
+        account_id: {type: string}
+        url: {type: string, maxLength: 4096, description: "The folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        folder_id: {type: string, description: "The media folder the files land in. Omit it to create one named after the source folder."}
+        every: {type: integer, minimum: 300, maximum: 86400, description: Seconds between runs; defaults to 900.}
+        name: {type: string, minLength: 1, maxLength: 80, description: Defaults to the source folder's name.}
+    MediaSyncPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        every: {type: integer, minimum: 300, maximum: 86400, description: Seconds between runs.}
+        state: {type: string, enum: [active, paused]}
+        folder_id: {type: string}
     FleetLink:
       type: object
       additionalProperties: false
@@ -24135,12 +25108,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 7
+      maxItems: 8
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -24162,8 +25135,10 @@ components:
       type: object
       additionalProperties: false
       required: [channel]
+      description: >-
+        email sends to recipients, webhook POSTs signed to url, and slack, teams, pagerduty and telegram post one message per outage and screen to a chat or pager with the write-only destination (telegram also needs telegram_chat_id), then a recovery after it; PagerDuty opens an incident and resolves it. They need at least one condition and take no event_types.
       properties:
-        channel: {type: string, enum: [email, webhook]}
+        channel: {type: string, enum: [email, webhook, slack, teams, pagerduty, telegram]}
         description: {type: string, maxLength: 200, description: A name for people.}
         conditions: {$ref: "#/components/schemas/NotificationConditions"}
         screen_tags: {$ref: "#/components/schemas/ScreenTags"}
@@ -24171,7 +25146,20 @@ components:
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri, description: "Webhook only: https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment."}
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        destination: {$ref: "#/components/schemas/NotificationDestination"}
+        telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
         enabled: {type: boolean, default: true}
+    NotificationDestination:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      writeOnly: true
+      description: >-
+        Slack, Teams, PagerDuty and Telegram only; required for them. The credential in the shape the service issues it: slack, the incoming webhook URL (hooks.slack.com); teams, the Workflows webhook URL (logic.azure.com or powerplatform.com; Office 365 connector URLs are retired); pagerduty, the 32-character Events API v2 routing key; telegram, the bot token. Another shape is notification_destination_rejected. It is sealed, never returned, and appears on reads only as destination_hint.
+    NotificationTelegramChat:
+      type: string
+      pattern: "^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$"
+      description: "Telegram only; required for it. The chat to post to: its numeric id (negative for a group or channel) or @channelname. Not a credential."
     NotificationPatch:
       type: object
       additionalProperties: false
@@ -24184,6 +25172,8 @@ components:
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri}
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        destination: {$ref: "#/components/schemas/NotificationDestination"}
+        telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
         enabled: {type: boolean}
         snoozed_until:
           oneOf: [{type: string, format: date-time}, {type: "null"}]
@@ -24197,7 +25187,7 @@ components:
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
-        channel: {type: string, description: "email or webhook. Readers treat another value as a channel they cannot edit."}
+        channel: {type: string, description: "email, webhook, slack, teams, pagerduty or telegram. Readers treat another value as a channel they cannot edit."}
         description: {type: string}
         conditions: {type: array, items: {type: string}, description: NotificationCondition values.}
         screen_tags: {type: array, items: {type: string}, description: Empty means every screen.}
@@ -24206,6 +25196,8 @@ components:
         url: {type: string, description: "Webhook only. The receiver URL. Empty, with url_redacted true, below effective Manage."}
         url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential."}
         event_types: {type: array, items: {type: string}, description: Webhook only.}
+        destination_hint: {type: string, description: "Slack, Teams, PagerDuty and Telegram only. The destination masked to its host and last four characters, as https://hooks.slack.com/…/x9Zq or …a1b2."}
+        telegram_chat_id: {type: string, description: Telegram only. The chat messages go to.}
         enabled: {type: boolean}
         snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
         revision: {type: integer, minimum: 1}
@@ -26249,6 +27241,8 @@ x-problem-codes:
   - review_blocked
   - playlist_not_approved
   - media_pending_review
+  - media_sync_source_refused
+  - media_sync_source_unavailable
   - not_found
   - method_not_allowed
   - idempotency_mismatch
@@ -26354,6 +27348,7 @@ x-problem-codes:
   - alert_mute_limit_reached
   - fleet_link_limit_reached
   - webhook_url_rejected
+  - notification_destination_rejected
   - document_not_shared
   - note_contains_credential
   - note_rejected

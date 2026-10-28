@@ -299,10 +299,10 @@ test("screen live status and stop read the session", async () => {
   assert.match(human.stdout, new RegExp(`Watch it in the dashboard: ${VIEWER_URL}`));
 });
 
-test("help names the three subcommands and what they never carry", () => {
+test("help names the subcommands and what they never carry", () => {
   const group = commandHelp(["screen", "live"]);
   assert.equal(group.kind, "group");
-  assert.deepEqual(group.commands?.map((command) => command.name).sort(), ["start", "status", "stop"]);
+  assert.deepEqual(group.commands?.map((command) => command.name).sort(), ["frame", "start", "status", "stop"]);
   assert.ok(group.notes.length > 0);
   assert.match(group.notes.join("\n"), /never carries video/);
   const start = commandHelp(["screen", "live", "start"]);

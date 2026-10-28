@@ -4,8 +4,11 @@ import path from "node:path";
 import { test } from "node:test";
 import { CliError } from "../problems.js";
 import { testTemp } from "../test-temp.js";
+import { createMemoryLogger } from "../log/logger.js";
+import type { CliRuntime } from "../runtime.js";
+import { vendorHttpFor } from "./cli.js";
 import { backoffMs, createVendorHttp, cursorPages, offsetPages, retryAfterSeconds } from "./http.js";
-import type { VendorClient, VendorClientOptions } from "./types.js";
+import type { VendorAdapter, VendorClient, VendorClientOptions } from "./types.js";
 
 interface Call {
   url: string;
@@ -13,9 +16,10 @@ interface Call {
   headers: Record<string, string>;
   body?: string;
   at: number;
+  signal?: AbortSignal;
 }
 
-function fixture(handler: (call: Call, index: number) => Response | Promise<Response>, options: { random?: () => number; start?: number } = {}) {
+function fixture(handler: (call: Call, index: number) => Response | Promise<Response>, options: { random?: () => number; start?: number; requestTimeoutMs?: number; idleTimeoutMs?: number } = {}) {
   let now = options.start ?? 0;
   const calls: Call[] = [];
   const sleeps: number[] = [];
@@ -27,6 +31,7 @@ function fixture(handler: (call: Call, index: number) => Response | Promise<Resp
       headers: Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([name, value]) => [name.toLowerCase(), value])),
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
       at: now,
+      ...(init?.signal ? { signal: init.signal } : {}),
     };
     calls.push(call);
     return handler(call, calls.length - 1);
@@ -46,6 +51,8 @@ function fixture(handler: (call: Call, index: number) => Response | Promise<Resp
     now: () => now,
     random: options.random ?? (() => 1),
     log: (entry) => logs.push(entry),
+    ...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+    ...(options.idleTimeoutMs !== undefined ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
   });
   return {
     calls,
@@ -282,6 +289,171 @@ test("download streams to a new 0600 file, sends the credential only to the base
     const error = await failure(missing.client().download("/x", path.join(dir, "gone.bin")));
     assert.equal(error.problem.code, "vendor_not_found");
     await assert.rejects(stat(path.join(dir, "gone.bin")), { code: "ENOENT" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- time limits: the request limit ends with the headers, the idle limit guards the body ----------------------------------
+
+/** A body that sends `chunks` pieces of ten bytes, `gapMs` apart, and dies with the request's signal if that aborts. */
+function trickle(chunks: number, gapMs: number, signal?: AbortSignal): Response {
+  let sent = 0;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+    },
+    async pull(controller) {
+      if (sent >= chunks) {
+        controller.close();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, gapMs));
+      sent += 1;
+      controller.enqueue(new TextEncoder().encode("0123456789"));
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+test("a download that flows for longer than the request limit completes: the limit ends when the headers arrive", async () => {
+  const dir = await testTemp("vendor-slow-");
+  try {
+    // Eight chunks 25 ms apart take about 200 ms, five times the 40 ms request limit.
+    const f = fixture((call) => trickle(8, 25, call.signal), { requestTimeoutMs: 40 });
+    const target = path.join(dir, "big.bin");
+    assert.deepEqual(await f.client().download("/library/download/1", target), { bytes: 80 });
+    assert.equal((await readFile(target)).length, 80);
+    assert.deepEqual(f.logs, [{ vendor: "fixture", method: "GET", status: 200, ms: 0 }], "one request, answered");
+    // A small JSON answer that flows for as long is read whole too.
+    const answer = fixture((call) => trickle(4, 25, call.signal), { requestTimeoutMs: 40 });
+    const unreadable = await failure(answer.client().json("/x"));
+    assert.equal(unreadable.problem.code, "vendor_bad_response", "read to its end (ten digits are not JSON), not cut off by the request limit");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a request whose headers never arrive is dropped at the request limit, retried, and then vendor_unavailable with the reason", async () => {
+  const f = fixture((call) => new Promise<Response>((_resolve, reject) => {
+    call.signal!.addEventListener("abort", () => reject(call.signal!.reason), { once: true });
+  }), { requestTimeoutMs: 20 });
+  const error = await failure(f.client().json("/x"));
+  assert.equal(error.problem.code, "vendor_unavailable");
+  assert.equal(error.exitCode, 10);
+  assert.match(error.problem.detail, /\(REQUEST_TIMEOUT\)/);
+  assert.equal(f.calls.length, 6);
+});
+
+test("a download that goes silent for the idle limit is vendor_file_stalled, and its file is removed; a silent JSON answer is vendor_unavailable", async () => {
+  const dir = await testTemp("vendor-stall-");
+  try {
+    const silent = (): Response => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("0123456789"));
+      },
+      pull: () => new Promise<void>(() => undefined),
+    }), { status: 200 });
+    const f = fixture(silent, { idleTimeoutMs: 30 });
+    const error = await failure(f.client().download("/library/download/1", path.join(dir, "gone.bin")));
+    assert.equal(error.problem.code, "vendor_file_stalled");
+    await assert.rejects(stat(path.join(dir, "gone.bin")), { code: "ENOENT" });
+    const answer = fixture(() => new Response(new ReadableStream<Uint8Array>({ pull: () => new Promise<void>(() => undefined) }), { status: 200 }), { idleTimeoutMs: 30 });
+    const stalled = await failure(answer.client().json("/x"));
+    assert.equal(stalled.problem.code, "vendor_unavailable");
+    assert.match(stalled.problem.detail, /stopped arriving \(IDLE_TIMEOUT\)/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- a failed request says why, at the level of a failure ------------------------------------------------------------
+
+test("a request with no answer names the system error in its detail and its log, never a URL", async () => {
+  const f = fixture(() => {
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo ENOTFOUND cms.example.com"), { code: "ENOTFOUND" }) });
+  });
+  const error = await failure(f.client().json("/x?token=hidden"));
+  assert.equal(error.problem.code, "vendor_unavailable");
+  assert.match(error.problem.detail, /the connection failed or timed out \(ENOTFOUND\)/);
+  assert.equal(f.logs.length, 6);
+  assert.ok(f.logs.every((entry) => JSON.stringify(entry) === JSON.stringify({ vendor: "fixture", method: "GET", status: 0, ms: 0, cause: "ENOTFOUND" })));
+  assert.ok(!JSON.stringify([error.problem, f.logs]).match(/example\.com|hidden/), "no address or query in either");
+  const tls = fixture(() => {
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error("self-signed certificate"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }) });
+  });
+  assert.match((await failure(tls.client().json("/x"))).problem.detail, /\(DEPTH_ZERO_SELF_SIGNED_CERT\)/);
+});
+
+test("the operation log records a request that got no answer or was refused as an error, and an answered one quietly", async () => {
+  const { logger, events } = createMemoryLogger();
+  let answer: () => Response = () => new Response("{}", { status: 200 });
+  const runtime = {
+    logger, sleep: async () => undefined, now: () => new Date(0),
+    vendorFetch: (async () => {
+      const response = answer();
+      return response;
+    }) as typeof fetch,
+  } as unknown as CliRuntime;
+  const adapter = { id: "fixture", name: "Fixture CMS", credentials: [] } as unknown as VendorAdapter;
+  const client = vendorHttpFor(runtime, adapter).client({ base: "https://cms.example.com/api" });
+  await client.json("/ok");
+  answer = () => new Response("no", { status: 404 });
+  await failure(client.json("/missing"));
+  answer = () => {
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" }) });
+  };
+  await failure(client.json("/down"));
+  const phases = events.filter((event) => event.op === "migrate.vendor.request" && event.phase !== "start").map((event) => [event.phase, event.params?.status, event.params?.cause]);
+  assert.deepEqual(phases.slice(0, 2), [["finish", 200, undefined], ["error", 404, undefined]]);
+  assert.ok(phases.slice(2).length === 6 && phases.slice(2).every((row) => row[0] === "error" && row[1] === 0 && row[2] === "ECONNREFUSED"), JSON.stringify(phases));
+  assert.ok(!JSON.stringify(events).includes("127.0.0.1"), "no address");
+});
+
+// ---- redirects and downloads ----------------------------------------------------------------------------------------
+
+test("a 307 or 308 that would repeat a body at another origin is refused; the same origin repeats it, and a 302 becomes a GET", async () => {
+  const cross = fixture((call) => (call.url.endsWith("/authorize") ? new Response(null, { status: 307, headers: { location: "https://other.example.net/token" } }) : json({})));
+  const refused = await failure(cross.client().json("/authorize", { method: "POST", form: { grant_type: "client_credentials", client_secret: "fixture-secret" } }));
+  assert.equal(refused.problem.code, "vendor_bad_response");
+  assert.match(refused.problem.detail, /redirected a request with a body to another address/);
+  assert.equal(cross.calls.length, 1, "the secret went nowhere else");
+  assert.ok(!JSON.stringify(refused.problem).includes("fixture-secret"));
+  const permanent = fixture(() => new Response(null, { status: 308, headers: { location: "http://cms.example.com/api/authorize" } }));
+  assert.equal((await failure(permanent.client().json("/authorize", { method: "POST", body: { a: 1 } }))).problem.code, "vendor_bad_response", "http to https is another origin too");
+  assert.equal(permanent.calls.length, 1);
+
+  const same = fixture((call, index) => (index === 0 ? new Response(null, { status: 307, headers: { location: "/api/token" } }) : json({ url: call.url })));
+  await same.client().json("/authorize", { method: "POST", form: { grant_type: "client_credentials" } });
+  assert.equal(same.calls[1]!.method, "POST");
+  assert.equal(same.calls[1]!.body, "grant_type=client_credentials");
+  const found = fixture((call, index) => (index === 0 ? new Response(null, { status: 302, headers: { location: "https://other.example.net/after" } }) : json({ url: call.url })));
+  await found.client().json("/authorize", { method: "POST", form: { client_secret: "fixture-secret" } });
+  assert.equal(found.calls[1]!.method, "GET");
+  assert.equal(found.calls[1]!.body, undefined, "a 302 drops the body");
+});
+
+test("a refusal from a host that was sent no credential is vendor_file_gone; the base origin's refusal is still vendor_refused", async () => {
+  const dir = await testTemp("vendor-gone-");
+  try {
+    for (const status of [401, 403, 410]) {
+      const direct = fixture(() => new Response("vendor-body-text", { status }));
+      const gone = await failure(direct.client().download("https://cdn.example.net/blob?sig=old", path.join(dir, `a${status}`)));
+      assert.equal(gone.problem.code, "vendor_file_gone", String(status));
+      assert.equal(gone.problem.status, 410);
+      assert.match(gone.problem.detail, /migrate scan again to refresh the file addresses/);
+      assert.deepEqual(gone.problem.next?.command, "screenrig migrate scan --from fixture");
+      assert.ok(!JSON.stringify(gone.problem).match(/cdn\.example\.net|sig=old|vendor-body-text/), "no address, query or body");
+      assert.equal(direct.calls[0]!.headers.authorization, undefined);
+      // A listed path that the base redirects to a CDN: the CDN was sent no credential either.
+      const viaBase = fixture((call) => (call.url.startsWith("https://cms.example.com/") ? new Response(null, { status: 302, headers: { location: "https://cdn.example.net/blob" } }) : new Response("no", { status })));
+      assert.equal((await failure(viaBase.client().download("/library/download/1", path.join(dir, `b${status}`)))).problem.code, "vendor_file_gone", `redirected ${status}`);
+    }
+    const own = fixture(() => new Response("no", { status: 403 }));
+    assert.equal((await failure(own.client().download("/library/download/1", path.join(dir, "own")))).problem.code, "vendor_refused");
+    const other = fixture(() => new Response("no", { status: 404 }));
+    assert.equal((await failure(other.client().download("https://cdn.example.net/blob", path.join(dir, "nf")))).problem.code, "vendor_not_found");
+    await assert.rejects(stat(path.join(dir, "a403")), { code: "ENOENT" });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

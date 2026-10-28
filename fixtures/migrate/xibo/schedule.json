@@ -33,7 +33,7 @@
     "isAlways": 0,
     "isCustom": 1,
     "syncEvent": 0,
-    "syncTimezone": 0,
+    "syncTimezone": 1,
     "shareOfVoice": 0,
     "maxPlaysPerHour": 0,
     "isGeoAware": 0
@@ -111,7 +111,7 @@
     "isAlways": 0,
     "isCustom": 1,
     "syncEvent": 0,
-    "syncTimezone": 1,
+    "syncTimezone": 0,
     "shareOfVoice": 0,
     "maxPlaysPerHour": 0,
     "isGeoAware": 0
