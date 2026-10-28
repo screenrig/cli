@@ -12,7 +12,7 @@ import { boundedSeconds } from "./screen-commands.js";
  * it: the video itself is watched there.
  */
 export const LIVE_DURATION_MIN_S = 30;
-export const LIVE_DURATION_MAX_S = 3600;
+export const LIVE_DURATION_MAX_S = 300;
 export const LIVE_WAIT_DEFAULT_MS = 30_000;
 export const LIVE_WAIT_MAX_MS = 600_000;
 export const LIVE_POLL_MS = 1_000;
@@ -30,9 +30,9 @@ export function liveScreenId(value: string | undefined, command: string): string
   return value;
 }
 
-/** `--duration` of screen live start, as duration_s (30 to 3600). */
+/** `--duration` of screen live start, as duration_s (30 to 300): a session lasts five minutes at most. */
 export function liveDurationSeconds(value: string): number {
-  return boundedSeconds("--duration", value, LIVE_DURATION_MIN_S, LIVE_DURATION_MAX_S, "90s, 5m, or 1h", "30s to 1h");
+  return boundedSeconds("--duration", value, LIVE_DURATION_MIN_S, LIVE_DURATION_MAX_S, "90s or 5m", "30s to 5m");
 }
 
 export function liveDurationOption(value: string): string {
@@ -92,7 +92,7 @@ export async function settleLive(first: LiveSession, read: () => Promise<LiveSes
 
 const ENDED_SENTENCES: Record<string, string> = {
   stopped: "The session was stopped.",
-  expired: "Nobody renewed the session, or it reached its hour.",
+  expired: "Nobody renewed the session, or it reached its five minutes.",
   consent_denied: "Someone at the screen declined to allow screen capture.",
   consent_timeout: "Nobody at the screen allowed screen capture in time. On Android, someone at the screen allows capture once each time the Player starts.",
   capture_failed: "The Player could not capture or encode the screen.",

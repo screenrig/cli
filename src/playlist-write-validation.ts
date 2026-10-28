@@ -1,5 +1,6 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
-import { usageError } from "./problems.js";
+import { iframeSnippetSource } from "./iframe-snippet.js";
+import { CliError, usageError } from "./problems.js";
 import { PLAYLIST_TRANSITION_TYPES } from "./playlist-templates.js";
 
 interface JsonRecord { [key: string]: unknown }
@@ -153,6 +154,8 @@ function validCivil(value: string): boolean {
     date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
+const SCREEN_WEATHER_KEY = "{screen.weather}";
+
 function validateVisibility(value: unknown, name: string): void {
   const visibility = record(value, name);
   exact(visibility, ["enabled", "from", "until", "windows", "data"], name);
@@ -161,8 +164,11 @@ function validateVisibility(value: unknown, name: string): void {
     const dataName = `${name}.data`;
     const data = record(visibility.data, dataName);
     exact(data, ["key", "path", "equals"], dataName);
-    const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
-    if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+    // {screen.weather} is the one key template: each screen's manifest fills in the weather conditions of its own location.
+    if (data.key !== SCREEN_WEATHER_KEY) {
+      const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
+      if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+    }
     if (data.path !== undefined && (typeof data.path !== "string" || Buffer.byteLength(data.path, "utf8") > 256 ||
       (data.path !== "" && !data.path.startsWith("/")) || /~(?:[^01]|$)/.test(data.path) || data.path.split("/").length > 17)) {
       throw usageError(`${dataName}.path must be an RFC 6901 pointer of at most 256 bytes and 16 segments.`);
@@ -279,9 +285,13 @@ function validateIframe(value: JsonRecord, name: string): void {
   const src = string(value, "src", name, 4096);
   string(value, "title", name, 200);
   // A sign shows what its owner points it at: http or https, any host including
-  // the screen's LAN, with user:pass@ credentials for a page behind a login.
+  // the screen's LAN, with user:pass@ credentials for a page behind a login. The
+  // server also reads a pasted <iframe ...> embed code for its src.
   let parsed: URL;
-  try { parsed = new URL(src); } catch { throw usageError(`${name}.src must be an http or https URL.`); }
+  try { parsed = new URL(iframeSnippetSource(src) ?? src); } catch (error) {
+    if (error instanceof CliError) throw error;
+    throw usageError(`${name}.src must be an http or https URL.`);
+  }
   if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
     throw usageError(`${name}.src must be an http or https URL.`);
   }

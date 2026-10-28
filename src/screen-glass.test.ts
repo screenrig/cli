@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { Screen } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { run, type CliRuntime } from "./main.js";
-import { glassLines } from "./screen-glass.js";
+import { flatFrameNote, frameRow, glassLines } from "./screen-glass.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -82,4 +82,58 @@ test("screen show carries Screen.glass in JSON and prints the stalled block in h
   const calm = new FakeTransport().on("GET", "/api/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body: { ...body, glass: { playback: { ...stalled, verdict: "playing" } } } }));
   const quiet = await cli(["--human", "screen", "show", "scr_LOBBY"], calm);
   assert.doesNotMatch(quiet.stdout, /Playlist stalled/);
+});
+
+const blank = { verdict: "blank" as const, since: "2026-10-28T12:03:00Z", judged_at: "2026-10-28T12:03:40Z" };
+
+test("glassLines prints a blank or frozen picture verdict with what to do and nothing else", () => {
+  const blankLines = glassLines({ ...base, glass: { picture: blank } });
+  assert.equal(blankLines.length, 2);
+  assert.equal(
+    blankLines[0],
+    "Blank screen since 2026-10-28T12:03:00Z: every screenshot ScreenRig took over a run that covers the whole loop was one flat tone, although the screen is online and its content is current.",
+  );
+  assert.match(blankLines[1]!, /screen screenshot scr_LOBBY, or restart the Player with screen reload scr_LOBBY\. It clears after two screenshots in a row that show a moving picture/);
+  const frozenLines = glassLines({ ...base, glass: { picture: { ...blank, verdict: "frozen" } } });
+  assert.equal(
+    frozenLines[0],
+    "Frozen picture since 2026-10-28T12:03:00Z: every screenshot ScreenRig took over a run that covers the whole loop was the same picture, although the screen is online and its content is current.",
+  );
+  for (const verdict of ["verified", "unjudged"] as const) {
+    assert.deepEqual(glassLines({ ...base, glass: { picture: { ...blank, verdict } } }), [], verdict);
+  }
+  // A verdict the CLI does not know prints nothing rather than a guess.
+  assert.deepEqual(glassLines({ ...base, glass: { picture: { ...blank, verdict: "sideways" as never } } }), []);
+  // Both checks can speak at once; the playback one comes first.
+  const both = glassLines({ ...base, glass: { playback: stalled, picture: blank } });
+  assert.equal(both.length, 4);
+  assert.match(both[0]!, /^Playlist stalled/);
+  assert.match(both[2]!, /^Blank screen/);
+  assert.equal(glassLines({ ...base, glass: { picture: { ...blank, since: "yesterday\u001b[2J" } } })[0]!.startsWith("Blank screen: every screenshot"), true);
+});
+
+test("frameRow and flatFrameNote describe one image and never call the screen blank", () => {
+  assert.equal(frameRow({ flat: true }), "flat (one tone)");
+  assert.equal(frameRow({ flat: false }), "not flat");
+  assert.equal(frameRow(undefined), undefined);
+  assert.equal(frameRow({ flat: "yes" }), undefined);
+  assert.equal(flatFrameNote({ flat: false }, base).length, 0);
+  assert.equal(flatFrameNote(undefined, base).length, 0);
+  const note = flatFrameNote({ flat: true }, base);
+  assert.equal(note.length, 1);
+  assert.match(note[0]!, /no verdict: a transition between pages, or a page that is black on purpose/);
+  // Once the screen is found blank, the verdict lines say it and the note does not repeat it.
+  assert.equal(flatFrameNote({ flat: true }, { ...base, glass: { picture: blank } }).length, 0);
+});
+
+test("screen show prints the blank block and keeps Screen.glass.picture in JSON", async () => {
+  const body = {
+    id: "scr_LOBBY", label: "Lobby", state: "active", public_id: "pub_scr_LOBBY", revision: 1, manifest_revision: "man_1", online: true,
+    created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", glass: { picture: blank },
+  };
+  const transport = new FakeTransport().on("GET", "/api/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body }));
+  const json = await cli(["--json", "screen", "show", "scr_LOBBY"], transport);
+  assert.deepEqual((JSON.parse(json.stdout) as { data: Screen }).data.glass, { picture: blank });
+  const human = await cli(["--human", "screen", "show", "scr_LOBBY"], transport);
+  assert.match(human.stdout, /\nBlank screen since 2026-10-28T12:03:00Z: every screenshot ScreenRig took over a run that covers the whole loop was one flat tone/);
 });

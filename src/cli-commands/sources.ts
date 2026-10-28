@@ -24,8 +24,7 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
     "  one card, and a project has at most 200. Kinds: ics (iCalendar and webcal://",
     "  addresses: Google, Outlook, iCloud and Nextcloud calendars into an events card,",
     "  or a study-rooms card with one room per calendar), sheets, csv, json,",
-    "  microsoft365, google_calendar, square and shopify. A kind that is not available",
-    "  answers invalid_request at kind.",
+    "  microsoft365, google_calendar, square and shopify.",
     "  Create the card first (card create), preview with source test, then source",
     "  create. A run that fails never writes: the card keeps its last good document and",
     "  the status shows the error. Status ok means the last fetch succeeded and the card",
@@ -33,8 +32,22 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
     "  current, nor whether any screen shows the card.",
     "  A calendar address is a credential. Give it as --secret calendar_url.KEY=@FILE",
     "  (or - for stdin) so it stays out of your shell history and process list; it is",
-    "  stored sealed and shown back only as scheme and host. The settings of each kind,",
-    "  the status codes and the privacy rules are at https://screenrig.ai/docs/sources.",
+    "  stored sealed and shown back only as scheme and host.",
+    "  A sheets, csv or json source fills any card: its settings carry a mapping that",
+    "  builds the card's data from the rows (rows, columns, by_key) or the JSON answer",
+    "  (body, by_key). A Google Sheet needs no key: share it with Anyone with the link, or",
+    "  publish it to the web. A token or API key for a csv or json address goes as",
+    "  --secret token=@FILE and is sent only to the address's own origin. Preview a",
+    "  mapping with source test before source create.",
+    "  A microsoft365 or google_calendar source reads meeting-room calendars into a room",
+    "  or room-board card with your own Microsoft Entra app (--secret client_secret=@FILE)",
+    "  or Google service account (--secret service_account_key=@FILE, the JSON key file).",
+    "  They only read: source test shows the bookings and per-room counts it read.",
+    "  A square or shopify source reads a till's menu into a menu or price-matrix card",
+    "  with the merchant's token (--secret access_token=@FILE; shopify also takes",
+    "  client_secret with a client_id setting). Sold-out items follow the till.",
+    "  The settings of each kind, the status codes and the privacy rules are at",
+    "  https://screenrig.ai/docs/sources.",
   ].join("\n"));
 
   const list = source.command("list").description("List this project's data sources with their status")
@@ -60,6 +73,8 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
   addCommandExamples(create,
     "screenrig source create --kind ics --card crd_CARD --name \"Lobby calendar\" --set calendars='[{\"key\":\"lobby\"}]' --set time_zone=America/Vancouver --secret calendar_url.lobby=@lobby.url",
     "screenrig source create --kind ics --card crd_ROOMS --name \"Study rooms\" --settings @rooms.json --secret calendar_url.room1=@room1.url --secret calendar_url.room2=@room2.url --refresh 2m",
+    "screenrig source create --kind sheets --card crd_MENU --name \"Cafe menu\" --settings @menu-sheet.json",
+    "screenrig source create --kind json --card crd_KPI --name \"Daily numbers\" --settings @kpi-api.json --secret token=@api.token",
   );
 
   const update = source.command("update").description("Change a data source; a change other than a rename resets its failures and runs it again")

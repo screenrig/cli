@@ -68,6 +68,25 @@ test("bundle predicates keep the backend's key, scalar and RFC 6901 limits", () 
   }
 });
 
+test("a page condition may read the weather of each screen's own location", () => {
+  for (const data of [{ key: "{screen.weather}", path: "/condition", equals: "rain" }, { key: "{screen.weather}", path: "/band", equals: "freezing" },
+    { key: "{screen.weather}", path: "/temperatureC", equals: 12 }, { key: "{screen.weather}", path: "/isDay", equals: false }, { key: "{screen.weather}" }]) {
+    for (const bounds of [{}, { from: "2026-10-27T09:00" }]) {
+      const value = playlistWithVisibility({ enabled: true, data, ...bounds });
+      const original = structuredClone(value);
+      assert.deepEqual(playlistIssues(value), [], JSON.stringify(data));
+      assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set());
+      assert.deepEqual(value, original);
+    }
+  }
+  // Only the whole key is the token.
+  for (const key of ["{screen.weather}x", "weather-{screen.weather}", "{screen.name}", "{screen.field.store}", "{screen.weather", "feed.conditions.v1:49.25:-123.00 "]) {
+    const value = playlistWithVisibility({ enabled: true, data: { key, path: "/condition", equals: "rain" } });
+    assert.throws(() => validatePlaylistWrite(value, new Map()), CliError, key);
+    assert.notDeepEqual(playlistIssues(value), [], key);
+  }
+});
+
 function playlistWithTransition(transition: unknown) {
   const value = playlistWithPrimitives(TWO_IFRAMES);
   return { ...value, pages: value.pages.map((page) => ({ ...page, transition })) };
@@ -156,6 +175,17 @@ test("both local authoring validators refuse transition rule violations at the s
 
 test("playlist write accepts two iframe primitives on a page", () => {
   assert.deepEqual(validatePlaylistWrite(playlistWithPrimitives(TWO_IFRAMES), new Map()), new Set());
+});
+
+test("playlist write accepts a pasted iframe embed code as an iframe src, as the server reads it", () => {
+  const code = '<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vExample/embed?start=true&amp;loop=true" width="640" height="389"></iframe>';
+  for (const src of [code, `  ${code}`, "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit"]) {
+    assert.deepEqual(playlistIssues(playlistWithPrimitives([iframePrimitive("deck", src)])), [], `schema: ${src}`);
+    assert.deepEqual(validatePlaylistWrite(playlistWithPrimitives([iframePrimitive("deck", src)]), new Map()), new Set(), src);
+  }
+  for (const src of ["docs.google.com/presentation", "javascript:alert(1)", "<script src=\"https://example.com/x.js\"></script>", ""]) {
+    assert.throws(() => validatePlaylistWrite(playlistWithPrimitives([iframePrimitive("deck", src)]), new Map()), CliError, src);
+  }
 });
 
 test("playlist write accepts a panning background and a spinning badge", () => {
