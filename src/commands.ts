@@ -9605,7 +9605,12 @@ export const handleCampaignScreens = commandHandler(async (args, runtime, resolv
 export const handleCampaignExplain = commandHandler(async (args, runtime, resolved) => {
   const screenId = campaignScreenId(args.positionals[2]);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await campaignCall(client, { method: "GET", path: `/api/screens/${screenId}/campaigns` }, screenId, "screen");
+  const at = flagString(args.flags, "at");
+  const to = flagString(args.flags, "to");
+  const response = await campaignCall(client, {
+    method: "GET", path: `/api/screens/${screenId}/campaigns`,
+    ...(at !== undefined || to !== undefined ? { query: { ...(at !== undefined ? { at } : {}), ...(to !== undefined ? { to } : {}) } } : {}),
+  }, screenId, "screen");
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
