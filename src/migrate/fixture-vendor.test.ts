@@ -19,9 +19,20 @@ export const libraryFiles: Record<string, { name: string; filename: string; type
   "4": { name: "Theme", filename: "theme.mp3", type: "audio", path: "audio/theme.mp3" },
 };
 
+/** Another host the fixture CMS can point a download at; it is sent no key. */
+export const CDN_URL = "https://cdn.example.net";
+
 export interface RouterOptions {
   /** Downloads of these ids answer this status. */
   downloadStatus?: Record<string, number>;
+  /** Downloads of these ids are redirected to the CDN host, which answers `cdnStatus`. */
+  downloadRedirect?: readonly string[];
+  /** What the CDN host answers (default 200 with the file). */
+  cdnStatus?: number;
+  /** Downloads of these ids answer 200 with no body at all. */
+  emptyDownloads?: readonly string[];
+  /** Downloads of these ids never connect: the request fails as a lost network does. */
+  networkDown?: readonly string[];
   /** Answer every request 401. */
   refuse?: boolean;
 }
@@ -38,6 +49,10 @@ export function fixtureRouter(options: RouterOptions = {}): Router {
     const url = new URL(String(input));
     const headers = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([name, value]) => [name.toLowerCase(), value]));
     requests.push({ method: init?.method ?? "GET", path: url.pathname, ...(headers.authorization ? { authorization: headers.authorization } : {}) });
+    if (url.origin === CDN_URL) {
+      if (options.cdnStatus) return new Response("no", { status: options.cdnStatus });
+      return new Response(await readFile(path.join(FILES, libraryFiles[/\/(\d+)$/.exec(url.pathname)?.[1] ?? ""]?.path ?? "images/welcome.png")));
+    }
     if (url.origin !== FIXTURE_URL) return new Response("wrong origin", { status: 502 });
     if (options.refuse || headers.authorization !== `Bearer ${FIXTURE_TOKEN}`) return new Response("denied: the key fixture-token is not allowed", { status: 401 });
     if (url.pathname === "/api/library") {
@@ -46,6 +61,9 @@ export function fixtureRouter(options: RouterOptions = {}): Router {
     const download = /^\/api\/library\/download\/(\d+)$/.exec(url.pathname);
     if (download) {
       const id = download[1]!;
+      if (options.networkDown?.includes(id)) throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      if (options.downloadRedirect?.includes(id)) return new Response(null, { status: 302, headers: { location: `${CDN_URL}/blob/${id}` } });
+      if (options.emptyDownloads?.includes(id)) return new Response(null, { status: 200 });
       const status = options.downloadStatus?.[id];
       if (status) return new Response("no", { status });
       const file = libraryFiles[id];
@@ -145,9 +163,40 @@ export const fixtureLocalAdapter: VendorAdapter = {
   },
 };
 
+/** A system whose two media name the same original file, as two assets with one file name do. */
+export const fixtureSharedAdapter: VendorAdapter = {
+  id: "fixture-shared",
+  name: "Shared CMS",
+  inputs: { files: "optional" },
+  credentials: [],
+  connect: ["Download your files into one folder."],
+  maps: ["Two media and one playlist."],
+  skips: [],
+  docs: ["https://cms.example.com/docs/api"],
+  example: "screenrig migrate scan --from fixture-shared --files ./downloads",
+  async open() {
+    return {
+      async scan() {
+        const media: SourceMedia[] = [
+          { id: "one", name: "Welcome", filename: "welcome.png", kind: "image", original: true },
+          { id: "two", name: "Welcome again", filename: "Welcome.PNG", kind: "image", original: true },
+        ];
+        return {
+          account: "shared-cms", label: "shared-cms", media,
+          playlists: [{ id: "p", name: "Both", items: [{ media_id: "one" }, { media_id: "two" }], notes: [] }],
+          layouts: [], groups: [], screens: [], schedules: [], not_imported: [], notes: [],
+        };
+      },
+      async fetchMedia() {
+        throw new Error("this system hands out no files");
+      },
+    };
+  },
+};
+
 /** Adds the fixture systems to the registry for this test process. */
 export function registerFixtureVendor(): void {
-  for (const adapter of [fixtureAdapter, fixtureLocalAdapter]) {
+  for (const adapter of [fixtureAdapter, fixtureLocalAdapter, fixtureSharedAdapter]) {
     if (!VENDORS.some((vendor) => vendor.id === adapter.id)) (VENDORS as VendorAdapter[]).push(adapter);
   }
 }

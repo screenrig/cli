@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { copyFile, link, lstat, open, readdir, readFile, stat } from "node:fs/promises";
+import { copyFile, lstat, open, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { usageError } from "../problems.js";
 import { ZipArchive, type ZipEntry } from "./zip.js";
@@ -82,13 +82,9 @@ async function folderFiles(root: string): Promise<LocalFiles> {
     },
     read: (entry) => readFile(real(entry)),
     async extract(entry, destination) {
-      // A hard link keeps a large folder from being copied twice; another device or filesystem copies.
-      try {
-        await link(real(entry), destination);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EEXIST") throw error;
-        await copyFile(real(entry), destination, constants.COPYFILE_EXCL);
-      }
+      // A reflink where the filesystem allows one, a copy otherwise. Never a hard link: linking and
+      // unlinking change the original's change time, and an upload refuses a file whose change time moved.
+      await copyFile(real(entry), destination, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
       return { bytes: entry.bytes };
     },
   };

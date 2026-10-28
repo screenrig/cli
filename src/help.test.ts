@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts and migrate add ten immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 59);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate and sources add eleven immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 60);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -296,6 +296,13 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts mute",
     "alerts mutes",
     "alerts unmute",
+    "source list",
+    "source show",
+    "source create",
+    "source update",
+    "source test",
+    "source refresh",
+    "source delete",
     "doctor",
     "version",
     "status",
@@ -535,7 +542,7 @@ test("notifications help, JSON help and preflight agree on option relationships 
   assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook"]);
   assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email"]);
   assert.equal(create.options.find((option) => option.name === "--tag")?.type, "value");
-  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing/);
+  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing/);
   for (const sentence of ["Provide exactly one of --email or --webhook.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook."]) {
     assert.equal(create.usage.split(sentence).length, 2, `${sentence} appears once in the human help`);
   }
@@ -598,11 +605,11 @@ test("alerts help, JSON help and preflight agree on option relationships, choice
   }
   assert.deepEqual(commandHelp(["alerts"]).commands.map((child) => child.name), ["list", "show", "ack", "snooze", "mute", "mutes", "unmute"]);
   const group = commandHelp(["alerts"]).usage;
-  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck or not_playing/);
+  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck, not_playing or loop_stalled/);
   assert.match(group, /crashing is a notice, never\s+an alert/);
   assert.match(group, /has at most 50 current mutes/);
-  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing or crashing/);
-  assert.match(commandHelp(["notifications", "create"]).notes.join("\n"), /not_playing \(the Player shows an error instead of its content\)/);
+  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing, loop_stalled or crashing/);
+  assert.match(commandHelp(["notifications", "create"]).notes.join("\n"), /not_playing \(the Player shows an error instead of its content\), loop_stalled \(no media start has reached ScreenRig/);
   assert.match(commandHelp(["webhooks"]).usage, /content stuck, not playing, crashing\) are screenrig notifications/);
 });
 

@@ -113,6 +113,19 @@ test("an occurrence of 24 hours or more is the whole day, and says so", () => {
   assert.match(open.ok ? open.lossy[0]! : "", /no end time/);
 });
 
+test("midnight to the next midnight is exactly a whole day: days only, and nothing is said", () => {
+  const whole = campaignTiming(schedule({ start: "2026-10-26T00:00", end: "2026-10-27T00:00", repeat: { every: "week", weekdays: ["mon", "wed"] } }));
+  assert.deepEqual(whole.ok && whole.windows, [{ days: ["mon", "wed"] }]);
+  assert.deepEqual(whole.ok && whole.lossy, []);
+  const daily = campaignTiming(schedule({ start: "2026-10-26T00:00", end: "2026-10-27T00:00", repeat: { every: "day" } }));
+  assert.deepEqual(daily.ok && [daily.windows, daily.lossy], [[{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] }], []]);
+  // Anything else that long, or longer, still changed: noon to noon, midnight to the day after next, or a minute past.
+  for (const [start, end] of [["2026-10-26T12:00", "2026-10-27T12:00"], ["2026-10-26T00:00", "2026-10-28T00:00"], ["2026-10-26T00:00", "2026-10-27T00:01"]] as const) {
+    const longer = campaignTiming(schedule({ start, end, repeat: { every: "week", weekdays: ["mon"] } }));
+    assert.match(longer.ok ? longer.lossy[0]! : "", /24 hours or more/, `${start} to ${end}`);
+  }
+});
+
 test("bounds: until is the day after the last day, in every calendar corner", () => {
   const until = (end: string): string | undefined => {
     const result = campaignTiming(schedule({ start: "2026-02-01T09:00", end: "2026-02-01T10:00", repeat: { every: "day", until: end } }));

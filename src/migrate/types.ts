@@ -118,8 +118,11 @@ export interface SourceCatalog {
 export interface VendorRequestLog {
   vendor: string;
   method: string;
+  /** 0 when no answer came. */
   status: number;
   ms: number;
+  /** The system error code behind a request that got no answer (ENOTFOUND, ECONNREFUSED, ...). */
+  cause?: string;
 }
 
 export interface VendorRequestInit {

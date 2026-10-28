@@ -395,13 +395,16 @@ class XiboSession implements VendorSession {
       }
       const reached = [...new Set([...screenTargets, ...groupTargets.flatMap((group) => membersOfGroup.get(group) ?? [])])];
 
-      // Times are Unix times. An event that follows each display's clock is read in the CMS zone;
-      // any other is one moment, made civil in the zone of each display that plays it. An always-on event has no times.
+      // Times are Unix times. An event synced to each display's zone ("syncTimezone") is one moment that every
+      // display formats in its own zone, so it is made civil in the zone of each display that plays it. Any
+      // other event shows the CMS clock's digits, and each display plays those digits on its own clock: they are
+      // read in the CMS zone, which is the model campaigns use too. An always-on event has no times.
       const cmsZone = this.options.timezone;
       const cms = { zone: cmsZone ?? "UTC", known: cmsZone !== undefined };
+      const synced = flag(row.syncTimezone) && !always;
       const parts: Array<{ zone: string; known: boolean; groups: string[]; screens: string[] }> = [];
       const byZone = new Map<string, { known: boolean; screens: string[] }>();
-      if (!flag(row.syncTimezone) && !always) {
+      if (synced) {
         for (const display of reached) {
           const own = screenZone.get(display);
           const zone = own !== undefined ? { zone: own, known: true } : cms;
@@ -449,7 +452,8 @@ class XiboSession implements VendorSession {
           ...(always ? { always: true } : {
             ...(fromDt !== undefined && fromDt > 0 ? { start: civil(fromDt, part.zone) } : {}),
             ...(toDt !== undefined && toDt > 0 ? { end: civil(toDt, part.zone) } : {}),
-            timezone: part.zone,
+            // Only a synced event is read in a zone of its own; the rest read on each display's clock, as campaigns do.
+            ...(synced ? { timezone: part.zone } : {}),
           }),
           ...(repeat ? { repeat } : {}),
           priority,
@@ -482,7 +486,7 @@ export const xibo: VendorAdapter = {
     "Make a dedicated CMS user that can view the library, layouts, campaigns, displays and schedule. A Client Credentials token acts as the user that owns the Application, so give that user nothing more.",
     "Signed in as that user, open Administration, then Applications, and add an Application. Enable the Client Credentials grant, save, then edit it to read the Client ID and Client Secret. The secret is shown once; reset it if it is lost.",
     "Write XIBO_CLIENT_ID=... and XIBO_CLIENT_SECRET=... as two lines in a file only you can read, and pass it with --credentials FILE.",
-    "--url is the address you sign in at, including the folder when the CMS is installed in one (https://example.org/xibo). --timezone is the CMS's own time zone, used for events that follow each display's clock.",
+    "--url is the address you sign in at, including the folder when the CMS is installed in one (https://example.org/xibo). --timezone is the CMS's own time zone, used to read the hours of events that play at the same clock time on every display.",
   ],
   maps: [
     "Library images, video and audio become media, downloaded from the CMS.",

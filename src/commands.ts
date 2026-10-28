@@ -21,6 +21,7 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { glassLines } from "./screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
 import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
@@ -639,7 +640,7 @@ function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
   return ids;
 }
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
+export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
@@ -654,7 +655,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(
+export function jsonBody(
   response: { body: unknown; headers: Record<string, string> },
   requestId: string,
   extra?: Record<string, unknown>,
@@ -799,7 +800,7 @@ async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, reso
 }
 
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
-function commandHandler(
+export function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {
@@ -848,7 +849,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "source" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -6027,6 +6028,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
+      ...glassLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...replacedByLines(screen),

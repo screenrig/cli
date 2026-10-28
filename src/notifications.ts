@@ -9,7 +9,7 @@ import { table } from "./webhooks.js";
 export const NOTIFICATION_ID_PATTERN = /^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$/;
 export const NOTIFICATIONS_MAX = 20;
 /** NotificationCondition (vendor/openapi.yaml): the screen state changes a notification fires on. */
-export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "crashing"] as const;
+export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "crashing"] as const;
 export const NOTIFICATION_RECIPIENTS_MAX = 20;
 const RECIPIENT_MAX_LENGTH = 200;
 export const NOTIFICATION_HOLD_MAX = 1440;
