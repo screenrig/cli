@@ -4,6 +4,13 @@ import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMe
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { CREDIT_HELP } from "../help-text.js";
+import {
+  handleMediaSyncAccountAdd, handleMediaSyncAccountDelete, handleMediaSyncAccountList, handleMediaSyncAccountShow, handleMediaSyncAccountTest,
+  handleMediaSyncAccountUpdate, handleMediaSyncCreate, handleMediaSyncDelete, handleMediaSyncList, handleMediaSyncRun, handleMediaSyncShow, handleMediaSyncUpdate,
+  mediaSyncAccountOption, mediaSyncClientId, mediaSyncEvery, mediaSyncFolderOption, mediaSyncName, mediaSyncTenant, mediaSyncUrl,
+} from "../media-sync.js";
+
+const SECRET_FILE = "Read the client secret's value from this file, or - for stdin (never an argument)";
 
 export function registerMediaCommands(root: Command, bind: CommandActionBinder): void {
   const media = root.command("media").description("Generate, upload, and manage images, videos, and soundtrack audio");
@@ -121,4 +128,72 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Media folder identifier (mfd_...)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaFolderDelete));
+
+  const sync = media.command("sync").description("Keep a SharePoint or OneDrive for work folder in step with a media folder");
+  addCommandNotes(sync, [
+    "Media sync:",
+    "  A sync imports the images, videos and audio directly inside a SharePoint or",
+    "  OneDrive for work folder into a media folder, and keeps them in step: a",
+    "  changed file replaces its bytes under the same media ID, so every playlist",
+    "  that plays it updates, and a file removed at the source is taken out of play.",
+    "  It reads through your own Microsoft Entra app (an account): application",
+    "  permission Sites.Selected, granted on each site, or Files.Read.All, with admin",
+    "  consent. The client secret is sealed on the server and never shown again.",
+    "  Play the media folder with a folder selector in a playlist.",
+  ].join("\n"));
+
+  const account = sync.command("account").description("Add, test and manage the Microsoft Entra apps a project's syncs read through");
+  const add = account.command("add").description("Add the credentials of your own app");
+  add.command("microsoft365").description("Add a Microsoft Entra app: its tenant, application id and a client secret")
+    .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
+    .requiredOption("--tenant-id <TENANT>", "Your organization's directory (tenant) id, or its primary domain such as contoso.onmicrosoft.com", mediaSyncTenant)
+    .requiredOption("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
+    .requiredOption("--secret-file <FILE>", `${SECRET_FILE}; the file holds only the secret's Value`)
+    .action(bind(handleMediaSyncAccountAdd));
+  account.command("list").description("List this project's media sync accounts").action(bind(handleMediaSyncAccountList));
+  account.command("show").description("Inspect one account and its last test")
+    .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountShow));
+  const accountUpdate = account.command("update").description("Change an account's name, tenant, application id or client secret")
+    .argument("<id>", "Account identifier (msa_...)")
+    .option("--name <NAME>", "Rename the account", mediaSyncName)
+    .option("--tenant-id <TENANT>", "The tenant's directory id or primary domain", mediaSyncTenant)
+    .option("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
+    .option("--secret-file <FILE>", `${SECRET_FILE}; it replaces the stored secret`)
+    .option("--expect-rev <REVISION>", "Optionally require this account revision", revision)
+    .action(bind(handleMediaSyncAccountUpdate));
+  requireOptionGroup(accountUpdate, "atLeastOne", ["--name", "--tenant-id", "--client-id", "--secret-file"]);
+  account.command("test").description("Sign in with the app and list the Graph permissions it holds")
+    .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountTest));
+  account.command("delete").description("Delete an account no sync uses")
+    .argument("<id>", "Account identifier (msa_...)")
+    .option("--expect-rev <REVISION>", "Optionally require this account revision", revision)
+    .action(bind(handleMediaSyncAccountDelete));
+
+  const create = sync.command("create").description("Start keeping a folder in step with a media folder");
+  create.command("sharepoint").description("Sync a SharePoint or OneDrive for work folder")
+    .requiredOption("--account-id <ID>", "The account to read through (msa_...)", mediaSyncAccountOption)
+    .requiredOption("--url <URL>", "The folder's SharePoint address, or its sharing link", mediaSyncUrl)
+    .option("--folder-id <ID>", "The media folder the files land in (mfd_...); omitted creates one named after the source folder", mediaSyncFolderOption)
+    .option("--every <DURATION>", "How often to look for changes, 5 minutes to 24 hours (default 15m)", mediaSyncEvery)
+    .option("--name <NAME>", "Name the sync, 1 to 80 characters (default: the source folder's name)", mediaSyncName)
+    .action(bind(handleMediaSyncCreate));
+  sync.command("list").description("List this project's media syncs").action(bind(handleMediaSyncList));
+  sync.command("show").description("Inspect one sync and what its last run did")
+    .argument("<id>", "Sync identifier (msy_...)").action(bind(handleMediaSyncShow));
+  const syncUpdate = sync.command("update").description("Change a sync's cadence, name or media folder, or pause and resume it")
+    .argument("<id>", "Sync identifier (msy_...)")
+    .option("--name <NAME>", "Rename the sync", mediaSyncName)
+    .option("--every <DURATION>", "How often to look for changes, 5 minutes to 24 hours", mediaSyncEvery)
+    .option("--folder-id <ID>", "Fill this media folder instead (mfd_...)", mediaSyncFolderOption)
+    .addOption(new Option("--pause", "Stop running until resumed").conflicts(["resume"]))
+    .addOption(new Option("--resume", "Run again; also resumes a sync an error stopped").conflicts(["pause"]))
+    .option("--expect-rev <REVISION>", "Optionally require this sync revision", revision)
+    .action(bind(handleMediaSyncUpdate));
+  requireOptionGroup(syncUpdate, "atLeastOne", ["--name", "--every", "--folder-id", "--pause", "--resume"]);
+  sync.command("run").description("Run a sync now instead of at its next time")
+    .argument("<id>", "Sync identifier (msy_...)").action(bind(handleMediaSyncRun));
+  sync.command("delete").description("Stop a sync; its media and folder stay")
+    .argument("<id>", "Sync identifier (msy_...)")
+    .option("--expect-rev <REVISION>", "Optionally require this sync revision", revision)
+    .action(bind(handleMediaSyncDelete));
 }

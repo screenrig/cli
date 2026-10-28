@@ -146,6 +146,18 @@ test("root help is compact and every command is discoverable through immediate c
     "media folder create",
     "media folder update",
     "media folder delete",
+    "media sync account add microsoft365",
+    "media sync account list",
+    "media sync account show",
+    "media sync account update",
+    "media sync account test",
+    "media sync account delete",
+    "media sync create sharepoint",
+    "media sync list",
+    "media sync show",
+    "media sync update",
+    "media sync run",
+    "media sync delete",
     "compose catalog",
     "compose batch",
     "compose render",
@@ -323,7 +335,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
   assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
   assert.deepEqual(media.commands.map((child) => child.name), [
-    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete", "move", "folder",
+    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete", "move", "folder", "sync",
   ]);
   for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
