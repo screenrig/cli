@@ -92,6 +92,6 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
   campaign.command("explain").description("Show why each campaign plays on one screen or not, now or at a chosen time")
     .argument("<screen-id>", "Screen identifier")
     .addOption(new Option("--at <TIME>", "Explain this time instead of now: an instant with a zone (2026-03-08T09:30:00Z) or a time on the screen's clock (2026-03-08T09:30)").argParser(campaignExplainTime("--at")))
-    .addOption(new Option("--to <TIME>", "Also list the playlist switches from --at (default: now) to this time, at most 31 days later").argParser(campaignExplainTime("--to")))
+    .addOption(new Option("--to <TIME>", "Also list the playlist switches from --at (default: now) to this time, in the same forms").argParser(campaignExplainTime("--to")))
     .action(bind(handleCampaignExplain));
 }

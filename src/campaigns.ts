@@ -533,7 +533,8 @@ function campaignExplainAtLines(screenId: string, at: ScreenExplainAt): string[]
     : ["No takeover, campaigns or schedule entries apply to this screen"]));
   const timeline = Array.isArray(at.timeline) ? at.timeline : [];
   if (timeline.length) {
-    lines.push(`Switches from ${instantInZone(timeline[0]!.from, zone)} to ${instantInZone(timeline[timeline.length - 1]!.to, zone)}${at.timeline_truncated ? " (more follow; ask for a shorter span)" : ""}`,
+    const last = timeline[timeline.length - 1]!;
+    lines.push(`Switches from ${instantInZone(timeline[0]!.from, zone)} to ${instantInZone(last.to, zone)}${at.timeline_truncated ? ` (stopped early; ask again with --at ${last.to})` : ""}`,
       ...table(["FROM", "TO", "PLAYS"], timeline.map((segment) => [
         instantInZone(segment.from, zone), instantInZone(segment.to, zone),
         segment.playlist_id ? `${segment.playlist_id} (${segment.source}${segment.entry_id ? ` ${segment.entry_id}` : ""})` : "no playlist",
