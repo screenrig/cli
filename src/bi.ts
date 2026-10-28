@@ -4,7 +4,7 @@ import { readAuthoringText } from "./authoring-input.js";
 import type { ApiClient } from "./client.js";
 import { requireToken } from "./client.js";
 import { clientFor, commandHandler, jsonBody } from "./commands.js";
-import { flagString } from "./command-input.js";
+import { flagBool, flagString } from "./command-input.js";
 import { quotedRevision } from "./if-match.js";
 import { successEnvelope } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
@@ -14,8 +14,8 @@ import { table } from "./webhooks.js";
 
 // BI dashboards on screens: /api/bi-connections (a project's access to a BI
 // system, with a sealed secret the server never returns) and /api/bi-views (one
-// dashboard, panel or public link). A view plays through an iframe primitive
-// that shows its embed_url. Only Grafana exists so far.
+// dashboard, panel, report or public link). A view plays through an iframe
+// primitive that shows its embed_url. Kinds: Grafana and Power BI.
 
 const CONNECTIONS_PATH = "/api/bi-connections";
 const VIEWS_PATH = "/api/bi-views";
@@ -27,6 +27,10 @@ export const BI_FITS = ["contain", "cover", "fill"] as const;
 export const BI_THEMES = ["dark", "light"] as const;
 export const BI_REFRESH_MIN_S = 30;
 export const BI_REFRESH_MAX_S = 86_400;
+export const BI_ROTATE_MIN_S = 10;
+export const BI_ROTATE_MAX_S = 3_600;
+const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const TENANT_DOMAIN = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const TOKEN_FILE_MAX_BYTES = 8192;
 const NAME_MAX = 80;
 
@@ -34,7 +38,7 @@ export interface BiCheck { name: string; ok: boolean; warn?: boolean; detail?: s
 export interface BiTestReport { at: string; ok: boolean; checks: BiCheck[]; width?: number; height?: number; bytes?: number }
 export interface BiConnection {
   id: string; project_id?: string; kind: string; name: string;
-  config: { url?: string; org_id?: number };
+  config: { url?: string; org_id?: number; tenant_id?: string; client_id?: string };
   embed_origin: string | null;
   secret: { set: boolean; hint: string };
   last_test: BiTestReport | null;
@@ -43,10 +47,11 @@ export interface BiConnection {
 export interface BiTarget {
   dashboard_uid?: string; panel_id?: number; org_id?: number; from?: string; to?: string;
   vars?: Record<string, string>; theme?: string; timezone?: string; public_url?: string;
+  workspace_id?: string; report_id?: string; pages?: string[]; rotate_all_pages?: boolean;
 }
 export interface BiView {
   id: string; project_id?: string; connection_id?: string; kind: string; name: string; target: BiTarget;
-  refresh_s: number; fit: string; revision: number;
+  refresh_s: number; rotate_s?: number; fit: string; revision: number;
   status: { last_ok_at: string | null; last_error: { at: string; code: string; detail: string } | null };
   embed_url: string | null; created_at?: string; updated_at?: string;
 }
@@ -115,6 +120,36 @@ export function biDashboardUid(value: string): string {
   return value;
 }
 
+/** --tenant-id: the Entra tenant's Directory ID (a GUID) or its domain, not common, organizations or consumers. */
+export function biTenantId(value: string): string {
+  const text = value.trim();
+  if (!GUID.test(text) && !(text.length <= 253 && TENANT_DOMAIN.test(text))) {
+    throw usageError("--tenant-id takes your Microsoft Entra Directory (tenant) ID, a GUID, or its domain such as contoso.onmicrosoft.com.");
+  }
+  return text;
+}
+
+/** --client-id, --workspace and --report: a GUID. */
+export function biGuid(flag: string, what: string): (value: string) => string {
+  return (value: string) => {
+    const text = value.trim();
+    if (!GUID.test(text)) throw usageError(`${flag} takes ${what}, a GUID.`);
+    return text;
+  };
+}
+export const biClientId = biGuid("--client-id", "the Application (client) ID of your Microsoft Entra app registration");
+export const biWorkspaceId = biGuid("--workspace", "a Power BI workspace id, the part after /groups/ in a report's address");
+export const biReportId = biGuid("--report", "a Power BI report id, the part after /reports/ in its address");
+
+/** Repeatable --page NAME: returns a JSON array of the page names, in order. */
+export function biPage(value: string, previous?: string): string {
+  const name = value.trim();
+  if (!name || [...name].length > 200 || /\p{Cc}/u.test(name)) throw usageError("--page takes a page name or display name of 1 to 200 characters without control characters.");
+  const pages: string[] = previous ? JSON.parse(previous) as string[] : [];
+  pages.push(name);
+  return JSON.stringify(pages);
+}
+
 /** Grafana times such as now-6h, now/d or an epoch in milliseconds. */
 export function biTime(value: string): string {
   if (!/^[A-Za-z0-9:+\-/_.,]{1,64}$/.test(value)) throw usageError("--from and --to take a Grafana time such as now-6h, now/d, or an epoch in milliseconds.");
@@ -139,13 +174,31 @@ export function biRefreshOption(value: string): string {
   return value;
 }
 
-/** --refresh: seconds, or a duration such as 30s, 5m or 1h, from 30 seconds to 24 hours. */
+/** --refresh: seconds, or a duration such as 30s, 5m or 1h, from 30 seconds to 24 hours; 0 or off for a Power BI view that updates itself. The server judges the range of the view's kind. */
 export function biRefreshSeconds(value: string): number {
   const text = value.trim();
+  if (text === "0" || text.toLowerCase() === "off") return 0;
   const ms = /^\d+$/.test(text) ? Number(text) * 1000 : snoozeDurationMs(text);
   const seconds = ms === undefined ? NaN : Math.round(ms / 1000);
   if (!Number.isFinite(seconds) || seconds < BI_REFRESH_MIN_S || seconds > BI_REFRESH_MAX_S) {
-    throw usageError("--refresh takes a cadence from 30s to 24h, such as 30s, 5m, 1h or a number of seconds.");
+    throw usageError("--refresh takes a cadence from 30s to 24h, such as 30s, 5m, 1h or a number of seconds, or 0 for none (a Power BI view that updates itself).");
+  }
+  return seconds;
+}
+
+export function biRotateOption(value: string): string {
+  biRotateSeconds(value);
+  return value;
+}
+
+/** --rotate: how long each page shows, 10 seconds to 1 hour; 0 or off shows one page. */
+export function biRotateSeconds(value: string): number {
+  const text = value.trim();
+  if (text === "0" || text.toLowerCase() === "off") return 0;
+  const ms = /^\d+$/.test(text) ? Number(text) * 1000 : snoozeDurationMs(text);
+  const seconds = ms === undefined ? NaN : Math.round(ms / 1000);
+  if (!Number.isFinite(seconds) || seconds < BI_ROTATE_MIN_S || seconds > BI_ROTATE_MAX_S) {
+    throw usageError("--rotate takes how long each page shows, from 10s to 1h, such as 30s or 2m, or 0 for one page.");
   }
   return seconds;
 }
@@ -155,10 +208,10 @@ type Args = Parameters<Handler>[0];
 type Runtime = Parameters<Handler>[1];
 
 /** Read the secret from a file or stdin, never an argument. */
-async function readToken(file: string, runtime: Runtime): Promise<string> {
+async function readToken(file: string, runtime: Runtime, what = "token"): Promise<string> {
   const text = (await readAuthoringText(file, runtime, TOKEN_FILE_MAX_BYTES)).trim();
-  if (!text) throw usageError(`${file === "-" ? "stdin" : file} holds no token.`);
-  if (/\s/.test(text)) throw usageError(`${file === "-" ? "stdin" : file} must hold only the token: one value without spaces or line breaks.`);
+  if (!text) throw usageError(`${file === "-" ? "stdin" : file} holds no ${what}.`);
+  if (/\s/.test(text)) throw usageError(`${file === "-" ? "stdin" : file} must hold only the ${what}: one value without spaces or line breaks.`);
   return text;
 }
 
@@ -171,11 +224,11 @@ export function biProblem(error: unknown, id?: string): unknown {
   const connection = id !== undefined && BI_CONNECTION_ID_PATTERN.test(id);
   if (problem.code === "bi_upstream_refused") {
     return withNext(connection ? `screenrig bi connection test ${id}` : "screenrig bi connection list",
-      "Fix the connection as the detail says (a Viewer service-account token for the Grafana organization), update it with bi connection update, then test it.");
+      "Fix the connection as the detail says (Grafana: a Viewer service-account token; Power BI: the app's client secret value, the Embed content in apps and Service principals can call Fabric public APIs tenant settings and the app's role in the workspace), update it with bi connection update, then test it.");
   }
   if (problem.code === "bi_upstream_unavailable") {
     return withNext(connection ? `screenrig bi connection test ${id}` : "screenrig bi connection list",
-      "Check the Grafana address and that it has the Image Renderer plugin or a remote rendering service, then test the connection again. Nothing was changed.");
+      "Check that the system is reachable (Grafana: its address and the Image Renderer plugin or a remote rendering service), then test the connection again. Nothing was changed.");
   }
   if (problem.code === "resource_conflict" && connection) {
     return withNext("screenrig bi view list", "Delete the views the detail names (bi view delete ID), then delete the connection.");
@@ -209,8 +262,9 @@ export function connectionLines(connection: BiConnection | undefined): string[] 
     `id: ${connection.id}`,
     `name: ${connection.name}`,
     `kind: ${connection.kind}`,
-    `url: ${dash(connection.config?.url)}`,
-    `org: ${connection.config?.org_id ?? 1}`,
+    ...(connection.kind === "powerbi"
+      ? [`tenant: ${dash(connection.config?.tenant_id)}`, `app (client id): ${dash(connection.config?.client_id)}`]
+      : [`url: ${dash(connection.config?.url)}`, `org: ${connection.config?.org_id ?? 1}`]),
     `secret: ${connection.secret?.set ? `set${connection.secret.hint ? ` (ends ${connection.secret.hint})` : ""}` : "not set"}`,
     ...(connection.embed_origin ? [`embed origin: ${connection.embed_origin}`] : []),
     `last test: ${test ? `${test.ok ? "ok" : "failed"} at ${test.at}` : "never"}`,
@@ -221,14 +275,21 @@ export function connectionLines(connection: BiConnection | undefined): string[] 
 
 export function connectionTableLines(items: BiConnection[]): string[] {
   if (!items.length) return ["No connections"];
-  return table(["ID", "KIND", "NAME", "URL", "TEST"], items.map((item) => [
-    item.id, item.kind, item.name, dash(item.config?.url), item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
+  return table(["ID", "KIND", "NAME", "URL OR TENANT", "TEST"], items.map((item) => [
+    item.id, item.kind, item.name, dash(item.kind === "powerbi" ? item.config?.tenant_id : item.config?.url), item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
   ]));
 }
 
 function targetText(view: BiView): string {
   const target = view.target ?? {};
   if (target.public_url) return `public link ${target.public_url}`;
+  if (view.kind === "powerbi" || target.report_id) {
+    const parts = [`report ${target.report_id ?? "?"}`, `workspace ${target.workspace_id ?? "?"}`];
+    if (target.pages?.length) parts.push(`pages ${target.pages.join(", ")}`);
+    if (target.rotate_all_pages) parts.push("every page");
+    if (view.rotate_s) parts.push(`each ${view.rotate_s}s`);
+    return parts.join(", ");
+  }
   const parts = [`dashboard ${target.dashboard_uid ?? "?"}`];
   if (target.panel_id !== undefined) parts.push(`panel ${target.panel_id}`);
   if (target.from || target.to) parts.push(`${target.from ?? "default"} to ${target.to ?? "default"}`);
@@ -245,8 +306,8 @@ export function viewLines(view: BiView | undefined): string[] {
     `name: ${view.name}`,
     `connection: ${view.connection_id ?? "(public link)"}`,
     `shows: ${targetText(view)}`,
-    `refresh: every ${view.refresh_s}s`,
-    `fit: ${view.fit}`,
+    `refresh: ${view.refresh_s === 0 ? "never" : `every ${view.refresh_s}s`}`,
+    ...(view.kind === "powerbi" ? [] : [`fit: ${view.fit}`]),
     `status: ${status.last_error ? `${status.last_error.code} (${status.last_error.detail})` : status.last_ok_at ? `ok since ${status.last_ok_at}` : "not shown yet"}`,
     `embed_url: ${view.embed_url ?? "(none: this server has no embed host)"}`,
     `revision: ${view.revision}`,
@@ -256,7 +317,7 @@ export function viewLines(view: BiView | undefined): string[] {
 export function viewTableLines(items: BiView[]): string[] {
   if (!items.length) return ["No views"];
   return table(["ID", "NAME", "SHOWS", "REFRESH", "STATUS"], items.map((item) => [
-    item.id, item.name, targetText(item), `${item.refresh_s}s`, item.status?.last_error ? item.status.last_error.code : item.status?.last_ok_at ? "ok" : "new",
+    item.id, item.name, targetText(item), item.refresh_s === 0 ? "never" : `${item.refresh_s}s`, item.status?.last_error ? item.status.last_error.code : item.status?.last_ok_at ? "ok" : "new",
   ]));
 }
 
@@ -304,6 +365,28 @@ export const handleBiConnectionCreate = commandHandler(async (args: Args, runtim
   };
 });
 
+export const handleBiConnectionCreatePowerBI = commandHandler(async (args: Args, runtime: Runtime, resolved) => {
+  const tenant = flagString(args.flags, "tenant-id");
+  const clientId = flagString(args.flags, "client-id");
+  const secretFile = flagString(args.flags, "secret-file");
+  if (tenant === undefined || clientId === undefined || secretFile === undefined) {
+    throw usageError("bi connection create powerbi requires --tenant-id, --client-id and --secret-file.");
+  }
+  const secret = await readToken(secretFile, runtime, "client secret");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await biCall(client, {
+    method: "POST", path: CONNECTIONS_PATH, idempotent: true,
+    body: { name: biName(flagString(args.flags, "name") ?? "Power BI"), kind: "powerbi", config: { tenant_id: tenant, client_id: clientId }, secret },
+  });
+  const created = response.body as BiConnection | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Created connection ${created?.id ?? ""}`.trimEnd(), ...connectionLines(created),
+      "", `Next: screenrig bi connection test ${created?.id ?? "ID"}`].join("\n"),
+  };
+});
+
 function biHostName(url: string): string {
   try {
     return new URL(url).hostname;
@@ -338,15 +421,23 @@ export const handleBiConnectionUpdate = commandHandler(async (args: Args, runtim
   const name = flagString(args.flags, "name");
   const url = flagString(args.flags, "url");
   const orgId = flagString(args.flags, "org-id");
+  const tenant = flagString(args.flags, "tenant-id");
+  const clientId = flagString(args.flags, "client-id");
   const tokenFile = flagString(args.flags, "token-file");
-  if (name === undefined && url === undefined && orgId === undefined && tokenFile === undefined) {
-    throw usageError("bi connection update requires --name, --url, --org-id or --token-file.");
+  const secretFile = flagString(args.flags, "secret-file");
+  if (tokenFile !== undefined && secretFile !== undefined) throw usageError("Give --token-file or --secret-file, not both: each is the connection's secret.");
+  const secretSource = tokenFile ?? secretFile;
+  if ([name, url, orgId, tenant, clientId, secretSource].every((value) => value === undefined)) {
+    throw usageError("bi connection update requires --name, --url, --org-id, --tenant-id, --client-id, --token-file or --secret-file.");
   }
-  const config = { ...(url !== undefined ? { url } : {}), ...(orgId !== undefined ? { org_id: Number(orgId) } : {}) };
+  const config = {
+    ...(url !== undefined ? { url } : {}), ...(orgId !== undefined ? { org_id: Number(orgId) } : {}),
+    ...(tenant !== undefined ? { tenant_id: tenant } : {}), ...(clientId !== undefined ? { client_id: clientId } : {}),
+  };
   const body = {
     ...(name !== undefined ? { name: biName(name) } : {}),
     ...(Object.keys(config).length ? { config } : {}),
-    ...(tokenFile !== undefined ? { secret: await readToken(tokenFile, runtime) } : {}),
+    ...(secretSource !== undefined ? { secret: await readToken(secretSource, runtime, secretFile !== undefined ? "client secret" : "token") } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await biCall(client, { method: "PATCH", path: `${CONNECTIONS_PATH}/${id}`, idempotent: true, body, headers: revisionHeader(args) }, id);
@@ -390,10 +481,13 @@ export const handleBiConnectionBrowse = commandHandler(async (args: Args, runtim
   const id = biConnectionId(args.positionals[3], "browse");
   const query = flagString(args.flags, "query");
   const dashboard = flagString(args.flags, "dashboard");
+  const workspace = flagString(args.flags, "workspace");
+  if (dashboard !== undefined && workspace !== undefined) throw usageError("Give --dashboard (Grafana) or --workspace (Power BI), not both.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const items: Array<Record<string, unknown>> = [];
   let cursor: string | undefined;
-  let response = await biCall(client, { method: "GET", path: `${CONNECTIONS_PATH}/${id}/browse`, query: { ...(query !== undefined ? { query } : {}), ...(dashboard !== undefined ? { dashboard } : {}) } }, id);
+  const scope = { ...(dashboard !== undefined ? { dashboard } : {}), ...(workspace !== undefined ? { workspace } : {}) };
+  let response = await biCall(client, { method: "GET", path: `${CONNECTIONS_PATH}/${id}/browse`, query: { ...(query !== undefined ? { query } : {}), ...scope } }, id);
   for (let pages = 0; pages < 100; pages++) {
     items.push(...listBody<Record<string, unknown>>(response));
     cursor = (response.body as BiList<unknown> | undefined)?.next_cursor ?? undefined;
@@ -401,11 +495,21 @@ export const handleBiConnectionBrowse = commandHandler(async (args: Args, runtim
     response = await biCall(client, { method: "GET", path: `${CONNECTIONS_PATH}/${id}/browse`, query: { ...(query !== undefined ? { query } : {}), cursor } }, id);
   }
   const heading = (response.body as { dashboard?: { uid: string; title: string } } | undefined)?.dashboard;
-  const lines = dashboard !== undefined
-    ? [`Panels of ${heading?.title ?? dashboard} (${items.length})`, ...table(["PANEL", "TYPE", "TITLE"], items.map((item) => [String(item.id ?? ""), String(item.type ?? ""), String(item.title ?? "")]))]
-    : [`Dashboards (${items.length})`, ...table(["UID", "FOLDER", "TITLE"], items.map((item) => [String(item.uid ?? ""), String(item.folder ?? ""), String(item.title ?? "")]))];
+  const text = (item: Record<string, unknown>, key: string) => String(item[key] ?? "");
+  let lines: string[];
+  if (dashboard !== undefined) {
+    lines = [`Panels of ${heading?.title ?? dashboard} (${items.length})`, ...table(["PANEL", "TYPE", "TITLE"], items.map((item) => [text(item, "id"), text(item, "type"), text(item, "title")]))];
+  } else if (workspace !== undefined) {
+    lines = [`Reports in workspace ${workspace} (${items.length})`, ...table(["REPORT", "NAME"], items.map((item) => [text(item, "id"), text(item, "name")])),
+      ...(items.length ? ["", `Next: screenrig bi view create --connection-id ${id} --workspace ${workspace} --report REPORT`] : [])];
+  } else if (items.some((item) => "uid" in item)) {
+    lines = [`Dashboards (${items.length})`, ...table(["UID", "FOLDER", "TITLE"], items.map((item) => [text(item, "uid"), text(item, "folder"), text(item, "title")]))];
+  } else {
+    lines = [`Workspaces (${items.length})`, ...table(["WORKSPACE", "NAME"], items.map((item) => [text(item, "id"), text(item, "name")])),
+      ...(items.length ? ["", `Next: screenrig bi connection browse ${id} --workspace WORKSPACE`] : [])];
+  }
   return {
-    envelope: jsonBody({ ...response, body: { ...(heading ? { dashboard: heading } : {}), items, next_cursor: null } }, client.requestId),
+    envelope: jsonBody({ ...response, body: { ...(heading ? { dashboard: heading } : {}), ...((response.body as { workspace?: unknown } | undefined)?.workspace ? { workspace: (response.body as { workspace: unknown }).workspace } : {}), items, next_cursor: null } }, client.requestId),
     exitCode: ExitCode.Success,
     human: lines.join("\n"),
   };
@@ -413,20 +517,50 @@ export const handleBiConnectionBrowse = commandHandler(async (args: Args, runtim
 
 // ---- views
 
-function nameFromAddress(url: string | undefined, dashboard: string | undefined): string {
+function nameFromAddress(url: string | undefined, dashboard: string | undefined, report: string | undefined): string {
+  if (report !== undefined || (url !== undefined && /\/reports\/|reportEmbed/i.test(url))) return "Power BI report";
   const uid = dashboard ?? (url ? /\/d(?:-solo)?\/([^/?#]+)/.exec(url)?.[1] : undefined);
   return uid ? `Grafana ${uid}` : "Grafana dashboard";
 }
 
+/** The kind of a view of a public link: Power BI links are on powerbi.com, anything else is Grafana. */
+export function publicLinkKind(link: string): "powerbi" | "grafana" {
+  try {
+    const host = new URL(link).hostname.toLowerCase();
+    return host === "powerbi.com" || host.endsWith(".powerbi.com") ? "powerbi" : "grafana";
+  } catch {
+    return "grafana";
+  }
+}
+
 /** The target flags a create or update can carry besides --url, --dashboard and --public-url. */
-const TARGET_FLAGS = ["panel", "from", "to", "var", "theme", "timezone"] as const;
+const TARGET_FLAGS = ["panel", "from", "to", "var", "theme", "timezone", "workspace", "report", "page"] as const;
 
 function targetFromFlags(args: Args, base: BiTarget | undefined): BiTarget {
-  const target: BiTarget = { ...(base ?? {}), ...(base?.vars ? { vars: { ...base.vars } } : {}) };
+  const target: BiTarget = { ...(base ?? {}), ...(base?.vars ? { vars: { ...base.vars } } : {}), ...(base?.pages ? { pages: [...base.pages] } : {}) };
   const dashboard = flagString(args.flags, "dashboard");
   if (dashboard !== undefined) {
     for (const key of Object.keys(target) as Array<keyof BiTarget>) delete target[key];
     target.dashboard_uid = dashboard;
+  }
+  const workspace = flagString(args.flags, "workspace");
+  const report = flagString(args.flags, "report");
+  if (workspace !== undefined || report !== undefined) {
+    // A new report starts a new target; the one it replaces keeps its workspace if only --report is given.
+    const keptWorkspace = base?.workspace_id;
+    for (const key of Object.keys(target) as Array<keyof BiTarget>) delete target[key];
+    const chosen = workspace ?? keptWorkspace;
+    if (chosen !== undefined) target.workspace_id = chosen;
+    if (report !== undefined) target.report_id = report;
+  }
+  const pages = flagString(args.flags, "page");
+  if (pages !== undefined) {
+    target.pages = JSON.parse(pages) as string[];
+    delete target.rotate_all_pages;
+  }
+  if (flagBool(args.flags, "all-pages")) {
+    target.rotate_all_pages = true;
+    delete target.pages;
   }
   const panel = flagString(args.flags, "panel");
   if (panel !== undefined) target.panel_id = Number(panel);
@@ -444,15 +578,18 @@ function targetFromFlags(args: Args, base: BiTarget | undefined): BiTarget {
 }
 
 function viewTargetFlagsGiven(args: Args): string[] {
-  return TARGET_FLAGS.filter((flag) => flagString(args.flags, flag) !== undefined).map((flag) => `--${flag}`);
+  return [...TARGET_FLAGS.filter((flag) => flagString(args.flags, flag) !== undefined), ...(flagBool(args.flags, "all-pages") ? ["all-pages" as const] : [])].map((flag) => `--${flag}`);
 }
 
 export const handleBiViewCreate = commandHandler(async (args: Args, runtime: Runtime, resolved) => {
   const connectionId = flagString(args.flags, "connection-id");
   const url = flagString(args.flags, "url");
   const dashboard = flagString(args.flags, "dashboard");
+  const report = flagString(args.flags, "report");
+  const workspace = flagString(args.flags, "workspace");
   const publicUrl = flagString(args.flags, "public-url");
   const refresh = flagString(args.flags, "refresh");
+  const rotate = flagString(args.flags, "rotate");
   const fit = flagString(args.flags, "fit");
   const given = viewTargetFlagsGiven(args);
   let body: Record<string, unknown>;
@@ -460,21 +597,27 @@ export const handleBiViewCreate = commandHandler(async (args: Args, runtime: Run
     if (connectionId !== undefined || url !== undefined || dashboard !== undefined || given.length) {
       throw usageError("--public-url needs no connection: give it alone, with --name, --refresh and --fit.");
     }
-    body = { kind: "grafana", name: flagString(args.flags, "name") ?? "Grafana public dashboard", target: { public_url: publicUrl } };
+    const kind = publicLinkKind(publicUrl);
+    body = { kind, name: flagString(args.flags, "name") ?? (kind === "powerbi" ? "Power BI public report" : "Grafana public dashboard"), target: { public_url: publicUrl } };
   } else {
-    if (connectionId === undefined) throw usageError("bi view create requires --connection-id with --url or --dashboard, or --public-url alone.");
+    if (connectionId === undefined) throw usageError("bi view create requires --connection-id with --url, --dashboard or --workspace and --report, or --public-url alone.");
     if (url !== undefined && (dashboard !== undefined || given.length)) {
-      throw usageError(`With --url the dashboard's settings come from the address; to set ${given.join(", ") || "--dashboard"} use --dashboard UID instead.`);
+      throw usageError(`With --url the target comes from the address; to set ${given.join(", ") || "--dashboard"} give --dashboard UID (Grafana) or --workspace and --report (Power BI) instead.`);
     }
-    if (url === undefined && dashboard === undefined) throw usageError("bi view create requires --url or --dashboard with --connection-id.");
+    if (url === undefined && dashboard === undefined && report === undefined && workspace === undefined) {
+      throw usageError("bi view create requires --url, --dashboard (Grafana) or --workspace and --report (Power BI) with --connection-id.");
+    }
+    if ((workspace === undefined) !== (report === undefined)) throw usageError("--workspace and --report are given together: the workspace and the report in it.");
+    if (dashboard !== undefined && report !== undefined) throw usageError("Give --dashboard (Grafana) or --workspace and --report (Power BI), not both.");
     body = {
       connection_id: connectionId,
-      name: flagString(args.flags, "name") ?? nameFromAddress(url, dashboard),
+      name: flagString(args.flags, "name") ?? nameFromAddress(url, dashboard, report),
       ...(url !== undefined ? { url } : { target: targetFromFlags(args, undefined) }),
     };
   }
   body.name = biName(String(body.name));
   if (refresh !== undefined) body.refresh_s = biRefreshSeconds(refresh);
+  if (rotate !== undefined) body.rotate_s = biRotateSeconds(rotate);
   if (fit !== undefined) body.fit = fit;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await biCall(client, { method: "POST", path: VIEWS_PATH, idempotent: true, body }, connectionId);
@@ -514,18 +657,23 @@ export const handleBiViewUpdate = commandHandler(async (args: Args, runtime: Run
   const name = flagString(args.flags, "name");
   const url = flagString(args.flags, "url");
   const dashboard = flagString(args.flags, "dashboard");
+  const workspace = flagString(args.flags, "workspace");
+  const report = flagString(args.flags, "report");
   const publicUrl = flagString(args.flags, "public-url");
   const refresh = flagString(args.flags, "refresh");
+  const rotate = flagString(args.flags, "rotate");
   const fit = flagString(args.flags, "fit");
   const given = viewTargetFlagsGiven(args);
   const changesTarget = url !== undefined || dashboard !== undefined || publicUrl !== undefined || given.length > 0;
-  if (name === undefined && refresh === undefined && fit === undefined && !changesTarget) {
-    throw usageError("bi view update requires something to change: --name, --refresh, --fit, --url, --dashboard, --public-url or a target flag.");
+  if (name === undefined && refresh === undefined && rotate === undefined && fit === undefined && !changesTarget) {
+    throw usageError("bi view update requires something to change: --name, --refresh, --rotate, --fit, --url, --dashboard, --workspace, --report, --page, --all-pages, --public-url or a target flag.");
   }
+  if (dashboard !== undefined && (workspace !== undefined || report !== undefined)) throw usageError("Give --dashboard (Grafana) or --workspace and --report (Power BI), not both.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const body: Record<string, unknown> = {};
   if (name !== undefined) body.name = biName(name);
   if (refresh !== undefined) body.refresh_s = biRefreshSeconds(refresh);
+  if (rotate !== undefined) body.rotate_s = biRotateSeconds(rotate);
   if (fit !== undefined) body.fit = fit;
   if (publicUrl !== undefined) {
     if (url !== undefined || dashboard !== undefined || given.length) throw usageError("--public-url replaces the whole target: give it without the other target flags.");
@@ -534,7 +682,7 @@ export const handleBiViewUpdate = commandHandler(async (args: Args, runtime: Run
     if (dashboard !== undefined || given.length) throw usageError("--url replaces the whole target from the address: give it without the other target flags.");
     body.url = url;
   } else if (dashboard !== undefined || given.length) {
-    // --dashboard starts a new target; the other flags change the current one.
+    // --dashboard starts a new target; --workspace and --report start a new report; the other flags change the current target.
     const current = dashboard !== undefined ? undefined : ((await biCall(client, { method: "GET", path: `${VIEWS_PATH}/${id}` }, id)).body as BiView).target;
     if (current?.public_url) throw usageError("This view shows a public link: change it with --public-url, or create a view of a connection.");
     body.target = targetFromFlags(args, current);
@@ -573,7 +721,7 @@ export const handleBiViewTest = commandHandler(async (args: Args, runtime: Runti
       envelope: jsonBody(response, client.requestId),
       exitCode: ExitCode.Success,
       human: [`View ${id}: ${report?.ok ? "ok" : "failed"}`, ...checkLines(report?.checks),
-        ...(report?.ok ? [] : ["", `Next: screenrig bi connection test ${"CONNECTION_ID"} checks the token and the Image Renderer plugin.`])].join("\n"),
+        ...(report?.ok ? [] : ["", "Next: screenrig bi connection test ID, with the view's connection, checks the credentials themselves."])].join("\n"),
     };
   }
   const query = { width: width ?? "1920", height: height ?? "1080" };

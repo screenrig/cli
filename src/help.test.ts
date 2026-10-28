@@ -287,6 +287,7 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts mutes",
     "alerts unmute",
     "bi connection create grafana",
+    "bi connection create powerbi",
     "bi connection list",
     "bi connection show",
     "bi connection update",

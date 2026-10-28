@@ -131,7 +131,8 @@ test("the parsers read cadences, variables and ids", () => {
   assert.equal(biRefreshSeconds("1h30m"), 5400);
   assert.equal(biRefreshSeconds("24h"), 86_400);
   assert.equal(biRefreshSeconds("90"), 90);
-  for (const bad of ["29s", "25h", "0", "soon", "", "1w"]) assert.throws(() => biRefreshSeconds(bad), /--refresh takes a cadence/, bad);
+  assert.equal(biRefreshSeconds("0"), 0);
+  for (const bad of ["29s", "25h", "soon", "", "1w"]) assert.throws(() => biRefreshSeconds(bad), /--refresh takes a cadence/, bad);
   assert.deepEqual(JSON.parse(biVar("host=web1")), { "var-host": "web1" });
   assert.deepEqual(JSON.parse(biVar("var-env=prod", biVar("host=web1"))), { "var-host": "web1", "var-env": "prod" });
   assert.deepEqual(JSON.parse(biVar("note=a=b")), { "var-note": "a=b" });
@@ -240,7 +241,7 @@ test("bi problems name the next command", async () => {
   const env = await enrolled();
   const transport = backend()
     .on("POST", "/api/bi-connections/bic_REFUSEDAAAAAAAAAAAAA/test", () => problem(409, "bi_upstream_refused", "Grafana refused the service-account token."))
-    .on("POST", "/api/bi-connections/bic_DOWNAAAAAAAAAAAAAAAA/test", () => problem(502, "bi_upstream_unavailable", "Grafana did not answer in time."))
+    .on("POST", "/api/bi-connections/bic_DOWNAAAAAAAAAAAAAAAA/test", () => problem(500, "bi_upstream_unavailable", "Grafana did not answer in time."))
     .on("DELETE", "/api/bi-connections/bic_USEDAAAAAAAAAAAAAAAA", () => problem(409, "resource_conflict", "The connection is used by views: biv_X."))
     .on("GET", "/api/bi-views/biv_GONEAAAAAAAAAAAAAAAA", () => problem(404, "not_found", "The view was not found in this project."));
   const refused = await cli(["--json", "bi", "connection", "test", "bic_REFUSEDAAAAAAAAAAAAA"], transport, env);
@@ -285,7 +286,7 @@ test("view create from flags builds the target, repeats --var and checks the com
   for (const [args, pattern] of [
     [["--connection-id", CONN], /Provide exactly one of/],
     [["--connection-id", CONN, "--url", "https://g.example.com/d/a/b", "--dashboard", "abc"], /cannot be used with/],
-    [["--connection-id", CONN, "--url", "https://g.example.com/d/a/b", "--theme", "dark"], /dashboard's settings come from the address/],
+    [["--connection-id", CONN, "--url", "https://g.example.com/d/a/b", "--theme", "dark"], /the target comes from the address/],
     [["--dashboard", "abc123"], /requires --connection-id/],
     [["--connection-id", CONN, "--public-url", "https://g.example.com/public-dashboards/x"], /cannot be used with/],
     [["--public-url", "https://g.example.com/public-dashboards/x", "--theme", "dark"], /needs no connection/],
@@ -400,8 +401,10 @@ test("the help names the renderer, the secret rule and carries examples that run
   const env = await enrolled();
   await writeFile(path.join(env.cwd, "token.txt"), `${TOKEN}\n`);
   await writeFile(path.join(env.cwd, "new-token.txt"), `${TOKEN}\n`);
+  await writeFile(path.join(env.cwd, "secret.txt"), `${TOKEN}\n`);
+  await writeFile(path.join(env.cwd, "new-secret.txt"), `${TOKEN}\n`);
   const leaves = [
-    ["bi", "connection", "create", "grafana"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
+    ["bi", "connection", "create", "grafana"], ["bi", "connection", "create", "powerbi"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
     ["bi", "connection", "browse"], ["bi", "connection", "delete"], ["bi", "view", "create"], ["bi", "view", "list"], ["bi", "view", "show"], ["bi", "view", "update"],
     ["bi", "view", "test"], ["bi", "view", "delete"],
   ];
