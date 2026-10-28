@@ -1759,6 +1759,54 @@ export interface ScreenCampaigns {
   screen_id: string;
   effective_playlist?: ScreenEffectivePlaylist | null;
   items: CampaignStatus[];
+  /** Present with ?at= or ?to=: the screen explained at that instant. */
+  at?: ScreenExplainAt;
+}
+
+export type ScreenVerdictName = "won" | "outranked" | "not_started" | "ended" | "outside_hours" | "off";
+
+/** One takeover, campaign or schedule entry at the explained instant. */
+export interface ScreenVerdict {
+  kind: "takeover" | "campaign" | "schedule";
+  /** The campaign id or schedule entry id; absent for a takeover. */
+  id?: string;
+  playlist_id: string;
+  verdict: ScreenVerdictName;
+  /** Why an off candidate does not apply. */
+  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable";
+  /** The candidate that won over an outranked one. */
+  by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
+  /** When a takeover ends. */
+  until?: string;
+  next_start?: string;
+}
+
+/** A span of the timeline in which the playlist does not change. */
+export interface ScreenTimelineSegment {
+  from: string;
+  to: string;
+  playlist_id?: string;
+  source: "takeover" | "campaign" | "schedule" | "default";
+  entry_id?: string;
+}
+
+/** What an explanation declines to judge. */
+export interface ScreenNotJudged {
+  code: "configuration_history" | "playlist_content" | "page_rules" | "player_state" | "archived";
+  detail: string;
+}
+
+/** The screen explained at one instant. */
+export interface ScreenExplainAt {
+  instant: string;
+  timezone?: string;
+  /** The instant on the screen's clock, YYYY-MM-DDTHH:MM. */
+  local?: string;
+  effective_playlist: ScreenEffectivePlaylist | null;
+  verdicts: ScreenVerdict[];
+  timeline?: ScreenTimelineSegment[];
+  timeline_truncated?: boolean;
+  not_judged: ScreenNotJudged[];
 }
 
 /** Backend-owned principals contracts mirrored from the reviewed snapshot. */

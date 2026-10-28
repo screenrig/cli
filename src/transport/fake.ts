@@ -2553,7 +2553,46 @@ export function memoryBackend(options: {
     const effective = screen.takeover ? { id: screen.takeover.playlist_id, source: "takeover" }
       : playingCampaign ? { id: playingCampaign.playlist_id, source: "campaign", entry_id: playingCampaign.id }
       : screen.playlist_id ? { id: screen.playlist_id, source: "default" } : null;
-    return { status: 200, headers: {}, body: { screen_id: screen.id, effective_playlist: effective, items } };
+    const body: Record<string, unknown> = { screen_id: screen.id, effective_playlist: effective, items };
+    if (req.query?.at !== undefined || req.query?.to !== undefined) {
+      // The explanation at an instant, simplified like the standings: the clock
+      // is not read, so the answer at any time is the answer now. A time
+      // without a zone is read as the screen's own clock; one with a zone is
+      // that instant.
+      const instantOf = (field: string, value: string | undefined): { instant: string; local?: string } | TransportResponse => {
+        if (value === undefined) return { instant: new Date().toISOString() };
+        const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+        const civil = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value) && Number.isFinite(Date.parse(`${value}Z`));
+        if (!zoned && !civil) return campaignInvalid(field, "must be an RFC 3339 instant with a zone, or a time on the screen's clock");
+        if (civil && !screen.timezone) return campaignInvalid(field, "is a time on the screen's clock and the screen has no timezone; give an RFC 3339 instant with a zone");
+        return zoned ? { instant: new Date(value).toISOString() } : { instant: new Date(`${value.slice(0, 16)}:00Z`).toISOString(), local: value.slice(0, 16) };
+      };
+      const start = instantOf("at", req.query?.at);
+      if ("status" in start) return start;
+      const end = req.query?.to === undefined ? undefined : instantOf("to", req.query.to);
+      if (end && "status" in end) return end;
+      if (end && Date.parse(end.instant) <= Date.parse(start.instant)) return campaignInvalid("to", "must be after at");
+      if (end && Date.parse(end.instant) - Date.parse(start.instant) > 31 * 86_400_000) return campaignInvalid("to", "must be at most 31 days after at");
+      const verdicts: Array<Record<string, unknown>> = [];
+      if (screen.takeover) verdicts.push({ kind: "takeover", playlist_id: screen.takeover.playlist_id, verdict: "won", ...(screen.takeover.until ? { until: screen.takeover.until } : {}) });
+      for (const item of items) {
+        const campaign = campaigns.get(item.campaign_id as string)!;
+        const row = { kind: "campaign", id: item.campaign_id, playlist_id: campaign.playlist_id };
+        if (item.status === "playing") verdicts.push({ ...row, verdict: "won" });
+        else if (item.status === "outranked") verdicts.push({ ...row, verdict: "outranked", by: item.reason === "takeover" ? { kind: "takeover" } : { kind: "campaign", id: item.by } });
+        else verdicts.push({ ...row, verdict: "off", reason: item.status === "blocked" ? item.reason : item.status });
+      }
+      body.at = {
+        instant: start.instant,
+        ...(screen.timezone ? { timezone: screen.timezone } : {}),
+        ...(start.local ? { local: start.local } : {}),
+        effective_playlist: effective,
+        verdicts,
+        ...(end ? { timeline: [{ from: start.instant, to: end.instant, ...(effective ? { playlist_id: effective.id } : {}), source: effective?.source ?? "default", ...(effective && "entry_id" in effective ? { entry_id: effective.entry_id } : {}) }] } : {}),
+        not_judged: [{ code: "configuration_history", detail: "The screen's takeover and playlist schedule and the project's campaigns are read as they are now, not as they were or will have been changed by then." }],
+      };
+    }
+    return { status: 200, headers: {}, body };
   });
 
   return transport;

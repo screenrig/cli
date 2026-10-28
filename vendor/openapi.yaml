@@ -4464,10 +4464,25 @@ paths:
     get:
       x-screenrig-access: read
       operationId: explainScreenCampaigns
-      description: Why each campaign of the project plays on this screen or not, in precedence order, with the screen's effective playlist.
+      description: Why each campaign of the project plays on this screen or not, in precedence order, with the screen's effective playlist. items and effective_playlist are the screen's state now. With at (and optionally to), at is the same resolver the boundary sweep runs, asked about that instant, with a verdict for the takeover, every campaign and every schedule entry (won, outranked, not_started, ended, outside_hours, off), the playlist at that instant, and what the answer does not judge. With to as well, at.timeline lists the spans between at and to in which the playlist does not change. The schedule, takeover and campaigns are read as they are now.
       security:
         - projectBearer: []
         - dashboardSession: []
+      parameters:
+        - name: at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: The instant to explain, RFC 3339 with a zone (2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00). Defaults to now when only to is given.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: End of the timeline of switches that starts at at. Later than at and at most 31 days after it.
       responses:
         '200':
           description: Every campaign's standing on the screen.
@@ -23128,6 +23143,61 @@ components:
         screen_id: {type: string}
         effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}]}
         items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/CampaignStatus"}}
+        at: {$ref: "#/components/schemas/ScreenExplainAt"}
+    ScreenExplainAt:
+      type: object
+      additionalProperties: false
+      required: [instant, effective_playlist, verdicts, not_judged]
+      description: >-
+        What the screen shows at instant and why, from the resolver the boundary sweep runs. The screen's takeover, playlist schedule and the project's campaigns are read as they are now, not as they were then. A campaign whose playlist is missing or unapproved is skipped, as the sweep skips it.
+      properties:
+        instant: {type: string, format: date-time, description: "The explained instant, in UTC."}
+        timezone: {type: string, description: "The screen's timezone, when it has one."}
+        local: {type: string, description: "The instant on the screen's clock, civil YYYY-MM-DDTHH:MM; absent without a usable timezone."}
+        effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}], description: "The playlist at instant; until is the next instant it changes."}
+        verdicts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScreenVerdict"}, description: "The takeover, then every campaign in precedence order, then every playlist schedule entry in order."}
+        timeline: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/ScreenTimelineSegment"}, description: "With to: the spans from instant to to in which the playlist does not change."}
+        timeline_truncated: {type: boolean, description: "True when the timeline stopped at 500 spans before reaching to."}
+        not_judged: {type: array, items: {$ref: "#/components/schemas/ScreenNotJudged"}}
+    ScreenVerdict:
+      type: object
+      additionalProperties: false
+      required: [kind, playlist_id, verdict]
+      description: >-
+        One candidate at the explained instant. won: the resolver picks it. outranked: it holds, and by is the candidate that won. not_started: before its from. ended: at or after its until (a takeover: its end). outside_hours: inside from and until, outside its windows. off: it does not apply, and reason says why.
+      properties:
+        kind: {type: string, enum: [takeover, campaign, schedule]}
+        id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
+        playlist_id: {type: string}
+        verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, off]}
+        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable], description: "Why an off candidate does not apply."}
+        by:
+          type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind: {type: string, enum: [takeover, campaign, schedule]}
+            id: {type: string}
+        until: {type: string, format: date-time, description: "When a takeover ends; absent when it holds until cleared."}
+        next_start: {type: string, format: date-time, description: "The first instant after the explained one at which a not_started or outside_hours candidate holds, when within eight days."}
+    ScreenTimelineSegment:
+      type: object
+      additionalProperties: false
+      required: [from, to, source]
+      properties:
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        playlist_id: {type: string}
+        source: {type: string, enum: [takeover, campaign, schedule, default]}
+        entry_id: {type: string}
+    ScreenNotJudged:
+      type: object
+      additionalProperties: false
+      required: [code, detail]
+      description: Something the explanation does not judge.
+      properties:
+        code: {type: string, enum: [configuration_history, playlist_content, page_rules, player_state, archived]}
+        detail: {type: string}
     Trigger:
       type: object
       additionalProperties: false

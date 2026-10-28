@@ -7,7 +7,7 @@ import {
   handleCampaignScreens, handleCampaignShow, handleCampaignUpdate,
 } from "../commands.js";
 import {
-  campaignAnyTags, campaignAudienceOption, campaignInstant, campaignName, campaignPlaylistId, campaignPriority, campaignScreenIds,
+  campaignAnyTags, campaignAudienceOption, campaignExplainTime, campaignInstant, campaignName, campaignPlaylistId, campaignPriority, campaignScreenIds,
   campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,
 } from "../campaigns.js";
 
@@ -89,7 +89,9 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .option("--cursor <CURSOR>", "Continue after the data.next_cursor of the previous page", campaignScreensCursor)
     .action(bind(handleCampaignScreens));
 
-  campaign.command("explain").description("Show why each campaign plays on one screen or not")
+  campaign.command("explain").description("Show why each campaign plays on one screen or not, now or at a chosen time")
     .argument("<screen-id>", "Screen identifier")
+    .addOption(new Option("--at <TIME>", "Explain this time instead of now: an instant with a zone (2026-03-08T09:30:00Z) or a time on the screen's clock (2026-03-08T09:30)").argParser(campaignExplainTime("--at")))
+    .addOption(new Option("--to <TIME>", "Also list the playlist switches from --at (default: now) to this time, at most 31 days later").argParser(campaignExplainTime("--to")))
     .action(bind(handleCampaignExplain));
 }
