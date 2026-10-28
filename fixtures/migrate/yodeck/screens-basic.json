@@ -1,0 +1,173 @@
+[
+  {
+    "id": 61,
+    "uuid": "00000000-0000-4000-8000-000000000061",
+    "name": "Front desk",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/61.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [
+        "Lobby"
+      ],
+      "monitor_rotation": "",
+      "time_zone": "America",
+      "time_subzone": "Toronto"
+    }
+  },
+  {
+    "id": 62,
+    "uuid": "00000000-0000-4000-8000-000000000062",
+    "name": "Cafe wall",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/62.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [
+        "Café",
+        "lobby"
+      ],
+      "monitor_rotation": "",
+      "time_zone": "America",
+      "time_subzone": "Phoenix"
+    }
+  },
+  {
+    "id": 63,
+    "uuid": "00000000-0000-4000-8000-000000000063",
+    "name": "Back office",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/63.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [],
+      "monitor_rotation": "",
+      "time_zone": "Etc",
+      "time_subzone": "UTC"
+    }
+  },
+  {
+    "id": 64,
+    "uuid": "00000000-0000-4000-8000-000000000064",
+    "name": "Stockroom",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/64.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [
+        "Café"
+      ],
+      "monitor_rotation": "",
+      "time_zone": "Mars",
+      "time_subzone": "Olympus"
+    }
+  },
+  {
+    "id": 65,
+    "uuid": "00000000-0000-4000-8000-000000000065",
+    "name": "Kiosk",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/65.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [],
+      "monitor_rotation": "",
+      "time_zone": "",
+      "time_subzone": ""
+    }
+  },
+  {
+    "id": 66,
+    "uuid": "00000000-0000-4000-8000-000000000066",
+    "name": "Lobby",
+    "description": null,
+    "player_type": "Web Player",
+    "workspace": {
+      "id": 12,
+      "name": "Annex"
+    },
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_ip_address": null,
+    "last_pushed": "2026-01-05T09:00:00Z",
+    "reg_code": "",
+    "takeover_content": null,
+    "screenshot_url": "https://shots.example.com/screens/66.jpg",
+    "state": {},
+    "configuration": {},
+    "gpio_enable": false,
+    "basic": {
+      "tags": [
+        "Lobby"
+      ],
+      "monitor_rotation": "",
+      "time_zone": "US",
+      "time_subzone": "Pacific"
+    }
+  }
+]
