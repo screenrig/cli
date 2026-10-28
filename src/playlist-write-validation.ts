@@ -1,5 +1,6 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
-import { usageError } from "./problems.js";
+import { iframeSnippetSource } from "./iframe-snippet.js";
+import { CliError, usageError } from "./problems.js";
 import { PLAYLIST_TRANSITION_TYPES } from "./playlist-templates.js";
 
 interface JsonRecord { [key: string]: unknown }
@@ -284,9 +285,13 @@ function validateIframe(value: JsonRecord, name: string): void {
   const src = string(value, "src", name, 4096);
   string(value, "title", name, 200);
   // A sign shows what its owner points it at: http or https, any host including
-  // the screen's LAN, with user:pass@ credentials for a page behind a login.
+  // the screen's LAN, with user:pass@ credentials for a page behind a login. The
+  // server also reads a pasted <iframe ...> embed code for its src.
   let parsed: URL;
-  try { parsed = new URL(src); } catch { throw usageError(`${name}.src must be an http or https URL.`); }
+  try { parsed = new URL(iframeSnippetSource(src) ?? src); } catch (error) {
+    if (error instanceof CliError) throw error;
+    throw usageError(`${name}.src must be an http or https URL.`);
+  }
   if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
     throw usageError(`${name}.src must be an http or https URL.`);
   }

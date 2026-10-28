@@ -177,6 +177,17 @@ test("playlist write accepts two iframe primitives on a page", () => {
   assert.deepEqual(validatePlaylistWrite(playlistWithPrimitives(TWO_IFRAMES), new Map()), new Set());
 });
 
+test("playlist write accepts a pasted iframe embed code as an iframe src, as the server reads it", () => {
+  const code = '<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vExample/embed?start=true&amp;loop=true" width="640" height="389"></iframe>';
+  for (const src of [code, `  ${code}`, "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit"]) {
+    assert.deepEqual(playlistIssues(playlistWithPrimitives([iframePrimitive("deck", src)])), [], `schema: ${src}`);
+    assert.deepEqual(validatePlaylistWrite(playlistWithPrimitives([iframePrimitive("deck", src)]), new Map()), new Set(), src);
+  }
+  for (const src of ["docs.google.com/presentation", "javascript:alert(1)", "<script src=\"https://example.com/x.js\"></script>", ""]) {
+    assert.throws(() => validatePlaylistWrite(playlistWithPrimitives([iframePrimitive("deck", src)]), new Map()), CliError, src);
+  }
+});
+
 test("playlist write accepts a panning background and a spinning badge", () => {
   assert.deepEqual(
     validatePlaylistWrite(playlistWithPrimitives([{
