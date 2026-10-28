@@ -47,7 +47,7 @@ async function enrolled(): Promise<Env> {
   return { fs, cwd, configPath };
 }
 
-async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
+async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger, extra: Partial<CliRuntime> = {}): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const outP = collect(stdout);
@@ -58,6 +58,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: 
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
     ...(logger ? { logger } : {}),
+    ...extra,
   };
   const code = await run(runtime);
   stdout.end();
@@ -271,6 +272,92 @@ test("fleet-links show prints the url under a sensitive label, or says why it is
   assert.equal(malformed.code, ExitCode.Usage);
   assert.equal(malformed.envelope.error!.next!.command, "screenrig fleet-links list");
   assert.equal(transport.calls.length, before, "a malformed id is refused locally");
+});
+
+const MANAGED_MANIFEST = {
+  schema: "screenrig.android/v1",
+  managed: { package: "ai.screenrig.player.managed", path: "/android/managed/screenrig-managed-26.10.12.apk", signer_sha256: "ab".repeat(32) },
+};
+
+function manifestFetch(body: unknown, status = 200): typeof fetch & { urls: string[] } {
+  const urls: string[] = [];
+  const impl = ((url: string) => {
+    urls.push(String(url));
+    return Promise.resolve(new Response(JSON.stringify(body), { status }));
+  }) as typeof fetch & { urls: string[] };
+  impl.urls = urls;
+  return impl;
+}
+
+const linkShown = (overrides: Record<string, unknown> = {}): FakeTransport =>
+  new FakeTransport().on("GET", "/api/fleet-links/flk_FIXEDAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: link(overrides) }));
+
+test("fleet-links show --android-provisioning prints the dashboard's QR payload for the link", async () => {
+  const env = await enrolled();
+  const site = manifestFetch(MANAGED_MANIFEST);
+  const shown = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown(), env, undefined, { siteFetch: site });
+  assert.equal(shown.code, 0, shown.stdout);
+  assert.deepEqual(site.urls, ["https://screenrig.ai/android/manifest.json"]);
+  assert.equal(shown.envelope.data.id, "flk_FIXEDAAAAAAAAAAA");
+  assert.deepEqual(shown.envelope.data.provisioning, {
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "ai.screenrig.player.managed/ai.screenrig.player.managed.ScreenRigDeviceAdminReceiver",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://screenrig.ai/android/managed/screenrig-managed-26.10.12.apk",
+    "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+    "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
+    "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": { fleet_link: SECRET },
+  });
+  assert.equal(shown.envelope.data.url, undefined, "the link's own URL is not repeated beside the payload");
+
+  const human = await cli(["--human", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown(), env, undefined, { siteFetch: manifestFetch(MANAGED_MANIFEST) });
+  assert.equal(human.code, 0, human.stderr);
+  const lines = human.stdout.trimEnd().split("\n");
+  const title = lines.indexOf("Android device owner provisioning for fleet link flk_FIXEDAAAAAAAAAAA");
+  assert.ok(title >= 0, human.stdout);
+  assert.match(lines[title + 1]!, /^Sensitive: this JSON carries the fleet link secret/);
+  assert.deepEqual(JSON.parse(lines.at(-1)!), shown.envelope.data.provisioning, "the last line is the payload, ready to encode");
+});
+
+test("fleet-links show --android-provisioning refuses without a secret or a build, and says why", async () => {
+  const env = await enrolled();
+  const site = manifestFetch(MANAGED_MANIFEST);
+
+  const readOnly = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown({ url: "", url_redacted: true }), env, undefined, { siteFetch: site });
+  assert.equal(readOnly.code, ExitCode.Auth);
+  assert.equal(readOnly.envelope.error!.code, "fleet_link_secret_unavailable");
+  assert.match(readOnly.envelope.error!.detail, /Read only credential/);
+  assert.equal(readOnly.envelope.error!.next!.command, "screenrig login --access manage");
+
+  const unsafe = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown({ url: `http://play.screenrig.ai/player/#fleet=${SECRET}` }), env, undefined, { siteFetch: site });
+  assert.equal(unsafe.envelope.error!.code, "fleet_link_secret_unavailable");
+  assert.doesNotMatch(unsafe.stdout + unsafe.stderr, /srfl_A/, "a refused link's secret is not echoed");
+  assert.deepEqual(site.urls, [], "no site request before the link yields a secret");
+
+  const none = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown(), env, undefined, { siteFetch: manifestFetch({ schema: "screenrig.android/v1", player: { package: "ai.screenrig.player" } }) });
+  assert.equal(none.code, ExitCode.NotFound);
+  assert.equal(none.envelope.error!.code, "android_device_owner_build_unavailable");
+  assert.match(none.envelope.error!.detail, /lists no Android build for device owner setup/);
+  assert.doesNotMatch(none.stdout + none.stderr, /srfl_A/);
+
+  const down = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], linkShown(), env, undefined, { siteFetch: manifestFetch({}, 503) });
+  assert.equal(down.envelope.error!.code, "unexpected_response");
+});
+
+test("fleet-links show --android-provisioning needs a ScreenRig API origin and is off by default", async () => {
+  const env = await enrolled();
+  const config = JSON.parse(await readFile(env.configPath, "utf8")) as Record<string, unknown>;
+  await writeConfigAtomic(env.configPath, { ...config, api_url: "https://api.example.com" }, env.fs);
+  const transport = linkShown();
+  const foreign = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA", "--android-provisioning"], transport, env, undefined, { siteFetch: manifestFetch(MANAGED_MANIFEST) });
+  assert.equal(foreign.code, ExitCode.Usage);
+  assert.equal(foreign.envelope.error!.code, "usage_error");
+  assert.equal(transport.calls.length, 0, "refused before any request");
+
+  const plain = await enrolled();
+  const site = manifestFetch(MANAGED_MANIFEST);
+  const shown = await cli(["--json", "fleet-links", "show", "flk_FIXEDAAAAAAAAAAA"], linkShown(), plain, undefined, { siteFetch: site });
+  assert.equal(shown.code, 0, shown.stdout);
+  assert.equal(shown.envelope.data.provisioning, undefined);
+  assert.deepEqual(site.urls, []);
 });
 
 test("an unsafe returned url is withheld with a warning instead of printed", async () => {

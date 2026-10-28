@@ -48,6 +48,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (name === "field" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
       || (["var", "page"].includes(name) && command.parent?.name() === "view" && ["create", "update"].includes(command.name()))
       || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
+      || (["set", "secret", "unset-secret"].includes(name) && command.parent?.name() === "source" && ["create", "update", "test"].includes(command.name()))
       || (["screen-id", "tag"].includes(name) && command.parent?.name() === "alerts" && command.name() === "mute")
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
       || (["tag", "any-tag", "screen-id", "window"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))

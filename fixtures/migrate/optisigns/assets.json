@@ -1,0 +1,144 @@
+[
+  {
+    "data": {
+      "assets": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-assets-0",
+              "node": {
+                "_id": "OPA00000000000001",
+                "accountId": "acct-fixture-0001",
+                "name": null,
+                "filename": "Welcome.png",
+                "originalFileName": "Welcome.png",
+                "fileType": "image",
+                "type": "file",
+                "appType": null,
+                "webLink": null,
+                "AWSS3ID": "s3-welcome",
+                "screenZones": null
+              }
+            },
+            {
+              "cursor": "c-assets-1",
+              "node": {
+                "_id": "OPA00000000000002",
+                "accountId": "acct-fixture-0001",
+                "name": "Promo",
+                "filename": "Promo.mp4",
+                "originalFileName": "Promo.mp4",
+                "fileType": "video",
+                "type": "file",
+                "appType": null,
+                "webLink": null,
+                "AWSS3ID": "s3-promo",
+                "screenZones": null
+              }
+            },
+            {
+              "cursor": "c-assets-2",
+              "node": {
+                "_id": "OPA00000000000003",
+                "accountId": "acct-fixture-0001",
+                "name": "Status page",
+                "filename": null,
+                "originalFileName": null,
+                "fileType": null,
+                "type": "app",
+                "appType": "web_page",
+                "webLink": "https://status.example.com/",
+                "AWSS3ID": null,
+                "screenZones": null
+              }
+            },
+            {
+              "cursor": "c-assets-3",
+              "node": {
+                "_id": "OPA00000000000004",
+                "accountId": "acct-fixture-0001",
+                "name": "Handbook",
+                "filename": "Handbook.pdf",
+                "originalFileName": "Handbook.pdf",
+                "fileType": "document",
+                "type": "file",
+                "appType": null,
+                "webLink": null,
+                "AWSS3ID": null,
+                "screenZones": null
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "cursor-assets-1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "assets": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-assets-0",
+              "node": {
+                "_id": "OPA00000000000005",
+                "accountId": "acct-fixture-0001",
+                "name": "Clock",
+                "filename": null,
+                "originalFileName": null,
+                "fileType": null,
+                "type": "app",
+                "appType": "clock",
+                "webLink": null,
+                "AWSS3ID": null,
+                "screenZones": null
+              }
+            },
+            {
+              "cursor": "c-assets-1",
+              "node": {
+                "_id": "OPA00000000000006",
+                "accountId": "acct-fixture-0001",
+                "name": "Split screen",
+                "filename": null,
+                "originalFileName": null,
+                "fileType": null,
+                "type": "app",
+                "appType": "zones",
+                "webLink": null,
+                "AWSS3ID": null,
+                "screenZones": {
+                  "id": "zone1"
+                }
+              }
+            },
+            {
+              "cursor": "c-assets-2",
+              "node": {
+                "_id": "OPA00000000000007",
+                "accountId": "acct-fixture-0001",
+                "name": "Banner",
+                "filename": "stored-9f2c.jpg",
+                "originalFileName": "Banner.jpg",
+                "fileType": "image",
+                "type": "file",
+                "appType": null,
+                "webLink": null,
+                "AWSS3ID": "s3-banner",
+                "screenZones": null
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,108 @@
+[
+  {
+    "data": {
+      "allFiles": {
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "cursor-files-1"
+        },
+        "nodes": [
+          {
+            "id": "f1000000-0000-4000-8000-000000000001",
+            "name": "Welcome.png",
+            "mimetype": "image/png",
+            "size": "2048",
+            "source": "https://files.example.com/screencloud/welcome.png",
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          },
+          {
+            "id": "f1000000-0000-4000-8000-000000000002",
+            "name": "Promo.mp4",
+            "mimetype": "video/mp4",
+            "size": "900000",
+            "source": "https://files.example.com/screencloud/promo.mp4",
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          },
+          {
+            "id": "f1000000-0000-4000-8000-000000000003",
+            "name": "Theme.mp3",
+            "mimetype": "audio/mpeg",
+            "size": "5000",
+            "source": "https://files.example.com/screencloud/theme.mp3",
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "data": {
+      "allFiles": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "f1000000-0000-4000-8000-000000000004",
+            "name": "Handbook.pdf",
+            "mimetype": "application/pdf",
+            "size": "7000",
+            "source": "https://files.example.com/screencloud/handbook.pdf",
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          },
+          {
+            "id": "f1000000-0000-4000-8000-000000000005",
+            "name": "Banner.jpg",
+            "mimetype": "image/jpeg",
+            "size": "3000",
+            "source": null,
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": [
+                {
+                  "url": "https://cdn.example.com/screencloud/banner.jpg",
+                  "mimetype": "image/jpeg"
+                }
+              ]
+            }
+          },
+          {
+            "id": "f1000000-0000-4000-8000-000000000006",
+            "name": "Old.png",
+            "mimetype": "image/png",
+            "size": "100",
+            "source": "https://files.example.com/screencloud/old.png",
+            "deletedAt": "2026-09-30T00:00:00+00:00",
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          },
+          {
+            "id": "f1000000-0000-4000-8000-000000000007",
+            "name": "NoAddress.png",
+            "mimetype": "image/png",
+            "size": "100",
+            "source": null,
+            "deletedAt": null,
+            "fileOutputsByFileId": {
+              "nodes": []
+            }
+          }
+        ]
+      }
+    }
+  }
+]

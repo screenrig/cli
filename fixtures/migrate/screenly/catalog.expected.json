@@ -1,0 +1,420 @@
+{
+  "account": "01J9FX0000000000000000T001",
+  "label": "Screenly",
+  "media": [
+    {
+      "id": "01J9FX00000000000000000A01",
+      "name": "Welcome",
+      "filename": "Welcome.png",
+      "kind": "image",
+      "fetch": {
+        "url": "https://assets.example.com/screenly/welcome"
+      },
+      "original": true
+    },
+    {
+      "id": "01J9FX00000000000000000A02",
+      "name": "Promo",
+      "filename": "Promo.mp4",
+      "kind": "video",
+      "fetch": {
+        "url": "https://assets.example.com/screenly/promo"
+      },
+      "original": true
+    },
+    {
+      "id": "01J9FX00000000000000000A07",
+      "name": "Theme",
+      "filename": "Theme.mp3",
+      "kind": "audio",
+      "fetch": {
+        "url": "https://assets.example.com/screenly/theme"
+      },
+      "original": true
+    }
+  ],
+  "playlists": [
+    {
+      "id": "01J9FX00000000000000000P01",
+      "name": "Lobby loop",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 10
+        },
+        {
+          "media_id": "01J9FX00000000000000000A02"
+        },
+        {
+          "url": "https://menu.example.com/board",
+          "title": "Menu board",
+          "duration_s": 15
+        },
+        {
+          "media_id": "01J9FX00000000000000000A07"
+        }
+      ],
+      "notes": [
+        "1 item was left out because its asset is listed under Cannot come over."
+      ]
+    },
+    {
+      "id": "01J9FX00000000000000000P02",
+      "name": "Weekday mornings",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 8
+        },
+        {
+          "media_id": "01J9FX00000000000000000A02",
+          "duration_s": 12
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P03",
+      "name": "Holiday",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 8
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P04",
+      "name": "Either or",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P05",
+      "name": "Night",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P06",
+      "name": "Not Tuesday",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P07",
+      "name": "Switched off",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": [
+        "It was switched off in Screenly."
+      ]
+    },
+    {
+      "id": "01J9FX00000000000000000P08",
+      "name": "Odd rule",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P09",
+      "name": "Evening",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P10",
+      "name": "Cafe loop",
+      "items": [
+        {
+          "media_id": "01J9FX00000000000000000A01",
+          "duration_s": 5
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "combined:01J9FX00000000000000000P10+01J9FX00000000000000000P01",
+      "name": "Cafe loop + Lobby loop",
+      "items": [
+        {
+          "playlist_id": "01J9FX00000000000000000P10"
+        },
+        {
+          "playlist_id": "01J9FX00000000000000000P01"
+        }
+      ],
+      "notes": [
+        "Screenly plays every active playlist of a screen one after another, in an order it does not publish; this one plays Cafe loop, Lobby loop in that order."
+      ]
+    }
+  ],
+  "layouts": [],
+  "groups": [
+    {
+      "id": "01J9FX00000000000000000L01",
+      "name": "All screens"
+    },
+    {
+      "id": "01J9FX00000000000000000L04",
+      "name": "Lobby screens"
+    }
+  ],
+  "screens": [
+    {
+      "id": "01J9FX00000000000000000S01",
+      "name": "Front desk",
+      "group_ids": [
+        "01J9FX00000000000000000L01",
+        "01J9FX00000000000000000L04"
+      ],
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P01"
+      },
+      "timezone": "Europe/Stockholm",
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000S02",
+      "name": "Cafe wall",
+      "group_ids": [
+        "01J9FX00000000000000000L01"
+      ],
+      "content": {
+        "playlist_id": "combined:01J9FX00000000000000000P10+01J9FX00000000000000000P01"
+      },
+      "timezone": "America/Toronto",
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000S03",
+      "name": "Back office",
+      "group_ids": [
+        "01J9FX00000000000000000L01",
+        "01J9FX00000000000000000L04"
+      ],
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P01"
+      },
+      "notes": [
+        "It was switched off in Screenly."
+      ]
+    }
+  ],
+  "schedules": [
+    {
+      "id": "01J9FX00000000000000000P02:01J9FX00000000000000000L04",
+      "name": "Weekday mornings",
+      "targets": {
+        "group_ids": [
+          "01J9FX00000000000000000L04"
+        ],
+        "screen_ids": []
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P02"
+      },
+      "start": "2026-10-28T08:00",
+      "end": "2026-10-28T11:00",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ]
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P03:01J9FX00000000000000000L01",
+      "name": "Holiday",
+      "targets": {
+        "group_ids": [
+          "01J9FX00000000000000000L01"
+        ],
+        "screen_ids": []
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P03"
+      },
+      "start": "2025-12-24T00:00",
+      "end": "2026-01-02T00:00",
+      "priority": 10,
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P04:01J9FX00000000000000000L02:1",
+      "name": "Either or (1)",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "01J9FX00000000000000000S01"
+        ]
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P04"
+      },
+      "start": "2026-10-28T10:00",
+      "end": "2026-10-28T18:00",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "sat",
+          "sun"
+        ]
+      },
+      "priority": 0,
+      "notes": [
+        "Its rule had several alternatives; each became its own campaign."
+      ]
+    },
+    {
+      "id": "01J9FX00000000000000000P04:01J9FX00000000000000000L02:2",
+      "name": "Either or (2)",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "01J9FX00000000000000000S01"
+        ]
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P04"
+      },
+      "start": "2026-01-01T00:00",
+      "end": "2026-01-02T00:00",
+      "priority": 0,
+      "notes": [
+        "Its rule had several alternatives; each became its own campaign."
+      ]
+    },
+    {
+      "id": "01J9FX00000000000000000P06:01J9FX00000000000000000L03",
+      "name": "Not Tuesday",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "01J9FX00000000000000000S02"
+        ]
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P06"
+      },
+      "start": "2026-10-28T00:00",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ]
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "01J9FX00000000000000000P09:01J9FX00000000000000000L03",
+      "name": "Evening",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "01J9FX00000000000000000S02"
+        ]
+      },
+      "content": {
+        "playlist_id": "01J9FX00000000000000000P09"
+      },
+      "start": "2026-10-28T18:00",
+      "end": "2026-10-29T00:00",
+      "repeat": {
+        "every": "day"
+      },
+      "priority": 0,
+      "notes": []
+    }
+  ],
+  "not_imported": [
+    {
+      "kind": "item",
+      "source_id": "01J9FX00000000000000000A04",
+      "name": "Lobby camera",
+      "reason": "It is a live stream.",
+      "next": "Add the stream address as a stream page in a playlist."
+    },
+    {
+      "kind": "item",
+      "source_id": "01J9FX00000000000000000A05",
+      "name": "Weather app",
+      "reason": "It is a Screenly Edge App.",
+      "next": "Rebuild it as a built-in card or an iframe page in a playlist."
+    },
+    {
+      "kind": "media",
+      "source_id": "01J9FX00000000000000000A06",
+      "name": "Still processing",
+      "reason": "Screenly has not finished processing it."
+    },
+    {
+      "kind": "media",
+      "source_id": "01J9FX00000000000000000A08",
+      "name": "Handbook",
+      "reason": "It is a PDF document, which is not an image, video or audio file.",
+      "next": "Export its pages as images and upload them with media upload."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "01J9FX00000000000000000P05",
+      "name": "Night",
+      "reason": "Its time window ends before it starts."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "01J9FX00000000000000000P07",
+      "name": "Switched off",
+      "reason": "The playlist is switched off in Screenly, so its labels play nothing."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "01J9FX00000000000000000P08",
+      "name": "Odd rule",
+      "reason": "Its time rule uses an operator other than BETWEEN, >= or <=."
+    }
+  ],
+  "notes": []
+}

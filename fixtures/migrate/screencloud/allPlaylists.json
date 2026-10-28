@@ -1,0 +1,163 @@
+[
+  {
+    "data": {
+      "allPlaylists": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "b1000000-0000-4000-8000-000000000001",
+            "name": "Lobby loop",
+            "draftOf": null,
+            "content": {
+              "list": [
+                {
+                  "list_id": "f1000000-file",
+                  "content": {
+                    "_ref": {
+                      "type": "file",
+                      "id": "f1000000-0000-4000-8000-000000000001"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "f1000000-file",
+                  "content": {
+                    "_ref": {
+                      "type": "file",
+                      "id": "f1000000-0000-4000-8000-000000000002"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "9a000000-link",
+                  "content": {
+                    "_ref": {
+                      "type": "link",
+                      "id": "9a000000-0000-4000-8000-000000000001"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "f1000000-file",
+                  "content": {
+                    "_ref": {
+                      "type": "file",
+                      "id": "f1000000-0000-4000-8000-000000000004"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "77000000-app",
+                  "content": {
+                    "_ref": {
+                      "type": "app",
+                      "id": "77000000-0000-4000-8000-000000000001"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "b1000000-playlist",
+                  "content": {
+                    "_ref": {
+                      "type": "playlist",
+                      "id": "b1000000-0000-4000-8000-000000000002"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                },
+                {
+                  "list_id": "f1000000-file",
+                  "content": {
+                    "_ref": {
+                      "type": "file",
+                      "id": "f1000000-0000-4000-8000-000000000001"
+                    },
+                    "props": {
+                      "duration": 12000
+                    }
+                  },
+                  "rules": [
+                    {
+                      "time": [
+                        {
+                          "start": "08:00",
+                          "end": "12:00"
+                        }
+                      ],
+                      "day_of_week": {
+                        "mon": true,
+                        "tue": false,
+                        "wed": false,
+                        "thu": false,
+                        "fri": false,
+                        "sat": false,
+                        "sun": false
+                      },
+                      "date": [],
+                      "exclusive": false
+                    }
+                  ]
+                },
+                {
+                  "list_id": "f1000000-file",
+                  "content": {
+                    "_ref": {
+                      "type": "file",
+                      "id": "f1000000-0000-4000-8000-000000000003"
+                    },
+                    "props": {
+                      "duration": 0
+                    }
+                  }
+                }
+              ],
+              "props": {
+                "play_mode": "loop",
+                "default_durations": {
+                  "image": 10000,
+                  "app": 60000,
+                  "link": 60000,
+                  "document": 10000
+                }
+              }
+            }
+          },
+          {
+            "id": "b1000000-0000-4000-8000-000000000002",
+            "name": "Nested",
+            "draftOf": null,
+            "content": "{\"list\": [{\"list_id\": \"f1000000-file\", \"content\": {\"_ref\": {\"type\": \"file\", \"id\": \"f1000000-0000-4000-8000-000000000005\"}, \"props\": {\"duration\": 5000}}}], \"props\": {\"play_mode\": \"loop\"}}"
+          },
+          {
+            "id": "b1000000-0000-4000-8000-000000000003",
+            "name": "Lobby loop (draft)",
+            "draftOf": "b1000000-0000-4000-8000-000000000001",
+            "content": {
+              "list": []
+            }
+          }
+        ]
+      }
+    }
+  }
+]

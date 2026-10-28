@@ -1,0 +1,206 @@
+[
+  {
+    "id": 41,
+    "name": "Split",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "resolution_width": 1920,
+    "resolution_height": 1080,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    },
+    "regions": [
+      {
+        "id": 96,
+        "width": 200,
+        "height": 200,
+        "top": 100,
+        "left": 100,
+        "zindex": 6,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 200,
+        "res_height": 200,
+        "order": 6,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": false,
+        "rotation": 90,
+        "flip": "none",
+        "item": {
+          "type": "image",
+          "id": 13
+        }
+      },
+      {
+        "id": 91,
+        "width": 1280,
+        "height": 1080,
+        "top": 0,
+        "left": 0,
+        "zindex": 1,
+        "duration": 10,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 1280,
+        "res_height": 1080,
+        "order": 1,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": false,
+        "rotation": 0,
+        "flip": "none",
+        "item": {
+          "type": "image",
+          "id": 11
+        }
+      },
+      {
+        "id": 92,
+        "width": 640,
+        "height": 540,
+        "top": 0,
+        "left": 1280,
+        "zindex": 2,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 640,
+        "res_height": 540,
+        "order": 2,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": false,
+        "rotation": 0,
+        "flip": "none",
+        "item": {
+          "type": "url",
+          "id": 15
+        }
+      },
+      {
+        "id": 93,
+        "width": 640,
+        "height": 540,
+        "top": 540,
+        "left": 1280,
+        "zindex": 3,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 640,
+        "res_height": 540,
+        "order": 3,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": false,
+        "rotation": 0,
+        "flip": "none",
+        "item": {
+          "type": "widget",
+          "id": 5
+        }
+      },
+      {
+        "id": 94,
+        "width": 50,
+        "height": 50,
+        "top": 0,
+        "left": 0,
+        "zindex": 4,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 50,
+        "res_height": 50,
+        "order": 4,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": true,
+        "rotation": 0,
+        "flip": "none",
+        "item": {
+          "type": "image",
+          "id": 11
+        }
+      },
+      {
+        "id": 95,
+        "width": 500,
+        "height": 180,
+        "top": 900,
+        "left": 0,
+        "zindex": 5,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 500,
+        "res_height": 180,
+        "order": 5,
+        "is_muted": false,
+        "content_data": {
+          "text": "Hello"
+        },
+        "hidden": false,
+        "rotation": 0,
+        "flip": "none",
+        "item": null
+      }
+    ],
+    "background_audio": null
+  },
+  {
+    "id": 42,
+    "name": "Menu board",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "resolution_width": 1080,
+    "resolution_height": 1920,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    },
+    "regions": [
+      {
+        "id": 97,
+        "width": 1080,
+        "height": 1920,
+        "top": 0,
+        "left": 0,
+        "zindex": 1,
+        "duration": -2,
+        "fit": "contain",
+        "enable_transparency": false,
+        "res_width": 1080,
+        "res_height": 1920,
+        "order": 1,
+        "is_muted": false,
+        "content_data": {},
+        "hidden": false,
+        "rotation": 0,
+        "flip": "none",
+        "item": {
+          "type": "video",
+          "id": 12
+        }
+      }
+    ],
+    "background_audio": {
+      "id": 1,
+      "item": {
+        "type": "audio",
+        "id": 14
+      }
+    }
+  }
+]

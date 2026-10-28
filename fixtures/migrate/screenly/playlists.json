@@ -1,0 +1,92 @@
+[
+  {
+    "id": "01J9FX00000000000000000P01",
+    "title": "Lobby loop",
+    "predicate": "TRUE",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P02",
+    "title": "Weekday mornings",
+    "predicate": "TRUE AND ($WEEKDAY IN {0, 1, 2, 3, 4}) AND ($TIME BETWEEN {28800000, 39600000})",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P03",
+    "title": "Holiday",
+    "predicate": "TRUE AND ($DATE >= 1766534400000) AND ($DATE <= 1767225600000)",
+    "is_enabled": true,
+    "priority": true,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P04",
+    "title": "Either or",
+    "predicate": "FALSE OR (($WEEKDAY IN {5, 6}) AND ($TIME BETWEEN {36000000, 64800000})) OR ($DATE = 1767225600000)",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P05",
+    "title": "Night",
+    "predicate": "TRUE AND ($TIME BETWEEN {79200000, 25200000})",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P06",
+    "title": "Not Tuesday",
+    "predicate": "TRUE AND ($WEEKDAY NOT IN {1})",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P07",
+    "title": "Switched off",
+    "predicate": "TRUE",
+    "is_enabled": false,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P08",
+    "title": "Odd rule",
+    "predicate": "$TIME < 3600000",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P09",
+    "title": "Evening",
+    "predicate": "TRUE AND ($TIME >= 64800000)",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  },
+  {
+    "id": "01J9FX00000000000000000P10",
+    "title": "Cafe loop",
+    "predicate": "TRUE",
+    "is_enabled": true,
+    "priority": false,
+    "team_id": "01J9FX0000000000000000T001",
+    "transition": "fade-in"
+  }
+]
