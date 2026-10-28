@@ -27,7 +27,7 @@ function durationSeconds(value: string): number | undefined {
   return Number.isFinite(total) && total > 0 ? total : undefined;
 }
 
-function boundedSeconds(flag: string, value: string, min: number, max: number, forms: string, bounds: string): number {
+export function boundedSeconds(flag: string, value: string, min: number, max: number, forms: string, bounds: string): number {
   const total = durationSeconds(value);
   if (total === undefined) throw usageError(`${flag} takes a duration with a unit, such as ${forms}, from ${bounds}.`);
   if (total < min || total > max) throw usageError(`${flag} must be from ${bounds}.`);

@@ -21,6 +21,8 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
+import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { outageLines } from "./screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
@@ -636,7 +638,7 @@ function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
   return ids;
 }
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
+export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
@@ -651,7 +653,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(
+export function jsonBody(
   response: { body: unknown; headers: Record<string, string> },
   requestId: string,
   extra?: Record<string, unknown>,
@@ -796,7 +798,7 @@ async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, reso
 }
 
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
-function commandHandler(
+export function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {
@@ -845,7 +847,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "source" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -10051,6 +10053,72 @@ export const handleScreenIdentify = commandHandler(async (args, runtime, resolve
       "The Player shows the screen's name over its content for the duration, counted from when it receives this; playback continues underneath. Run it again to replace the overlay.",
     ].join("\n"),
   };
+}, true);
+
+// Start live view of a screen, or renew it, and wait for the Player to publish.
+// The video is watched on data.viewer_url; the CLI never carries it.
+export const handleScreenLiveStart = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "start");
+  const duration = flagString(args.flags, "duration");
+  const wait = flagString(args.flags, "wait");
+  const waitMs = wait === undefined ? LIVE_WAIT_DEFAULT_MS : liveWaitMs(wait);
+  // The server's 5 minutes applies unless --duration is given.
+  const body: LiveStartRequest | undefined = duration === undefined ? undefined : { duration_s: liveDurationSeconds(duration) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const path = `/api/screens/${encodeURIComponent(id)}/live`;
+  let response;
+  try {
+    response = await client.call({ method: "POST", path, ...(body ? { body } : {}) });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  let session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live start response does not match the generated LiveSession contract.");
+  session = await settleLive(session, async () => {
+    response = await client.call({ method: "GET", path });
+    const read = liveSessionBody(response.body);
+    if (!read) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+    return read;
+  }, { waitMs, now: () => runtime.now().getTime(), sleep: runtime.sleep });
+  if (session.state === "ended" || session.state === "idle") throw liveEndedError(session);
+  const warnings = session.publisher?.connected ? [] : [liveNotReadyWarning(session)];
+  return {
+    envelope: jsonBody({ body: session, headers: response.headers }, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [liveHumanLines(session), ...warnings.map((warning) => warning.message)].join("\n"),
+  };
+}, true);
+
+// Read a screen's live session.
+export const handleScreenLiveStatus = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "status");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}/live` });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  const session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
+}, true);
+
+// End a screen's live session. Also succeeds when there is none.
+export const handleScreenLiveStop = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "stop");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const path = `/api/screens/${encodeURIComponent(id)}/live`;
+  let response;
+  try {
+    await client.call({ method: "DELETE", path });
+    response = await client.call({ method: "GET", path });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  const session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
 }, true);
 
 // Put a notice on a screen instead of its content. Single screen only.
