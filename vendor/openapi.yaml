@@ -4474,15 +4474,19 @@ paths:
           required: false
           schema:
             type: string
-            format: date-time
-          description: The instant to explain, RFC 3339 with a zone (2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00). Defaults to now when only to is given.
+            anyOf:
+              - format: date-time
+              - pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$
+          description: The instant to explain, either RFC 3339 with a zone (2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00) or a time on the screen's own clock (2026-03-08T09:30, optionally with seconds). A clock time that daylight saving skips or repeats is refused with invalid_request naming at, and a repeated one names the two instants to choose from. Defaults to now when only to is given.
         - name: to
           in: query
           required: false
           schema:
             type: string
-            format: date-time
-          description: End of the timeline of switches that starts at at. Later than at and at most 31 days after it.
+            anyOf:
+              - format: date-time
+              - pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$
+          description: End of the timeline of switches that starts at at, in the same two forms as at. Later than at, with no limit on how far; one answer lists at most 500 spans, a stretch of eight days with no change counting as one, and timeline_truncated says it stopped before reaching to.
       responses:
         '200':
           description: Every campaign's standing on the screen.
@@ -20316,10 +20320,26 @@ components:
         checkout_url:
           type: string
           description: Short-lived hosted payment capability. Never log or cache it.
+    BillingPlanSubscription:
+      type: object
+      required: [subscription_id, plan, status, entitlement, cancel_at_period_end]
+      properties:
+        subscription_id: {type: string}
+        plan: {type: string, enum: [premium, enterprise]}
+        status: {type: string}
+        entitlement: {type: string, enum: [awaiting_payment, pending_application, accepted, refused]}
+        invoice_id: {type: string}
+        invoice_status: {type: string}
+        current_period_start: {type: string, format: date-time}
+        current_period_end: {type: string, format: date-time}
+        cancel_at_period_end: {type: boolean}
     OrganizationPayments:
       type: object
       required: [organization_id, available, local_simulation, purchases]
       properties:
+        plan:
+          allOf: [{$ref: '#/components/schemas/BillingPlanSubscription'}]
+          nullable: true
         billing_account: {type: boolean}
         payment_method:
           allOf: [{$ref: '#/components/schemas/BillingPaymentMethod'}]
@@ -23157,7 +23177,7 @@ components:
         effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}], description: "The playlist at instant; until is the next instant it changes."}
         verdicts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScreenVerdict"}, description: "The takeover, then every campaign in precedence order, then every playlist schedule entry in order."}
         timeline: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/ScreenTimelineSegment"}, description: "With to: the spans from instant to to in which the playlist does not change."}
-        timeline_truncated: {type: boolean, description: "True when the timeline stopped at 500 spans before reaching to."}
+        timeline_truncated: {type: boolean, description: "True when the timeline stopped before reaching to: one answer lists at most 500 spans, and each eight days with no change counts as one. Ask again from the last span's to."}
         not_judged: {type: array, items: {$ref: "#/components/schemas/ScreenNotJudged"}}
     ScreenVerdict:
       type: object
