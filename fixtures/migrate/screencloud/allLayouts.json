@@ -1,0 +1,79 @@
+[
+  {
+    "data": {
+      "allLayouts": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "c1000000-0000-4000-8000-000000000001",
+            "width": 1920,
+            "height": 1080,
+            "config": {
+              "name": "Main and sidebar",
+              "width": 1920,
+              "height": 1080,
+              "is_flexible": true,
+              "is_scalable": true,
+              "zones": [
+                {
+                  "id": "zone1",
+                  "name": "Main Zone"
+                },
+                {
+                  "id": "zone2",
+                  "name": "Sidebar Zone"
+                }
+              ],
+              "css": "<style>\n   #zone1 {\n     position: absolute;\n     width: 70vw;\n     height: 100vh;\n     top: 0;\n     left: 0;\n     z-index: 10;\n   }\n   #zone2 {\n     position: absolute;\n     width: 30vw;\n     height: 100vh;\n     top: 0;\n     left: 70vw;\n     z-index: 10;\n   }\n</style>"
+            }
+          },
+          {
+            "id": "c1000000-0000-4000-8000-000000000002",
+            "width": 1920,
+            "height": 1080,
+            "config": {
+              "name": "Fullscreen",
+              "width": 1920,
+              "height": 1080,
+              "is_flexible": true,
+              "is_scalable": true,
+              "zones": [
+                {
+                  "id": "zone1",
+                  "name": "Full"
+                }
+              ],
+              "css": "<style>#zone1 { position: absolute; width: 100%; height: 100%; top: 0; left: 0; z-index: 10; }</style>"
+            }
+          },
+          {
+            "id": "c1000000-0000-4000-8000-000000000003",
+            "width": 1920,
+            "height": 1080,
+            "config": {
+              "name": "Quarter",
+              "width": 1920,
+              "height": 1080,
+              "is_flexible": true,
+              "is_scalable": true,
+              "zones": [
+                {
+                  "id": "zone1",
+                  "name": "A"
+                },
+                {
+                  "id": "zone2",
+                  "name": "B"
+                }
+              ],
+              "css": "<style>\n #zone1 { position: absolute; width: 960px; height: 540px; top: 0; left: 0; z-index: 10; }\n #zone2 { position: absolute; width: 50%; height: 50%; top: 50%; left: 50%; z-index: 20; }\n /* corner */\n</style>"
+            }
+          }
+        ]
+      }
+    }
+  }
+]

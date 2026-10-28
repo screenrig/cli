@@ -32,12 +32,15 @@ import type { OperationLogger } from "./log/types.js";
  * notification answer can carry its signing secret, and a webhook URL path may
  * itself embed a receiver token. A fleet link answer carries the URL that
  * creates screens, a trigger answer the password a CAP sender authenticates
- * with, and a K/V webhook answer the secret its sender authenticates with.
+ * with, a K/V webhook answer the secret its sender authenticates with, a data
+ * source request the addresses and credentials it reads with, a media sync
+ * account the client secret of the customer's own Entra app, and a media sync
+ * create the sharing link of the folder it reads.
  */
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
-  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers)(?:\/|$)/.test(path)
-    || /^\/api\/applications\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers|sources|media-sync-accounts|media-syncs)(?:\/|$)/.test(path)
+    || /^\/api\/(?:applications|cards)\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
 }
 
 /** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */

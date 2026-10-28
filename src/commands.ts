@@ -21,16 +21,22 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { glassLines } from "./screen-glass.js";
+import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
+import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
+import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
+import { outageLines } from "./screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
-import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
+import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_MAPPING_MAX_BYTES, KV_WEBHOOK_SECRET_PATTERN, KV_WEBHOOK_SIGNING_SECRET_PATTERN, type KvWebhookTarget, cardWebhookExample, cardWebhookLines, cardWebhookSigningWarning, cardWebhookTableLines, kvWebhookDeliveryTableLines, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookMapping, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines, kvWebhookTargetFlag, kvWebhooksPath } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
-import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
+import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
+import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -125,7 +131,14 @@ import {
   type CampaignScreens,
   type CampaignWrite,
   type ScreenCampaigns,
+  type CardKVWebhook,
+  type CardKVWebhookCreate,
+  type CardKVWebhookList,
+  type CardKVWebhookUpdate,
+  type CardKVWebhookWithSecrets,
+  type KVWebhook,
   type KVWebhookCreate,
+  type KVWebhookDeliveryList,
   type KVWebhookList,
   type KVWebhookWithSecret,
   type Notification,
@@ -190,6 +203,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
+import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, parseRetryAfter, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
@@ -281,6 +295,13 @@ import {
 } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
 import { cardId, cardUid, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
+import { runApply, ONLY_KINDS, type ApplyOptions, type OnlyKind } from "./migrate/apply.js";
+import { chooseDir, describeVendor, findVendor, sortedVendors, vendorHttpFor, vendorLines } from "./migrate/cli.js";
+import { loadCredentials } from "./migrate/credentials.js";
+import { openLocalFiles } from "./migrate/local-files.js";
+import { runPair } from "./migrate/pair.js";
+import { reportLines as migrationReportLines } from "./migrate/report.js";
+import { runScan } from "./migrate/scan.js";
 
 export { CLI_VERSION };
 
@@ -635,7 +656,7 @@ function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
   return ids;
 }
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
+export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
@@ -650,7 +671,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(
+export function jsonBody(
   response: { body: unknown; headers: Record<string, string> },
   requestId: string,
   extra?: Record<string, unknown>,
@@ -795,7 +816,7 @@ async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, reso
 }
 
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
-function commandHandler(
+export function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {
@@ -844,7 +865,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "source" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -6027,6 +6048,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
+      ...glassLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...replacedByLines(screen),
@@ -6037,6 +6059,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
+      ...outageLines(screen),
       ...commandLines(screen),
       ...notes.lines,
     ].join("\n"),
@@ -7415,112 +7438,209 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
 }, true);
 
-// Incoming K/V webhooks: /api/applications/{id}/kv-webhooks. url is not
-// secret; the secret is returned only by create and rotate-secret, printed
-// once, and kept out of the operation log (client.ts privateBodies).
-function kvWebhookApplication(args: ParsedArgs): string {
+// Incoming K/V webhooks: /api/applications/{id}/kv-webhooks write one key of
+// an application, /api/cards/{id}/kv-webhooks write a card's data document. url
+// is not secret; the secrets are returned only by create, rotate-secret and the
+// update that turns signing on, printed once, and kept out of the operation log
+// (client.ts privateBodies).
+function kvWebhookTarget(args: ParsedArgs, command: string): KvWebhookTarget {
   const applicationId = flagString(args.flags, "application-id");
-  if (!applicationId) throw usageError("kv commands require --app-id.");
-  return applicationId;
-}
-
-function kvWebhooksPath(applicationId: string): string {
-  return `/api/applications/${encodeURIComponent(applicationId)}/kv-webhooks`;
+  const card = flagString(args.flags, "card");
+  if (applicationId && card) throw usageError("Pass --app-id or --card, not both.");
+  if (card) return { kind: "card", id: cardUid(card) };
+  if (!applicationId) throw usageError(`kv webhook ${command} requires --app-id (a key of an application) or --card (a card's data document).`);
+  return { kind: "app", id: applicationId };
 }
 
 async function kvWebhookCall(
   client: ApiClient,
   request: Parameters<ApiClient["call"]>[0],
-  applicationId: string,
+  target: KvWebhookTarget,
   id?: string,
 ): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
   try {
     return await client.call(request);
   } catch (error) {
-    throw kvWebhookProblem(error, applicationId, id);
+    throw kvWebhookProblem(error, target, id);
   }
 }
 
-async function kvWebhookWithSecret(body: unknown, action: "create" | "rotate", applicationId: string, runtime: CliRuntime): Promise<KVWebhookWithSecret> {
-  const webhook = body as KVWebhookWithSecret | undefined;
-  if (!webhook || typeof webhook.id !== "string" || typeof webhook.secret !== "string" || !KV_WEBHOOK_SECRET_PATTERN.test(webhook.secret)) {
+async function kvWebhookWithSecret(body: unknown, action: "create" | "rotate", target: KvWebhookTarget, runtime: CliRuntime, signing = false): Promise<KVWebhookWithSecret | CardKVWebhookWithSecrets> {
+  const webhook = body as (KVWebhookWithSecret | CardKVWebhookWithSecrets) | undefined;
+  const secret = webhook?.secret;
+  const signingSecret = (webhook as CardKVWebhookWithSecrets | undefined)?.signing_secret;
+  const secretOk = typeof secret === "string" && KV_WEBHOOK_SECRET_PATTERN.test(secret);
+  const signingOk = signingSecret === undefined ? !signing : KV_WEBHOOK_SIGNING_SECRET_PATTERN.test(signingSecret);
+  // A signing rotation answers the signing secret alone; every other create or
+  // rotation answers the webhook secret.
+  const shapeOk = signing && action === "rotate" ? typeof signingSecret === "string" && signingOk : secretOk && signingOk;
+  if (!webhook || typeof webhook.id !== "string" || !shapeOk) {
     await writeRecoveries.get(runtime)?.finish();
     const id = webhook && typeof webhook.id === "string" && KV_WEBHOOK_ID_PATTERN.test(webhook.id) ? webhook.id : undefined;
+    const flag = kvWebhookTargetFlag(target);
     throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
       `The ${action === "create" ? "kv webhook create" : "rotate-secret"} request completed, but its answer did not carry a secret. Do not rerun it.`, {
         next: id
-          ? { command: `screenrig kv webhook rotate-secret ${id} --app-id ${applicationId}`, reason: "Issue a new secret; it is shown once in data.secret." }
-          : { command: `screenrig kv webhook list --app-id ${applicationId}`, reason: "Find the webhook, then run screenrig kv webhook rotate-secret ID to receive a new secret." },
+          ? { command: `screenrig kv webhook rotate-secret ${id} ${flag}${signing ? " --signing" : ""}`, reason: "Issue a new secret; it is shown once in the answer." }
+          : { command: `screenrig kv webhook list ${flag}`, reason: "Find the webhook, then run screenrig kv webhook rotate-secret ID to receive a new secret." },
       }), ExitCode.Unexpected);
   }
   return webhook;
 }
 
 async function kvWebhookSecretResult(
-  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", applicationId: string, runtime: CliRuntime,
+  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", target: KvWebhookTarget, runtime: CliRuntime, signing = false,
 ): Promise<CommandResult> {
-  const webhook = await kvWebhookWithSecret(response.body, action, applicationId, runtime);
-  const warning = kvWebhookSecretWarning(webhook.id, applicationId, action);
+  const webhook = await kvWebhookWithSecret(response.body, action, target, runtime, signing);
+  if (target.kind === "card") return cardWebhookSecretResult(response, client, webhook as CardKVWebhookWithSecrets, action, target, signing);
+  const secretWebhook = webhook as KVWebhookWithSecret;
+  const warning = kvWebhookSecretWarning(webhook.id, target, action);
   return {
     envelope: jsonBody(response, client.requestId, undefined, [warning]),
     exitCode: ExitCode.Success,
     human: [
       action === "create" ? `Created K/V webhook ${webhook.id}` : `Rotated the secret of K/V webhook ${webhook.id}`,
-      ...kvWebhookLines(webhook),
+      ...kvWebhookLines(webhook as KVWebhookWithSecret),
       "",
       "Sensitive webhook secret (store it only in the system that posts to the url above)",
-      `secret: ${webhook.secret}`,
-      `example: ${kvWebhookExample(webhook.url, webhook.secret)}`,
+      `secret: ${secretWebhook.secret}`,
+      `example: ${kvWebhookExample(webhook.url, secretWebhook.secret)}`,
       `warning: ${warning.message}`,
     ].join("\n"),
     keepRecoveryUntilOutput: true,
   };
 }
 
+/** The answer of a card webhook request that issued a secret, a signing secret, or both. */
+function cardWebhookSecretResult(
+  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, webhook: CardKVWebhookWithSecrets,
+  action: "create" | "rotate" | "update", target: KvWebhookTarget, signingRotation = false,
+): CommandResult {
+  const warnings: Warning[] = [];
+  if (webhook.secret) warnings.push(kvWebhookSecretWarning(webhook.id, target, action === "update" ? "create" : action, Boolean(webhook.signing_secret)));
+  if (webhook.signing_secret) warnings.push(cardWebhookSigningWarning(webhook.id, target));
+  const title = action === "create" ? `Created card webhook ${webhook.id}`
+    : action === "update" ? `Updated card webhook ${webhook.id}`
+    : signingRotation ? `Rotated the signing secret of card webhook ${webhook.id}` : `Rotated the secret of card webhook ${webhook.id}`;
+  const lines = [title, ...cardWebhookLines(webhook)];
+  if (webhook.secret || webhook.signing_secret) {
+    lines.push("", "Sensitive webhook secrets (store them only in the system that posts to the url above)");
+    if (webhook.secret) lines.push(`secret: ${webhook.secret}`);
+    if (webhook.signing_secret) lines.push(`signing_secret: ${webhook.signing_secret}`);
+    lines.push(`example: ${cardWebhookExample(webhook.url, webhook.secret, webhook.signing)}`);
+    for (const warning of warnings) lines.push(`warning: ${warning.message}`);
+  }
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, warnings.length ? warnings : undefined),
+    exitCode: ExitCode.Success,
+    human: lines.join("\n"),
+    ...(webhook.secret || webhook.signing_secret ? { keepRecoveryUntilOutput: true } : {}),
+  };
+}
+
 export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = kvWebhookApplication(args);
-  const key = kvWebhookKey(args.positionals[3]);
+  const target = kvWebhookTarget(args, "create");
   const description = flagString(args.flags, "description");
-  const body: KVWebhookCreate = { key, ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
+  const key = args.positionals[3];
+  let body: KVWebhookCreate | CardKVWebhookCreate;
+  if (target.kind === "app") {
+    if (flagString(args.flags, "map") !== undefined || flagBool(args.flags, "signing")) {
+      throw usageError("--map and --signing apply to a card webhook: pass --card CARD_ID instead of --app-id.");
+    }
+    body = { key: kvWebhookKey(key), ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
+  } else {
+    if (key !== undefined) throw usageError("A card webhook writes the card's data document, not a key: omit <key>.");
+    const map = flagString(args.flags, "map");
+    body = {
+      ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}),
+      ...(map !== undefined ? { mapping: kvWebhookMapping(await readAuthoringText(map, runtime, KV_WEBHOOK_MAPPING_MAX_BYTES)) } : {}),
+      ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
+    };
+  }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await kvWebhookCall(client, { method: "POST", path: kvWebhooksPath(applicationId), idempotent: true, body }, applicationId);
-  return kvWebhookSecretResult(response, client, "create", applicationId, runtime);
+  const response = await kvWebhookCall(client, { method: "POST", path: kvWebhooksPath(target), idempotent: true, body }, target);
+  return kvWebhookSecretResult(response, client, "create", target, runtime, target.kind === "card" && flagBool(args.flags, "signing"));
 }, true);
 
 export const handleKvWebhookList = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = kvWebhookApplication(args);
+  const target = kvWebhookTarget(args, "list");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await kvWebhookCall(client, { method: "GET", path: kvWebhooksPath(applicationId) }, applicationId);
-  const items = (response.body as KVWebhookList | undefined)?.items;
+  const response = await kvWebhookCall(client, { method: "GET", path: kvWebhooksPath(target) }, target);
+  const items = (response.body as KVWebhookList | CardKVWebhookList | undefined)?.items;
   const list = Array.isArray(items) ? items : [];
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: [`K/V webhooks (${list.length})`, ...kvWebhookTableLines(list)].join("\n"),
+    human: target.kind === "card"
+      ? [`Card webhooks (${list.length})`, ...cardWebhookTableLines(list as CardKVWebhook[])].join("\n")
+      : [`K/V webhooks (${list.length})`, ...kvWebhookTableLines(list as KVWebhook[])].join("\n"),
   };
 }, true);
 
 export const handleKvWebhookRotateSecret = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = kvWebhookApplication(args);
-  const id = kvWebhookId(args.positionals[3], "rotate-secret", applicationId);
+  const target = kvWebhookTarget(args, "rotate-secret");
+  const id = kvWebhookId(args.positionals[3], "rotate-secret", target);
+  const signing = flagBool(args.flags, "signing");
+  if (signing && target.kind === "app") throw usageError("--signing rotates a card webhook's signing secret: pass --card CARD_ID.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await kvWebhookCall(client, {
-    method: "POST", path: `${kvWebhooksPath(applicationId)}/${id}/rotate-secret`, idempotent: true,
-  }, applicationId, id);
-  return kvWebhookSecretResult(response, client, "rotate", applicationId, runtime);
+    method: "POST", path: `${kvWebhooksPath(target)}/${id}/rotate-secret`, idempotent: true,
+    ...(signing ? { body: { signing: true } } : {}),
+  }, target, id);
+  return kvWebhookSecretResult(response, client, "rotate", target, runtime, signing);
+}, true);
+
+export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolved) => {
+  const target = kvWebhookTarget(args, "update");
+  if (target.kind !== "card") throw usageError("kv webhook update changes a card webhook: pass --card CARD_ID.");
+  const id = kvWebhookId(args.positionals[3], "update", target);
+  const description = flagString(args.flags, "description");
+  const map = flagString(args.flags, "map");
+  const body: CardKVWebhookUpdate = {
+    ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}),
+    ...(map !== undefined ? { mapping: kvWebhookMapping(await readAuthoringText(map, runtime, KV_WEBHOOK_MAPPING_MAX_BYTES)) } : {}),
+    ...(flagBool(args.flags, "clear-map") ? { mapping: null } : {}),
+    ...(flagBool(args.flags, "enable") ? { enabled: true } : {}),
+    ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
+    ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
+    ...(flagBool(args.flags, "no-signing") ? { signing: false } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, { method: "PATCH", path: `${kvWebhooksPath(target)}/${id}`, idempotent: true, body }, target, id);
+  return cardWebhookSecretResult(response, client, response.body as CardKVWebhookWithSecrets, "update", target);
+}, true);
+
+export const handleKvWebhookDeliveries = commandHandler(async (args, runtime, resolved) => {
+  const target = kvWebhookTarget(args, "deliveries");
+  if (target.kind !== "card") throw usageError("kv webhook deliveries reads a card webhook's log: pass --card CARD_ID.");
+  const id = kvWebhookId(args.positionals[3], "deliveries", target);
+  const limit = flagString(args.flags, "limit");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, {
+    method: "GET", path: `${kvWebhooksPath(target)}/${id}/deliveries`, ...(limit ? { query: { limit } } : {}),
+  }, target, id);
+  const items = (response.body as KVWebhookDeliveryList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Deliveries of ${id} (${list.length})`, ...kvWebhookDeliveryTableLines(list)].join("\n"),
+  };
 }, true);
 
 export const handleKvWebhookDelete = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = kvWebhookApplication(args);
-  const id = kvWebhookId(args.positionals[3], "delete", applicationId);
+  const target = kvWebhookTarget(args, "delete");
+  const id = kvWebhookId(args.positionals[3], "delete", target);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await kvWebhookCall(client, {
-    method: "DELETE", path: `${kvWebhooksPath(applicationId)}/${id}`, idempotent: true,
-  }, applicationId, id);
+    method: "DELETE", path: `${kvWebhooksPath(target)}/${id}`, idempotent: true,
+  }, target, id);
   return {
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
     exitCode: ExitCode.Success,
-    human: `Deleted K/V webhook ${id}. Its URL stopped working; the key it wrote keeps its value.`,
+    human: target.kind === "card"
+      ? `Deleted card webhook ${id}. Its URL stopped working; the card keeps its document.`
+      : `Deleted K/V webhook ${id}. Its URL stopped working; the key it wrote keeps its value.`,
   };
 }, true);
 
@@ -8430,15 +8550,17 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       content.push(record);
     } else if (RESOURCE_ID_PATTERNS.release.test(input)) {
       content.push({ primitive: "application", release_id: input });
-    } else if (/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    } else if (iframeSnippetSource(input) !== undefined || /^[a-z][a-z0-9+.-]*:/i.test(input)) {
+      // A pasted <iframe> embed code gives its src; the server rebuilds a
+      // Google or Microsoft document link when the playlist is written.
       let url: URL;
-      try { url = new URL(input); } catch { throw usageError("Provide a valid http or https iframe URL."); }
+      try { url = new URL(iframeSnippetSource(input) ?? input); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
       if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) throw usageError("Iframe URLs must use http or https.");
       content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
     } else {
       const sourcePath = path.resolve(runtime.cwd(), input);
       try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }
-      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, or http(s) URL."); }
+      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, http(s) URL, or iframe embed code."); }
       files.set(content.length, sourcePath);
       // Audio files become soundtrack tracks, not pages, so the preflight
       // shape check must see them as audio before anything uploads.
@@ -8787,11 +8909,13 @@ export const handleWebhooksDeliveries = commandHandler(async (args, runtime, res
   };
 });
 
-// Notifications: /api/notifications, email and webhook channels. A webhook's
-// signing secret is printed once in data.secret (create, rotate-secret) and
-// never reaches config, logs, or the write-recovery ledger, as for webhooks; an
-// email notification has no secret. Both channels share the 20-per-project
-// limit and the revision guard (webhookRevisionHeaders).
+// Notifications: /api/notifications, email, webhook, Slack, Teams, PagerDuty
+// and Telegram channels. A webhook's signing secret is printed once in
+// data.secret (create, rotate-secret) and never reaches config, logs, or the
+// write-recovery ledger, as for webhooks; the other channels have no secret. A
+// chat or pager credential (destination) is only ever sent, never printed back:
+// the notification shows a masked destination_hint. Every channel shares the
+// 20-per-project limit and the revision guard (webhookRevisionHeaders).
 const NOTIFICATIONS_PATH = "/api/notifications";
 
 async function notificationCall(
@@ -8845,15 +8969,28 @@ async function notificationSecretResult(response: Awaited<ReturnType<ApiClient["
 export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
   const email = flagString(args.flags, "email");
   const webhook = flagString(args.flags, "webhook");
-  if ((email === undefined) === (webhook === undefined)) throw usageError("notifications create requires exactly one of --email or --webhook.");
+  const chat = NOTIFICATION_CHAT_CHANNELS.flatMap(({ channel, flag }) => {
+    const value = flagString(args.flags, flag);
+    return value === undefined ? [] : [{ channel, flag: `--${flag}`, value }];
+  });
+  if ((email === undefined ? 0 : 1) + (webhook === undefined ? 0 : 1) + chat.length !== 1) {
+    throw usageError("notifications create requires exactly one of --email, --webhook, --slack, --teams, --pagerduty or --telegram.");
+  }
+  const telegramChat = flagString(args.flags, "telegram-chat");
+  if ((chat[0]?.channel === "telegram") !== (telegramChat !== undefined)) {
+    throw usageError("--telegram and --telegram-chat go together: the bot token and the chat it posts to.");
+  }
   const conditions = flagString(args.flags, "conditions");
   const events = flagString(args.flags, "events");
   const tags = flagString(args.flags, "tag");
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
   const body: NotificationWrite = {
-    channel: email !== undefined ? "email" : "webhook",
-    ...(email !== undefined ? { recipients: notificationRecipients(email) } : { url: webhookUrl(webhook!, "--webhook") }),
+    channel: email !== undefined ? "email" : webhook !== undefined ? "webhook" : chat[0]!.channel,
+    ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
+    ...(webhook !== undefined ? { url: webhookUrl(webhook, "--webhook") } : {}),
+    ...(chat.length ? { destination: await notificationDestination(chat[0]!.value, chat[0]!.flag, runtime) } : {}),
+    ...(telegramChat !== undefined ? { telegram_chat_id: telegramChat } : {}),
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
@@ -8899,6 +9036,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const id = notificationId(args.positionals[2], "update");
   const email = flagString(args.flags, "email");
   const url = flagString(args.flags, "url");
+  const destination = flagString(args.flags, "destination");
+  const telegramChat = flagString(args.flags, "telegram-chat");
   const conditions = flagString(args.flags, "conditions");
   const events = flagString(args.flags, "events");
   const tags = flagString(args.flags, "tag");
@@ -8908,6 +9047,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const patch: NotificationPatch = {
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
     ...(url !== undefined ? { url: webhookUrl(url) } : {}),
+    ...(destination !== undefined ? { destination: await notificationDestination(destination, "--destination", runtime) } : {}),
+    ...(telegramChat !== undefined ? { telegram_chat_id: telegramChat } : {}),
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(flagBool(args.flags, "clear-conditions") ? { conditions: [] } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
@@ -8922,7 +9063,7 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   // --snooze derives its instant from the clock, so a rerun fingerprints
@@ -9212,10 +9353,43 @@ export const handleFleetLinksList = commandHandler(async (args, runtime, resolve
 
 export const handleFleetLinksShow = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "show");
+  const wantsProvisioning = flagBool(args.flags, "android-provisioning");
+  const origin = wantsProvisioning ? siteOrigin(resolved.apiUrl) : undefined;
+  if (wantsProvisioning && origin === undefined) throw unsupportedSiteError();
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await fleetLinkCall(client, { method: "GET", path: `${FLEET_LINKS_PATH}/${id}` }, id);
-  return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  if (origin === undefined) return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  return fleetLinkAndroidProvisioning(response, client, origin, runtime);
 });
+
+/**
+ * `fleet-links show --android-provisioning`: the payload the dashboard's QR code
+ * encodes, from the link's secret and the site's `managed` Android build. The
+ * secret comes from the link as returned (a Read only credential gets none) and
+ * the payload is printed once, under a sensitive label, never logged.
+ */
+async function fleetLinkAndroidProvisioning(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, origin: string, runtime: CliRuntime): Promise<CommandResult> {
+  const answered = response.body as FleetLink | undefined;
+  const secret = answered && typeof answered === "object" && !fleetLinkUrlProblem(answered.url) ? fleetLinkSecret(answered.url) : undefined;
+  if (secret === undefined) {
+    throw new CliError(makeProblem("fleet_link_secret_unavailable", "Fleet link secret unavailable", 403,
+      answered?.url_redacted === true
+        ? "A Read only credential receives no fleet link URL, so the provisioning payload cannot carry the link's secret."
+        : "The fleet link was returned without a usable URL, so the provisioning payload cannot carry its secret.",
+      { next: { command: "screenrig login --access manage", reason: "A Manage sign-in receives the fleet link URL." } }));
+  }
+  const artifact = await fetchManagedArtifact(origin, runtime.siteFetch ?? globalThis.fetch);
+  const provisioning = androidProvisioning(artifact, origin, secret);
+  if (provisioning === undefined) {
+    throw unexpectedResponseError(`The managed Android build lists a path outside ${origin}/android/, so no download location is built for it.`);
+  }
+  const id = String(answered?.id ?? "");
+  return {
+    envelope: successEnvelope({ id, provisioning }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: [`Android device owner provisioning for fleet link ${id}`, PROVISIONING_NOTICE, "", JSON.stringify(provisioning)].join("\n"),
+  };
+}
 
 export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "update");
@@ -9923,6 +10097,96 @@ export const handleScreenIdentify = commandHandler(async (args, runtime, resolve
   };
 }, true);
 
+// Start live view of a screen, or renew it, and wait for the Player to publish.
+// The video is watched on data.viewer_url; the CLI never carries it.
+export const handleScreenLiveStart = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "start");
+  const duration = flagString(args.flags, "duration");
+  const wait = flagString(args.flags, "wait");
+  const waitMs = wait === undefined ? LIVE_WAIT_DEFAULT_MS : liveWaitMs(wait);
+  // The server's 5 minutes applies unless --duration is given.
+  const body: LiveStartRequest | undefined = duration === undefined ? undefined : { duration_s: liveDurationSeconds(duration) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const path = `/api/screens/${encodeURIComponent(id)}/live`;
+  let response;
+  try {
+    response = await client.call({ method: "POST", path, ...(body ? { body } : {}) });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  let session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live start response does not match the generated LiveSession contract.");
+  session = await settleLive(session, async () => {
+    response = await client.call({ method: "GET", path });
+    const read = liveSessionBody(response.body);
+    if (!read) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+    return read;
+  }, { waitMs, now: () => runtime.now().getTime(), sleep: runtime.sleep });
+  if (session.state === "ended" || session.state === "idle") throw liveEndedError(session);
+  const warnings = session.publisher?.connected ? [] : [liveNotReadyWarning(session)];
+  return {
+    envelope: jsonBody({ body: session, headers: response.headers }, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [liveHumanLines(session), ...warnings.map((warning) => warning.message)].join("\n"),
+  };
+}, true);
+
+// Read a screen's live session.
+export const handleScreenLiveStatus = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "status");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}/live` });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  const session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
+}, true);
+
+// End a screen's live session. Also succeeds when there is none.
+export const handleScreenLiveStop = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "stop");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const path = `/api/screens/${encodeURIComponent(id)}/live`;
+  let response;
+  try {
+    await client.call({ method: "DELETE", path });
+    response = await client.call({ method: "GET", path });
+  } catch (error) {
+    throw liveProblem(error, id);
+  }
+  const session = liveSessionBody(response.body);
+  if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
+}, true);
+
+// Save JPEG frames of a screen's live stream: start the session, wait for the
+// Player to publish, start frames, then read each new frame once.
+export const handleScreenLiveFrame = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "frame");
+  const count = flagNumber(args.flags, "count") ?? 1;
+  if (!Number.isInteger(count) || count < 1) throw usageError("--count must be a whole number of at least 1.");
+  const interval = flagString(args.flags, "interval");
+  const intervalMs = interval === undefined ? LIVE_FRAME_INTERVAL_DEFAULT_MS : liveFrameIntervalMs(interval);
+  const duration = flagString(args.flags, "duration");
+  const wait = flagString(args.flags, "wait");
+  const plan = {
+    screenId: id,
+    count,
+    intervalMs,
+    leaseSeconds: liveFrameLeaseSeconds(duration === undefined ? undefined : liveDurationSeconds(duration), count, intervalMs),
+    waitMs: wait === undefined ? LIVE_WAIT_DEFAULT_MS : liveWaitMs(wait),
+    stop: flagBool(args.flags, "stop"),
+    output: await resolveFrameOutput(runtime.cwd(), flagString(args.flags, "output"), count),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const result = await captureLiveFrames(plan, client, { now: () => runtime.now().getTime(), sleep: runtime.sleep });
+  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: liveFramesHumanLines(result) };
+}, true);
+
 // Put a notice on a screen instead of its content. Single screen only.
 export const handleScreenSuspend = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
@@ -10156,4 +10420,146 @@ export const handleScreenDisplayClear = commandHandler(async (args, runtime, res
     exitCode: ExitCode.Success,
     human: displayHuman(`Cleared the display override on ${id}`, response.body as Screen | undefined),
   };
+}, true);
+
+// ---- migrate: import from another signage system -------------------------------------------------
+
+export const handleMigrateVendors = commandHandler(async (args) => {
+  const id = args.positionals[2];
+  const vendors = id === undefined ? sortedVendors() : [findVendor(id)];
+  return {
+    envelope: successEnvelope({ vendors: vendors.map(describeVendor) }),
+    exitCode: ExitCode.Success,
+    human: vendors.flatMap((vendor) => vendorLines(vendor)).join("\n"),
+  };
+}, false);
+
+export const handleMigrateScan = commandHandler(async (args, runtime) => {
+  const adapter = findVendor(flagString(args.flags, "from") ?? "");
+  const resolvePath = (flag: string): string | undefined => {
+    const value = flagString(args.flags, flag);
+    return value === undefined ? undefined : path.resolve(runtime.cwd(), value);
+  };
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"), adapter.id);
+  const files = resolvePath("files");
+  const { report } = await runScan({
+    adapter,
+    flags: {
+      ...(flagString(args.flags, "url") !== undefined ? { url: flagString(args.flags, "url")! } : {}),
+      ...(flagString(args.flags, "region") !== undefined ? { region: flagString(args.flags, "region")! } : {}),
+      ...(flagString(args.flags, "timezone") !== undefined ? { timezone: flagString(args.flags, "timezone")! } : {}),
+      ...(files !== undefined ? { files } : {}),
+    },
+    ...(resolvePath("credentials") !== undefined ? { credentialsFile: resolvePath("credentials")! } : {}),
+    dir,
+    env: runtime.env,
+    now: runtime.now,
+    http: vendorHttpFor(runtime, adapter),
+  });
+  return {
+    envelope: successEnvelope({ ...report, dir: dir.dir, scan_file: dir.scanFile }),
+    exitCode: ExitCode.Success,
+    human: migrationReportLines(report, dir.dir).join("\n"),
+  };
+}, false);
+
+async function migrateProjectId(client: ApiClient, configured: string | undefined): Promise<string> {
+  if (configured) return configured;
+  const id = ((await client.call({ method: "GET", path: "/api/project" })).body as Project | undefined)?.id;
+  if (typeof id !== "string" || id.length === 0) throw usageError("The project id is unavailable, so the migration directory cannot be bound to it.");
+  return id;
+}
+
+export const handleMigrateApply = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"));
+  const scan = await dir.readScan();
+  const adapter = findVendor(scan.vendor);
+  const concurrency = flagNumber(args.flags, "concurrency") ?? UPLOAD_BATCH_DEFAULT_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < UPLOAD_BATCH_MIN_CONCURRENCY || concurrency > UPLOAD_BATCH_MAX_CONCURRENCY) {
+    throw usageError(`--concurrency must be a whole number from ${UPLOAD_BATCH_MIN_CONCURRENCY} to ${UPLOAD_BATCH_MAX_CONCURRENCY}.`);
+  }
+  const canvasText = flagString(args.flags, "canvas");
+  const canvasMatch = canvasText === undefined ? undefined : /^(\d+)x(\d+)$/i.exec(canvasText);
+  const onlyText = flagString(args.flags, "only");
+  const only = new Set<OnlyKind>(onlyText === undefined ? ONLY_KINDS : (onlyText.split(",") as OnlyKind[]));
+  const credentialsFile = flagString(args.flags, "credentials") === undefined ? undefined : path.resolve(runtime.cwd(), flagString(args.flags, "credentials")!);
+  const folder = flagString(args.flags, "folder");
+  if (folder !== undefined) mediaFolderId(folder, "--folder");
+  const options: ApplyOptions = {
+    dryRun: flagBool(args.flags, "dry-run"),
+    only,
+    ...(folder !== undefined ? { folder } : {}),
+    canvas: canvasMatch ? { width: Number(canvasMatch[1]), height: Number(canvasMatch[2]) } : { width: 1920, height: 1080 },
+    concurrency,
+    noTranscode: flagBool(args.flags, "no-transcode"),
+    transcodeOptions: transcodeOptionsFromArgs(args),
+    timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
+    pollMs: 1000,
+  };
+  const json = !flagBool(args.flags, "human");
+  const secrets: string[] = [];
+  const result = await runApply({
+    runtime,
+    client,
+    dir,
+    scan,
+    vendorName: adapter.name,
+    apiUrl: resolved.apiUrl.replace(/\/+$/, ""),
+    projectId: await migrateProjectId(client, resolved.projectId),
+    openSession: async () => {
+      const credentials = await loadCredentials(adapter, { ...(credentialsFile !== undefined ? { file: credentialsFile } : {}), env: runtime.env });
+      secrets.push(...Object.values(credentials));
+      const files = scan.inputs.files !== undefined ? await openLocalFiles(scan.inputs.files) : undefined;
+      return adapter.open({
+        ...(scan.inputs.url !== undefined ? { url: scan.inputs.url } : {}),
+        ...(scan.inputs.region !== undefined ? { region: scan.inputs.region } : {}),
+        ...(scan.inputs.timezone !== undefined ? { timezone: scan.inputs.timezone } : {}),
+        credentials,
+        http: vendorHttpFor(runtime, adapter),
+        ...(files ? { files } : {}),
+        now: runtime.now,
+      });
+    },
+    openFiles: async () => {
+      if (scan.inputs.files === undefined) throw usageError("This scan used no --files, so there are no local originals to import.");
+      return openLocalFiles(scan.inputs.files);
+    },
+    reporter: progressReporterFor(args, runtime),
+    rerun: shellQuote([
+      "screenrig", "migrate", "apply", "--dir", dir.dir,
+      ...(onlyText !== undefined ? ["--only", onlyText] : []),
+      ...(folder !== undefined ? ["--folder", folder] : []),
+      ...(canvasText !== undefined ? ["--canvas", canvasText] : []),
+      ...(credentialsFile !== undefined ? ["--credentials", credentialsFile] : []),
+      ...(flagString(args.flags, "concurrency") !== undefined ? ["--concurrency", String(concurrency)] : []),
+      ...(options.noTranscode ? ["--no-transcode"] : []),
+    ]),
+    progress: (event) => {
+      runtime.stderr.write(json ? `${JSON.stringify(event)}\n` : `screenrig: migrate ${String(event.phase)} ${String(event.done)}/${String(event.total)}\n`);
+    },
+    secrets,
+  }, options);
+  return {
+    envelope: successEnvelope(result.data, { request_id: client.requestId, warnings: result.warnings }),
+    exitCode: result.exitCode,
+    human: result.human,
+  };
+}, true);
+
+export const handleMigratePair = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const rawCode = args.positionals.slice(2).join(" ");
+  if (!rawCode) throw usageError("migrate pair requires CODE.");
+  const code = canonicalPairingCode(rawCode, "migrate pair CODE");
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"));
+  const scan = await dir.readScan();
+  const result = await runPair({
+    runtime, client, dir, scan,
+    apiUrl: resolved.apiUrl.replace(/\/+$/, ""),
+    projectId: await migrateProjectId(client, resolved.projectId),
+    code,
+    screen: flagString(args.flags, "screen") ?? "",
+  });
+  return { envelope: successEnvelope(result.data, { request_id: client.requestId }), exitCode: ExitCode.Success, human: result.human };
 }, true);

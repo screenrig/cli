@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications and alerts add nine immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 58);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate and sources add eleven immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 60);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -40,6 +40,10 @@ test("root help is compact and every command is discoverable through immediate c
     "recovery list",
     "recovery show",
     "recovery reconcile",
+    "migrate vendors",
+    "migrate scan",
+    "migrate apply",
+    "migrate pair",
     "reviews list",
     "reviews show",
     "reviews withdraw",
@@ -142,6 +146,18 @@ test("root help is compact and every command is discoverable through immediate c
     "media folder create",
     "media folder update",
     "media folder delete",
+    "media sync account add microsoft365",
+    "media sync account list",
+    "media sync account show",
+    "media sync account update",
+    "media sync account test",
+    "media sync account delete",
+    "media sync create sharepoint",
+    "media sync list",
+    "media sync show",
+    "media sync update",
+    "media sync run",
+    "media sync delete",
     "compose catalog",
     "compose batch",
     "compose render",
@@ -187,6 +203,10 @@ test("root help is compact and every command is discoverable through immediate c
     "campaign explain",
     "screen update",
     "screen list",
+    "screen live frame",
+    "screen live start",
+    "screen live status",
+    "screen live stop",
     "screen show",
     "screen storage-forecast",
     "screen assign",
@@ -216,6 +236,8 @@ test("root help is compact and every command is discoverable through immediate c
     "kv webhook list",
     "kv webhook rotate-secret",
     "kv webhook delete",
+    "kv webhook update",
+    "kv webhook deliveries",
     "comment show screen",
     "comment show playlist",
     "comment set screen",
@@ -286,6 +308,13 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts mute",
     "alerts mutes",
     "alerts unmute",
+    "source list",
+    "source show",
+    "source create",
+    "source update",
+    "source test",
+    "source refresh",
+    "source delete",
     "doctor",
     "version",
     "status",
@@ -306,7 +335,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
   assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
   assert.deepEqual(media.commands.map((child) => child.name), [
-    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete", "move", "folder",
+    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete", "move", "folder", "sync",
   ]);
   for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
@@ -383,7 +412,7 @@ test("negative switches are documented as booleans without value placeholders", 
 
 test("structured discovery exposes positional cardinality, choices, defaults and examples", () => {
   const init = invoke(["playlist", "init", "--help"]).data;
-  assert.deepEqual(init.arguments, [{ name: "inputs", description: "Local image/video/audio files, med_ IDs, rel_ IDs, or http(s) URLs (iframe pages) in playback order; audio becomes the soundtrack", required: true, variadic: true }]);
+  assert.deepEqual(init.arguments, [{ name: "inputs", description: "Local image/video/audio files, med_ IDs, rel_ IDs, http(s) URLs or pasted <iframe> embed codes (iframe pages) in playback order; audio becomes the soundtrack", required: true, variadic: true }]);
   assert.deepEqual(init.options.find((option) => option.name === "--fit")?.choices, ["contain", "cover", "fill"]);
   assert.equal(init.options.find((option) => option.name === "--duration-ms")?.default, undefined);
   assert.match(init.options.find((option) => option.name === "--duration-ms")?.description ?? "", /8000.*86400000 for application pages/);
@@ -471,10 +500,18 @@ test("canonical vocabulary keeps legacy invocations equivalent without rewriting
   assert.equal(selector?.required, true);
   assert.deepEqual(selector?.aliases, ["--application-id"]);
   assert.equal(commandHelp(["kv", "get"]).options.some(option => option.name === "--application-id"), false);
+  // A webhook writes an application key or a card's document: exactly one of --app-id and --card.
   for (const action of ["create", "list", "rotate-secret", "delete"]) {
-    const webhookSelector = commandHelp(["kv", "webhook", action]).options.find(option => option.name === "--app-id");
-    assert.equal(webhookSelector?.required, true, action);
+    const help = commandHelp(["kv", "webhook", action]);
+    const webhookSelector = help.options.find(option => option.name === "--app-id");
+    assert.equal(webhookSelector?.required, false, action);
     assert.deepEqual(webhookSelector?.aliases, ["--application-id"], action);
+    assert.equal(help.options.some(option => option.name === "--card"), true, action);
+    assert.deepEqual(help.relationships?.map(({ kind, options }) => ({ kind, options })), [{ kind: "exactlyOne", options: ["--app-id", "--card"] }], action);
+  }
+  for (const action of ["update", "deliveries"]) {
+    const card = commandHelp(["kv", "webhook", action]).options.find(option => option.name === "--card");
+    assert.equal(card?.required, true, action);
   }
   assert.equal(commandHelp(["kv", "webhook"]).kind, "group");
 });
@@ -520,21 +557,27 @@ test("every operational command has examples that parse and stdin help matches i
 test("notifications help, JSON help and preflight agree on option relationships and write scope", () => {
   const create = invoke(["notifications", "create", "--help"]).data;
   assert.deepEqual(create.relationships, [
-    { kind: "exactlyOne", options: ["--email", "--webhook"] },
+    { kind: "exactlyOne", options: ["--email", "--webhook", "--slack", "--teams", "--pagerduty", "--telegram"] },
     { kind: "atLeastOne", options: ["--conditions", "--events"] },
     { kind: "requires", options: ["--email", "--conditions"] },
     { kind: "requires", options: ["--events", "--webhook"] },
+    { kind: "together", options: ["--telegram", "--telegram-chat"] },
   ]);
-  assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook"]);
-  assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook", "--slack", "--teams", "--pagerduty", "--telegram"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email", "--slack", "--teams", "--pagerduty", "--telegram"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--telegram")?.conflicts, ["--email", "--webhook", "--slack", "--teams", "--pagerduty"]);
+  for (const name of ["--slack", "--teams", "--pagerduty", "--telegram"]) {
+    assert.match(create.options.find((option) => option.name === name)?.description ?? "", /\bstdin\b/, `${name} reads its credential from stdin`);
+  }
   assert.equal(create.options.find((option) => option.name === "--tag")?.type, "value");
-  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing/);
-  for (const sentence of ["Provide exactly one of --email or --webhook.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook."]) {
+  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing/);
+  for (const sentence of ["Provide exactly one of --email or --webhook or --slack or --teams or --pagerduty or --telegram.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook.", "Provide --telegram and --telegram-chat together."]) {
     assert.equal(create.usage.split(sentence).length, 2, `${sentence} appears once in the human help`);
   }
   const update = commandHelp(["notifications", "update"]);
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
-  assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url"] });
+  assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url", "--destination"] });
+  assert.match(update.options.find((option) => option.name === "--destination")?.description ?? "", /\bstdin\b/);
   assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens"]);
   assert.deepEqual(update.options.find((option) => option.name === "--description")?.conflicts, ["--clear-description"]);
   assert.match(update.options.find((option) => option.name === "--snooze")?.description ?? "", /30m, 1h, 4h, 2d.*off/);
@@ -550,7 +593,7 @@ test("notifications help, JSON help and preflight agree on option relationships 
     assert.match(commandHelp(["notifications", name]).notes.join("\n"), /needs Manage access/i, `${name} states its write scope`);
   }
   assert.deepEqual(commandHelp(["notifications"]).commands.map((child) => child.name), ["create", "list", "show", "update", "delete", "rotate-secret", "test", "deliveries"]);
-  assert.match(commandHelp(["notifications"]).usage, /at most 20\s+notifications, email and webhook together/);
+  assert.match(commandHelp(["notifications"]).usage, /at most 20\s+notifications of every channel/);
   assert.match(commandHelp(["webhooks"]).usage, /Email and screen alerts[\s\S]*are screenrig notifications/);
 });
 
@@ -591,11 +634,11 @@ test("alerts help, JSON help and preflight agree on option relationships, choice
   }
   assert.deepEqual(commandHelp(["alerts"]).commands.map((child) => child.name), ["list", "show", "ack", "snooze", "mute", "mutes", "unmute"]);
   const group = commandHelp(["alerts"]).usage;
-  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck or not_playing/);
+  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck, not_playing or loop_stalled/);
   assert.match(group, /crashing is a notice, never\s+an alert/);
   assert.match(group, /has at most 50 current mutes/);
-  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing or crashing/);
-  assert.match(commandHelp(["notifications", "create"]).notes.join("\n"), /not_playing \(the Player shows an error instead of its content\)/);
+  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing, loop_stalled or crashing/);
+  assert.match(commandHelp(["notifications", "create"]).notes.join("\n"), /not_playing \(the Player shows an error instead of its content\), loop_stalled \(no media start has reached ScreenRig/);
   assert.match(commandHelp(["webhooks"]).usage, /content stuck, not playing, crashing\) are screenrig notifications/);
 });
 

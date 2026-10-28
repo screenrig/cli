@@ -1,0 +1,553 @@
+{
+  "account": "yodeck:7",
+  "label": "Yodeck",
+  "media": [
+    {
+      "id": "11",
+      "name": "Welcome",
+      "filename": "Welcome.png",
+      "kind": "image",
+      "original": true
+    },
+    {
+      "id": "12",
+      "name": "Promo",
+      "filename": "Promo.mp4",
+      "kind": "video",
+      "fetch": {
+        "url": "https://cdn.example.com/yodeck/12/play.mp4"
+      },
+      "original": false
+    },
+    {
+      "id": "13",
+      "name": "Remote logo",
+      "filename": "Remote logo.png",
+      "kind": "image",
+      "fetch": {
+        "url": "https://assets.example.com/logo.png"
+      },
+      "original": true
+    },
+    {
+      "id": "14",
+      "name": "Theme",
+      "filename": "Theme.mp3",
+      "kind": "audio",
+      "original": true
+    },
+    {
+      "id": "20",
+      "name": "Promo clip",
+      "filename": "Promo clip.mp4",
+      "kind": "video",
+      "fetch": {
+        "url": "https://assets.example.com/clip.mp4"
+      },
+      "original": true
+    }
+  ],
+  "playlists": [
+    {
+      "id": "31",
+      "name": "Lobby loop",
+      "items": [
+        {
+          "media_id": "11",
+          "duration_s": 12
+        },
+        {
+          "media_id": "12"
+        },
+        {
+          "media_id": "13",
+          "duration_s": 8
+        },
+        {
+          "url": "https://example.com/board",
+          "title": "Board",
+          "duration_s": 20
+        },
+        {
+          "media_id": "17",
+          "duration_s": 10
+        },
+        {
+          "media_id": "14"
+        },
+        {
+          "media_id": "12",
+          "duration_s": 10
+        },
+        {
+          "playlist_id": "32"
+        },
+        {
+          "media_id": "20"
+        }
+      ],
+      "shuffle": true,
+      "notes": [
+        "Its sub-playlist Promos was limited to a number of items or a time; it now plays in full.",
+        "An item of type hide_playlist was left out."
+      ]
+    },
+    {
+      "id": "32",
+      "name": "Promos",
+      "items": [
+        {
+          "media_id": "13",
+          "duration_s": 15
+        },
+        {
+          "layout_id": "42"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "33",
+      "name": "Document set",
+      "items": [
+        {
+          "media_id": "16",
+          "duration_s": 10
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "media:15",
+      "name": "Board",
+      "items": [
+        {
+          "url": "https://example.com/board",
+          "title": "Board"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "media:13",
+      "name": "Remote logo",
+      "items": [
+        {
+          "media_id": "13"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "layouts": [
+    {
+      "id": "41",
+      "name": "Split",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "91",
+          "name": "Zone 1",
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 1080,
+          "z": 1,
+          "items": [
+            {
+              "media_id": "11",
+              "duration_s": 10
+            }
+          ]
+        },
+        {
+          "id": "92",
+          "name": "Zone 2",
+          "x": 1280,
+          "y": 0,
+          "width": 640,
+          "height": 540,
+          "z": 2,
+          "items": [
+            {
+              "url": "https://example.com/board",
+              "title": "Board"
+            }
+          ]
+        },
+        {
+          "id": "93",
+          "name": "Zone 3",
+          "x": 1280,
+          "y": 540,
+          "width": 640,
+          "height": 540,
+          "z": 3,
+          "items": []
+        },
+        {
+          "id": "95",
+          "name": "Zone 4",
+          "x": 0,
+          "y": 900,
+          "width": 500,
+          "height": 180,
+          "z": 5,
+          "items": []
+        },
+        {
+          "id": "96",
+          "name": "Zone 5",
+          "x": 100,
+          "y": 100,
+          "width": 200,
+          "height": 200,
+          "z": 6,
+          "items": [
+            {
+              "media_id": "13"
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "A rotated zone comes over unrotated."
+      ]
+    },
+    {
+      "id": "42",
+      "name": "Menu board",
+      "width": 1080,
+      "height": 1920,
+      "zones": [
+        {
+          "id": "97",
+          "name": "Zone 1",
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920,
+          "z": 1,
+          "items": [
+            {
+              "media_id": "12"
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "Its background audio does not come over."
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "tag:lobby",
+      "name": "Lobby"
+    },
+    {
+      "id": "tag:café",
+      "name": "Café"
+    }
+  ],
+  "screens": [
+    {
+      "id": "61",
+      "name": "Front desk",
+      "group_ids": [
+        "tag:lobby"
+      ],
+      "content": {
+        "playlist_id": "31"
+      },
+      "timezone": "America/Toronto",
+      "notes": []
+    },
+    {
+      "id": "62",
+      "name": "Cafe wall",
+      "group_ids": [
+        "tag:café",
+        "tag:lobby"
+      ],
+      "content": {
+        "playlist_id": "31"
+      },
+      "timezone": "America/Phoenix",
+      "notes": []
+    },
+    {
+      "id": "63",
+      "name": "Back office",
+      "group_ids": [],
+      "timezone": "UTC",
+      "notes": [
+        "Its schedule turns the screen off between events; set a default playlist after pairing."
+      ]
+    },
+    {
+      "id": "64",
+      "name": "Stockroom",
+      "group_ids": [
+        "tag:café"
+      ],
+      "notes": [
+        "Its time zone Mars/Olympus is not one this CLI knows, so none is set.",
+        "It was turned off in Yodeck, so it has no default content."
+      ]
+    },
+    {
+      "id": "65",
+      "name": "Kiosk",
+      "group_ids": [],
+      "content": {
+        "playlist_id": "media:15"
+      },
+      "notes": []
+    },
+    {
+      "id": "66",
+      "name": "Lobby",
+      "group_ids": [
+        "tag:lobby"
+      ],
+      "content": {
+        "layout_id": "41"
+      },
+      "timezone": "America/Los_Angeles",
+      "notes": []
+    }
+  ],
+  "schedules": [
+    {
+      "id": "51:1",
+      "name": "Opening hours: Promos",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "playlist_id": "32"
+      },
+      "start": "2026-11-02T07:00",
+      "end": "2026-11-02T11:00",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "until": "2026-12-18"
+      },
+      "priority": 3,
+      "notes": []
+    },
+    {
+      "id": "51:2",
+      "name": "Opening hours: Menu board",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "layout_id": "42"
+      },
+      "start": "2026-12-24T09:00",
+      "end": "2026-12-24T13:00",
+      "priority": 5,
+      "notes": []
+    },
+    {
+      "id": "51:3",
+      "name": "Opening hours: Remote logo",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "playlist_id": "media:13"
+      },
+      "start": "2026-11-10T18:00",
+      "end": "2026-11-10T19:30",
+      "repeat": {
+        "every": "day",
+        "interval": 2,
+        "until": "2050-01-01",
+        "count": 10
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "51:5",
+      "name": "Opening hours: Lobby loop",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "playlist_id": "31"
+      },
+      "start": "2026-11-25T09:00",
+      "end": "2026-11-25T10:00",
+      "repeat": {
+        "every": "month",
+        "until": "2050-01-01"
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "51:6",
+      "name": "Opening hours: Promos",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "playlist_id": "32"
+      },
+      "start": "2026-11-07T10:00",
+      "end": "2026-11-07T12:00",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "sun"
+        ],
+        "until": "2026-12-31"
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "51:8",
+      "name": "Opening hours: Promos",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "62"
+        ]
+      },
+      "content": {
+        "playlist_id": "32"
+      },
+      "start": "2026-12-01T09:00",
+      "end": "2026-12-01T10:00",
+      "repeat": {
+        "every": "year",
+        "until": "2050-01-01"
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "53:1",
+      "name": "Back office hours",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "63"
+        ]
+      },
+      "content": {
+        "playlist_id": "31"
+      },
+      "start": "2026-11-03T08:00",
+      "end": "2026-11-03T18:00",
+      "repeat": {
+        "every": "week",
+        "until": "2026-12-18"
+      },
+      "priority": 0,
+      "notes": []
+    }
+  ],
+  "not_imported": [
+    {
+      "kind": "media",
+      "source_id": "16",
+      "name": "Menu PDF",
+      "reason": "Documents (PDF, Word, Excel, PowerPoint) are not images, video or audio.",
+      "next": "Export its pages as images, or a deck as a video, and add them with media upload-batch."
+    },
+    {
+      "kind": "media",
+      "source_id": "17",
+      "name": "Clock",
+      "reason": "Apps (clocks, weather, RSS and other widgets) are not media files.",
+      "next": "Rebuild it as a built-in card, or as a web page if it shows one."
+    },
+    {
+      "kind": "media",
+      "source_id": "18",
+      "name": "Street cam",
+      "reason": "It is a live stream or a capture input, not a file.",
+      "next": "Add it to a playlist after the import: a YouTube link goes in an iframe page, an HLS or RTSP address in a stream page."
+    },
+    {
+      "kind": "media",
+      "source_id": "19",
+      "name": "Summer video",
+      "reason": "Yodeck has not finished processing it.",
+      "next": "Wait for Yodeck to finish it, then scan again."
+    },
+    {
+      "kind": "media",
+      "source_id": "21",
+      "name": "Launch video",
+      "reason": "It is a hosted video or audio link (YouTube, Vimeo), not a file.",
+      "next": "Add it to a playlist after the import: a YouTube link goes in an iframe page, an HLS or RTSP address in a stream page."
+    },
+    {
+      "kind": "item",
+      "source_id": "layout 41 zone 93",
+      "name": "Zone 3",
+      "reason": "Apps (clocks, weather, RSS and other widgets) are not media files.",
+      "next": "Rebuild it as a built-in card, or as a web page if it shows one."
+    },
+    {
+      "kind": "item",
+      "source_id": "layout 41 zone 95",
+      "name": "Zone 4",
+      "reason": "Text and clipart zones are not media files.",
+      "next": "Rebuild it as a built-in card, or as a web page if it shows one."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "51:4",
+      "name": "Opening hours",
+      "reason": "It turns the screen off, and campaigns show content.",
+      "next": "After pairing, set when the display is on with screen display-schedule."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "51:7",
+      "name": "Opening hours: Promos",
+      "reason": "It has already ended."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "52",
+      "name": "Unused schedule",
+      "reason": "No screen shows it, so there is nothing to aim it at."
+    }
+  ],
+  "notes": [
+    "1 media has availability dates or hours in Yodeck (Promo clip); they now play whenever their playlist does."
+  ]
+}

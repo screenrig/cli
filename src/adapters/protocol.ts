@@ -561,6 +561,22 @@ export interface ScreenHealth {
   renderer_restarts_24h?: number;
 }
 
+/**
+ * Screen.last_outage: the screen's latest presence outage and, once the first
+ * health report after it decided one, why the screen was gone. likely_cause is
+ * absent when unknown; a value this CLI does not know reads as unknown.
+ * evidence is open: device_uptime_s, app_uptime_s, report_at,
+ * crashes_24h_before and crashes_24h_after, reboot_command,
+ * stream_down_during_outage, observer_impaired.
+ */
+export interface ScreenOutage {
+  offline_since: string;
+  back_at?: string;
+  duration_s?: number;
+  likely_cause?: string;
+  evidence?: Record<string, unknown>;
+}
+
 export interface ScreenDisplaySchedule {
   enabled: boolean;
   windows: ScreenScheduleWindow[];
@@ -619,6 +635,24 @@ export interface ScreenCommand {
   done_at?: string;
 }
 
+/** Screen.glass: the backend's conclusions about the picture. Readers keep a member and a verdict they do not know. */
+export interface ScreenGlass {
+  /** The loop_stalled check; absent for a screen it never found stalled. */
+  playback?: ScreenGlassPlayback;
+}
+
+export interface ScreenGlassPlayback {
+  /** stalled: no media start arrived for longer than the loop allows. playing: one arrived after. unjudged: the screen stopped meeting the conditions under which the check judges. */
+  verdict: "playing" | "stalled" | "unjudged";
+  /** When the verdict began; for stalled, the instant the loop's allowance ran out. */
+  since: string;
+  /** Server receipt time of the latest media start the check had seen. */
+  last_media_start_at?: string;
+  /** The silence in seconds the loop allowed. Present with a stalled verdict. */
+  threshold_s?: number;
+  judged_at: string;
+}
+
 /** Screen.suspension: present while the screen shows a notice instead of its content. */
 export interface ScreenSuspension {
   message: string;
@@ -659,6 +693,49 @@ export interface ScreenPlayPageAccepted {
   page_id: string;
   manifest_revision: string;
   expires_at: string;
+}
+
+export type LiveState = "idle" | "requested" | "publishing" | "ended";
+
+/** The Player's last live view report. connected is its own word, at most 45 seconds old. */
+export interface LivePublisher {
+  connected: boolean;
+  connection: string;
+  reported_at: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+/** GET|POST /api/screens/{id}/live: the screen's live view session. Open schema. */
+export interface LiveSession {
+  state: LiveState;
+  screen_id: string;
+  live_id?: string;
+  created_at?: string;
+  lease_until?: string;
+  max_until?: string;
+  publisher?: LivePublisher;
+  ended_at?: string;
+  /** stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped; an open enum. */
+  ended_reason?: string;
+  /** The dashboard page that shows the live view of the screen. */
+  viewer_url: string;
+}
+
+/** Write body for POST /api/screens/{id}/live; duration_s is omitted so the server can default it (300). */
+export interface LiveStartRequest {
+  duration_s?: number;
+}
+
+export type LiveFramesState = "starting" | "streaming" | "silent";
+
+/** Accepted POST /api/screens/{id}/live/frames: how far the live session's frame adapter has come. Open schema. */
+export interface LiveFrames {
+  live_id: string;
+  state: LiveFramesState;
+  /** When a frame last arrived. Absent while starting. */
+  last_frame_at?: string;
 }
 
 /**
@@ -717,6 +794,7 @@ export interface Screen {
    * after the first connect. When offline, last time the screen was online.
    */
   last_online_at?: string;
+  last_outage?: ScreenOutage;
   last_page_failure?: PageFailure;
   manifest_revision: number;
   observation?: ScreenObservation;
@@ -782,6 +860,8 @@ export interface Screen {
   commands?: ScreenCommand[];
   /** Present while the screen shows a notice instead of its content (screen suspend). Read-only. */
   suspension?: ScreenSuspension;
+  /** What the backend concluded about the screen's picture from the reports it received. A check with nothing to say is absent. Read-only. */
+  glass?: ScreenGlass;
   /**
    * Present while the paired Player cannot show the application or iframe
    * primitives its manifest carries. at is when the condition began. The
@@ -1176,6 +1256,64 @@ export interface KVWebhookCreate {
   description?: string;
 }
 
+/**
+ * /api/cards/{id}/kv-webhooks: an incoming webhook that writes a card's data
+ * document. mapping is the template that builds the document from the posted
+ * body, or null when the posted object is the document. The secret and the
+ * signing secret are returned only by create, rotate-secret and the update that
+ * turns signing on.
+ */
+export interface CardKVWebhook {
+  id: string;
+  card_id: string;
+  description: string;
+  mapping: Record<string, unknown> | null;
+  enabled: boolean;
+  signing: boolean;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+}
+
+export interface CardKVWebhookWithSecrets extends CardKVWebhook {
+  secret?: string;
+  signing_secret?: string;
+}
+
+export interface CardKVWebhookList {
+  items: CardKVWebhook[];
+}
+
+export interface CardKVWebhookCreate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  signing?: boolean;
+}
+
+export interface CardKVWebhookUpdate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  enabled?: boolean;
+  signing?: boolean;
+}
+
+/** One post to a card webhook: how it ended and why, never what it carried. */
+export interface KVWebhookDelivery {
+  at: string;
+  outcome: "written" | "unchanged" | "refused" | "invalid";
+  reason?: "credentials" | "signature" | "disabled" | "body" | "mapping" | "card_data_invalid" | "rate_limited" | "payment_required" | "internal";
+  detail?: string;
+  status: number;
+  bytes: number;
+  revision?: number;
+  request_id: string;
+}
+
+export interface KVWebhookDeliveryList {
+  items: KVWebhookDelivery[];
+}
+
 export type FeedbackKind = "bug" | "feature";
 
 /**
@@ -1320,12 +1458,13 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "crashing";
 
 /**
- * GET/PATCH /api/notifications/{id}: an email or webhook notification. The
- * signing secret is never part of this shape. Readers treat a channel other
- * than email or webhook as one they cannot edit.
+ * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty
+ * or Telegram notification. The signing secret and a chat or pager destination
+ * are never part of this shape. Readers treat a channel they do not know as one
+ * they cannot edit.
  */
 export interface Notification {
   channel: string;
@@ -1334,6 +1473,8 @@ export interface Notification {
   description?: string;
   disabled_at?: string;
   disabled_reason?: "delivery_failures";
+  /** Slack, Teams, PagerDuty and Telegram only: the destination masked to its host and last four characters. */
+  destination_hint?: string;
   enabled: boolean;
   /** Webhook only. */
   event_types?: string[];
@@ -1349,6 +1490,8 @@ export interface Notification {
   screen_tags: string[];
   snoozed_until?: string;
   status: "active" | "failing" | "disabled";
+  /** Telegram only: the chat messages go to. */
+  telegram_chat_id?: string;
   updated_at: string;
   /** Webhook only; empty with url_redacted true below effective Manage. */
   url?: string;
@@ -1365,14 +1508,18 @@ export interface NotificationList {
 }
 
 export interface NotificationWrite {
-  channel: "email" | "webhook";
+  channel: "email" | "webhook" | "slack" | "teams" | "pagerduty" | "telegram";
   conditions?: string[];
   description?: string;
+  /** Slack, Teams, PagerDuty and Telegram only: the write-only webhook URL, routing key or bot token. */
+  destination?: string;
   enabled?: boolean;
   event_types?: string[];
   hold_minutes?: number;
   recipients?: string[];
   screen_tags?: string[];
+  /** Telegram only: the chat id or @channelname. */
+  telegram_chat_id?: string;
   url?: string;
 }
 
@@ -1380,6 +1527,8 @@ export interface NotificationPatch {
   conditions?: string[];
   /** An empty string clears the description. */
   description?: string;
+  /** Slack, Teams, PagerDuty and Telegram only: replaces the credential. */
+  destination?: string;
   enabled?: boolean;
   event_types?: string[];
   hold_minutes?: number;
@@ -1387,6 +1536,8 @@ export interface NotificationPatch {
   screen_tags?: string[];
   /** null ends the snooze. */
   snoozed_until?: string | null;
+  /** Telegram only: replaces the chat. */
+  telegram_chat_id?: string;
   url?: string;
 }
 

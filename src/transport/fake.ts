@@ -1923,17 +1923,42 @@ export function memoryBackend(options: {
     return { status: 200, headers: {}, body: { items, next_cursor: next } };
   });
 
-  // Notifications, email and webhook: ntf_ ids for email, whk_ ids for a
-  // webhook, the 20-per-project limit shared with the webhook routes above, a
-  // secret only on a webhook's create and rotate-secret.
+  // Notifications: ntf_ ids for email and the chat and pager channels, whk_ ids
+  // for a webhook, the 20-per-project limit shared with the webhook routes
+  // above, a secret only on a webhook's create and rotate-secret. A chat or
+  // pager destination is checked per channel, stored as its masked hint only,
+  // and never answered.
   const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
   transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "crashing"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "crashing"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
     body: { status: 400, code: "invalid_request", title: "Invalid request", detail, errors: [{ field, code: "invalid", detail }] },
+  });
+  const chatChannels = ["slack", "teams", "pagerduty", "telegram"];
+  const destinationReason = (channel: string, value: unknown): string | undefined => {
+    const text = typeof value === "string" ? value : "";
+    let host = "";
+    try { host = new URL(text).hostname; } catch { /* not a URL */ }
+    const fits = channel === "slack" ? /^https:\/\/hooks\.slack\.com\/(services|workflows|triggers)\/./.test(text)
+      : channel === "teams" ? host.endsWith(".logic.azure.com") || host.endsWith(".powerplatform.com")
+      : channel === "pagerduty" ? /^[A-Za-z0-9]{32}$/.test(text)
+      : /^\d{3,20}:[A-Za-z0-9_-]{30,64}$/.test(text);
+    if (channel === "teams" && /\.webhook\.office\.com$/.test(host)) return "Office 365 connector URLs are retired; create a Teams Workflows webhook";
+    return fits ? undefined : `destination must be a ${channel} credential in the shape the service issues it`;
+  };
+  const destinationHint = (channel: string, value: string): string => {
+    const tail = value.slice(-4);
+    if (channel === "slack") return `https://hooks.slack.com/…/${tail}`;
+    if (channel === "teams") return `${new URL(value).hostname}/…${tail}`;
+    return `…${tail}`;
+  };
+  const destinationRejected = (reason: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "notification_destination_rejected", title: "Notification destination is not valid for its channel", detail: `${reason}.`, errors: [{ field: "destination", code: "rejected", detail: `${reason}.` }] },
   });
   const notificationFor = (req: TransportRequest): Record<string, unknown> | undefined => notifications.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   /** A refusal for what a notification of this channel cannot hold, or undefined when it is whole. */
@@ -1946,6 +1971,10 @@ export function memoryBackend(options: {
       if (!conditions.length) return invalidRequest("An email notification needs at least one condition.", "conditions");
       return undefined;
     }
+    if (chatChannels.includes(notification.channel as string)) {
+      if (!conditions.length) return invalidRequest(`A ${notification.channel} notification needs at least one condition.`, "conditions");
+      return undefined;
+    }
     if (!notification.url) return invalidRequest("A webhook needs a url.", "url");
     const rejected = webhookUrlRejected(notification.url);
     if (rejected) return rejectedUrl(rejected);
@@ -1955,17 +1984,28 @@ export function memoryBackend(options: {
   transport.on("GET", "/api/notifications", () => ({ status: 200, headers: {}, body: { items: [...notifications.values()] } }));
   transport.on("POST", "/api/notifications", (req) => webhookReplay(req, () => {
     const body = (req.body ?? {}) as Record<string, any>;
-    if (body.channel !== "email" && body.channel !== "webhook") return invalidRequest("channel must be email or webhook.", "channel");
+    const chat = chatChannels.includes(body.channel);
+    if (body.channel !== "email" && body.channel !== "webhook" && !chat) return invalidRequest("channel must be email, webhook, slack, teams, pagerduty or telegram.", "channel");
     const email = body.channel === "email";
-    const foreign = email ? ["url", "event_types"] : ["recipients"];
+    const foreign = email ? ["url", "event_types", "destination", "telegram_chat_id"]
+      : chat ? ["url", "event_types", "recipients", ...(body.channel === "telegram" ? [] : ["telegram_chat_id"])]
+      : ["recipients", "destination", "telegram_chat_id"];
     const wrong = foreign.find((field) => body[field] !== undefined);
-    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : chat ? `a ${body.channel}` : "a webhook"} notification.`, wrong);
+    if (chat) {
+      if (typeof body.destination !== "string" || !body.destination) return invalidRequest(`destination is required for a ${body.channel} notification.`, "destination");
+      const reason = destinationReason(body.channel, body.destination);
+      if (reason) return destinationRejected(reason);
+      if (body.channel === "telegram" && typeof body.telegram_chat_id !== "string") return invalidRequest("telegram_chat_id is required for a telegram notification.", "telegram_chat_id");
+    }
     notificationSequence += 1;
     const notification: Record<string, unknown> = {
-      id: `${email ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
+      id: `${email || chat ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
       ...(body.description ? { description: body.description } : {}),
       conditions: body.conditions ?? [], screen_tags: body.screen_tags ?? [], hold_minutes: body.hold_minutes ?? 10,
-      ...(email ? { recipients: body.recipients } : { url: body.url, event_types: body.event_types ?? [] }),
+      ...(email ? { recipients: body.recipients }
+        : chat ? { destination_hint: destinationHint(body.channel, body.destination), ...(body.channel === "telegram" ? { telegram_chat_id: body.telegram_chat_id } : {}) }
+        : { url: body.url, event_types: body.event_types ?? [] }),
       enabled: body.enabled ?? true, revision: 1, status: body.enabled === false ? "disabled" : "active",
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
@@ -1974,7 +2014,7 @@ export function memoryBackend(options: {
     if (webhooks.size + notifications.size >= 20) return problem(409, "notification_limit_reached", "The project already has the maximum of 20 notifications.");
     notifications.set(notification.id as string, notification);
     notificationDeliveries.set(notification.id as string, []);
-    return { status: 201, headers: { "cache-control": "no-store" }, body: email ? { ...notification } : { ...notification, secret: webhookSecret() } };
+    return { status: 201, headers: { "cache-control": "no-store" }, body: email || chat ? { ...notification } : { ...notification, secret: webhookSecret() } };
   }));
   transport.on("GET", /^\/api\/notifications\/[^/]+$/, (req) => {
     const notification = notificationFor(req);
@@ -1987,11 +2027,20 @@ export function memoryBackend(options: {
     if (stale) return stale;
     const body = (req.body ?? {}) as Record<string, any>;
     const email = notification.channel === "email";
-    const wrong = (email ? ["url", "event_types"] : ["recipients"]).find((field) => body[field] !== undefined);
-    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    const chat = chatChannels.includes(notification.channel as string);
+    const foreign = email ? ["url", "event_types", "destination", "telegram_chat_id"]
+      : chat ? ["url", "event_types", "recipients", ...(notification.channel === "telegram" ? [] : ["telegram_chat_id"])]
+      : ["recipients", "destination", "telegram_chat_id"];
+    const wrong = foreign.find((field) => body[field] !== undefined);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : chat ? `a ${notification.channel}` : "a webhook"} notification.`, wrong);
     const next: Record<string, unknown> = { ...notification };
-    for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types"]) {
+    for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types", "telegram_chat_id"]) {
       if (body[field] !== undefined) next[field] = body[field];
+    }
+    if (body.destination !== undefined) {
+      const reason = destinationReason(notification.channel as string, body.destination);
+      if (reason) return destinationRejected(reason);
+      next.destination_hint = destinationHint(notification.channel as string, body.destination);
     }
     if (body.description !== undefined) {
       if (body.description) next.description = body.description;
@@ -2391,6 +2440,99 @@ export function memoryBackend(options: {
     return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
   }));
 
+  // Card webhooks: /api/cards/{id}/kv-webhooks write a card's data document.
+  // At most 20 per card; the secret and the signing secret are returned only
+  // by the request that issued them. A card id starting crd_MISSING is not in
+  // the project.
+  const cardWebhooks = new Map<string, Record<string, unknown>>();
+  let cardWebhookSigningSequence = 0;
+  const cardWebhookSigningSecret = () => `whsec_${String(++cardWebhookSigningSequence).padStart(43, "S")}`;
+  const cardWebhookCard = (req: TransportRequest): string | undefined => {
+    const cardId = decodeURIComponent(req.path.split("/")[3] ?? "");
+    return cardId.startsWith("crd_MISSING") ? undefined : cardId;
+  };
+  const cardWebhookFor = (req: TransportRequest): Record<string, unknown> | undefined => {
+    const webhook = cardWebhooks.get(decodeURIComponent(req.path.split("/")[5] ?? ""));
+    return webhook && webhook.card_id === cardWebhookCard(req) ? webhook : undefined;
+  };
+  const cardMissing = () => problem(404, "card_not_found", "Card was not found.");
+  const cardWebhookMissing = () => notFound("The key/value webhook was not found on this card.");
+  const cardWebhookView = (webhook: Record<string, unknown>) => ({ ...webhook });
+  const mappingProblem = (mapping: unknown): TransportResponse | undefined =>
+    mapping === undefined || mapping === null || (typeof mapping === "object" && !Array.isArray(mapping)) ? undefined
+      : problem(400, "invalid_request", "mapping must be a JSON object that becomes the card's data document.");
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    return { status: 200, headers: {}, body: { items: [...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).map(cardWebhookView) } };
+  });
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => kvWebhookReplay(req, () => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if ([...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).length >= 20) {
+      return problem(409, "kv_webhook_limit_reached", "The card already has the maximum of 20 key/value webhooks.");
+    }
+    kvWebhookSequence += 1;
+    const id = `kvw_${String(kvWebhookSequence).padStart(22, "A")}`;
+    const webhook: Record<string, unknown> = {
+      id, card_id: cardId, description: body.description ?? "", mapping: body.mapping ?? null, enabled: true, signing: body.signing === true,
+      url: `https://api.screenrig.ai/api/cards/${cardId}/kv-webhooks/${id}/write`,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    cardWebhooks.set(id, webhook);
+    return {
+      status: 201, headers: { "cache-control": "no-store" },
+      body: { ...webhook, secret: kvWebhookSecret(), ...(webhook.signing ? { signing_secret: cardWebhookSigningSecret() } : {}) },
+    };
+  }));
+  transport.on("PATCH", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; enabled?: boolean; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if (body.description !== undefined) webhook.description = body.description;
+    if (body.mapping !== undefined) webhook.mapping = body.mapping;
+    if (body.enabled !== undefined) webhook.enabled = body.enabled;
+    let signingSecret: string | undefined;
+    if (body.signing !== undefined) {
+      if (body.signing && !webhook.signing) signingSecret = cardWebhookSigningSecret();
+      webhook.signing = body.signing;
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), ...(signingSecret ? { signing_secret: signingSecret } : {}) } };
+  }));
+  transport.on("DELETE", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    cardWebhooks.delete(webhook.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/rotate-secret$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    if ((req.body as { signing?: boolean } | undefined)?.signing) {
+      if (!webhook.signing) return problem(400, "invalid_request", "This webhook does not sign, so it has no signing secret to rotate.");
+      return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), signing_secret: cardWebhookSigningSecret() } };
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), secret: kvWebhookSecret() } };
+  }));
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/deliveries$/, (req) => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    if (!cardWebhookFor(req)) return cardWebhookMissing();
+    const limit = Number(req.query?.limit ?? 100);
+    const items = [
+      { at: "2026-08-14T17:00:02.000Z", outcome: "invalid", reason: "card_data_invalid", detail: "document.title: must be at most 120 characters", status: 409, bytes: 311, request_id: "req_two" },
+      { at: "2026-08-14T17:00:01.000Z", outcome: "written", status: 200, bytes: 98, revision: 3, request_id: "req_one" },
+    ];
+    return { status: 200, headers: {}, body: { items: items.slice(0, limit) } };
+  });
+
   // Content campaigns: at most 100 per project, listed in precedence order
   // (priority, then newest). A write bumps the revision, If-Match guards it,
   // and an exact Idempotency-Key replay returns the same answer. A playlist id
@@ -2577,7 +2719,6 @@ export function memoryBackend(options: {
       const end = req.query?.to === undefined ? undefined : instantOf("to", req.query.to);
       if (end && "status" in end) return end;
       if (end && Date.parse(end.instant) <= Date.parse(start.instant)) return campaignInvalid("to", "must be after at");
-      if (end && Date.parse(end.instant) - Date.parse(start.instant) > 31 * 86_400_000) return campaignInvalid("to", "must be at most 31 days after at");
       const verdicts: Array<Record<string, unknown>> = [];
       if (screen.takeover) verdicts.push({ kind: "takeover", playlist_id: screen.takeover.playlist_id, verdict: "won", ...(screen.takeover.until ? { until: screen.takeover.until } : {}) });
       for (const item of items) {

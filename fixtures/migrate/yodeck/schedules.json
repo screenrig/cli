@@ -1,0 +1,221 @@
+[
+  {
+    "id": 51,
+    "name": "Opening hours",
+    "last_modified": "2026-01-05T09:00:00.000000",
+    "created_at": "2026-01-05T09:00:00.000000",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "events": [
+      {
+        "id": 1,
+        "start": "2026-11-02T07:00:00",
+        "end": "2026-12-18T00:00:00",
+        "duration": 240,
+        "priority": 3,
+        "recurrence": "w",
+        "days_of_week": "1111100",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 32,
+          "source_name": "Promos",
+          "source_type": "playlist"
+        }
+      },
+      {
+        "id": 2,
+        "start": "2026-12-24T09:00:00",
+        "end": "2026-12-24T13:00:00",
+        "duration": 240,
+        "priority": 5,
+        "recurrence": "o",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 42,
+          "source_name": "Menu board",
+          "source_type": "layout"
+        }
+      },
+      {
+        "id": 3,
+        "start": "2026-11-10T18:00:00",
+        "end": "2050-01-01T00:00:00",
+        "duration": 90,
+        "priority": 0,
+        "recurrence": "d",
+        "days_of_week": "0000000",
+        "every": 2,
+        "occurrences": 10,
+        "on": null,
+        "source": {
+          "source_id": 13,
+          "source_name": "Remote logo",
+          "source_type": "media"
+        }
+      },
+      {
+        "id": 4,
+        "start": "2026-11-10T22:00:00",
+        "end": "2050-01-01T00:00:00",
+        "duration": 480,
+        "priority": 9,
+        "recurrence": "d",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": null,
+          "source_name": "",
+          "source_type": "turned_off"
+        }
+      },
+      {
+        "id": 5,
+        "start": "2026-11-25T09:00:00",
+        "end": "2050-01-01T00:00:00",
+        "duration": 60,
+        "priority": 0,
+        "recurrence": "m",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": [
+          25
+        ],
+        "source": {
+          "source_id": 31,
+          "source_name": "Lobby loop",
+          "source_type": "playlist"
+        }
+      },
+      {
+        "id": 6,
+        "start": "2026-11-07T10:00:00",
+        "end": "2026-12-31T00:00:00",
+        "duration": 120,
+        "priority": 0,
+        "recurrence": "d",
+        "days_of_week": "1000001",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 32,
+          "source_name": "Promos",
+          "source_type": "playlist"
+        }
+      },
+      {
+        "id": 7,
+        "start": "2025-03-03T09:00:00",
+        "end": "2025-03-03T10:00:00",
+        "duration": 60,
+        "priority": 0,
+        "recurrence": "o",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 32,
+          "source_name": "Promos",
+          "source_type": "playlist"
+        }
+      },
+      {
+        "id": 8,
+        "start": "2026-12-01T09:00:00",
+        "end": "2050-01-01T00:00:00",
+        "duration": 60,
+        "priority": 0,
+        "recurrence": "y",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 32,
+          "source_name": "Promos",
+          "source_type": "playlist"
+        }
+      }
+    ],
+    "filler_content": {
+      "source_id": 31,
+      "source_name": "Lobby loop",
+      "source_type": "playlist"
+    }
+  },
+  {
+    "id": 52,
+    "name": "Unused schedule",
+    "last_modified": "2026-01-05T09:00:00.000000",
+    "created_at": "2026-01-05T09:00:00.000000",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "events": [
+      {
+        "id": 1,
+        "start": "2026-11-02T07:00:00",
+        "end": "2026-12-18T00:00:00",
+        "duration": 60,
+        "priority": 0,
+        "recurrence": "d",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 32,
+          "source_name": "Promos",
+          "source_type": "playlist"
+        }
+      }
+    ],
+    "filler_content": null
+  },
+  {
+    "id": 53,
+    "name": "Back office hours",
+    "last_modified": "2026-01-05T09:00:00.000000",
+    "created_at": "2026-01-05T09:00:00.000000",
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "events": [
+      {
+        "id": 1,
+        "start": "2026-11-03T08:00:00",
+        "end": "2026-12-18T00:00:00",
+        "duration": 600,
+        "priority": 0,
+        "recurrence": "w",
+        "days_of_week": "0000000",
+        "every": 1,
+        "occurrences": null,
+        "on": null,
+        "source": {
+          "source_id": 31,
+          "source_name": "Lobby loop",
+          "source_type": "playlist"
+        }
+      }
+    ],
+    "filler_content": {
+      "source_id": null,
+      "source_name": "",
+      "source_type": "turned_off"
+    }
+  }
+]

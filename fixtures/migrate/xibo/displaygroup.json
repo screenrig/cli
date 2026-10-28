@@ -1,0 +1,52 @@
+[
+  {
+    "displayGroupId": 601,
+    "displayGroup": "Lobby screens",
+    "description": "",
+    "isDisplaySpecific": 0,
+    "isDynamic": 0,
+    "userId": 1,
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "displayGroupId": 602,
+    "displayGroup": "Caf\u00e9",
+    "description": "",
+    "isDisplaySpecific": 0,
+    "isDynamic": 1,
+    "userId": 1,
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "displayGroupId": 701,
+    "displayGroup": "Front desk",
+    "description": "",
+    "isDisplaySpecific": 1,
+    "isDynamic": 0,
+    "userId": 1,
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "displayGroupId": 702,
+    "displayGroup": "Cafe wall",
+    "description": "",
+    "isDisplaySpecific": 1,
+    "isDynamic": 0,
+    "userId": 1,
+    "tags": [],
+    "folderId": 1
+  },
+  {
+    "displayGroupId": 703,
+    "displayGroup": "Back office",
+    "description": "",
+    "isDisplaySpecific": 1,
+    "isDynamic": 0,
+    "userId": 1,
+    "tags": [],
+    "folderId": 1
+  }
+]
