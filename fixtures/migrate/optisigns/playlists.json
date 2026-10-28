@@ -1,0 +1,123 @@
+[
+  {
+    "data": {
+      "playlists": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-playlists-0",
+              "node": {
+                "_id": "OPP00000000000001",
+                "accountId": "acct-fixture-0001",
+                "name": "Main loop",
+                "options": {
+                  "shuffle": true,
+                  "backgroundAudio": "bg-1",
+                  "backgroundAudioName": "Calm"
+                },
+                "assets": [
+                  {
+                    "_id": null,
+                    "filename": "Welcome.png",
+                    "fileType": "image",
+                    "type": "file",
+                    "appType": null,
+                    "webLink": null,
+                    "duration": 10,
+                    "srcDuration": null,
+                    "AWSS3ID": "s3-welcome"
+                  },
+                  {
+                    "_id": null,
+                    "filename": "Promo.mp4",
+                    "fileType": "video",
+                    "type": "file",
+                    "appType": null,
+                    "webLink": null,
+                    "duration": 20,
+                    "srcDuration": 20,
+                    "AWSS3ID": "s3-promo"
+                  },
+                  {
+                    "_id": null,
+                    "filename": "Status page",
+                    "fileType": null,
+                    "type": "app",
+                    "appType": "web_page",
+                    "webLink": "https://status.example.com/",
+                    "duration": 30,
+                    "srcDuration": null,
+                    "AWSS3ID": null
+                  },
+                  {
+                    "_id": null,
+                    "filename": "Handbook.pdf",
+                    "fileType": "document",
+                    "type": "file",
+                    "appType": null,
+                    "webLink": null,
+                    "duration": 10,
+                    "srcDuration": null,
+                    "AWSS3ID": null
+                  },
+                  {
+                    "_id": null,
+                    "filename": "Clock",
+                    "fileType": null,
+                    "type": "app",
+                    "appType": "clock",
+                    "webLink": null,
+                    "duration": 15,
+                    "srcDuration": null,
+                    "AWSS3ID": null
+                  },
+                  {
+                    "_id": null,
+                    "filename": "Extra.png",
+                    "fileType": "image",
+                    "type": "file",
+                    "appType": null,
+                    "webLink": null,
+                    "duration": 6,
+                    "srcDuration": null,
+                    "AWSS3ID": null
+                  }
+                ]
+              }
+            },
+            {
+              "cursor": "c-playlists-1",
+              "node": {
+                "_id": "OPP00000000000002",
+                "accountId": "acct-fixture-0001",
+                "name": "Banners",
+                "options": {
+                  "shuffle": false,
+                  "backgroundAudio": null,
+                  "backgroundAudioName": null
+                },
+                "assets": [
+                  {
+                    "_id": null,
+                    "filename": "Banner.jpg",
+                    "fileType": "image",
+                    "type": "file",
+                    "appType": null,
+                    "webLink": null,
+                    "duration": 7,
+                    "srcDuration": null,
+                    "AWSS3ID": null
+                  }
+                ]
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+]

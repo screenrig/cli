@@ -1,0 +1,101 @@
+[
+  {
+    "data": {
+      "allScreens": {
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "cursor-screens-1"
+        },
+        "nodes": [
+          {
+            "id": "e1000000-0000-4000-8000-000000000001",
+            "name": "Front desk",
+            "screenGroupId": "a1000000-0000-4000-8000-000000000001",
+            "tags": [
+              "Lobby",
+              "entrance"
+            ],
+            "content": {
+              "_ref": {
+                "type": "channel",
+                "id": "d1000000-0000-4000-8000-000000000001"
+              }
+            },
+            "timezone": "America/Toronto",
+            "playerTimezone": "UTC",
+            "timezoneOverride": ""
+          },
+          {
+            "id": "e1000000-0000-4000-8000-000000000002",
+            "name": "Cafe wall",
+            "screenGroupId": "a1000000-0000-4000-8000-000000000002",
+            "tags": [
+              "lobby"
+            ],
+            "content": {
+              "_ref": {
+                "type": "playlist",
+                "id": "b1000000-0000-4000-8000-000000000001"
+              }
+            },
+            "timezone": null,
+            "playerTimezone": "Europe/London",
+            "timezoneOverride": ""
+          },
+          {
+            "id": "e1000000-0000-4000-8000-000000000003",
+            "name": "Kiosk",
+            "screenGroupId": "a1000000-0000-4000-8000-000000000001",
+            "tags": [],
+            "content": {
+              "_ref": {
+                "type": "file",
+                "id": "f1000000-0000-4000-8000-000000000001"
+              }
+            },
+            "timezone": null,
+            "playerTimezone": "Mars/Olympus",
+            "timezoneOverride": "Asia/Tokyo"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "data": {
+      "allScreens": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "e1000000-0000-4000-8000-000000000004",
+            "name": "Hall",
+            "screenGroupId": "a1000000-0000-4000-8000-000000000002",
+            "tags": null,
+            "content": {
+              "_ref": {
+                "type": "app",
+                "id": "77000000-0000-4000-8000-000000000001"
+              }
+            },
+            "timezone": null,
+            "playerTimezone": "",
+            "timezoneOverride": ""
+          },
+          {
+            "id": "e1000000-0000-4000-8000-000000000005",
+            "name": "Spare",
+            "screenGroupId": null,
+            "tags": [],
+            "content": null,
+            "timezone": null,
+            "playerTimezone": "",
+            "timezoneOverride": ""
+          }
+        ]
+      }
+    }
+  }
+]
