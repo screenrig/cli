@@ -310,6 +310,7 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts unmute",
     "bi connection create grafana",
     "bi connection create powerbi",
+    "bi connection create tableau",
     "bi connection list",
     "bi connection show",
     "bi connection update",

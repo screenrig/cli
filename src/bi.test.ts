@@ -404,7 +404,7 @@ test("the help names the renderer, the secret rule and carries examples that run
   await writeFile(path.join(env.cwd, "secret.txt"), `${TOKEN}\n`);
   await writeFile(path.join(env.cwd, "new-secret.txt"), `${TOKEN}\n`);
   const leaves = [
-    ["bi", "connection", "create", "grafana"], ["bi", "connection", "create", "powerbi"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
+    ["bi", "connection", "create", "grafana"], ["bi", "connection", "create", "powerbi"], ["bi", "connection", "create", "tableau"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
     ["bi", "connection", "browse"], ["bi", "connection", "delete"], ["bi", "view", "create"], ["bi", "view", "list"], ["bi", "view", "show"], ["bi", "view", "update"],
     ["bi", "view", "test"], ["bi", "view", "delete"],
   ];
