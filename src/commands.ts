@@ -711,7 +711,7 @@ function pendingReviewResult(response: { body: unknown; headers: Record<string, 
  * Player web app cannot frame) move from data into the envelope's warnings and
  * the human output, so an agent reads them like every other warning.
  */
-function playlistWriteResult(response: { body: unknown; headers: Record<string, string> }, requestId: string, title: string): CommandResult {
+export function playlistWriteResult(response: { body: unknown; headers: Record<string, string> }, requestId: string, title: string): CommandResult {
   const lifted = playlistAnswerWarnings(response.body);
   return {
     envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, requestId, undefined, lifted),
@@ -860,7 +860,7 @@ export function commandHandler(
       || Boolean(authenticated && resolved.token && (
         ["kv", "card", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update", "rename"].includes(action ?? "")) ||
-        (group === "playlist" && ["create", "update", "patch", "rename", "delete"].includes(action ?? "")) ||
+        (group === "playlist" && ["create", "update", "patch", "rename", "delete", "promote"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
@@ -8619,27 +8619,6 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     ...(target ? { publish: { argv: ["screen", "publish", target.id, output, ...context], reason: "Inspect the prepared document and preview before publishing." } } : {}),
   }, { request_id: existingClient?.requestId, warnings }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
 }, false);
-
-export const handleScreenChanges = commandHandler(async (args, runtime, resolved) => {
-  const id = args.positionals[2];
-  if (!id) throw usageError("screen changes requires a screen ID.");
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}/changes` });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
-    human: JSON.stringify(response.body, null, 2) };
-});
-
-export const handleScreenRevert = commandHandler(async (args, runtime, resolved) => {
-  const id = args.positionals[2];
-  const change = flagString(args.flags, "change-id");
-  const revision = flagString(args.flags, "if-match");
-  if (!id || !change || !revision) throw usageError("screen revert requires a screen ID, --change-id and --expect-rev.");
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "POST", path: `/api/screens/${encodeURIComponent(id)}/revert`,
-    body: { change_id: change }, headers: { "If-Match": `"${revision}"` }, idempotent: true });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
-    human: `Screen revert accepted. Read screen show ${id} and its manifest_upgrade to confirm Player activation.\n${JSON.stringify(response.body, null, 2)}` };
-});
 
 export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {
   const parsed = await readAuthoringJson(args.positionals[3]!, runtime);

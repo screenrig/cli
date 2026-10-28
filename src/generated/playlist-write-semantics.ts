@@ -25,6 +25,21 @@ function httpsWithoutCredentials(value: unknown): boolean {
   } catch { return false; }
 }
 
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** The src of the first iframe of a pasted embed code, entities decoded (server embeddedSource); any other value is returned as it is. */
+function embeddedSource(value: unknown): unknown {
+  if (typeof value !== "string" || value.length > 4096 || !/^\s*<iframe\b/i.test(value)) return value;
+  const match = /<iframe\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/is.exec(value);
+  const source = match === null ? undefined : (match[1] ?? match[2] ?? match[3]);
+  if (source === undefined) return value;
+  return source.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(amp|lt|gt|quot|apos));/gi, (entity, decimal?: string, hex?: string, name?: string) => {
+    if (name !== undefined) return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
+    const code = decimal !== undefined ? Number.parseInt(decimal, 10) : Number.parseInt(hex ?? "", 16);
+    return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  }).trim();
+}
+
 /** An iframe page a sign shows: http or https, any host, credentials allowed (server signageWebURL). */
 function signageUrl(value: unknown, protocols: readonly string[]): boolean {
   if (typeof value !== "string" || value.length > 2048) return false;
@@ -152,7 +167,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
-      if (primitive.primitive === "iframe" && !signageUrl(primitive.src, ["http:", "https:"])) {
+      if (primitive.primitive === "iframe" && !signageUrl(embeddedSource(primitive.src), ["http:", "https:"])) {
         fail(`${itemPath}/src`, "must be an http or https URL");
       }
       if (primitive.primitive === "stream") {

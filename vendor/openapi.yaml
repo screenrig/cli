@@ -2388,6 +2388,86 @@ paths:
           description: Unset
         default:
           $ref: '#/components/responses/Problem'
+  /api/playlists/{id}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listPlaylistRevisions
+      description: >-
+        The playlist's revisions, newest first: each revision a write stored (a create, a replace, a patch, a structure change, an applied review, a promote) with its name, its page count, the kind of change and who made it. History begins with the revision a playlist held when revision history was first recorded: until its next write the list holds that revision alone, with change baseline. Revisions are kept for as long as the playlist is. At most 50 per page; next_cursor while more remain, null on the last page.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: The playlist's revisions, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistRevisionList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/revisions/{revision}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getPlaylistRevision
+      description: >-
+        One revision of the playlist and the playlist as it stood at that revision: its name, pages, soundtrack and format, with revision set to this one. A revision the playlist never had, or one from before its history began, is not_found.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/PlaylistRevisionNumber'
+      responses:
+        '200':
+          description: The revision and the playlist at that revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistRevisionDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/revisions/{revision}/promote:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: promotePlaylistRevision
+      description: >-
+        Makes an earlier revision current again by copying it forward: its pages, soundtrack and format become a new revision, the current one plus one, whose change is promoted and restored_from names the revision copied. The playlist keeps its current name, earlier revisions stay as they were, and every screen that shows the playlist updates as for any other write. If-Match is required and names the current revision (invalid_request when absent, revision_conflict when stale). The pages are resolved again as a structure change resolves them: a selector matches today's media, and media or a web app the revision named that is gone or not ready refuses the promote with the problem a write would get. A revision whose content is the current content changes nothing and answers the current playlist. Needs a credential that publishes live (forbidden for one whose writes are proposed for review) or a dashboard session of the project owner or a member who can approve (approver_required); a playlist no person approved yet is playlist_not_approved (409).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/PlaylistRevisionNumber'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The playlist with the copied revision current; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/comment/playlist/{id}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -3218,80 +3298,6 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
-  /api/screens/{id}/changes:
-    parameters:
-      - $ref: '#/components/parameters/ProjectTarget'
-    get:
-      x-screenrig-access: read
-      operationId: listScreenCompositionChanges
-      description: Lists up to 50 newest issued or queued composition changes retained for 30 days. A change ID is the desired manifest revision issued or queued for this screen. History starts when composition retention is enabled; a row without previous_change_id has no preceding retained composition.
-      security:
-        - projectBearer: []
-      parameters:
-        - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '200':
-          description: Retained screen composition changes.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items, retention_days]
-                properties:
-                  retention_days:
-                    type: integer
-                    const: 30
-                  items:
-                    type: array
-                    maxItems: 50
-                    items:
-                      $ref: '#/components/schemas/ScreenCompositionChange'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/screens/{id}/revert:
-    parameters:
-      - $ref: '#/components/parameters/ProjectTarget'
-    post:
-      x-screenrig-access: write
-      operationId: revertScreenCompositionChange
-      description: Reverts the named current issued change on one screen by forking its preceding immutable composition into a new playlist and assigning it atomically. Requires a live-write credential, If-Match and an explicit change_id. A takeover, an intervening newer publication or screen change, expired history or unavailable dependency refuses the write. Other screens and source playlists remain unchanged. Card data stays current and expiry is preserved. Exact idempotency retries return the same accepted assignment. Acceptance is separate from the Player's manifest_upgrade activation state.
-      security:
-        - projectBearer: []
-      parameters:
-        - $ref: '#/components/parameters/ResourceID'
-        - $ref: '#/components/parameters/IfMatch'
-        - $ref: '#/components/parameters/OptionalIdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [change_id]
-              properties:
-                change_id:
-                  type: string
-                  pattern: '^man_'
-                  maxLength: 128
-      responses:
-        '200':
-          description: The screen assignment is accepted. Observe screen.manifest_activated or manifest_upgrade to confirm Player activation.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accepted, reverted_change_id, screen]
-                properties:
-                  accepted:
-                    type: boolean
-                    const: true
-                  reverted_change_id:
-                    type: string
-                  screen:
-                    $ref: '#/components/schemas/Screen'
-        default:
-          $ref: '#/components/responses/Problem'
   /api/screens/{id}/reload:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -4567,6 +4573,592 @@ paths:
                 $ref: '#/components/schemas/ScreenCampaigns'
         default:
           $ref: '#/components/responses/Problem'
+  /api/bi-connections:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listBIConnections
+      description: 'Lists the project''s BI connections, oldest first, 200 to a page; pass next_cursor back as cursor for the next. A secret is never returned: secret shows whether it is set and its last 4 characters.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnectionList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIConnection
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. For Tableau (kind tableau): config.url (the https address of Tableau Server, or of your Tableau Cloud pod such as https://10ay.online.tableau.com), config.site (the site content URL, empty for the default site), config.client_id and config.secret_id of a connected app with direct trust, config.username (the Tableau user the screens views are shown as) and the secret value as secret. Add the answer embed_origin to the connected app domain allowlist and enable the secret. Anyone holding a screen ticket can embed any view that user can see, so use a user that sees only screen dashboards. Tableau Cloud, or Tableau Server 2023.3 or later. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request, including an address that is not a public Internet host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIConnection
+      description: 'One connection, with its last test.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One connection.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateBIConnection
+      description: 'Changes a connection''s name, address, organization or secret (a sent secret replaces it; an omitted one is kept). Moving a Grafana or Tableau connection to another origin (scheme, host or port) needs the secret in the same request, answered invalid_request at secret otherwise: the stored secret is only sent to the address it was saved for. A changed address or secret clears last_test and retires every render cached for its views. Appends bi_connection.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionPatch'
+      responses:
+        '200':
+          description: The updated connection.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteBIConnection
+      description: 'Deletes a connection that no view uses; while views use it the answer is resource_conflict naming their ids. Appends bi_connection.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '409':
+          description: resource_conflict, views use the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testBIConnection
+      description: 'Calls the BI system with the connection''s secret and stores the answer as last_test. For Grafana the checks are token (GET /api/search accepts it) and image_renderer (the plugin is listed; a missing plugin is a warning because a remote rendering service does not show as one). It does not judge per-dashboard permissions, data-source health or the reachability of a remote renderer: test a view to render for real. A refusal from Grafana is a failed check, not an error. For Power BI the checks are token (Microsoft Entra accepts the app) and workspaces (the app can list workspaces; it counts them and none fails the check, naming the workspace access step). It does not judge capacity, row-level security or access to any one report: test a view, which generates a real embed token. For Tableau the check is signin: Tableau accepts a content-read JWT signed with the connected app secret for the connection user, and the server signs out again. It does not judge the domain allowlist, which only a screen loading a view proves, or the permissions on any view: test a view, which looks the view up as the user.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The checks.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BITestReport'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-connections/{id}/browse:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: browseBIConnection
+      description: 'Lists what the connection''s token can show. Grafana: its dashboards (query searches titles; next_cursor pages), or with dashboard set that dashboard''s panels (rows flattened) under dashboard. Power BI: the workspaces the app can see (id, name; query keeps names containing it), or with workspace set that workspace''s reports (id, name, embed_url) under workspace. Tableau: the views the connection user can see (path as Workbook/View, name), 100 per page read; query keeps views whose name or path contains it, reading up to ten pages to find them, and next_cursor is the next page to read.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+        - name: dashboard
+          in: query
+          required: false
+          description: A dashboard uid; lists its panels.
+          schema: {type: string, maxLength: 128}
+        - name: workspace
+          in: query
+          required: false
+          description: A Power BI workspace id; lists its reports.
+          schema: {type: string, maxLength: 36}
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+      responses:
+        '200':
+          description: Dashboards or panels.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIBrowse'
+        '409':
+          description: bi_upstream_refused, the BI system refused the connection credentials or permissions.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: bi_upstream_unavailable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listBIViews
+      description: 'Lists the project''s BI views, oldest first, 200 to a page; pass next_cursor back as cursor for the next. Each carries embed_url, the address an iframe primitive shows (content_fit fill); it is null where this server has no embed host.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of views.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIView
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. For Tableau (kind tableau): a view of the connection site (url: an address copied from Tableau, such as https://HOST/t/SITE/views/WORKBOOK/VIEW or Tableau Cloud https://HOST/#/site/SITE/views/WORKBOOK/VIEW, or Workbook/View; or target.view), optionally with target.rotate_sheets and rotate_s of 10 to 3600 to turn the workbook published sheets (rotate_s and rotate_sheets go together; rotate_sheets may be given as the whole target beside url), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a five minute JWT with only the embed scope, signed with the connected app secret, and builds the Embedding API v3 tableau-viz from the Tableau host; the screen never holds the secret. A Tableau Public viz is a view without a connection (kind tableau, target.public_url, rebuilt as https://public.tableau.com/views/WORKBOOK/VIEW) and takes rotate_sheets too. Appends bi_view.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request, including a url that is not a dashboard address of the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found, the connection is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIView
+      description: 'One view, with embed_url and how it last fared on glass (status).'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One view.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateBIView
+      description: 'Changes a view''s name, target (url or target replaces the whole target), cadence or fit. A new target clears status, and every render cached for the old one is retired. A view keeps its connection and kind. Appends bi_view.updated. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewPatch'
+      responses:
+        '200':
+          description: The updated view.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteBIView
+      description: 'Deletes a view. A screen that still shows its embed_url answers not_found on glass until its playlist changes. Appends bi_view.deleted. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testBIView
+      description: 'Renders a connection view for real (1920x1080, outside the shared cache and without touching status), or fetches a public dashboard link and checks that its page may be framed by the view''s embed host (allow_embedding in Grafana). It does not judge what the picture shows. A Grafana failure is a failed check, not an error. A Power BI connection view generates a real embed token for its report (checks report and embed_token); it does not judge the pages it names, capacity or what the report shows, and a dataset with row-level security is refused by Power BI with its own message, shown in the check. A Power BI public link is fetched and its framing headers read. A Tableau connection view signs in as the connection user and looks the view up (checks signin and view); it does not judge the domain allowlist, the embed permission or what the view shows. A Tableau Public view asks Tableau Public whether the workbook exists and does not judge the view name.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The checks.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewTest'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/bi-views/{id}/image:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getBIViewImage
+      description: 'Draws a Grafana view now as a PNG (a Power BI or Tableau view answers not_found), outside the shared cache, so a test shows exactly what Grafana renders at that size. The embed page itself uses the shared render.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: width
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 10000, default: 1920}
+        - name: height
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 10000, default: 1080}
+      responses:
+        '200':
+          description: The rendered PNG.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '409':
+          description: bi_upstream_refused, the BI system refused the connection credentials or permissions.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: bi_upstream_unavailable, including a Grafana without an image renderer.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/triggers:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -5025,7 +5617,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Starts live view of the named screen, or renews the one it has (docs/player-compatibility.md §6.10): sub-second video of what the screen plays, from the Player through a media relay to the dashboard. A screen has one live session, shared by every viewer. Its lease runs duration_s from now (30 to 3600, default 300) and a start or renewal sets lease_until to the later of its current end and that instant, never past max_until, the hour after the session began. The session ends when the lease passes with no renewal, at max_until, on DELETE, or when the Player ends it; the Player stops publishing within about 20 seconds of the lease ending. A new session appends the per-screen runtime command player.live_publish (details live_id, at, expires_at sixty seconds later, max_until; never delivered after expires_at); a renewal sends it again only when the Player never joined and the last command expired. The screen must be active and online and its host hint must declare the live_view capability: 409 live_unsupported (update the Player, or use a screenshot), 409 live_unavailable (offline), screen_archived. 404 feature_unavailable when the server has no media relay configured. 201 is a new session, 200 a renewed one; both return the LiveSession with a viewer_url that opens the dashboard viewer. State requested lasts until the Player publishes: poll GET until publisher.connected. Live view is free and exempt from the 1-credit API meter, like a screenshot.'
+      description: 'Starts live view of the named screen, or renews the one it has (docs/player-compatibility.md §6.10): sub-second video of what the screen plays, from the Player through a media relay to the dashboard. A screen has one live session, shared by every viewer. Its lease runs duration_s from now (30 to 300, default 300) and a start or renewal sets lease_until to the later of its current end and that instant, never past max_until, five minutes after the session began. The session ends by itself at the latest then: nothing renews or restarts it, and a new session needs a new start. It ends earlier when the lease passes with no renewal, on DELETE, or when the Player ends it; the Player stops publishing within about 20 seconds of the lease ending. With live_id the request only renews that session: when it is not the screen''s live session (it ended, or the screen started another) the answer is 409 live_unavailable naming ended_reason, and no session starts or is extended. A new session appends the per-screen runtime command player.live_publish (details live_id, at, expires_at sixty seconds later, max_until; never delivered after expires_at); a renewal sends it again only when the Player never joined and the last command expired. The screen must be active and online and its host hint must declare the live_view capability: 409 live_unsupported (update the Player, or use a screenshot), 409 live_unavailable (offline), screen_archived. 404 feature_unavailable when the server has no media relay configured. 201 is a new session, 200 a renewed one; both return the LiveSession with a viewer_url that opens the dashboard viewer. State requested lasts until the Player publishes: poll GET until publisher.connected. Live view is free and exempt from the 1-credit API meter, like a screenshot.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9871,7 +10463,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccount
-      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9885,7 +10477,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked.
+          description: Created, with its secret masked; a Canva account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -9898,7 +10490,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MediaSyncAccount'
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
           description: invalid_request.
           content:
@@ -9906,7 +10498,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -9945,7 +10537,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateMediaSyncAccount
-      description: 'Changes the name, tenant, client id or secret; an omitted secret keeps the stored one. A change of credentials discards the last test. Appends media_sync_account.updated. If-Match guards the revision.'
+      description: 'Changes the name, tenant, client id or secret; an omitted secret keeps the stored one. A change of credentials discards the last test. A Canva account takes only a name; media sync account connect renews its connection. Appends media_sync_account.updated. If-Match guards the revision.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9991,7 +10583,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteMediaSyncAccount
-      description: 'Deletes the account. Refused 409 resource_conflict while a sync reads through it; the detail names those syncs. Appends media_sync_account.deleted. If-Match guards the revision.'
+      description: 'Deletes the account. Refused 409 resource_conflict while a sync reads through it; the detail names those syncs. Deleting a Canva account also revokes its tokens at Canva (a failure to revoke is logged and does not undo the delete). Appends media_sync_account.deleted. If-Match guards the revision.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10022,7 +10614,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: testMediaSyncAccount
-      description: 'Signs in with the account''s app and reports what Microsoft granted it: whether the credentials work and which Graph application permissions the token carries (Sites.Selected, Files.Read.All and the like). Sites.Selected is reported with a warning, because each site needs a grant for the app. It does not judge a site''s grant, a folder, or consent beyond what the token carries. The result is stored as last_test. A failed check is ok false in the answer, not a problem.'
+      description: 'Signs in with the account''s app and reports what Microsoft granted it: whether the credentials work and which Graph application permissions the token carries (Sites.Selected, Files.Read.All and the like). Sites.Selected is reported with a warning, because each site needs a grant for the app. For a Canva account it reports whether Canva still accepts the connection. It does not judge a site''s grant, a folder or a design, or consent beyond what the token carries. The result is stored as last_test. A failed check is ok false in the answer, not a problem.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10043,6 +10635,135 @@ paths:
                 $ref: '#/components/schemas/MediaSyncTest'
         default:
           $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}/connect:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: connectMediaSyncAccount
+      description: 'Makes a new one-time consent link (authorize_url, valid until authorize_expires_at) for a Canva account, to send to the person who owns the Canva account; they open it signed in to Canva and allow access. It replaces any earlier link. A connected account stays connected until the new consent completes, so this also renews a connection (state reconnect_required) or moves it to another Canva account. The link is a credential of the consent: send it to that person only. A server without the Canva integration answers 409 canva_not_configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The account with a new authorize_url.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
+        '400':
+          description: invalid_request — the account is not a Canva account.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: canva_not_configured — this server has no Canva integration.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}/designs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncDesigns
+      description: 'Lists the Canva designs the connected person can see, most recently changed first (50 per page; continuation continues), optionally those matching query. Each shows its id, title, last change, page count and a view address. An account that is not connected is 409 canva_reconnect_required; a server without the Canva integration is 409 canva_not_configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncDesignQuery'
+        - $ref: '#/components/parameters/MediaSyncDesignContinuation'
+      responses:
+        '200':
+          description: One page of designs.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncDesignList'
+        '400':
+          description: invalid_request — the account is not a Canva account, or query or continuation is not valid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: canva_reconnect_required (the account is not connected, or Canva no longer honors the connection) or canva_not_configured (this server has no Canva integration).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/canva/callback:
+    get:
+      operationId: completeCanvaConsent
+      description: 'Where Canva sends the person after they allow (or refuse) access in a consent link. It carries no credential: the one-time state in the query finds the Canva account, must be unexpired and is used once, in the same write that stores the connection. screenRIG exchanges the code (PKCE, client authentication with the integration''s credentials), reads whose Canva account it is, seals the tokens and appends media_sync_account.connected. The answer is a short page naming the account and the project it was connected to; an error, an unknown, expired or used state, or a refused code renders the same page with the reason and changes nothing. Answers only on the API host.'
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The page that says the account is connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          description: The page that says why nothing was connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '502':
+          description: Canva could not be reached; the same link works again.
+          content:
+            text/html:
+              schema:
+                type: string
+        '409':
+          description: Canva is not configured on this server.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      security: []
   /api/media-syncs:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10075,7 +10796,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSync
-      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10226,12 +10947,13 @@ paths:
     post:
       x-screenrig-access: write
       operationId: runMediaSync
-      description: 'Makes the sync due now and answers 202; a worker runs it within about 30 seconds and the answer of GET /api/media-syncs/{id} shows its last_run. A sync an error stopped runs again; a paused sync is refused until it is resumed.'
+      description: 'Makes the sync due now and answers 202; a worker runs it within about 30 seconds and the answer of GET /api/media-syncs/{id} shows its last_run. A sync an error stopped runs again; a paused sync is refused until it is resumed. force=true makes a Canva sync export the design even when Canva reports it unchanged (a SharePoint sync is refused: it already downloads every changed file).'
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - $ref: '#/components/parameters/MediaSyncForce'
       responses:
         '202':
           description: The sync, due now.
@@ -10736,7 +11458,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -11197,6 +11919,111 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/notifications/{id}/unsubscribed/{user_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/NotificationUnsubscribedUserID'
+    delete:
+      x-screenrig-access: write
+      operationId: resubscribeNotificationUser
+      description: >-
+        Mails an email notification's person again after they stopped it with the unsubscribe link in its mail (Notification.unsubscribed lists the people who did). Idempotent: a person who is not stopped changes nothing, and the answer is the notification as it is. A change bumps the revision and appends notification.updated with details change resubscribed, user_id and via api. A dashboard session may resubscribe any person of the project; an agent credential needs the project write capability. The person's own way back is the Resubscribe button on the page their unsubscribe link answers with.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The notification, without the person in unsubscribed.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/unsubscribe:
+    get:
+      operationId: showNotificationUnsubscribe
+      description: >-
+        The link in an alert mail's footer. It carries no session and no bearer; the token t, made by screenRIG for one notification n and one person u, is the whole authority, never expires, and verifies while the issuance key version it names is retained. The answer is a page that asks to stop that notification's mail to that person and changes nothing, so a mail scanner that opens the link stops nothing; its button posts to this path. A person already stopped sees a page whose button resubscribes. Any token, notification or person that does not match, and a notification that is gone or is not an email notification, answers the same 404 page. The page has no script and posts only to this origin. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that asks to stop the alerts.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: unsubscribeFromNotification
+      description: >-
+        Stops an email notification's mail to the person the link is for. The query is the one of the GET link; the body is not read, so a mail provider's RFC 8058 one-click request (List-Unsubscribe=One-Click, from the List-Unsubscribe and List-Unsubscribe-Post headers every alert and test mail carries) and the page's button both work. Only that person is stopped, for that notification only; the others keep getting mail, and the person stays in recipients. It is idempotent. The first time it bumps the revision and appends notification.updated with details change unsubscribed, user_id and via email_link. The page it answers has a Resubscribe button (POST /api/notifications/resubscribe); a project member lists the people stopped in Notification.unsubscribed. When nobody is left to mail, a notice is skipped as no_recipients. Any link that does not match answers the 404 page of the GET. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that says the alerts are stopped.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/notifications/resubscribe:
+    post:
+      operationId: resubscribeToNotification
+      description: >-
+        Undoes POST /api/notifications/unsubscribe for the person the link is for: the Resubscribe button of the page it answers. Same link, same authority and same 404 page; idempotent. A change bumps the revision and appends notification.updated with details change resubscribed, user_id and via email_link. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that says the alerts are back on.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
   /api/notes:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -13998,7 +14825,7 @@ paths:
     get:
       operationId: getRuntimeCardData
       description: >-
-        Returns a card data or feed document, the card data or feed key of a card primitive in the screen's current manifest. A key is readable only while a desired, active, or transition-grace grant of the session's screen lists it; knowing a key is never enough. Feed keys start with feed: and read the system feed namespace (screenrig.weather/v1 and the other feed schemas); every other key reads the card data of the screen's project. The body is the document itself. ETag is the sha256 of its bytes and If-None-Match answers 304; keep the last good document for offline playback and refetch on screen.card_data_changed for the key. 404 means no document is stored yet; keep the card hidden.
+        Returns a card data or feed document, the card data or feed key of a card primitive in the screen's current manifest, or the key of a page's visibility.data condition. A key is readable only while a desired, active, or transition-grace grant of the session's screen lists it; knowing a key is never enough. Feed keys start with feed: and read the system feed namespace (screenrig.weather/v1 and the other feed schemas), as do the weather conditions keys that start with feed.conditions.v1: (a page's {screen.weather} condition, filled in each screen's manifest); every other key reads the card data of the screen's project. The body is the document itself. ETag is the sha256 of its bytes and If-None-Match answers 304; keep the last good document for offline playback and refetch on screen.card_data_changed for the key. 404 means no document is stored yet; keep the card hidden.
       security:
         - runtimeCookie: []
         - nativeSessionAuthorization: []
@@ -16880,6 +17707,188 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/bi-connections:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBIConnectionsInProject
+      description: 'Lists the project''s BI connections, oldest first, 200 to a page; pass next_cursor back as cursor for the next. A secret is never returned: secret shows whether it is set and its last 4 characters.'
+      security:
+        - projectBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnectionList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIConnectionInProject
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. For Tableau (kind tableau): config.url (the https address of Tableau Server, or of your Tableau Cloud pod such as https://10ay.online.tableau.com), config.site (the site content URL, empty for the default site), config.client_id and config.secret_id of a connected app with direct trust, config.username (the Tableau user the screens views are shown as) and the secret value as secret. Add the answer embed_origin to the connected app domain allowlist and enable the secret. Anyone holding a screen ticket can embed any view that user can see, so use a user that sees only screen dashboards. Tableau Cloud, or Tableau Server 2023.3 or later. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIConnectionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIConnection'
+        '400':
+          description: invalid_request, including an address that is not a public Internet host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/bi-views:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBIViewsInProject
+      description: 'Lists the project''s BI views, oldest first, 200 to a page; pass next_cursor back as cursor for the next. Each carries embed_url, the address an iframe primitive shows (content_fit fill); it is null where this server has no embed host.'
+      security:
+        - projectBearer: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: One page of views.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIViewList'
+        '400':
+          description: invalid_request, including a malformed cursor.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createBIViewInProject
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. For Tableau (kind tableau): a view of the connection site (url: an address copied from Tableau, such as https://HOST/t/SITE/views/WORKBOOK/VIEW or Tableau Cloud https://HOST/#/site/SITE/views/WORKBOOK/VIEW, or Workbook/View; or target.view), optionally with target.rotate_sheets and rotate_s of 10 to 3600 to turn the workbook published sheets (rotate_s and rotate_sheets go together; rotate_sheets may be given as the whole target beside url), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a five minute JWT with only the embed scope, signed with the connected app secret, and builds the Embedding API v3 tableau-viz from the Tableau host; the screen never holds the secret. A Tableau Public viz is a view without a connection (kind tableau, target.public_url, rebuilt as https://public.tableau.com/views/WORKBOOK/VIEW) and takes rotate_sheets too. Appends bi_view.created.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BIViewWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BIView'
+        '400':
+          description: invalid_request, including a url that is not a dashboard address of the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found, the connection is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/triggers:
     parameters:
       - name: project_id
@@ -18288,7 +19297,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccountInProject
-      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
       security:
         - projectBearer: []
       parameters:
@@ -18301,7 +19310,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked.
+          description: Created, with its secret masked; a Canva account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -18314,7 +19323,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MediaSyncAccount'
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
           description: invalid_request.
           content:
@@ -18322,7 +19331,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -18364,7 +19373,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncInProject
-      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
       parameters:
@@ -18555,7 +19564,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -19192,6 +20201,10 @@ components:
     ResourceID: {name: id, in: path, required: true, schema: {type: string}}
     NoteID: {name: note_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}, description: The id of one of the agent's notes.}
     WebhookDeliveryID: {name: delivery_id, in: path, required: true, schema: {type: string}, description: The id of one of the webhook's deliveries.}
+    NotificationUnsubscribedUserID: {name: user_id, in: path, required: true, schema: {type: string, maxLength: 200}, description: The user_id of a person in the notification's unsubscribed list.}
+    NotificationUnsubscribeNotification: {name: n, in: query, required: true, schema: {type: string, maxLength: 200}, description: The notification the link is for.}
+    NotificationUnsubscribePerson: {name: u, in: query, required: true, schema: {type: string, maxLength: 200}, description: The user_id of the person the link is for.}
+    NotificationUnsubscribeToken: {name: t, in: query, required: true, schema: {type: string, pattern: "^ust1\\.[1-9][0-9]{0,5}\\.[A-Za-z0-9_-]{43}$"}, description: The link's token.}
     CommandID: {name: command_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$"}, description: "The id of one of the screen's commands: the id in Screen.commands, the reboot_id or reload_id of the 202 answer."}
     PlaylistPageID: {name: page_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, description: Playlist page id string.}
     ApplicationID: {name: application_id, in: path, required: true, schema: {type: string}}
@@ -19224,6 +20237,9 @@ components:
     MediaSyncCursor: {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
     MediaSyncAccountFilter: {name: account_id, in: query, required: false, schema: {type: string}, description: Lists only the syncs that read through this account.}
     MediaSyncStateFilter: {name: state, in: query, required: false, schema: {type: string, enum: [active, paused, error]}, description: Lists only the syncs in this state.}
+    MediaSyncDesignQuery: {name: query, in: query, required: false, schema: {type: string, maxLength: 255}, description: Lists only the designs whose title or text matches.}
+    MediaSyncDesignContinuation: {name: continuation, in: query, required: false, schema: {type: string, maxLength: 2000}, description: The continuation of the previous page.}
+    MediaSyncForce: {name: force, in: query, required: false, schema: {type: boolean, default: false}, description: A Canva sync exports the design even when Canva reports it unchanged.}
     IfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict."}
     OptionalIfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict."}
     AfterCursor: {name: after, in: query, required: false, schema: {type: string}, description: "A cursor from a previous response: ev1_ for project events (and the event streams). The Player log (source=log) pages with lg1_ or ev1_ cursors by where the server keeps it; treat them as opaque and pass back the one a page returned. A cursor of another kind is refused with invalid_request."}
@@ -19238,6 +20254,7 @@ components:
     EventOrder: {name: order, in: query, required: false, schema: {type: string, enum: [asc, desc], default: asc}, description: "asc pages oldest first with after; desc pages newest first with before. before implies desc; order=asc with before is refused."}
     EventLogFrom: {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the start of the window (inclusive). Defaults to 24 hours before to; a newest-first page without from reaches back to the project's event retention instead."}
     EventLogTo: {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the end of the window (exclusive). Defaults to now. The window is at most 31 days."}
+    PlaylistRevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the playlist, as listPlaylistRevisions numbers them."}
     ListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 256}, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request."}
     EventListLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit."}
     PlaybackScreenID: {name: screen_id, in: query, required: false, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_"}}
@@ -23047,6 +24064,35 @@ components:
         created_at: {type: string, format: date-time, description: "When the playlist was created. Read-only."}
         updated_at: {type: string, format: date-time, description: "When the playlist's name, pages, soundtrack or format last changed. Read-only."}
         warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a write that succeeded: what its author should act on. Absent when there is nothing to act on, and on every read."}
+    PlaylistRevision:
+      type: object
+      required: [revision, created_at, change, name, page_count, current]
+      description: >-
+        One stored revision of a playlist. change says what made it: created (the first revision), edited (a replace, patch, structure change or applied review), promoted (a copy of an earlier revision, named by restored_from), or baseline (the revision the playlist held when its history began, before any write recorded one). A value this reader does not know reads as edited.
+      properties:
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time, description: "When the write that stored it committed; a baseline carries the time the playlist was last updated before its history began."}
+        change: {type: string, enum: [created, edited, promoted, baseline]}
+        restored_from: {type: integer, minimum: 1, description: "The revision a promote copied; present only when change is promoted."}
+        name: {type: string, description: "The playlist's name at this revision."}
+        page_count: {type: integer, minimum: 0}
+        current: {type: boolean, description: "This revision is the playlist's current one."}
+        author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
+    PlaylistRevisionAuthor:
+      type: object
+      required: [type, name]
+      description: Who made the revision, as the project's event log names them; absent when the write named no one (a baseline, or system work).
+      properties:
+        type: {type: string, enum: [person, agent]}
+        id: {type: string}
+        name: {type: string}
+    PlaylistRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/PlaylistRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    PlaylistRevisionDetail:
+      type: object
+      required: [revision, playlist]
+      properties:
+        revision: {$ref: "#/components/schemas/PlaylistRevision"}
+        playlist: {$ref: "#/components/schemas/PlaylistV2", description: "The playlist as it stood at this revision: its name, pages, soundtrack and format, and revision set to this one."}
     PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     PlaylistAudioWrite:
       type: object
@@ -23097,33 +24143,18 @@ components:
         until: {type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil upper bound in the screen timezone. When both bounds are present, from must be strictly earlier than until."}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/PageVisibilityWindow"}}
         data: {$ref: "#/components/schemas/PageDataCondition"}
-    ScreenCompositionChange:
-      type: object
-      required: [screen_id, change_id, playlist_id, playlist_revision, created_at, expires_at]
-      properties:
-        screen_id:
-          type: string
-        change_id:
-          type: string
-        previous_change_id:
-          type: string
-        playlist_id:
-          type: string
-        playlist_revision:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        expires_at:
-          type: string
-          format: date-time
     PageDataCondition:
       type: object
       additionalProperties: false
       required: [key]
       description: "A card-data predicate, evaluated before civil time. Missing or expired data never matches. The page also respects its ordinary time bounds. Requires host capability page.conditions; older hosts receive the page disabled."
       properties:
-        key: {type: string, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Project card data key or card instance ID; feed keys are not accepted."}
+        key:
+          type: string
+          maxLength: 256
+          pattern: "^(?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}|\\{screen\\.weather\\})$"
+          description: >-
+            Project card data key or card instance ID; feed keys are not accepted. The key {screen.weather} reads the weather conditions of each screen's own location: the document has condition (clear, cloud, fog, rain, snow, storm or wind), band (freezing below 0 degrees Celsius, cold 0 to 9, mild 10 to 17, warm 18 to 24, hot from 25), temperatureC (whole degrees) and isDay. Point path at one of them, for example path /condition with equals rain. The condition is the current observation for the screen's 0.25 degree cell, about hourly, not a forecast. A screen without a location never matches.
         path: {type: string, maxLength: 256, description: "RFC 6901 pointer with at most 16 segments; absent or empty tests the document itself."}
         equals:
           description: "Optional scalar equality. Omitting it tests existence, including a present null or false."
@@ -23286,11 +24317,11 @@ components:
     PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages.}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is read for its src; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is read for its src; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}}
     SelectorPreviewInput: {type: object, additionalProperties: false, required: [primitive, selector], properties: {primitive: {type: string, enum: [image, video]}, selector: {oneOf: [{$ref: "#/components/schemas/PlaylistMediaSelectorByAll"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByTag"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByFolder"}]}}}
     SelectorPreviewMedia: {type: object, required: [media_id, filename, tags], properties: {media_id: {type: string}, filename: {type: string}, tags: {type: array, items: {type: string}}}}
@@ -23999,21 +25030,31 @@ components:
             last_media_start_at: {type: string, format: date-time, description: Server receipt time of the latest media start the check had seen when it wrote the verdict. Not the Player clock.}
             threshold_s: {type: integer, minimum: 1, description: The silence in seconds the loop allowed before the screen counted as stalled. Present with a stalled verdict.}
             judged_at: {type: string, format: date-time, description: When the verdict was written.}
+        picture:
+          type: object
+          additionalProperties: false
+          required: [verdict, since, judged_at]
+          description: >-
+            The glass_blank and glass_frozen check. It reads the screenshots a screen's Player sends (screen screenshot, the dashboard, a wall, or the check's own captures): each is reduced to a 64 by 36 grid of brightness and a hash, and nothing else is kept. A flat frame, or one that is the same picture as one taken more than the longest page earlier, starts a suspicion. The check then asks for screenshots, less than the shortest page apart, until they span the loop plus its longest page, so that every page appeared in some frame; the verdict is blank when all of them were flat and frozen when all were the same picture, and a single frame that disagrees ends the suspicion without a trace. Two good frames in a row end a verdict (verified). A verdict is written only when it changes, so a screen that was never found blank or frozen has none. It does not judge a screen that is offline, whose display is off, standing by or disconnected, that is under a takeover or suspended, that is a video wall, or whose status is an error or whose content update is not current; a loop of one page, with a page that has nothing on it, with no image or card page that is always in it, with a page shorter than 6.25 seconds, with a page whose length the playlist does not fix (it plays to the end of its media, an application, an adslot break), or too long to cover with 30 captures; and a capture the Player reported as failed (a privacy frame).
+          properties:
+            verdict: {type: string, enum: [verified, blank, frozen, unjudged], description: "blank: every screenshot of a run that covers the loop was one flat tone. frozen: every one was the same picture. verified: a screen found blank or frozen showed two good screenshots in a row. unjudged: the screen was blank or frozen and then stopped meeting the conditions under which the check judges."}
+            since: {type: string, format: date-time, description: "When the verdict began: for blank and frozen, the first screenshot of the run that confirmed it; for verified, the second good screenshot; for unjudged, the moment the check stopped judging."}
+            judged_at: {type: string, format: date-time, description: When the verdict was written.}
     ScreenGlassChangedDetails:
       type: object
       additionalProperties: false
       required: [check, verdict, previous, since, evidence]
-      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other.
+      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other; glass_blank and glass_frozen open on a picture verdict blank or frozen and end on any other.
       properties:
-        check: {type: string, enum: [playback]}
-        verdict: {type: string, enum: [playing, stalled, unjudged]}
-        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged]}, {type: "null"}], description: "The verdict before; null when the check had none."}
+        check: {type: string, enum: [playback, picture]}
+        verdict: {type: string, enum: [playing, stalled, unjudged, verified, blank, frozen]}
+        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged, verified, blank, frozen]}, {type: "null"}], description: "The verdict before; null when the check had none."}
         since: {type: string, format: date-time}
         evidence:
           type: object
           additionalProperties: true
           description: >-
-            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason.
+            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason. picture blank or frozen: frames, run_s (the span of the run's screenshots), captures (system captures asked for), loop_s and shortest_page_s. picture verified: good_frames.
     ScreenStatusChangedDetails:
       type: object
       additionalProperties: false
@@ -24240,7 +25281,8 @@ components:
       type: object
       additionalProperties: false
       properties:
-        duration_s: {type: integer, minimum: 30, maximum: 3600, default: 300, description: "How long the lease runs from now, in seconds."}
+        duration_s: {type: integer, minimum: 30, maximum: 300, default: 300, description: "How long the lease runs from now, in seconds. A session lasts five minutes at most, whatever the lease."}
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$", description: "Renew this session only. When it is not the screen's live session, the answer is live_unavailable (the detail names ended_reason) and nothing starts or is extended. Without it, a start begins a session when the screen has none."}
     SessionDescription:
       type: object
       additionalProperties: false
@@ -24266,7 +25308,7 @@ components:
         live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$", description: "Absent while idle."}
         created_at: {type: string, format: date-time}
         lease_until: {type: string, format: date-time, description: "The session ends at this instant unless a viewer renews it."}
-        max_until: {type: string, format: date-time, description: "The hard end of the session: an hour after it began."}
+        max_until: {type: string, format: date-time, description: "The hard end of the session: five minutes after it began. No renewal moves it."}
         publisher:
           type: object
           required: [connected, connection, reported_at]
@@ -24411,6 +25453,15 @@ components:
         bytes: {type: integer, minimum: 1, maximum: 2097152}
         sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
         captured_at: {type: string, format: date-time}
+        frame:
+          type: object
+          additionalProperties: false
+          required: [flat, analyzed_at]
+          description: >-
+            What the backend read of this ready image: it describes one frame, not a verdict about the screen (Screen.glass.picture). Absent when the image could not be read, for instance when it is smaller than 64 by 36 pixels.
+          properties:
+            flat: {type: boolean, description: "True when the image is one flat tone: its 64 by 36 brightness cells span at most 12 of 255 and deviate by at most 4. A page that is black on purpose, or a transition between two pages, reads flat too."}
+            analyzed_at: {type: string, format: date-time}
     ScreenScreenshotRequestedDetails:
       type: object
       additionalProperties: false
@@ -24912,11 +25963,14 @@ components:
       properties:
         tenant_id: {type: string, description: "The organization's Entra tenant: its directory id (a GUID) or primary domain."}
         client_id: {type: string, description: "The app registration's application (client) id, a GUID."}
+        canva_user_id: {type: string, description: "A Canva account: the Canva user who connected it."}
+        team_id: {type: string, description: "A Canva account: the Canva team of that user."}
+        display_name: {type: string, description: "A Canva account: the name Canva shows for that user."}
     MediaSyncSecret:
       type: object
       additionalProperties: false
       required: [set, hint]
-      description: How an answer shows an account's client secret. The value is never returned.
+      description: How an answer shows an account's client secret, or a Canva account's tokens (set once connected, with no hint). The value is never returned.
       properties:
         set: {type: boolean}
         hint: {type: string, maxLength: 4, description: "The secret's last four characters; empty when it is too short to show any."}
@@ -24925,7 +25979,7 @@ components:
       additionalProperties: false
       required: [name, ok, detail]
       properties:
-        name: {type: string, enum: [credentials, permissions]}
+        name: {type: string, enum: [credentials, permissions, connection]}
         ok: {type: boolean}
         warn: {type: boolean, description: "A finding that does not fail the account but should be read."}
         detail: {type: string}
@@ -24941,29 +25995,37 @@ components:
       type: object
       additionalProperties: false
       required: [id, project_id, kind, name, config, secret, state, revision, created_at, updated_at]
-      description: The credentials of the project's own Microsoft Entra app, which syncs read through. The client secret is sealed and never returned.
+      description: "What syncs read through: the credentials of the project's own Microsoft Entra app (microsoft365), or one person's connection to Canva (canva). The client secret and the tokens are sealed and never returned."
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msa_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
-        kind: {type: string, enum: [microsoft365]}
+        kind: {type: string, enum: [microsoft365, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
         config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
         secret: {$ref: "#/components/schemas/MediaSyncSecret"}
-        state: {type: string, enum: [ready, pending_consent, reconnect_required]}
+        state: {type: string, enum: [ready, pending_consent, reconnect_required], description: "pending_consent: a Canva account no person has connected yet. reconnect_required: Canva no longer honors the connection; run media sync account connect."}
         last_test: {$ref: "#/components/schemas/MediaSyncTest"}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    MediaSyncAccountConnect:
+      description: "An account answered with its one-time consent link: what creating a Canva account and media sync account connect answer. The person who owns the Canva account opens authorize_url, signed in to Canva, before authorize_expires_at. It is the link of one consent: send it to that person only. Reads of the account never carry it."
+      allOf:
+        - $ref: "#/components/schemas/MediaSyncAccount"
+        - type: object
+          properties:
+            authorize_url: {type: string, description: "Present for a Canva account."}
+            authorize_expires_at: {type: string, format: date-time, description: "Present for a Canva account."}
     MediaSyncAccountList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSyncAccount"}}, next_cursor: {type: string, nullable: true}}}
     MediaSyncAccountWrite:
       type: object
       additionalProperties: false
-      required: [kind, name, config, secret]
+      required: [kind, name]
       properties:
-        kind: {type: string, enum: [microsoft365]}
+        kind: {type: string, enum: [microsoft365, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
-        config: {type: object, additionalProperties: false, required: [tenant_id, client_id], properties: {tenant_id: {type: string}, client_id: {type: string}}}
-        secret: {type: string, minLength: 1, maxLength: 1024, description: "The value of one of the app's client secrets (not its id)."}
+        config: {type: object, additionalProperties: false, properties: {tenant_id: {type: string}, client_id: {type: string}}, description: "Required for microsoft365 (both members); not accepted for canva."}
+        secret: {type: string, minLength: 1, maxLength: 1024, description: "Required for microsoft365: the value of one of the app's client secrets (not its id). Not accepted for canva."}
     MediaSyncAccountPatch:
       type: object
       additionalProperties: false
@@ -24975,11 +26037,18 @@ components:
     MediaSyncSource:
       type: object
       additionalProperties: false
-      required: [web_url, drive_id, item_id]
+      required: [web_url]
+      description: The source a sync reads, resolved when the sync was created. A SharePoint folder has drive_id and item_id; a Canva design has design_id and the members after it.
       properties:
-        web_url: {type: string, description: "The source folder's address as SharePoint names it."}
+        web_url: {type: string, description: "The source's address as the provider names it: the SharePoint folder, or the Canva design's view address."}
         drive_id: {type: string}
         item_id: {type: string}
+        design_id: {type: string, description: The Canva design's id.}
+        title: {type: string, description: The Canva design's title when the sync was created or last exported.}
+        pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "The pages synced; absent is every page."}
+        format: {type: string, enum: [png, mp4], description: "png: one image per page. mp4: one video."}
+        page_count: {type: integer, minimum: 1, description: The design's page count when last exported.}
+        design_updated_at: {type: string, format: date-time, description: "Canva's last-change time of the design version last exported. A run exports again when Canva reports a later one."}
     MediaSyncSkipped:
       type: object
       additionalProperties: false
@@ -24993,7 +26062,7 @@ components:
       additionalProperties: false
       required: [code, detail]
       properties:
-        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error."}
+        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error; for Canva also design_unavailable (Canva no longer shows the design; the sync is in state error and keeps its media), reconnect_required (run media sync account connect), canva_not_configured, export_failed, export_timeout or export_incomplete."}
         detail: {type: string}
     MediaSyncRun:
       type: object
@@ -25019,7 +26088,7 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msy_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
         account_id: {type: string}
-        provider: {type: string, enum: [sharepoint]}
+        provider: {type: string, enum: [sharepoint, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
         folder_id: {type: string, description: The media folder the files land in; a folder selector on it plays them.}
         every_s: {type: integer, minimum: 300, maximum: 86400}
@@ -25030,15 +26099,37 @@ components:
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    MediaSyncDesign:
+      type: object
+      additionalProperties: false
+      required: [id, title]
+      description: A Canva design the connected person can see.
+      properties:
+        id: {type: string}
+        title: {type: string}
+        updated_at: {type: string, format: date-time}
+        page_count: {type: integer, minimum: 1}
+        thumbnail_url: {type: string, description: "A short-lived https thumbnail address from Canva."}
+        view_url: {type: string, description: The design's view address in Canva.}
+    MediaSyncDesignList:
+      type: object
+      additionalProperties: false
+      required: [items, continuation]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/MediaSyncDesign"}}
+        continuation: {type: string, nullable: true, description: "Pass it as continuation to read the next page; null at the end."}
     MediaSyncList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSync"}}, next_cursor: {type: string, nullable: true}}}
     MediaSyncWrite:
       type: object
       additionalProperties: false
-      required: [provider, account_id, url]
+      required: [provider, account_id]
       properties:
-        provider: {type: string, enum: [sharepoint]}
+        provider: {type: string, enum: [sharepoint, canva]}
         account_id: {type: string}
-        url: {type: string, maxLength: 4096, description: "The folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        url: {type: string, maxLength: 4096, description: "sharepoint (required): the folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        design: {type: string, maxLength: 2048, description: "canva (required): the design's id, or its canva.com/design/ID/... address."}
+        pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "canva: the pages to sync; omit for every page. A design that later has fewer pages takes the missing ones out of play."}
+        format: {type: string, enum: [png, mp4], default: png, description: "canva: png gives one image per page; mp4 one video of the pages."}
         folder_id: {type: string, description: "The media folder the files land in. Omit it to create one named after the source folder."}
         every: {type: integer, minimum: 300, maximum: 86400, description: Seconds between runs; defaults to 900.}
         name: {type: string, minLength: 1, maxLength: 80, description: Defaults to the source folder's name.}
@@ -25148,12 +26239,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 8
+      maxItems: 10
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -25223,7 +26314,7 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
@@ -25240,6 +26331,10 @@ components:
         telegram_chat_id: {type: string, description: Telegram only. The chat messages go to.}
         enabled: {type: boolean}
         snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
+        unsubscribed:
+          type: array
+          items: {$ref: "#/components/schemas/NotificationUnsubscription"}
+          description: "Email only, and only while it is not empty: the people who stopped this notification's mail with the unsubscribe link in it. They stay in recipients and get no mail from this notification until they resubscribe (the page of their link, or DELETE /api/notifications/{id}/unsubscribed/{user_id})."
         revision: {type: integer, minimum: 1}
         status: {type: string, enum: [active, failing, disabled]}
         disabled_reason: {type: string, enum: [delivery_failures]}
@@ -25251,6 +26346,7 @@ components:
         updated_at: {type: string, format: date-time}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
     NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Notification"}}}}
+    NotificationUnsubscription: {type: object, additionalProperties: false, required: [user_id, at], properties: {user_id: {type: string}, at: {type: string, format: date-time, description: When the person stopped the notification's mail.}}}
     NotificationDelivery:
       type: object
       additionalProperties: false
@@ -25269,6 +26365,8 @@ components:
         since: {type: string, format: date-time, description: When the notice's condition began.}
         sent_with: {type: string, description: "Email only: the delivery whose email carried this notice."}
         emailed: {type: integer, minimum: 0, description: "Email only: how many people the email reached."}
+        group: {$ref: "#/components/schemas/NotificationDeliveryGroup", description: "Present on the notice that said a group of screens: the leader that opened the group and the notice that resolved it. Not on a webhook, which sends one notice per screen."}
+        group_id: {type: string, description: "The group a notice belongs to, on every other notice of the group; those notices are skipped as grouped."}
         state: {type: string, enum: [pending, succeeded, failed, skipped]}
         attempts: {type: integer, minimum: 0}
         next_attempt_at: {type: string, format: date-time, description: Present while pending.}
@@ -25277,10 +26375,24 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address who has not unsubscribed), grouped (the screen is part of a group whose one notice says it; group_id names the group). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
+    NotificationDeliveryGroup:
+      type: object
+      additionalProperties: false
+      required: [id, attribute, value, count]
+      description: >-
+        A group of screens one notice stands for. When at least three screens of a project fall into the same condition within five minutes of one another and share a value, an email, Slack, Teams, PagerDuty or Telegram notification sends one notice for them instead of one per screen. A screen that falls into the condition later with a value the open group is made of joins it without a new notice, and one notice says the group when its last screen recovers. A webhook notification still sends one notice per screen.
+      properties:
+        id: {type: string, description: "The group; its id derives from the notice that leads it."}
+        attribute:
+          type: string
+          description: >-
+            What the screens share: network (the last address, an IPv6 address as its /64), location (the location name), model (manufacturer and model), player (Player kind and version), tag, or many_networks (screens on three or more separate networks that fell together, which usually points at a shared cause such as screenRIG, DNS or an upstream provider). Readers treat another value as an attribute they cannot name.
+        value: {type: string, description: "The shared value, such as 203.0.113.7 or Store 12; for many_networks the number of networks, such as 6 networks."}
+        count: {type: integer, minimum: 1, description: How many screens the notice named.}
     NotificationDeliveryList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/NotificationDelivery"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end of the log.}}}
     NotificationDeliveryAttempt:
       type: object
@@ -25645,6 +26757,179 @@ components:
       properties:
         code: {type: string, enum: [configuration_history, playlist_content, page_rules, player_state, archived]}
         detail: {type: string}
+    BIConnectionConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        url: {type: string, maxLength: 2048, description: "Grafana's address: http or https on a public Internet host, with an optional path prefix such as /grafana, and no query or fragment. The server calls it with the connection's token. Tableau: https only, the address of Tableau Server or of your Tableau Cloud pod such as https://10ay.online.tableau.com."}
+        org_id: {type: integer, minimum: 1, default: 1, description: The Grafana organization the token belongs to.}
+        tenant_id: {type: string, maxLength: 253, description: "Power BI: the Directory (tenant) ID of the Microsoft Entra tenant, a GUID, or its domain such as contoso.onmicrosoft.com. Not common, organizations or consumers."}
+        client_id: {type: string, maxLength: 128, description: "Power BI: the Application (client) ID of the Entra app registration, a GUID. The secret is its client secret value. Tableau: the Client ID of the connected app."}
+        site: {type: string, maxLength: 255, description: "Tableau: the site content URL, the part after /site/ or /t/ in a view's address; empty for Tableau Server's default site."}
+        secret_id: {type: string, maxLength: 128, description: "Tableau: the Secret ID of a secret generated for the connected app. The secret is its secret value."}
+        username: {type: string, maxLength: 320, description: "Tableau: the user the screens' views are shown as (an email address on Tableau Cloud). Anyone holding a screen's ticket can embed any view this user can see."}
+    BISecret:
+      type: object
+      additionalProperties: false
+      required: [set, hint]
+      description: How a stored secret shows. The secret itself is never returned.
+      properties:
+        set: {type: boolean}
+        hint: {type: string, description: The last 4 characters of a secret of 12 or more; empty otherwise.}
+    BICheck:
+      type: object
+      additionalProperties: false
+      required: [name, ok]
+      properties:
+        name: {type: string, description: "What was checked: token, image_renderer, render, public_link or framing (Grafana); token, workspaces, report, embed_token, public_link or framing (Power BI); signin, view or public_link (Tableau)."}
+        ok: {type: boolean}
+        warn: {type: boolean, description: "With ok true: something the check could not judge."}
+        detail: {type: string}
+    BITestReport:
+      type: object
+      additionalProperties: false
+      required: [at, ok, checks]
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean, description: True when no check failed; warnings do not fail it.}
+        checks: {type: array, items: {$ref: "#/components/schemas/BICheck"}}
+    BIViewTest:
+      type: object
+      additionalProperties: false
+      required: [at, ok, checks]
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean}
+        checks: {type: array, items: {$ref: "#/components/schemas/BICheck"}}
+        width: {type: integer, description: The size of the test render.}
+        height: {type: integer}
+        bytes: {type: integer, description: The size of the test render's PNG.}
+    BIConnection:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, name, config, embed_origin, secret, last_test, revision, created_at, updated_at]
+      description: A project's access to one BI system. Every connection belongs to one project.
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?bic_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        embed_origin: {anyOf: [{type: string}, {type: "null"}], description: "The origin of the project's embed host, where its views' pages are served; null where this server has none."}
+        secret: {$ref: "#/components/schemas/BISecret"}
+        last_test: {anyOf: [{$ref: "#/components/schemas/BITestReport"}, {type: "null"}]}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BIConnectionList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/BIConnection"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    BIConnectionWrite:
+      type: object
+      additionalProperties: false
+      required: [name, kind, config, secret]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        secret: {type: string, minLength: 1, maxLength: 4096, description: "The service-account token (Grafana), the app's client secret value (Power BI) or the connected app's secret value (Tableau). Sealed on arrival; the CLI reads it from a file or stdin, never an argument."}
+    BIConnectionPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        config: {$ref: "#/components/schemas/BIConnectionConfig"}
+        secret: {type: string, minLength: 1, maxLength: 4096, description: Replaces the stored secret.}
+    BITarget:
+      type: object
+      additionalProperties: false
+      description: "What a view shows. Grafana with a connection: dashboard_uid (and optionally one panel). Power BI with a connection: workspace_id and report_id, with pages or rotate_all_pages. Tableau with a connection: view (Workbook/View), with rotate_sheets. Without a connection: only public_url (and rotate_sheets for Tableau)."
+      properties:
+        dashboard_uid: {type: string, maxLength: 128, description: "The part after /d/ in a dashboard's address."}
+        panel_id: {type: integer, minimum: 0, description: Show this panel alone (d-solo) instead of the dashboard.}
+        org_id: {type: integer, minimum: 1, description: The connection's organization when omitted.}
+        from: {type: string, maxLength: 64, description: "A Grafana time such as now-6h."}
+        to: {type: string, maxLength: 64, description: "A Grafana time such as now."}
+        vars: {type: object, maxProperties: 50, propertyNames: {pattern: "^var-[A-Za-z0-9_-]{1,64}$"}, additionalProperties: {type: string, maxLength: 200}, description: "Template variables, keyed var-name."}
+        theme: {type: string, enum: [dark, light], default: dark}
+        timezone: {type: string, maxLength: 64}
+        public_url: {type: string, maxLength: 2048, description: "A public link that needs no connection and plays live from its host: a Grafana public dashboard (Grafana must allow embedding), for kind powerbi a Publish to web link https://app.powerbi.com/view?r=..., or for kind tableau a Tableau Public viz address (the viz page, the views address or the embed address), stored as https://public.tableau.com/views/WORKBOOK/VIEW."}
+        workspace_id: {type: string, maxLength: 36, description: "Power BI: the workspace id, the part after /groups/ in the report's address."}
+        report_id: {type: string, maxLength: 36, description: "Power BI: the report id, the part after /reports/ in its address."}
+        pages: {type: array, maxItems: 50, items: {type: string, minLength: 1, maxLength: 200}, description: "Power BI: page names (ReportSection...) or display names, shown in this order. Two or more need rotate_s on the view. Empty shows the report's own first page."}
+        rotate_all_pages: {type: boolean, description: "Power BI: rotate through every visible page of the report (needs rotate_s). Not with pages."}
+        view: {type: string, maxLength: 401, description: "Tableau: the view as Workbook/View, the names after /views/ in its address."}
+        rotate_sheets: {type: boolean, description: "Tableau: turn the workbook's published sheets every rotate_s seconds (needs rotate_s). Also for a Tableau Public view."}
+    BIViewError:
+      type: object
+      additionalProperties: false
+      required: [at, code, detail]
+      properties:
+        at: {type: string, format: date-time}
+        code: {type: string, enum: [bi_upstream_refused, bi_upstream_unavailable]}
+        detail: {type: string}
+    BIViewStatus:
+      type: object
+      additionalProperties: false
+      required: [last_ok_at, last_error]
+      description: How the view last fared on glass. It changes only when the outcome changes.
+      properties:
+        last_ok_at: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
+        last_error: {anyOf: [{$ref: "#/components/schemas/BIViewError"}, {type: "null"}]}
+    BIView:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, name, target, refresh_s, rotate_s, fit, revision, status, embed_url, created_at, updated_at]
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?biv_[A-Za-z0-9_-]+$"}
+        project_id: {type: string}
+        connection_id: {type: string, description: Absent for a view of a public link.}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, description: "Grafana: how often the image is drawn again, 30 to 86400 (a public link reloads this often). Power BI and Tableau: how often the report or view refreshes its data, 60 to 86400, or 0 for never (a DirectQuery report or one with automatic page refresh updates itself)."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, description: "Power BI: how long each page shows when the target lists two or more pages or sets rotate_all_pages, 10 to 3600; 0 otherwise. Tableau: how long each sheet shows when the target sets rotate_sheets, 10 to 3600; 0 otherwise. Always 0 for Grafana and Power BI public links."}
+        fit: {type: string, enum: [contain, cover, fill]}
+        revision: {type: integer, minimum: 1}
+        status: {$ref: "#/components/schemas/BIViewStatus"}
+        embed_url: {anyOf: [{type: string}, {type: "null"}], description: "Put this in an iframe primitive with content_fit fill. It holds no credential; a screen's manifest adds its own ticket. Null where this server has no embed host."}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BIViewList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/BIView"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    BIViewWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: "Set connection_id with exactly one of url and target (for Tableau, url may come with a target that holds only rotate_sheets), or kind (grafana, powerbi or tableau) with target.public_url alone."
+      properties:
+        connection_id: {type: string}
+        kind: {type: string, enum: [grafana, powerbi, tableau], description: Required without a connection_id; otherwise it must match the connection.}
+        name: {type: string, minLength: 1, maxLength: 80}
+        url: {type: string, maxLength: 2048, description: "A /d/{uid}/... dashboard address on the connection's host. The server reads orgId, viewPanel (N or panel-N) or panelId, from, to, var-* and theme from it. Tableau: a view address on the connection's host (/views/W/V, /t/SITE/views/W/V, #/site/SITE/views/W/V) or Workbook/View."}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, default: 300, description: "Grafana 30 to 86400; Power BI and Tableau 0 or 60 to 86400."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, default: 0, description: "Power BI and Tableau: 0 or 10 to 3600; required for a target that rotates pages or sheets."}
+        fit: {type: string, enum: [contain, cover, fill], default: contain}
+    BIViewPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        url: {type: string, maxLength: 2048}
+        target: {$ref: "#/components/schemas/BITarget"}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600}
+        fit: {type: string, enum: [contain, cover, fill]}
+    BIBrowse:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      description: "Grafana: dashboards (uid, title, folder, tags), or with dashboard set that dashboard's panels (id, title, type) and the dashboard itself. Power BI: workspaces (id, name), or with workspace set that workspace's reports (id, name, embed_url) and the workspace itself. Tableau: views (path as Workbook/View, name)."
+      properties:
+        dashboard: {type: object, additionalProperties: false, properties: {uid: {type: string}, title: {type: string}}}
+        workspace: {type: object, additionalProperties: false, properties: {id: {type: string}}}
+        items: {type: array, maxItems: 1000, items: {type: object, additionalProperties: true}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
     Trigger:
       type: object
       additionalProperties: false
@@ -27283,6 +28568,8 @@ x-problem-codes:
   - media_pending_review
   - media_sync_source_refused
   - media_sync_source_unavailable
+  - canva_not_configured
+  - canva_reconnect_required
   - not_found
   - method_not_allowed
   - idempotency_mismatch
@@ -27347,6 +28634,8 @@ x-problem-codes:
   - recovery_not_offered
   - invitation_limit_reached
   - trigger_limit_reached
+  - bi_upstream_refused
+  - bi_upstream_unavailable
   - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit

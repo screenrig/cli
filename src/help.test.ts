@@ -35,7 +35,7 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), [
-    "project token", "card preview", "screen changes", "screen revert", "card create", "card list", "card show", "card params", "card delete", "card data get", "card data put",
+    "project token", "card preview", "card create", "card list", "card show", "card params", "card delete", "card data get", "card data put",
     "cards list", "cards show", "card-data get", "card-data put", "card-data list", "card-data delete", "feeds get",
     "recovery list",
     "recovery show",
@@ -174,6 +174,9 @@ test("root help is compact and every command is discoverable through immediate c
     "playlist import",
     "playlist show",
     "playlist list",
+    "playlist revisions",
+    "playlist revision show",
+    "playlist promote",
     "playlist delete",
     "screen publish",
     "screen pair",
