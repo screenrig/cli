@@ -638,7 +638,7 @@ function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
   return ids;
 }
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
+export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
@@ -653,7 +653,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(
+export function jsonBody(
   response: { body: unknown; headers: Record<string, string> },
   requestId: string,
   extra?: Record<string, unknown>,
@@ -798,7 +798,7 @@ async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, reso
 }
 
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
-function commandHandler(
+export function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {
@@ -847,7 +847,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "source" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
