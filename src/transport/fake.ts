@@ -1926,7 +1926,7 @@ export function memoryBackend(options: {
   const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
   transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "crashing"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },

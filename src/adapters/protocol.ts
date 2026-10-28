@@ -632,6 +632,16 @@ export interface ScreenCommand {
 export interface ScreenGlass {
   /** The loop_stalled check; absent for a screen it never found stalled. */
   playback?: ScreenGlassPlayback;
+  /** The glass_blank and glass_frozen check; absent for a screen it never found blank or frozen. */
+  picture?: ScreenGlassPicture;
+}
+
+export interface ScreenGlassPicture {
+  /** blank: every screenshot of a run that covers the loop was one flat tone. frozen: every one was the same picture. verified: two good screenshots in a row followed. unjudged: the screen stopped meeting the conditions under which the check judges. */
+  verdict: "verified" | "blank" | "frozen" | "unjudged";
+  /** When the verdict began; for blank and frozen, the first screenshot of the run that confirmed it. */
+  since: string;
+  judged_at: string;
 }
 
 export interface ScreenGlassPlayback {
@@ -1065,12 +1075,20 @@ export interface ScreenScreenshotStatus {
   capture_id?: ScreenshotCaptureID;
   captured_at?: string;
   expires_at?: string;
+  /** What the backend read of this ready image: one frame, not a verdict about the screen. Absent when the image could not be read. */
+  frame?: ScreenScreenshotFrame;
   height?: number;
   /** Present when state is unavailable. */
   reason?: "unsupported_surface" | "capture_failed";
   sha256?: string;
   state: ScreenScreenshotState;
   width?: number;
+}
+
+export interface ScreenScreenshotFrame {
+  /** True when the image is one flat tone. A transition, or a page that is black on purpose, reads flat too. */
+  flat: boolean;
+  analyzed_at: string;
 }
 
 export interface PairingClaim {
@@ -1451,7 +1469,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty

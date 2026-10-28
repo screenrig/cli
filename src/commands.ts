@@ -21,7 +21,7 @@ import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
-import { glassLines } from "./screen-glass.js";
+import { flatFrameNote, frameRow, glassLines } from "./screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
 import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
@@ -99,6 +99,7 @@ import {
   type ScreenReplaceWrite,
   type ScreenSuspendWrite,
   type ScreenScreenshotAccepted,
+  type ScreenScreenshotFrame,
   type ScreenScreenshotStatus,
   type ScreenStorageForecastDryRun,
   type ScreenStorageForecastRequest,
@@ -6778,20 +6779,42 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
     throw usageError("screen screenshot requires <id>.");
   }
   const outputPath = await resolveScreenshotOutput(runtime.cwd(), id, args.flags);
-  const data = await captureScreenshot(runtime, client, id, outputPath, screenshotOptions(args, runtime), client.idempotencyKey);
+  const saved = await captureScreenshot(runtime, client, id, outputPath, screenshotOptions(args, runtime), client.idempotencyKey);
+  // The screen's own picture verdict, if it has one, goes beside the image.
+  const screen = await screenAfterScreenshot(client, id);
+  const picture = screen?.glass?.picture;
+  const data = { ...saved, ...(picture ? { picture } : {}) };
   return {
     envelope: successEnvelope(data, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
-    human: humanLines("Screenshot saved", [
-      ["screen_id", data.screen_id],
-      ["capture_id", data.capture_id],
-      ["path", data.path],
-      ["bytes", String(data.bytes)],
-      ["sha256", data.sha256],
-      ["width", String(data.width)],
-      ["height", String(data.height)],
-    ]),
+    human: [
+      humanLines("Screenshot saved", [
+        ["screen_id", data.screen_id],
+        ["capture_id", data.capture_id],
+        ["path", data.path],
+        ["bytes", String(data.bytes)],
+        ["sha256", data.sha256],
+        ["width", String(data.width)],
+        ["height", String(data.height)],
+        ["frame", frameRow(data.frame)],
+      ]),
+      ...flatFrameNote(data.frame, screen),
+      ...glassLines(screen),
+    ].join("\n"),
   };
+}
+
+/**
+ * Read the screen once after its screenshot is saved, for the glass verdicts.
+ * Best effort, as the explanation of a failed capture is: the screenshot is
+ * already on disk, and a screen that cannot be read now prints without them.
+ */
+async function screenAfterScreenshot(client: ApiClient, id: string): Promise<Screen | undefined> {
+  try {
+    return (await client.call({ method: "GET", path: `/api/screens/${id}` })).body as Screen | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** How one invocation's captures wait, retry and report progress. */
@@ -6842,6 +6865,8 @@ interface ScreenshotSaved {
   sha256: string;
   width: number;
   height: number;
+  /** What the backend read of this image; absent when it could not be read. */
+  frame?: ScreenScreenshotFrame;
 }
 
 const SCREENSHOT_RETRY_MAX = 6;
@@ -7081,6 +7106,7 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
     sha256: digest,
     width: status.width,
     height: status.height,
+    ...(status.frame && typeof status.frame.flat === "boolean" ? { frame: { flat: status.frame.flat, analyzed_at: status.frame.analyzed_at } } : {}),
   };
 }
 

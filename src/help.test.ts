@@ -559,7 +559,7 @@ test("notifications help, JSON help and preflight agree on option relationships 
     assert.match(create.options.find((option) => option.name === name)?.description ?? "", /\bstdin\b/, `${name} reads its credential from stdin`);
   }
   assert.equal(create.options.find((option) => option.name === "--tag")?.type, "value");
-  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing/);
+  assert.match(create.options.find((option) => option.name === "--conditions")?.description ?? "", /screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing/);
   for (const sentence of ["Provide exactly one of --email or --webhook or --slack or --teams or --pagerduty or --telegram.", "Provide at least one of --conditions or --events.", "--email requires --conditions.", "--events requires --webhook.", "Provide --telegram and --telegram-chat together."]) {
     assert.equal(create.usage.split(sentence).length, 2, `${sentence} appears once in the human help`);
   }
@@ -623,10 +623,10 @@ test("alerts help, JSON help and preflight agree on option relationships, choice
   }
   assert.deepEqual(commandHelp(["alerts"]).commands.map((child) => child.name), ["list", "show", "ack", "snooze", "mute", "mutes", "unmute"]);
   const group = commandHelp(["alerts"]).usage;
-  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck, not_playing or loop_stalled/);
+  assert.match(group, /screen_offline, display_disconnected, running_hot,\s+storage_full, content_stuck, not_playing, loop_stalled, glass_blank or\s+glass_frozen\)/);
   assert.match(group, /crashing is a notice, never\s+an alert/);
-  assert.match(group, /has at most 50 current mutes/);
-  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing, loop_stalled or crashing/);
+  assert.match(group, /has at most 50\s+current mutes/);
+  assert.match(commandHelp(["notifications"]).usage, /content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen or crashing/);
   assert.match(commandHelp(["notifications", "create"]).notes.join("\n"), /not_playing \(the Player shows an error instead of its content\), loop_stalled \(no media start has reached ScreenRig/);
   assert.match(commandHelp(["webhooks"]).usage, /content stuck, not playing, crashing\) are screenrig notifications/);
 });
