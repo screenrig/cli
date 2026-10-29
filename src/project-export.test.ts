@@ -126,6 +126,27 @@ async function listFiles(directory: string): Promise<string[]> {
   return out;
 }
 
+test("--since bounds the event log to the days from it, oldest first", async () => {
+  await inTemp(async (directory) => {
+    const calls: Calls = { gets: [], files: [], appends: [] };
+    const api = fakeApi(calls);
+    const events = [
+      { id: "e3", at: "2026-10-28T12:00:00Z" }, { id: "e2", at: "2026-10-27T12:00:00Z" }, { id: "e1", at: "2026-10-01T12:00:00Z" },
+    ];
+    const wrapped: ExportApi = {
+      ...api,
+      async get(pathName, query) {
+        if (pathName !== "/api/events") return api.get(pathName, query);
+        assert.equal(query?.order, "desc");
+        return { items: events, next_cursor: null };
+      },
+    };
+    await runProjectExport(wrapped, { directory, media: false, since: "2026-10-27", now: NOW });
+    const lines = (await readFile(path.join(directory, "log/events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { id: string });
+    assert.deepEqual(lines.map((line) => line.id), ["e2", "e3"]);
+  });
+});
+
 test("a rerun keeps complete media, continues a partial download and refreshes the rest", async () => {
   await inTemp(async (directory) => {
     const first: Calls = { gets: [], files: [], appends: [] };

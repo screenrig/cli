@@ -48,7 +48,7 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
   const exportCommand = project.command("export").description("Write a complete copy of this project to a directory in open formats")
     .argument("<DIR>", "Directory to write (created if needed; a rerun continues and refreshes it)")
     .option("--no-media", "Skip the original media files (the manifest still lists them with their hashes)")
-    .option("--since <YYYY-MM-DD>", "First UTC day of the plays, uptime and playback CSV (default: as far back as the plan keeps them)");
+    .option("--since <YYYY-MM-DD>", "First UTC day of the plays, uptime and playback CSV and of the event log (default: as far back as the plan keeps the CSV data, and the whole log)");
   exportCommand.action(bind(handleProjectExport));
   addCommandNotes(exportCommand, [
     "Export:",

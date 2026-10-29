@@ -39,7 +39,7 @@ export interface ExportApi {
 export interface ExportOptions {
   directory: string;
   media: boolean;
-  /** First UTC day of the CSV data; default the longest lookback a plan keeps. */
+  /** First UTC day of the CSV data and the event log; default the longest lookback a plan keeps, and the whole log. */
   since?: string;
   now: Date;
   progress?: (line: string) => void;
@@ -271,14 +271,36 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     const temp = `${target}.part`;
     const handle = await open(temp, "w", 0o600);
     try {
-      let after: string | undefined;
-      for (;;) {
-        const page = asRecord(await api.get("/api/events", { limit: "200", ...(after ? { after } : {}) }));
-        const items = asArray(page.items);
-        if (items.length > 0) await handle.write(`${items.map((item) => JSON.stringify(item)).join("\n")}\n`);
-        const next = typeof page.next_cursor === "string" ? page.next_cursor : undefined;
-        if (!next || items.length === 0) break;
-        after = next;
+      if (options.since === undefined) {
+        let after: string | undefined;
+        for (;;) {
+          const page = asRecord(await api.get("/api/events", { limit: "200", ...(after ? { after } : {}) }));
+          const items = asArray(page.items);
+          if (items.length > 0) await handle.write(`${items.map((item) => JSON.stringify(item)).join("\n")}\n`);
+          const next = typeof page.next_cursor === "string" ? page.next_cursor : undefined;
+          if (!next || items.length === 0) break;
+          after = next;
+        }
+      } else {
+        // From --since on: newest first until the first event before the day, then written oldest first.
+        const from = `${options.since}T00:00:00Z`;
+        const kept: Array<Record<string, unknown>> = [];
+        let before: string | undefined;
+        for (let done = false; !done;) {
+          const page = asRecord(await api.get("/api/events", { limit: "200", order: "desc", ...(before ? { before } : {}) }));
+          const items = asArray(page.items);
+          for (const item of items) {
+            if (typeof item.at === "string" && item.at < from) {
+              done = true;
+              break;
+            }
+            kept.push(item);
+          }
+          const next = typeof page.next_cursor === "string" ? page.next_cursor : undefined;
+          if (!next || items.length === 0) done = true;
+          before = next;
+        }
+        if (kept.length > 0) await handle.write(`${kept.reverse().map((item) => JSON.stringify(item)).join("\n")}\n`);
       }
       await handle.sync();
     } finally {
