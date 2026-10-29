@@ -23,6 +23,8 @@ export interface NormalizedProblem {
   current_revision?: number;
   /** insufficient_access only: the cap that held the credential to Propose. */
   access_limited_by?: "project" | "person";
+  /** outside_upload_scope only: the playlists and media folders this uploader works in. */
+  upload_scope?: { playlist_ids: string[]; folder_ids: string[]; access?: "propose" | "manage" };
   /** Server 5xx only: whether retrying the unchanged request may succeed. */
   retryable?: boolean;
   /** Present only on 429, taken from the server's Retry-After header. */

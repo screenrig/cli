@@ -31,7 +31,11 @@ import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from ".
 import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_MAPPING_MAX_BYTES, KV_WEBHOOK_SECRET_PATTERN, KV_WEBHOOK_SIGNING_SECRET_PATTERN, type KvWebhookTarget, cardWebhookExample, cardWebhookLines, cardWebhookSigningWarning, cardWebhookTableLines, kvWebhookDeliveryTableLines, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookMapping, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines, kvWebhookTargetFlag, kvWebhooksPath } from "./kv-webhooks.js";
-import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
+import {
+  TRIGGER_ID_PATTERN, TRIGGER_MAPPING_MAX_BYTES, TRIGGER_PASSWORD_PATTERN, TRIGGER_SIGNING_SECRET_PATTERN, alertLines, overlayLines, triggerDeliveryTableLines, triggerExample,
+  triggerHoldSeconds, triggerId, triggerLines, triggerMapping, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerSigningWarning, triggerStyle,
+  triggerTableLines, triggerTag,
+} from "./triggers.js";
 import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
@@ -120,10 +124,14 @@ import {
   type FleetLinkPatch,
   type FleetLinkWrite,
   type Trigger,
+  type TriggerDeliveryList,
   type TriggerList,
+  type TriggerOverlayReceipt,
+  type TriggerPatch,
   type TriggerPull,
   type TriggerReceipt,
-  type TriggerWithPassword,
+  type TriggerTarget,
+  type TriggerWithSecrets,
   type TriggerWrite,
   type Campaign,
   type CampaignAudience,
@@ -691,7 +699,7 @@ export function jsonBody(
 }
 
 /** The --note of a review-class write as its request header. */
-function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
+export function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
   return reviewNoteHeaders(flagString(args.flags, "note"));
 }
 
@@ -699,7 +707,7 @@ function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
  * A review-class write that became a review under Propose access (HTTP 202
  * pending_review): a success, exit 0, data is the answer plus next.
  */
-function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
+export function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
   const lifted = playlistAnswerWarnings(response.body);
   return {
     envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, requestId, { ...extra, next: reviewNext(pending.review.id) }, [pendingReviewWarning(pending.review), ...lifted]),
@@ -1093,6 +1101,7 @@ interface ServiceClientView {
   keys: Array<{ kid: string; alg: string }>;
   secrets: Array<{ id: string; hint: string }>;
   last_used_at?: string;
+  upload_scope?: { playlist_ids: string[]; folder_ids: string[] };
 }
 
 function serviceClientId(args: ParsedArgs, verb: string): string {
@@ -1111,6 +1120,7 @@ function serviceClientLines(client: ServiceClientView): Array<[string, string | 
     ["keys", client.keys.map((key) => `${key.kid} (${key.alg})`).join(", ") || undefined],
     ["secrets", client.secrets.map((secret) => `${secret.id} (…${secret.hint})`).join(", ") || undefined],
     ["last_used_at", client.last_used_at],
+    ...(client.upload_scope ? [["uploader", `folders ${client.upload_scope.folder_ids.join(", ")}; playlists ${client.upload_scope.playlist_ids.join(", ") || "none"}`] as [string, string]] : []),
   ];
 }
 
@@ -1202,9 +1212,19 @@ export const handleServiceClientCreate = commandHandler(async (args, runtime, re
   }
   const capabilities = flagString(args.flags, "capability")?.split(",");
   const access = flagString(args.flags, "access");
+  const uploader = flagBool(args.flags, "uploader");
+  if (!uploader && (flagString(args.flags, "folder-id") !== undefined || flagString(args.flags, "playlist-id") !== undefined)) {
+    throw usageError("--folder-id and --playlist-id require --uploader.");
+  }
+  if (uploader && capabilities?.some((capability) => capability !== "content" && capability !== "playlists")) {
+    throw usageError("An uploader client holds the content and playlists capabilities only.");
+  }
+  // The client's own access applies to an uploader client (Propose unless chosen), so --access is not part of the scope.
+  const scope = uploader ? uploadScopeFromArgs(args, "service-client create --uploader", false) : undefined;
   const secretFile = await reserveSecretFile(args, runtime);
   return serviceClientWrite(args, runtime, resolved, { path: "/api/service-clients", title: "Service client created", body: {
     name, ...(capabilities ? { capabilities } : {}), ...(access ? { access } : {}), ...(key ? { key } : {}), ...(secretFile ? { secret: true } : {}),
+    ...(scope ? { upload_scope: scope } : {}),
   } }, secretFile);
 });
 
@@ -2682,7 +2702,19 @@ export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolve
 });
 
 /** Link URLs are an explicit one-time output, never logging or recovery metadata. */
+/** The scope an uploader invitation or service client carries: the folders and playlists it works in. */
+function uploadScopeFromArgs(args: ParsedArgs, subject: string, withAccess: boolean): { playlist_ids: string[]; folder_ids: string[]; access?: string } {
+  const folders = adsListOption(flagString(args.flags, "folder-id"), "folder-id");
+  const playlists = adsListOption(flagString(args.flags, "playlist-id"), "playlist-id");
+  if (!folders.length) throw usageError(`${subject} needs at least one --folder-id MFD_ID (comma-separated): an uploader works in media folders. media folder list shows them.`);
+  for (const id of folders) mediaFolderId(id, "--folder-id");
+  for (const id of playlists) if (!RESOURCE_ID_PATTERNS.playlist.test(id)) throw usageError("--playlist-id takes playlist IDs (pl_...); playlist list shows them.");
+  const access = withAccess ? flagString(args.flags, "access") : undefined;
+  return { playlist_ids: playlists, folder_ids: folders, ...(access !== undefined ? { access } : {}) };
+}
+
 export const handleInvitationsCreate = commandHandler(async (args, runtime, resolved) => {
+  const uploader = flagString(args.flags, "kind") === "uploader";
   const kind = flagString(args.flags, "kind") === "ad-buyer" ? "ad_buyer" : "project_member";
   const link = flagBool(args.flags, "link");
   // A link names no recipient (the server refuses emails with it), so never accept and drop an address.
@@ -2696,6 +2728,11 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
   if (kind === "project_member" && (screenIds.length || slotIds.length || policy !== undefined)) {
     throw usageError("Advertising scope and policy require --kind ad-buyer.");
   }
+  if (!uploader && (flagString(args.flags, "folder-id") !== undefined || flagString(args.flags, "playlist-id") !== undefined || flagString(args.flags, "access") !== undefined)) {
+    throw usageError("--folder-id, --playlist-id and --access require --kind uploader.");
+  }
+  const uploadScope = uploader ? uploadScopeFromArgs(args, "invitations create --kind uploader", true) : undefined;
+  if (uploadScope?.access !== undefined && uploadScope.access !== "propose" && uploadScope.access !== "manage") throw usageError("--access takes propose or manage.");
   if (kind === "ad_buyer" && !screenIds.length && !slotIds.length) {
     throw usageError("Ad-buyer invitations require at least one --screen-id or --slot-id.");
   }
@@ -2704,6 +2741,7 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
     method: "POST", path: "/api/invitations", idempotent: true,
     body: { kind, delivery: link ? "link" : "email",
       ...(!link ? { emails } : {}),
+      ...(uploadScope ? { upload_scope: uploadScope } : {}),
       ...(kind === "ad_buyer" ? { advertising: { screen_ids: screenIds, slot_ids: slotIds, policy: policy ?? "trusted" } } : {}),
     },
   });
@@ -3358,6 +3396,7 @@ function validateInvitation(value: unknown): Invitation {
     project_id: invitation.project_id, created_at: invitation.created_at!, expires_at: invitation.expires_at!,
     ...(invitation.recipient_email ? { recipient_email: invitation.recipient_email } : {}),
     ...(invitation.advertising ? { advertising: invitation.advertising } : {}),
+    ...(invitation.upload_scope ? { upload_scope: invitation.upload_scope } : {}),
   };
 }
 
@@ -3734,13 +3773,6 @@ async function uploadFolderFromArgs(args: ParsedArgs, client: ApiClient): Promis
   const id = mediaFolderId(folder, "--folder");
   await client.call({ method: "GET", path: `/api/media-folders/${id}` });
   return id;
-}
-
-/** Uploads land at the library root; --folder moves what the command uploaded, in requests of at most 1000 IDs. */
-async function moveIntoMediaFolder(client: ApiClient, folderId: string, mediaIds: string[]): Promise<void> {
-  for (let start = 0; start < mediaIds.length; start += 1000) {
-    await client.call({ method: "POST", path: "/api/media/move", idempotent: true, body: { folder_id: folderId, media_ids: mediaIds.slice(start, start + 1000) } });
-  }
 }
 
 export const handleMediaFolderList = commandHandler(async (args, runtime, resolved) =>
@@ -4790,9 +4822,6 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   // Validate unconditionally so a typo such as --webp-quality 500 is rejected
   // whether or not transcoding runs. The result is unused under --no-transcode.
   const transcodeOptions = transcodeOptionsFromArgs(args);
-  if (flagString(args.flags, "folder") !== undefined && flagBool(args.flags, "no-wait")) {
-    throw usageError("--folder needs the media ID, so it cannot be used with --no-wait; after the upload is ready run media move ID --folder ID.");
-  }
   const folderId = await uploadFolderFromArgs(args, client);
   const uploaded = await uploadMediaFile({
     runtime,
@@ -4800,6 +4829,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     sourcePath,
     explicitContentType,
     tag: mediaTagFromArgs(args),
+    ...(folderId ? { folderId } : {}),
     transcodeOptions,
     noTranscode: flagBool(args.flags, "no-transcode"),
     reporter: progressReporterFor(args, runtime),
@@ -4809,10 +4839,9 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     resumable: flagString(args.flags, "idempotency-key") !== undefined,
   });
   const mediaId = uploaded.mediaId;
-  if (folderId && mediaId) await moveIntoMediaFolder(client, folderId, [mediaId]);
   const data = {
     ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
-    ...(folderId && mediaId ? { folder_id: folderId } : {}),
+    ...(folderId ? { folder_id: folderId } : {}),
     operation: uploaded.operation,
     reused: uploaded.reused,
     upload: uploaded.upload,
@@ -4834,7 +4863,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       ["source_filename", uploaded.upload.source_filename],
       ["content_type", uploaded.upload.content_type],
       ["tag", uploaded.upload.tag],
-      ["folder_id", folderId && mediaId ? folderId : undefined],
+      ["folder_id", folderId],
       ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
       ["sha256", uploaded.upload.sha256],
       ["timing", Object.entries(uploaded.timing).map(([stage, ms]) => `${stage.replace(/_ms$/, "")} ${ms} ms`).join(", ")],
@@ -4877,6 +4906,7 @@ async function mediaUploadBatch(
     projectId: resolved.projectId,
     concurrency,
     defaultTag: mediaTagFromArgs(args),
+    ...(folderId ? { folderId } : {}),
     transcodeOptions,
     noTranscode: flagBool(args.flags, "no-transcode"),
     reporter: progressReporterFor(args, runtime),
@@ -4885,8 +4915,6 @@ async function mediaUploadBatch(
     timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
   });
-  const movable = result.data.items.flatMap((item) => (item.media_id ? [item.media_id] : []));
-  if (folderId && movable.length) await moveIntoMediaFolder(client, folderId, movable);
   return {
     envelope: successEnvelope(folderId ? { ...result.data, folder_id: folderId } : result.data, {
       request_id: client.requestId,
@@ -8522,8 +8550,13 @@ async function doctor(
         });
       }
     } catch (err) {
-      const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
       const name = route === "/api/capabilities" ? "capabilities" : route.slice(2);
+      // An uploader works only in its playlists and folders: that answer is the credential doing its job.
+      if (err instanceof CliError && err.problem.code === "outside_upload_scope") {
+        checks.push({ name, status: "pass", detail: "uploader: these playlists and folders" });
+        continue;
+      }
+      const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
       checks.push({ name, status: "fail", detail });
     }
   }
@@ -9468,9 +9501,12 @@ export const handleFleetLinksDelete = commandHandler(async (args, runtime, resol
   };
 });
 
-// CAP alert triggers: /api/triggers. url and username are not secret; the
-// password is returned only by create and rotate-secret, printed once, and
-// kept out of the operation log (client.ts privateBodies).
+// Triggers: /api/triggers. A CAP trigger takes an emergency system's alerts; an
+// overlay trigger takes a few words from any sender and shows them over what
+// plays (a bar) or instead of it (a takeover). url and username are not secret;
+// the password and the signing secret are returned only by create, rotate-secret
+// and the update that turns signing on, printed once, and kept out of the
+// operation log (client.ts privateBodies).
 const TRIGGERS_PATH = "/api/triggers";
 
 async function triggerCall(
@@ -9490,36 +9526,60 @@ function triggerRevisionHeaders(args: ParsedArgs): Record<string, string> | unde
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
-async function triggerWithPassword(body: unknown, action: "create" | "rotate", runtime: CliRuntime): Promise<TriggerWithPassword> {
-  const trigger = body as TriggerWithPassword | undefined;
-  if (!trigger || typeof trigger.id !== "string" || typeof trigger.password !== "string" || !TRIGGER_PASSWORD_PATTERN.test(trigger.password)) {
+type TriggerSecretAction = "create" | "rotate" | "update" | "rotate-signing";
+
+/**
+ * The answer of a request that issued a secret: create and rotate-secret carry
+ * the password (create also the signing secret of a signing overlay trigger), a
+ * signing rotation and the update that turns signing on carry the signing secret.
+ */
+async function triggerWithSecrets(body: unknown, action: TriggerSecretAction, wantSigning: boolean, runtime: CliRuntime): Promise<TriggerWithSecrets> {
+  const trigger = body as TriggerWithSecrets | undefined;
+  const passwordOk = typeof trigger?.password === "string" && TRIGGER_PASSWORD_PATTERN.test(trigger.password);
+  const signingOk = typeof trigger?.signing_secret === "string" && TRIGGER_SIGNING_SECRET_PATTERN.test(trigger.signing_secret);
+  const needPassword = action === "create" || action === "rotate";
+  const needSigning = action === "rotate-signing" || (action === "create" && wantSigning);
+  if (!trigger || typeof trigger.id !== "string" || (needPassword && !passwordOk) || (needSigning && !signingOk)
+    || (trigger.password !== undefined && !passwordOk) || (trigger.signing_secret !== undefined && !signingOk)) {
     await writeRecoveries.get(runtime)?.finish();
     const id = trigger && typeof trigger.id === "string" && TRIGGER_ID_PATTERN.test(trigger.id) ? trigger.id : undefined;
+    const signing = action === "rotate-signing" || wantSigning;
     throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
-      `The ${action === "create" ? "trigger create" : "rotate-secret"} request completed, but its answer did not carry a password. Do not rerun it.`, {
+      `The ${action === "create" ? "trigger create" : action === "update" ? "trigger update" : "rotate-secret"} request completed, but its answer did not carry the secret it should. Do not rerun it.`, {
         next: id
-          ? { command: `screenrig triggers rotate-secret ${id}`, reason: "Issue a new password; it is shown once in data.password." }
-          : { command: "screenrig triggers list", reason: "Find the trigger, then run screenrig triggers rotate-secret ID to receive a new password." },
+          ? { command: `screenrig triggers rotate-secret ${id}${signing ? " --signing" : ""}`, reason: "Issue a new secret; it is shown once in the answer." }
+          : { command: "screenrig triggers list", reason: "Find the trigger, then run screenrig triggers rotate-secret ID to receive a new secret." },
       }), ExitCode.Unexpected);
   }
   return trigger;
 }
 
-async function triggerPasswordResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", runtime: CliRuntime): Promise<CommandResult> {
-  const trigger = await triggerWithPassword(response.body, action, runtime);
-  const warning = triggerPasswordWarning(trigger.id, action);
+async function triggerSecretResult(
+  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: TriggerSecretAction, wantSigning: boolean, runtime: CliRuntime,
+): Promise<CommandResult> {
+  const trigger = await triggerWithSecrets(response.body, action, wantSigning, runtime);
+  const warnings: Warning[] = [];
+  if (trigger.password) warnings.push(triggerPasswordWarning(trigger.id, action === "create" ? "create" : "rotate", trigger.kind));
+  if (trigger.signing_secret) warnings.push(triggerSigningWarning(trigger.id));
+  const overlay = trigger.kind === "overlay";
+  const title = action === "create" ? `Created trigger ${trigger.id}`
+    : action === "update" ? `Updated trigger ${trigger.id}`
+    : action === "rotate-signing" ? `Rotated the signing secret of trigger ${trigger.id}` : `Rotated the password of trigger ${trigger.id}`;
+  const lines = [title, ...triggerLines(trigger), ...overlayLines(trigger.overlay)];
+  if (trigger.password || trigger.signing_secret) {
+    lines.push("", overlay
+      ? "Sensitive trigger secrets (enter them only in the system that posts to the url above)"
+      : "Sensitive CAP password (enter it only in your emergency notification system, with the url and username above)");
+    if (trigger.password) lines.push(`password: ${trigger.password}`);
+    if (trigger.signing_secret) lines.push(`signing_secret: ${trigger.signing_secret}`);
+    if (overlay) lines.push(`example: ${triggerExample(trigger.url, trigger.overlay?.signing === true)}`);
+    for (const warning of warnings) lines.push(`warning: ${warning.message}`);
+  }
   return {
-    envelope: jsonBody(response, client.requestId, undefined, [warning]),
+    envelope: jsonBody(response, client.requestId, undefined, warnings.length ? warnings : undefined),
     exitCode: ExitCode.Success,
-    human: [
-      action === "create" ? `Created trigger ${trigger.id}` : `Rotated the password of trigger ${trigger.id}`,
-      ...triggerLines(trigger),
-      "",
-      "Sensitive CAP password (enter it only in your emergency notification system, with the url and username above)",
-      `password: ${trigger.password}`,
-      `warning: ${warning.message}`,
-    ].join("\n"),
-    keepRecoveryUntilOutput: true,
+    human: lines.join("\n"),
+    ...(trigger.password || trigger.signing_secret ? { keepRecoveryUntilOutput: true } : {}),
   };
 }
 
@@ -9535,22 +9595,102 @@ async function triggerPull(file: string, runtime: CliRuntime): Promise<TriggerPu
   return parsed as TriggerPull;
 }
 
-export const handleTriggersCreate = commandHandler(async (args, runtime, resolved) => {
-  const label = triggerName(flagString(args.flags, "name") ?? "");
+function triggerTargetBody(args: ParsedArgs): TriggerTarget | undefined {
   const tag = flagString(args.flags, "tag");
   const screenIds = flagString(args.flags, "screen-id");
-  if ((tag === undefined) === (screenIds === undefined)) throw usageError("triggers create takes exactly one of --tag TAG or --screen-id ID.");
+  if (tag !== undefined && screenIds !== undefined) throw usageError("Pass --tag TAG or --screen-id ID, not both.");
+  if (tag !== undefined) return { tag: triggerTag(tag) };
+  if (screenIds !== undefined) return { screen_ids: triggerScreenIds(screenIds).split(",") };
+  return undefined;
+}
+
+/** The kind-only options of create: usage errors name the kind they need. */
+function triggerOverlayOptionsOnly(args: ParsedArgs, kind: string): void {
+  for (const flag of ["show", "edge", "style", "map", "signing"]) {
+    const given = flag === "signing" ? flagBool(args.flags, flag) : flagString(args.flags, flag) !== undefined;
+    if (given && kind !== "overlay") throw usageError(`--${flag} applies to an overlay trigger: add --kind overlay.`);
+  }
+}
+
+export const handleTriggersCreate = commandHandler(async (args, runtime, resolved) => {
+  const label = triggerName(flagString(args.flags, "name") ?? "");
+  const kind = flagString(args.flags, "kind") ?? "cap";
+  const target = triggerTargetBody(args);
+  if (!target) throw usageError("triggers create takes exactly one of --tag TAG or --screen-id ID.");
   const hold = flagString(args.flags, "for");
   const pullFile = flagString(args.flags, "pull");
-  const body: TriggerWrite = {
-    label,
-    target: tag !== undefined ? { tag: triggerTag(tag) } : { screen_ids: triggerScreenIds(screenIds ?? "").split(",") },
-    ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold) } : {}),
-    ...(pullFile !== undefined ? { pull: await triggerPull(pullFile, runtime) } : {}),
-  };
+  triggerOverlayOptionsOnly(args, kind);
+  const signing = flagBool(args.flags, "signing");
+  let body: TriggerWrite;
+  if (kind === "overlay") {
+    if (pullFile !== undefined) throw usageError("--pull applies to a CAP trigger: omit --kind overlay.");
+    const show = flagString(args.flags, "show");
+    if (show !== "bar" && show !== "takeover") throw usageError("An overlay trigger needs --show bar (a strip over whatever plays) or --show takeover (the alert fills the screen).");
+    const edge = flagString(args.flags, "edge");
+    if (edge !== undefined && show !== "bar") throw usageError("--edge applies to a bar: use --show bar.");
+    const styleFile = flagString(args.flags, "style");
+    const mapFile = flagString(args.flags, "map");
+    body = {
+      kind: "overlay", label, target,
+      ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold, "overlay") } : {}),
+      overlay: {
+        show,
+        ...(edge !== undefined ? { edge: edge as "top" | "bottom" } : {}),
+        ...(styleFile !== undefined ? { style: triggerStyle(await readAuthoringText(styleFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
+        ...(mapFile !== undefined ? { mapping: triggerMapping(await readAuthoringText(mapFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
+        ...(signing ? { signing: true } : {}),
+      },
+    };
+  } else {
+    body = {
+      label, target,
+      ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold) } : {}),
+      ...(pullFile !== undefined ? { pull: await triggerPull(pullFile, runtime) } : {}),
+    };
+  }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await triggerCall(client, { method: "POST", path: TRIGGERS_PATH, idempotent: true, body });
-  return triggerPasswordResult(response, client, "create", runtime);
+  return triggerSecretResult(response, client, "create", signing, runtime);
+});
+
+export const handleTriggersUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "update");
+  const name = flagString(args.flags, "name");
+  const target = triggerTargetBody(args);
+  const hold = flagString(args.flags, "for");
+  const pullFile = flagString(args.flags, "pull");
+  const edge = flagString(args.flags, "edge");
+  const styleFile = flagString(args.flags, "style");
+  const mapFile = flagString(args.flags, "map");
+  const overlay: NonNullable<TriggerPatch["overlay"]> = {
+    ...(edge !== undefined ? { edge: edge as "top" | "bottom" } : {}),
+    ...(styleFile !== undefined ? { style: triggerStyle(await readAuthoringText(styleFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
+    ...(flagBool(args.flags, "clear-style") ? { style: null } : {}),
+    ...(mapFile !== undefined ? { mapping: triggerMapping(await readAuthoringText(mapFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
+    ...(flagBool(args.flags, "clear-map") ? { mapping: null } : {}),
+    ...(flagBool(args.flags, "enable") ? { enabled: true } : {}),
+    ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
+    ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
+    ...(flagBool(args.flags, "no-signing") ? { signing: false } : {}),
+  };
+  const body: TriggerPatch = {
+    ...(name !== undefined ? { label: triggerName(name) } : {}),
+    ...(target ? { target } : {}),
+    // The kind is not known here, so the server holds the 1m floor of a CAP trigger.
+    ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold, "overlay") } : {}),
+    ...(pullFile !== undefined ? { pull: await triggerPull(pullFile, runtime) } : {}),
+    ...(flagBool(args.flags, "no-pull") ? { pull: null } : {}),
+    ...(Object.keys(overlay).length ? { overlay } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "PATCH", path: `${TRIGGERS_PATH}/${id}`, idempotent: true, body, headers: triggerRevisionHeaders(args) }, id);
+  const trigger = response.body as TriggerWithSecrets | undefined;
+  if (trigger?.password !== undefined || trigger?.signing_secret !== undefined) return triggerSecretResult(response, client, "update", flagBool(args.flags, "signing"), runtime);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Updated trigger ${id}`, ...triggerLines(trigger), ...overlayLines(trigger?.overlay)].join("\n"),
+  };
 });
 
 export const handleTriggersList = commandHandler(async (args, runtime, resolved) => {
@@ -9573,7 +9713,7 @@ export const handleTriggersShow = commandHandler(async (args, runtime, resolved)
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: ["Trigger", ...triggerLines(trigger), ...alertLines(trigger?.alert)].join("\n"),
+    human: ["Trigger", ...triggerLines(trigger), ...alertLines(trigger?.alert), ...overlayLines(trigger?.overlay)].join("\n"),
   };
 });
 
@@ -9581,7 +9721,16 @@ export const handleTriggersTest = commandHandler(async (args, runtime, resolved)
   const id = triggerId(args.positionals[2], "test");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await triggerCall(client, { method: "POST", path: `${TRIGGERS_PATH}/${id}/test`, idempotent: true }, id);
-  const receipt = response.body as TriggerReceipt | undefined;
+  const receipt = response.body as (TriggerReceipt & Partial<TriggerOverlayReceipt>) | undefined;
+  if (receipt && "active" in receipt) {
+    return {
+      envelope: jsonBody(response, client.requestId),
+      exitCode: ExitCode.Success,
+      human: receipt.outcome === "shown"
+        ? `Showing a test overlay from trigger ${id} ${receipt.until ? `until ${receipt.until}` : "until cleared"}. screenrig triggers show ${id} reports its screens; screenrig triggers clear ${id} ends it sooner.`
+        : `Trigger ${id} answered ${receipt.outcome ?? "no outcome"}.`,
+    };
+  }
   const alert = receipt?.alert;
   return {
     envelope: jsonBody(response, client.requestId),
@@ -9597,27 +9746,51 @@ export const handleTriggersTest = commandHandler(async (args, runtime, resolved)
 
 export const handleTriggersClear = commandHandler(async (args, runtime, resolved) => {
   const id = triggerId(args.positionals[2], "clear");
+  const alertId = flagString(args.flags, "alert-id");
+  if (alertId !== undefined && (!alertId.trim() || [...alertId].length > 200)) throw usageError("--alert-id takes the sender's alert id, 1 to 200 characters.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await triggerCall(client, { method: "POST", path: `${TRIGGERS_PATH}/${id}/clear`, idempotent: true }, id);
+  const response = await triggerCall(client, {
+    method: "POST", path: `${TRIGGERS_PATH}/${id}/clear`, idempotent: true, ...(alertId !== undefined ? { body: { alert_id: alertId.trim() } } : {}),
+  }, id);
   const trigger = response.body as Trigger | undefined;
+  const remaining = trigger?.overlay?.alerts.length ?? 0;
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: [
-      `No alert is active on trigger ${id}. Screens its alert took over go back to what they played before.`,
+      trigger?.overlay
+        ? remaining ? `Trigger ${id} still shows ${remaining} alert${remaining === 1 ? "" : "s"}.` : `No alert is active on trigger ${id}. Its bar is lowered, or its screens go back to what they played before.`
+        : `No alert is active on trigger ${id}. Screens its alert took over go back to what they played before.`,
       ...triggerLines(trigger),
       ...alertLines(trigger?.alert),
+      ...overlayLines(trigger?.overlay),
     ].join("\n"),
+  };
+});
+
+export const handleTriggersDeliveries = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "deliveries");
+  const limit = flagString(args.flags, "limit");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "GET", path: `${TRIGGERS_PATH}/${id}/deliveries`, ...(limit ? { query: { limit } } : {}) }, id);
+  const items = (response.body as TriggerDeliveryList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Deliveries of ${id} (${list.length})`, ...triggerDeliveryTableLines(list)].join("\n"),
   };
 });
 
 export const handleTriggersRotateSecret = commandHandler(async (args, runtime, resolved) => {
   const id = triggerId(args.positionals[2], "rotate-secret");
+  const signing = flagBool(args.flags, "signing");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await triggerCall(client, {
     method: "POST", path: `${TRIGGERS_PATH}/${id}/rotate-secret`, idempotent: true, headers: triggerRevisionHeaders(args),
+    ...(signing ? { body: { signing: true } } : {}),
   }, id);
-  return triggerPasswordResult(response, client, "rotate", runtime);
+  return triggerSecretResult(response, client, signing ? "rotate-signing" : "rotate", signing, runtime);
 });
 
 export const handleTriggersDelete = commandHandler(async (args, runtime, resolved) => {
@@ -9629,7 +9802,7 @@ export const handleTriggersDelete = commandHandler(async (args, runtime, resolve
   return {
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
     exitCode: ExitCode.Success,
-    human: `Deleted trigger ${id}. Its URL stopped accepting alerts.`,
+    human: `Deleted trigger ${id}. Its URL stopped accepting posts.`,
   };
 });
 

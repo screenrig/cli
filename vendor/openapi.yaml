@@ -2468,6 +2468,102 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/playlists/{id}/pages:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: review
+      operationId: addPlaylistPage
+      description: >-
+        Adds one page to an approved playlist without sending the others: at the end, or in front of the page named by before. The pages the playlist already holds are kept as stored and checked again with the new one in a single pass, so the rules across pages (1 to 100 pages, one ordinary page with no visibility, 16 ad slot pages, 1024 media references) see the result: a rule broken is invalid_request with field (page.id when the id is taken, before when it names no page). The page validity of the playlist is the page's own visibility (from, until, windows, data), in each screen's timezone, until exclusive. Review class: under Propose the change becomes a review (202); a later page change of the same playlist extends that pending review while it is based on the live revision, so successive changes do not supersede each other, and approval applies them all or none (review_stale when the playlist moved on). With Manage, or from a dashboard session of the owner or a member who can approve (approver_required otherwise), it is live. If-Match is optional: when present it must be the live revision. A playlist no person approved yet is playlist_not_approved (409). An uploader (docs/uploaders.md) adds only a media page of its folders to one of its playlists (outside_upload_scope otherwise); an uploader member at Propose is the review's proposer (kind person).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistPageAdd'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/pages/{page_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/PlaylistPageID'
+    put:
+      x-screenrig-access: review
+      operationId: replacePlaylistPage
+      description: >-
+        Replaces one page of an approved playlist, in place, without sending the others. The body is the page and its id is page_id. An unknown page is not_found. Everything else is as for addPlaylistPage: validated with the kept pages in one pass, review class (202 under Propose, chained onto a pending page-change review), live with Manage or from an approving person, If-Match optional, playlist_not_approved for a playlist no person approved. An uploader replaces only a media page of its folders, for another media page of its folders.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistPageWriteV2'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: review
+      operationId: removePlaylistPage
+      description: >-
+        Removes one page of an approved playlist. The playlist keeps 1 to 100 pages and one ordinary page with no visibility (invalid_request otherwise). An unknown page is not_found. Everything else is as for replacePlaylistPage. An uploader removes only a media page of its folders.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/comment/playlist/{id}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -2974,7 +3070,7 @@ paths:
     patch:
       operationId: patchScreenTags
       description: >-
-        A signed-in person sets a screen's tags. tags is the complete new set: an empty array clears it, and a malformed or repeated tag is invalid_request at tags[i]. It is the tag change updateScreen makes, on the dashboard session: the screen revision moves by one, screen.updated carries details.tags and the person as its actor, and the manifest revision never changes. A pairing_pending, active or archived screen accepts it. The body has no other member, so a session cannot change a screen's name, playlist or timezone here. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents change tags with updateScreen or a set_tags, add_tags or remove_tags fleet action. listScreens with tag finds the screen by its new tags.
+        A signed-in person sets a screen's tags. tags is the complete new set: an empty array clears it, and a malformed or repeated tag is invalid_request at tags[i]. It is the tag change updateScreen makes, on the dashboard session: the screen revision moves by one, screen.updated carries details.tags and the person as its actor, and the manifest revision never changes. A pairing_pending, active or archived screen accepts it. The body has no other member: a session renames a screen with patchScreenName and assigns its playlist with patchScreenPlaylist, and cannot change its timezone. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents change tags with updateScreen or a set_tags, add_tags or remove_tags fleet action. listScreens with tag finds the screen by its new tags.
       security:
         - dashboardSession: []
       parameters:
@@ -3068,6 +3164,47 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ScreenLocationPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/name:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenName
+      description: >-
+        A signed-in person renames a screen with updateScreen's name. The name is trimmed and must be 1 to 120 characters without control characters, else invalid_request at name (so is a missing or null name). The screen revision moves by one and the event is screen.manifest_changed, addressed to the screen, with the person as its actor; the manifest revision stays, so playback is untouched and Players refresh the name from the changed ETag. A rename to the same name still moves the revision and appends screen.updated. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenNamePatch'
       responses:
         '200':
           description: The screen as stored now; ETag carries its revision.
@@ -5165,7 +5302,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listTriggers
-      description: Lists the project's CAP alert triggers, oldest first (at most 20), each with its ingest url, username and latest alert. The password is never returned here.
+      description: Lists the project's triggers (CAP alert and overlay), oldest first (at most 20), each with its ingest url, username and latest alert or overlay state. No secret is ever returned here.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5187,7 +5324,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createTrigger
-      description: 'Creates a CAP alert trigger: one inbound URL an emergency notification system (Everbridge, Rave, Alertus, IPAWS relays and other CAP 1.2 senders) posts alerts to, with HTTP Basic credentials. The answer is the only place the password appears (with the rotate answer): store it in the sending system at once. target is a tag (every active screen with it when the alert arrives) or up to 500 screen_ids. An alert takes every target screen with a default playlist over until the alert''s <expires>, else for default_for_seconds (60 to 604800, default 3600); see POST /api/triggers/{id}/cap. A project has at most 20 triggers (trigger_limit_reached). Appends trigger.created. An exact retry with the same Idempotency-Key returns this same answer, password included, for twenty-four hours. Optional pull adds CAP sources the platform reads for the trigger (see CapPull); the ingest url keeps working beside it.'
+      description: 'Creates a CAP alert trigger: one inbound URL an emergency notification system (Everbridge, Rave, Alertus, IPAWS relays and other CAP 1.2 senders) posts alerts to, with HTTP Basic credentials. The answer is the only place the password appears (with the rotate answer): store it in the sending system at once. target is a tag (every active screen with it when the alert arrives) or up to 500 screen_ids. An alert takes every target screen with a default playlist over until the alert''s <expires>, else for default_for_seconds (60 to 604800, default 3600); see POST /api/triggers/{id}/cap. A project has at most 20 triggers (trigger_limit_reached). Appends trigger.created. An exact retry with the same Idempotency-Key returns this same answer, password included, for twenty-four hours. Optional pull adds CAP sources the platform reads for the trigger (see CapPull); the ingest url keeps working beside it. kind overlay creates the second kind instead: one inbound URL (POST /api/triggers/{id}/overlay) any system (Home Assistant, a camera, an alerting tool) posts a few words to, shown on the target screens as a bar over whatever plays (overlay.show bar, on the bottom or top edge) or as a takeover (overlay.show takeover) while an alert lasts; see TriggerOverlay. With signing true the answer also carries the signing secret once. Overlay holds are 10 to 604800 seconds (default 600).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5236,7 +5373,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getTrigger
-      description: One trigger with its latest alert. An alert past its until reads as ended with ended_reason expired.
+      description: One trigger with its latest alert, or for an overlay trigger its active alerts (newest first, the first shows), the fan-out counts and whether work is pending. An alert past its until reads as ended with ended_reason expired.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5258,10 +5395,62 @@ paths:
                 $ref: '#/components/schemas/Trigger'
         default:
           $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateTrigger
+      description: 'Changes a trigger without changing its URL or secret: label, target, default_for_seconds, a CAP trigger''s pull (null removes it), and for an overlay trigger overlay.edge, style (replaces the whole style; null clears it), mapping (null removes it), enabled and signing. A disabled overlay trigger answers its sender the same 404 as a wrong secret. Turning signing on returns the signing secret once in this answer. A bar re-places itself on the new target screens and edge; a takeover trigger''s new target applies from the next alert that starts. Appends trigger.updated with details.changed. If-Match guards the revision.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerPatch'
+      responses:
+        '200':
+          description: The trigger, with signing_secret when this update turned signing on.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerWithSecrets'
+        '400':
+          description: invalid_request — errors[0].field names the member (overlay.edge, overlay.style.theme, overlay.mapping, pull).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
     delete:
       x-screenrig-access: write
       operationId: deleteTrigger
-      description: Deletes the trigger. Its URL stops working at once, and its alert playlist and stills are deleted. A trigger showing an alert, or still clearing one, is refused resource_conflict; clear it first. Appends trigger.deleted. If-Match guards the revision.
+      description: Deletes the trigger. Its URL stops working at once, and its alert playlist and stills (or an overlay trigger's bars, playlist and card) are deleted. A trigger showing an alert, or still clearing one, is refused resource_conflict; clear it first. Appends trigger.deleted. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5292,16 +5481,22 @@ paths:
     post:
       x-screenrig-access: write
       operationId: rotateTriggerSecret
-      description: Replaces the trigger's password and returns the new one, once. The old password stops working at once; update the sending system. Appends trigger.updated with details.rotated true. If-Match guards the revision.
+      description: Replaces the trigger's password and returns the new one, once. The old password stops working at once; update the sending system. With signing true in the body it replaces an overlay trigger's signing secret instead and returns that one, once (400 invalid_request when the trigger does not sign). Appends trigger.updated with details.rotated. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerSecretRotate'
       responses:
         '200':
-          description: The trigger with its new password.
+          description: The trigger with its new password, or its new signing secret.
           headers:
             ETag:
               schema:
@@ -5314,7 +5509,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TriggerWithPassword'
+                $ref: '#/components/schemas/TriggerWithSecrets'
         '412':
           description: revision_conflict.
           content:
@@ -5330,7 +5525,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: testTrigger
-      description: Shows a one-minute Exercise alert (a blue card with a yellow EXERCISE banner) on the trigger's screens, exactly as a received alert would, so the targeting and the screens can be checked without the sending system. Refused resource_conflict while the trigger shows an alert, so a test never replaces a real one. An exact retry with the same Idempotency-Key answers outcome duplicate.
+      description: Shows a one-minute Exercise alert (a blue card with a yellow EXERCISE banner) on the trigger's screens, exactly as a received alert would, so the targeting and the screens can be checked without the sending system. Refused resource_conflict while the trigger shows an alert, so a test never replaces a real one. An exact retry with the same Idempotency-Key answers outcome duplicate. An overlay trigger shows the alert screenrig-test (label Test, title Test overlay) for a minute and answers a TriggerOverlayReceipt.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5342,7 +5537,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TriggerReceipt'
+                oneOf:
+                  - $ref: '#/components/schemas/TriggerReceipt'
+                  - $ref: '#/components/schemas/TriggerOverlayReceipt'
         '409':
           description: resource_conflict — the trigger is showing an alert.
           content:
@@ -5358,10 +5555,16 @@ paths:
     post:
       x-screenrig-access: write
       operationId: clearTrigger
-      description: Ends the trigger's alert (ended_reason cleared) and clears the takeovers it set. A screen another takeover has replaced since is left alone. A trigger without an active alert answers unchanged. Appends trigger.alert_received with outcome ended.
+      description: Ends the trigger's alert (ended_reason cleared) and clears the takeovers it set. A screen another takeover has replaced since is left alone. A trigger without an active alert answers unchanged. Appends trigger.alert_received with outcome ended. For an overlay trigger the body may name one alert (alert_id); without one every alert ends, and the last one ending lowers the bar or clears the takeovers.
       security:
         - projectBearer: []
         - dashboardSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerClear'
       responses:
         '200':
           description: The trigger. alert.screens.pending is true while the takeovers are being cleared.
@@ -5433,6 +5636,121 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
+  /api/triggers/{id}/overlay:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: receiveTriggerOverlay
+      description: 'The URL an outside system (Home Assistant, a camera, a door sensor, an alerting tool) posts to so the trigger''s screens show a few words. It authenticates with the trigger''s own secret in the Authorization header: Bearer <secret>, or HTTP Basic with the trigger id as the username. When the trigger signs, ScreenRig-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the signing secret> is also required, and t must be within five minutes of the server''s clock. An unknown trigger, a CAP trigger, a wrong or missing secret, a disabled trigger, a bad signature and every GET answer the same 404 not_found; the project sees the reason in the trigger''s delivery log. The body, at most 256 KiB, is JSON or application/x-www-form-urlencoded; with a mapping the template builds the request from body and query. alert_id names the alert: a post with an id that is active updates that alert instead of stacking another, and the newest started alert shows. Every raise or update holds its alert for duration from that post (10 to 604800 seconds, or 10s, 5m, 2h, 1d, or until_cleared; default the trigger''s), so a sensor that keeps posting keeps the overlay up. A post with clear true, or a state that means over (off, closed, clear, cleared, resolved, ok, normal, inactive, ended), ends the alert with that id, or every alert without one. A raise or update is one billed API request; a clear is free and never refused for balance. Idempotency-Key (8 to 200 characters) answers a sender''s retry with the first receipt for twenty-four hours. At most 120 posts per minute per trigger.'
+      security:
+        - triggerBearer: []
+        - triggerBasic: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - name: ScreenRig-Signature
+          in: header
+          required: false
+          description: 't=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>">; required when the trigger signs.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerOverlayRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: What the post did.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerOverlayReceipt'
+        '400':
+          description: invalid_request — the body is too large, empty, not JSON or a form, the mapping failed on it, or a member is wrong; errors name it in the delivery log.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: payment_required — the project has no credit left (a raise or update only).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found — the one answer to every refused post and every GET.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+        - name: trigger-overlay
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+  /api/triggers/{id}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listTriggerDeliveries
+      description: The posts to an overlay trigger over the last seven days, newest first (at most 100), with when each arrived, how each ended (shown, updated, unchanged, ended, ignored, refused or invalid), why a refused or invalid one was (credentials, signature, disabled, body, mapping, field, rate_limited, payment_required, internal), the status, the size and the request id. It keeps no body, header or credential. A CAP trigger lists none.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        '200':
+          description: The trigger's deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerDeliveryList'
+        '400':
+          description: invalid_request — limit is not a whole number from 1 to 100.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/screenshot:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -16867,6 +17185,63 @@ paths:
                 $ref: '#/components/schemas/DashboardMember'
         default:
           $ref: '#/components/responses/Problem'
+  /api/members/{user_id}/upload-scope:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: setDashboardMemberUploadScope
+      description: >-
+        Makes a member an uploader, or replaces the scope of one (docs/uploaders.md): the playlists they change pages of and the media folders they upload into. In one transaction it also stops them approving reviews, ends the agents they brought to the project (agent.disconnected, as removing them would) and appends project.member_upload_scope_changed (details user_id, upload_scope, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row is resource_conflict; a non-member is not_found; an id that is not a live playlist or media folder of the project is invalid_request at upload_scope.playlist_ids[i] or upload_scope.folder_ids[i]. access propose (the default) sends the uploader's changes to review; manage publishes them.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberUploadScopeUpdate'
+      responses:
+        '200':
+          description: The member, with upload_scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMember'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: clearDashboardMemberUploadScope
+      description: >-
+        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: The project the caller means; a session whose selection has changed is refused with resource_conflict.
+      responses:
+        '200':
+          description: The member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMember'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/advertising/reviews/{id}/request-changes:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -20315,7 +20690,8 @@ components:
     projectBearer: {type: http, scheme: bearer, bearerFormat: JWT, description: "Short-lived agent or service JWT. projects maps global project IDs to access scopes and capabilities, checked in memory after signature and Valkey revocation checks. Flat object-less operations default only for a one-project token; object IDs select their own project; lists accept project= to narrow. Refresh uses the opaque refresh token and current database memberships. Legacy opaque API bearers remain retired on this branch."}
     kvWebhookBearer: {type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write and POST /api/cards/{id}/kv-webhooks/{webhook_id}/write; never a project credential."}
     kvWebhookBasic: {type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write and POST /api/cards/{id}/kv-webhooks/{webhook_id}/write; never a project credential."}
-    triggerBasic: {type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential."}
+    triggerBasic: {type: http, scheme: basic, description: "A trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap and POST /api/triggers/{id}/overlay; never a project credential."}
+    triggerBearer: {type: http, scheme: bearer, bearerFormat: srtg, description: "An overlay trigger's own secret, the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/overlay; never a project credential."}
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -20412,6 +20788,29 @@ components:
       properties:
         can_approve: {type: boolean}
         project_id: {type: string, minLength: 1, maxLength: 200, description: "The project the caller means; a session whose selection has changed is refused with resource_conflict."}
+    UploadScope:
+      type: object
+      additionalProperties: false
+      required: [playlist_ids, folder_ids]
+      description: "What an uploader may use (docs/uploaders.md): the playlists it changes pages of and the media folders it uploads into. Folders are exactly the listed ones, never their subfolders. An id that names no live object of the project when written is invalid_request at its position; a later deletion leaves a dead id, which grants nothing. The scope is read on each request, so a change applies to the next one."
+      properties:
+        playlist_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string}, description: "May be empty: such an uploader fills folders that the owner's by:folder pages play."}
+        folder_ids: {type: array, minItems: 1, maxItems: 1000, uniqueItems: true, items: {type: string}}
+        access: {type: string, enum: [propose, manage], description: "Members and member invitations only: propose (default) sends the uploader's changes to review, manage publishes them. Absent on a service client, whose own access applies."}
+    PlaylistPageAdd:
+      type: object
+      additionalProperties: false
+      required: [page]
+      properties:
+        page: {$ref: "#/components/schemas/PlaylistPageWriteV2"}
+        before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "The page it goes in front of; omitted appends it."}
+    MemberUploadScopeUpdate:
+      type: object
+      additionalProperties: false
+      required: [upload_scope]
+      properties:
+        upload_scope: {$ref: "#/components/schemas/UploadScope"}
+        project_id: {type: string, minLength: 1, maxLength: 200, description: "As on MemberApproverUpdate."}
     ReviewPerson:
       type: object
       additionalProperties: false
@@ -20424,7 +20823,7 @@ components:
       additionalProperties: false
       required: [kind]
       properties:
-        kind: {type: string, enum: [agent, client, buyer]}
+        kind: {type: string, enum: [agent, client, buyer, person], description: "person is an uploader member at Propose access (docs/uploaders.md); its person is the uploader, and the owner or a member who approves decides the review."}
         agent_id: {type: string}
         agent_name: {type: string}
         client_id: {type: string}
@@ -20478,16 +20877,26 @@ components:
           type: object
           additionalProperties: false
           required: [name, pages]
-          description: The write body as the proposer sent it (PlaylistWriteV2).
+          description: The write body as the proposer sent it (PlaylistWriteV2). A page-change review (addPlaylistPage, replacePlaylistPage, removePlaylistPage) carries page_edits, and its pages are the proposed pages as materialized, for reading; approval replays page_edits on the live playlist and never sends pages again.
           properties:
             name: {type: string}
             pages: {type: array, items: {type: object, additionalProperties: true}}
             audio: {type: object, additionalProperties: true}
             format: {$ref: "#/components/schemas/PlaylistFormat"}
+            page_edits: {type: array, minItems: 1, maxItems: 200, items: {$ref: "#/components/schemas/ReviewPageEdit"}, description: "The ordered page changes of a page-change review. A later page change of the same playlist extends the pending review's edits while it is based on the live revision, so successive uploads do not supersede each other."}
         diff: {$ref: "#/components/schemas/ReviewPlaylistDiff"}
         media_playlists: {type: array, items: {$ref: "#/components/schemas/ReviewMediaPlaylist"}, description: "The playlists whose tag, folder or all selectors approving this review's pending media would make start or stop playing it: for a selector_refresh (a media review) every playlist with an approved version, plus every playlist with an open create or update review whose proposed selectors would, one entry per playlist; for a create or update the approved playlists beside its subject. impact.screens includes their screens."}
         media_change: {$ref: "#/components/schemas/ReviewMediaChange"}
         previously_rejected_media: {type: array, items: {type: string}, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media."}
+    ReviewPageEdit:
+      type: object
+      additionalProperties: false
+      required: [op, page_id]
+      properties:
+        op: {type: string, enum: [add, replace, remove]}
+        page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
+        page: {$ref: "#/components/schemas/PlaylistPageWriteV2", description: "The page an add or replace writes, as the proposer sent it."}
+        before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "An add's neighbour: the page it goes in front of."}
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
@@ -21396,6 +21805,9 @@ components:
           type: string
           format: date-time
           description: The time of this member's latest activity in the project other than a refused sign-in (listMemberActivity). Present only where the viewer may read that activity (themself; every member for the owner, an organization admin or a staff shadow) and the member has any.
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "Present for an uploader: the playlists and folders the member is limited to (docs/uploaders.md). An uploader never approves reviews (can_approve is false)."
     MemberActivityKind:
       type: string
       enum: [sign_in, sign_in_failed, sign_out, project_switched, credential_changed, reauthenticated, mutation]
@@ -21788,6 +22200,9 @@ components:
           maxItems: 50
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "project_member only (invalid_request otherwise). The person who accepts becomes an uploader of the project with this scope, and cannot approve reviews. access manage needs an inviter who could grant Manage (a person who can approve reviews, or an agent at Manage); approver_required otherwise. A new uploader invitation to an address that already has one outstanding reuses it and replaces its scope. A person who is already a member keeps their role."
       description: Email delivery requires emails. Link delivery is project_member only and omits emails and advertising. ad_buyer requires advertising. At most 50 outstanding member and buyer invitations per project; an outstanding email invitation of the same kind and address is reused.
       oneOf:
         - properties:
@@ -21833,6 +22248,9 @@ components:
           required:
             - emails
             - advertising
+          not:
+            required:
+              - upload_scope
     Invitation:
       type: object
       additionalProperties: false
@@ -21869,6 +22287,8 @@ components:
           type: string
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
         created_at:
           type: string
           format: date-time
@@ -21911,6 +22331,8 @@ components:
           type: string
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
         created_at:
           type: string
           format: date-time
@@ -22730,6 +23152,7 @@ components:
         tokens_issued: {type: integer}
         revoked_at: {type: string, format: date-time}
         revoke_reason: {type: string}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "Present on an uploader client (docs/uploaders.md): it works only in these playlists and folders. Its capabilities are content and playlists only."}
     ServiceClientList:
       type: object
       additionalProperties: false
@@ -22755,6 +23178,7 @@ components:
         access: {type: string, enum: [read, propose, manage], description: "Manage needs a person who can approve reviews (403 approver_required)."}
         key: {type: object, additionalProperties: true, description: "A public JWK: OKP Ed25519, EC P-256 or RSA of at least 2048 bits."}
         secret: {type: boolean, description: "Generate a secret (creation only)."}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "Creation makes an uploader client: capabilities default to, and must be a subset of, content and playlists, and access defaults to propose. A later change replaces the scope of a client that has one, and applies to its next request; a client without a scope cannot get one, and a scope cannot be removed (invalid_request: create a new client)."}
     OAuthError:
       type: object
       additionalProperties: true
@@ -24441,6 +24865,14 @@ components:
         location:
           anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
           description: "Where the screen is: the object replaces the whole location and null clears it."
+    ScreenNamePatch:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: >-
+        A screen's new name (patchScreenName). The body has no other member.
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120, description: "The screen's name, trimmed; 1 to 120 characters after trimming, without control characters."}
     ScreenPlaylistPatch:
       type: object
       additionalProperties: false
@@ -24572,6 +25004,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "The project's own values for this screen, such as a store number or a region. Absent when none are set. Set by ScreenPatch; changing them remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens. Never authorization."}
         location: {$ref: "#/components/schemas/ScreenLocation", description: "Where the screen is. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token. Never authorization."}
+        overlay_strips: {type: array, maxItems: 2, items: {type: object, additionalProperties: false, required: [trigger_id, edge], properties: {trigger_id: {type: string}, edge: {type: string, enum: [top, bottom]}}}, description: "The bars overlay triggers hold on the screen, at most one per edge: the trigger and the edge. Absent when none. An overlay trigger sets and removes them; a change remints the manifest revision of a screen that shows a playlist. Never authorization."}
         fleet_link_id: {type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted."}
         observation: {$ref: "#/components/schemas/ScreenObservation"}
         status: {$ref: "#/components/schemas/ScreenStatus"}
@@ -25828,7 +26261,7 @@ components:
         quality: {type: string, enum: [low, medium, high]}
         credits: {type: integer, minimum: 1}
         usd: {type: string}
-    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}
+    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
     MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
@@ -26934,19 +27367,20 @@ components:
       type: object
       additionalProperties: false
       required: [id, kind, label, target, default_for_seconds, url, username, revision, created_at, updated_at]
-      description: A CAP alert trigger. Its password is returned only by create and rotate-secret.
+      description: A CAP alert trigger or an overlay trigger. Its password is returned only by create and rotate-secret.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?trg_[A-Za-z0-9_-]+$"}
-        kind: {type: string, enum: [cap]}
+        kind: {type: string, enum: [cap, overlay]}
         label: {type: string, minLength: 1, maxLength: 80}
         target: {$ref: "#/components/schemas/TriggerTarget"}
-        default_for_seconds: {type: integer, minimum: 60, maximum: 604800}
+        default_for_seconds: {type: integer, minimum: 10, maximum: 604800, description: "How long an alert without <expires> (CAP, 60 or more) or a post without duration (overlay, 10 or more) holds the screens."}
         pull: {$ref: "#/components/schemas/CapPull"}
-        url: {type: string, description: "Where the sending system posts CAP messages: https://api.<domain>/api/triggers/<id>/cap. Not a credential: the password is."}
+        url: {type: string, description: "Where the sending system posts: https://api.<domain>/api/triggers/<id>/cap (CAP) or .../overlay. Not a credential: the password is."}
         username: {type: string, description: "The HTTP Basic username: the trigger id."}
-        playlist_id: {type: string, description: "The trigger's alert playlist, made on its first alert: one page showing the alert card."}
+        playlist_id: {type: string, description: "The CAP alert playlist, made on its first alert, or an overlay takeover's playlist: one page showing the card."}
         alert: {$ref: "#/components/schemas/TriggerAlert"}
+        overlay: {$ref: "#/components/schemas/TriggerOverlay"}
         last_received_at: {type: string, format: date-time, description: "The last CAP message received, whatever its outcome."}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
@@ -26958,16 +27392,119 @@ components:
           required: [password]
           properties:
             password: {type: string, pattern: "^srtg_[A-Za-z0-9_-]{43}$", description: The HTTP Basic password. Returned only here; the server keeps a digest.}
+            signing_secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "An overlay trigger's signing secret, present when it signs. Returned only here and when an update or rotation issues one; the server keeps it sealed."}
+    TriggerWithSecrets:
+      allOf:
+        - $ref: "#/components/schemas/Trigger"
+        - type: object
+          properties:
+            password: {type: string, pattern: "^srtg_[A-Za-z0-9_-]{43}$", description: The HTTP Basic password; present only on a password rotation.}
+            signing_secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: The signing secret; present only when this answer issued one.}
     TriggerList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Trigger"}}}}
     TriggerWrite:
       type: object
       additionalProperties: false
       required: [label, target]
       properties:
+        kind: {type: string, enum: [cap, overlay], default: cap}
         label: {type: string, minLength: 1, maxLength: 80}
         target: {$ref: "#/components/schemas/TriggerTarget"}
-        default_for_seconds: {type: integer, minimum: 60, maximum: 604800, description: How long an alert without <expires> holds the screens. Defaults to 3600.}
-        pull: {$ref: "#/components/schemas/CapPull"}
+        default_for_seconds: {type: integer, minimum: 10, maximum: 604800, description: "How long an alert without <expires> holds the screens: 60 to 604800, default 3600, for a CAP trigger; how long a post without duration holds its alert: 10 to 604800, default 600, for an overlay trigger."}
+        pull: {$ref: "#/components/schemas/CapPull", description: "CAP triggers only."}
+        overlay: {$ref: "#/components/schemas/TriggerOverlayWrite", description: "Required by, and only for, an overlay trigger."}
+    TriggerOverlayWrite:
+      type: object
+      additionalProperties: false
+      required: [show]
+      properties:
+        show: {type: string, enum: [bar, takeover], description: "bar: a strip over whatever plays, drawn on every page the target screens show. takeover: the target screens play the card at full size while an alert lasts, and an emergency or another takeover is never replaced by it. Fixed at create."}
+        edge: {type: string, enum: [top, bottom], default: bottom, description: "The edge a bar takes (bar only). A screen holds one bar per edge; a page that has its own strip with presence on that edge keeps it."}
+        style: {$ref: "#/components/schemas/TriggerOverlayStyle"}
+        mapping: {type: object, additionalProperties: true, description: "A docmap template (roots body and query) that builds the overlay request from the body a sender posts, such as {\"alert_id\": \"{{body.groupKey}}\", \"title\": \"{{body.title}}\", \"state\": \"{{body.status}}\"}. Without one the body is the request."}
+        signing: {type: boolean, default: false, description: "Require a ScreenRig-Signature on every post. The answer carries the signing secret once."}
+    TriggerPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: {type: string, minLength: 1, maxLength: 80}
+        target: {$ref: "#/components/schemas/TriggerTarget"}
+        default_for_seconds: {type: integer, minimum: 10, maximum: 604800}
+        pull: {anyOf: [{$ref: "#/components/schemas/CapPull"}, {type: "null"}], description: "CAP triggers only; null removes the sources."}
+        overlay:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            edge: {type: string, enum: [top, bottom]}
+            style: {anyOf: [{$ref: "#/components/schemas/TriggerOverlayStyle"}, {type: "null"}], description: "Replaces the whole style; null clears it."}
+            mapping: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "Replaces the mapping; null removes it."}
+            enabled: {type: boolean}
+            signing: {type: boolean}
+    TriggerSecretRotate:
+      type: object
+      additionalProperties: false
+      properties:
+        signing: {type: boolean, description: "Rotate the signing secret instead of the password."}
+    TriggerClear:
+      type: object
+      additionalProperties: false
+      properties:
+        alert_id: {type: string, minLength: 1, maxLength: 200, description: "The overlay alert to end. Without it every alert ends."}
+    TriggerOverlayStyle:
+      type: object
+      additionalProperties: false
+      description: The text card's static params an overlay is drawn with. The trigger chooses the layout.
+      properties:
+        theme: {type: string, enum: [neomustard, cyanotype, propaganda, signal, avant-garde, bloom, clear-dark, clear-light, primetime]}
+        accent: {anyOf: [{type: string, pattern: "^#[0-9A-Fa-f]{6}$"}, {type: "null"}]}
+        background: {type: string, enum: [theme, none]}
+        backgroundColor: {anyOf: [{type: string, pattern: "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"}, {type: "null"}]}
+        textColor: {anyOf: [{type: string, pattern: "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"}, {type: "null"}]}
+        align: {type: string, enum: [start, center]}
+    TriggerOverlayAlert:
+      type: object
+      additionalProperties: false
+      required: [id, until, started_at, updated_at, revision]
+      properties:
+        id: {type: string, maxLength: 200, description: The sender's id for the alert; default when a post named none.}
+        label: {type: string, maxLength: 40}
+        title: {type: string, maxLength: 120}
+        message: {type: string, maxLength: 400}
+        note: {type: string, maxLength: 120}
+        until: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the alert ends by itself; null holds it until cleared."}
+        started_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        revision: {type: integer, minimum: 1}
+    TriggerOverlayScreens:
+      type: object
+      additionalProperties: false
+      description: What the latest fan-out did to the target screens.
+      required: [targeted, holding, taken_over, removed, edge_taken, skipped, failed]
+      properties:
+        targeted: {type: integer, minimum: 0}
+        holding: {type: integer, minimum: 0, description: Screens that hold the bar.}
+        taken_over: {type: integer, minimum: 0, description: Screens a takeover holds.}
+        removed: {type: integer, minimum: 0, description: Bars removed or takeovers cleared.}
+        edge_taken: {type: integer, minimum: 0, description: Screens whose edge another overlay trigger holds.}
+        skipped: {type: integer, minimum: 0, description: "Screens that are gone or archived, have no default playlist (a takeover), or are under another takeover (a takeover)."}
+        failed: {type: integer, minimum: 0, description: Screens whose write failed; the sweep retries them.}
+    TriggerOverlay:
+      type: object
+      additionalProperties: false
+      required: [show, style, enabled, signing, alerts, screens, pending]
+      description: An overlay trigger's configuration and state.
+      properties:
+        show: {type: string, enum: [bar, takeover]}
+        edge: {type: string, enum: [top, bottom], description: Bar only.}
+        style: {$ref: "#/components/schemas/TriggerOverlayStyle"}
+        mapping: {type: object, additionalProperties: true}
+        enabled: {type: boolean}
+        signing: {type: boolean, description: Posts must carry a ScreenRig-Signature.}
+        card_id: {type: string, description: "The text card instance the trigger owns; its document is the alert that shows. It is an ordinary card of the project."}
+        alerts: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/TriggerOverlayAlert"}, description: "The active alerts, newest first; the first shows. Past ten, a new alert replaces the oldest."}
+        screens: {$ref: "#/components/schemas/TriggerOverlayScreens"}
+        pending: {type: boolean, description: True while a fan-out or the card document write is outstanding.}
     CapPull:
       type: object
       additionalProperties: false
@@ -27004,6 +27541,43 @@ components:
         outcome: {type: string, enum: [shown, updated, ended, ignored, duplicate], description: "shown: a new alert took the screens over. updated: the shown alert was redrawn. ended: a Cancel or AllClear ended it. ignored: nothing to show (Test, System or Draft status, Ack or Error, already expired, or a Cancel of an alert not shown). duplicate: this sender and identifier were already received."}
         trigger_id: {type: string}
         alert: {$ref: "#/components/schemas/TriggerAlert"}
+    TriggerOverlayRequest:
+      type: object
+      additionalProperties: false
+      description: One post to an overlay trigger, as read after the trigger's mapping (if any). A clear ignores every member but alert_id, clear and state.
+      properties:
+        alert_id: {type: string, maxLength: 200, description: "The sender's id for the alert; absent or empty is default for a raise, and every alert for a clear."}
+        label: {type: string, maxLength: 40, description: A short label above the title.}
+        title: {type: string, maxLength: 120}
+        message: {type: string, maxLength: 400}
+        note: {type: string, maxLength: 120, description: A quiet line at the foot.}
+        duration: {oneOf: [{type: integer, minimum: 10, maximum: 604800}, {type: string, description: "Seconds, or a number with s, m, h or d (10s to 7d), or until_cleared."}], description: "How long this post holds the alert, from now. Absent takes the trigger's default."}
+        clear: {oneOf: [{type: boolean}, {type: string}], description: "True ends the alert (true, yes, y, 1 or x as text). "}
+        state: {type: string, description: "A state word from the sender: off, closed, clear, cleared, resolved, ok, normal, inactive or ended (any case) ends the alert; anything else raises it."}
+    TriggerOverlayReceipt:
+      type: object
+      additionalProperties: false
+      required: [outcome, trigger_id, until, active]
+      properties:
+        outcome: {type: string, enum: [shown, updated, unchanged, ended, ignored], description: "shown: a new alert began. updated: the alert with that id changed or was held again. unchanged: nothing changed. ended: the alert ended. ignored: a clear of an alert that is not active."}
+        trigger_id: {type: string}
+        alert_id: {type: string}
+        until: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the alert ends by itself; null for an alert held until cleared, and for a post that ended or ignored one."}
+        active: {type: integer, minimum: 0, maximum: 10, description: How many alerts the trigger holds after the post.}
+    TriggerDelivery:
+      type: object
+      additionalProperties: false
+      required: [at, outcome, status, bytes, request_id]
+      properties:
+        at: {type: string, format: date-time}
+        outcome: {type: string, enum: [shown, updated, unchanged, ended, ignored, refused, invalid]}
+        reason: {type: string, enum: [credentials, signature, disabled, body, mapping, field, rate_limited, payment_required, internal]}
+        detail: {type: string, maxLength: 200, description: "A fixed sentence or the member or mapping path that was wrong. Never a posted value."}
+        status: {type: integer}
+        bytes: {type: integer, minimum: 0}
+        alert_id: {type: string}
+        request_id: {type: string}
+    TriggerDeliveryList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/TriggerDelivery"}}}}
     NotePage:
       type: object
       additionalProperties: false
@@ -27467,7 +28041,7 @@ components:
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
         level: {type: string, description: "Always warning today. A reader treats a level it does not know as warning."}
-        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), or screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled)."}
+        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), or overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it)."}
         pageId: {type: string}
         primitiveId: {type: string}
         detail: {type: string}
@@ -27952,6 +28526,9 @@ components:
           description: The current project is one the staff member shadows, without a membership. Reads grant no writes. Current-project mutations require an explicit active staff_write_mode approval.
         staff_write_mode:
           $ref: '#/components/schemas/DashboardStaffWriteMode'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "Present when the person is an uploader of the session's project (docs/uploaders.md): the dashboard then offers only the upload view. Read on each request, so a change by the owner shows on the next GET /api/session."
         passkey_enrollment_required:
           type: boolean
           description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /api/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
@@ -28514,6 +29091,7 @@ components:
         field: {type: string, description: "The request member this error is about, when one is to blame."}
         retryable: {type: boolean, description: "Present on every 5xx error and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable."}
         current_revision: {type: integer, description: "The resource's current revision, on revision_conflict."}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "On outside_upload_scope: the playlists and media folders the caller does work in (docs/uploaders.md). An id outside them and an id that does not exist get the same answer."}
         access_limited_by: {type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request."}
         next: {$ref: "#/components/schemas/NextAction"}
     RuntimeProblem:
@@ -28561,6 +29139,7 @@ x-problem-codes:
   - client_update_required
   - forbidden
   - insufficient_access
+  - outside_upload_scope
   - approver_required
   - review_not_pending
   - review_stale

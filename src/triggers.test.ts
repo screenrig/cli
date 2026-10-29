@@ -187,8 +187,8 @@ test("triggers list, show, test and clear report the alert; test and delete refu
   assert.deepEqual(list.envelope.data.items.map((item: { id: string }) => item.id), [trigger.id]);
   assert.doesNotMatch(list.stdout, /srtg_/, "list never carries a password");
   const listHuman = await cli(["--human", "triggers", "list"], transport, env);
-  assert.match(listHuman.stdout, /^ID\s+LABEL\s+TARGET\s+ALERT\s+LAST_RECEIVED$/m);
-  assert.match(listHuman.stdout, new RegExp(`^${trigger.id}\\s+Campus alerts\\s+1 screens\\s+-$`, "m"));
+  assert.match(listHuman.stdout, /^ID\s+KIND\s+LABEL\s+TARGET\s+ALERT\s+LAST_RECEIVED$/m);
+  assert.match(listHuman.stdout, new RegExp(`^${trigger.id}\\s+cap\\s+Campus alerts\\s+1 screens\\s+-$`, "m"));
 
   const tested = await cli(["--json", "triggers", "test", trigger.id], transport, env);
   assert.equal(tested.code, 0, tested.stdout);
@@ -264,4 +264,221 @@ test("triggers map not_found and the project limit to guidance", async () => {
 test("srtg_ passwords are redacted from text", () => {
   const password = "srtg_" + "Q".repeat(43);
   assert.equal(redactText(`Basic trg_A:${password}`), "Basic trg_A:srtg_***");
+});
+
+// ---- overlay triggers ----
+
+const STYLE = '{"theme":"signal","accent":"#FFB000"}';
+const MAP = '{"alert_id":"{{body.groupKey}}","title":"{{body.title}}","state":"{{body.status}}"}';
+
+async function writeTemp(name: string, text: string): Promise<string> {
+  const dir = await testTemp("triggers-file-");
+  const file = path.join(dir, name);
+  await writeFile(file, text);
+  return file;
+}
+
+test("triggers create --kind overlay sends the overlay, prints the secrets once and a placeholder example, and keeps them out of config and logs", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { logger, events } = createMemoryLogger({ command: ["triggers", "create"] });
+  const style = await writeTemp("style.json", STYLE);
+  const map = await writeTemp("map.json", MAP);
+  const created = await cli(["--json", "triggers", "create", "--name", "Lobby sensors", "--kind", "overlay", "--show", "bar", "--edge", "top", "--tag", "Lobby",
+    "--style", style, "--map", map, "--signing", "--for", "90s"], transport, env, logger);
+  assert.equal(created.code, 0, created.stdout);
+  const call = triggerCalls(transport).at(-1)!;
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, {
+    kind: "overlay", label: "Lobby sensors", target: { tag: "Lobby" }, default_for_seconds: 90,
+    overlay: { show: "bar", edge: "top", style: { theme: "signal", accent: "#FFB000" }, mapping: JSON.parse(MAP), signing: true },
+  });
+  assert.ok(call.headers?.["idempotency-key"]);
+  const data = created.envelope.data;
+  assert.equal(data.kind, "overlay");
+  assert.match(data.url, /\/api\/triggers\/trg_\S+\/overlay$/);
+  assert.match(data.password, /^srtg_[A-Za-z0-9_-]{43}$/);
+  assert.match(data.signing_secret, /^whsec_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(created.envelope.warnings?.map((warning) => warning.code), ["trigger_password_shown_once", "trigger_signing_secret_shown_once"]);
+  const config = await readFile(env.configPath, "utf8");
+  assert.doesNotMatch(config, /srtg_|whsec_/);
+  assert.doesNotMatch(JSON.stringify(events), /srtg_[A-Za-z0-9_-]{43}|whsec_[A-Za-z0-9_-]{43}/, "the secrets never reach the operation log");
+
+  const human = await cli(["--human", "triggers", "create", "--name", "Doorbell", "--kind", "overlay", "--show", "takeover", "--tag", "Lobby"], transport, env);
+  assert.equal(human.code, 0, human.stderr);
+  assert.match(human.stdout, /^Created trigger trg_\S+$/m);
+  assert.match(human.stdout, /^kind: overlay$/m);
+  assert.match(human.stdout, /^hold: 10m when a post names no duration$/m);
+  assert.match(human.stdout, /^show: takeover$/m);
+  assert.match(human.stdout, /^password: srtg_\S{43}$/m);
+  assert.doesNotMatch(human.stdout, /signing_secret/);
+  assert.match(human.stdout, /^example: curl -X POST https:\/\/api\.screenrig\.ai\/api\/triggers\/trg_\S+\/overlay -H "Authorization: Bearer <password>" -H "Content-Type: application\/json" -d '\{"alert_id":"front-door","title":"Front door","message":"The front door is open","duration":"10m"\}'$/m);
+  assert.doesNotMatch(human.stdout.split("example:")[1] ?? "", /srtg_/, "the example holds a placeholder, not the secret");
+});
+
+test("triggers create refuses overlay options that do not fit before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const style = await writeTemp("style.json", STYLE);
+  const notObject = await writeTemp("bad.json", "[1]");
+  for (const argv of [
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay"],
+    ["--name", "x", "--tag", "Lobby", "--show", "bar"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "takeover", "--edge", "top"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "popup"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--edge", "left"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--pull", "pull.json"],
+    ["--name", "x", "--tag", "Lobby", "--signing"],
+    ["--name", "x", "--tag", "Lobby", "--edge", "top"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--style", notObject],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--map", notObject],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--for", "9s"],
+    ["--name", "x", "--tag", "Lobby", "--kind", "overlay", "--show", "bar", "--style", path.join(path.dirname(style), "missing.json")],
+  ]) {
+    const result = await cli(["--json", "triggers", "create", ...argv], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+  }
+  assert.equal(triggerCalls(transport).length, 0);
+  assert.equal(triggerHoldSeconds("10s", "overlay"), 10);
+  assert.throws(() => triggerHoldSeconds("10s"), /1m to 7d/);
+});
+
+test("triggers update sends only what is passed, prints a new signing secret once, and guards the revision", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const style = await writeTemp("style.json", STYLE);
+  const map = await writeTemp("map.json", MAP);
+  const created = await cli(["--json", "triggers", "create", "--name", "Lobby", "--kind", "overlay", "--show", "bar", "--tag", "Lobby"], transport, env);
+  const id = created.envelope.data.id as string;
+
+  const none = await cli(["--json", "triggers", "update", id], transport, env);
+  assert.equal(none.code, ExitCode.Usage);
+  const conflicting = await cli(["--json", "triggers", "update", id, "--enable", "--disable"], transport, env);
+  assert.equal(conflicting.code, ExitCode.Usage);
+
+  const edge = await cli(["--json", "triggers", "update", id, "--edge", "top", "--tag", "Cafe", "--name", "Cafe bars", "--for", "2m", "--expect-rev", "1"], transport, env);
+  assert.equal(edge.code, 0, edge.stdout);
+  let call = triggerCalls(transport).at(-1)!;
+  assert.equal(call.method, "PATCH");
+  assert.equal(call.path, `/api/triggers/${id}`);
+  assert.deepEqual(call.body, { label: "Cafe bars", target: { tag: "Cafe" }, default_for_seconds: 120, overlay: { edge: "top" } });
+  assert.equal(call.headers?.["if-match"], '"1"');
+  assert.ok(call.headers?.["idempotency-key"]);
+  assert.equal(edge.envelope.data.overlay.edge, "top");
+  assert.deepEqual(edge.envelope.warnings ?? [], []);
+  const stale = await cli(["--json", "triggers", "update", id, "--disable", "--expect-rev", "1"], transport, env);
+  assert.equal(stale.code, ExitCode.Precondition);
+  assert.equal(stale.envelope.error?.next?.command, `screenrig triggers show ${id}`);
+
+  const many = await cli(["--json", "triggers", "update", id, "--style", style, "--map", map, "--disable", "--signing"], transport, env);
+  assert.equal(many.code, 0, many.stdout);
+  call = triggerCalls(transport).at(-1)!;
+  assert.deepEqual(call.body, { overlay: { style: { theme: "signal", accent: "#FFB000" }, mapping: JSON.parse(MAP), enabled: false, signing: true } });
+  assert.match(many.envelope.data.signing_secret, /^whsec_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(many.envelope.warnings?.map((warning) => warning.code), ["trigger_signing_secret_shown_once"]);
+  assert.equal(many.envelope.data.overlay.enabled, false);
+  assert.doesNotMatch(await readFile(env.configPath, "utf8"), /whsec_/);
+
+  // A trigger that already signs keeps its secret: nothing is printed.
+  const again = await cli(["--human", "triggers", "update", id, "--signing"], transport, env);
+  assert.doesNotMatch(again.stdout, /signing_secret|whsec_/);
+
+  const cleared = await cli(["--json", "triggers", "update", id, "--clear-style", "--clear-map", "--enable", "--no-signing"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { overlay: { style: null, mapping: null, enabled: true, signing: false } });
+
+  const cap = await create(transport, env);
+  const wrong = await cli(["--json", "triggers", "update", cap.id, "--edge", "top"], transport, env);
+  assert.equal(wrong.code, ExitCode.Client);
+  const noPull = await cli(["--json", "triggers", "update", cap.id, "--no-pull"], transport, env);
+  assert.equal(noPull.code, 0, noPull.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { pull: null });
+
+});
+
+test("triggers show, test, clear and list report an overlay trigger's alerts", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "triggers", "create", "--name", "Lobby", "--kind", "overlay", "--show", "bar", "--tag", "Lobby"], transport, env);
+  const id = created.envelope.data.id as string;
+  const tested = await cli(["--json", "triggers", "test", id], transport, env);
+  assert.equal(tested.code, 0, tested.stdout);
+  assert.equal(tested.envelope.data.outcome, "shown");
+  assert.equal(tested.envelope.data.alert_id, "screenrig-test");
+  const busy = await cli(["--json", "triggers", "test", id], transport, env);
+  assert.equal(busy.code, ExitCode.Conflict);
+  assert.equal(busy.envelope.error?.next?.command, `screenrig triggers clear ${id}`);
+
+  const human = await cli(["--human", "triggers", "show", id], transport, env);
+  assert.match(human.stdout, /^Overlay$/m);
+  assert.match(human.stdout, /^show: bar on the bottom edge$/m);
+  assert.match(human.stdout, /^alerts: 1$/m);
+  assert.match(human.stdout, /^  screenrig-test  until 2026-08-14T17:01:00\.000Z  Test \| Test overlay \| This tests the overlay on these screens\.$/m);
+  const list = await cli(["--human", "triggers", "list"], transport, env);
+  assert.match(list.stdout, /bar: 1 alert, Test overlay/);
+
+  const wrongId = await cli(["--json", "triggers", "clear", id, "--alert-id", "front-door"], transport, env);
+  assert.equal(wrongId.code, 0);
+  assert.equal(wrongId.envelope.data.overlay.alerts.length, 1, "an id that is not active changes nothing");
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { alert_id: "front-door" });
+  const cleared = await cli(["--human", "triggers", "clear", id, "--alert-id", "screenrig-test"], transport, env);
+  assert.equal(cleared.code, 0);
+  assert.match(cleared.stdout, /No alert is active on trigger/);
+  const all = await cli(["--json", "triggers", "clear", id], transport, env);
+  assert.equal(all.code, 0);
+  assert.equal(triggerCalls(transport).at(-1)!.body, undefined, "a clear without an id sends no body");
+});
+
+test("triggers deliveries reads the log with a limit", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "triggers", "create", "--name", "Lobby", "--kind", "overlay", "--show", "bar", "--tag", "Lobby"], transport, env);
+  const id = created.envelope.data.id as string;
+  const result = await cli(["--json", "triggers", "deliveries", id, "--limit", "20"], transport, env);
+  assert.equal(result.code, 0, result.stdout);
+  const call = triggerCalls(transport).at(-1)!;
+  assert.equal(call.method, "GET");
+  assert.equal(call.path, `/api/triggers/${id}/deliveries`);
+  assert.deepEqual(call.query, { limit: "20" });
+  assert.deepEqual(result.envelope.data.items, []);
+  const human = await cli(["--human", "triggers", "deliveries", id], transport, env);
+  assert.match(human.stdout, /^No deliveries in the last seven days$/m);
+  for (const limit of ["0", "101", "x"]) {
+    assert.equal((await cli(["--json", "triggers", "deliveries", id, "--limit", limit], transport, env)).code, ExitCode.Usage, limit);
+  }
+  assert.equal((await cli(["--json", "triggers", "deliveries", "nope"], transport, env)).code, ExitCode.Usage);
+});
+
+test("triggers rotate-secret --signing prints the new signing secret once", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const plain = await cli(["--json", "triggers", "create", "--name", "Lobby", "--kind", "overlay", "--show", "bar", "--tag", "Lobby"], transport, env);
+  const refused = await cli(["--json", "triggers", "rotate-secret", plain.envelope.data.id, "--signing"], transport, env);
+  assert.equal(refused.code, ExitCode.Client);
+  assert.equal((triggerCalls(transport).at(-1)!.body as { signing?: boolean }).signing, true);
+
+  const signed = await cli(["--json", "triggers", "create", "--name", "Signed", "--kind", "overlay", "--show", "takeover", "--tag", "Lobby", "--signing"], transport, env);
+  const rotated = await cli(["--json", "triggers", "rotate-secret", signed.envelope.data.id, "--signing"], transport, env);
+  assert.equal(rotated.code, 0, rotated.stdout);
+  assert.match(rotated.envelope.data.signing_secret, /^whsec_/);
+  assert.notEqual(rotated.envelope.data.signing_secret, signed.envelope.data.signing_secret);
+  assert.equal(rotated.envelope.data.password, undefined);
+  assert.deepEqual(rotated.envelope.warnings?.map((warning) => warning.code), ["trigger_signing_secret_shown_once"]);
+  const human = await cli(["--human", "triggers", "rotate-secret", signed.envelope.data.id, "--signing"], transport, env);
+  assert.match(human.stdout, /^Rotated the signing secret of trigger trg_\S+$/m);
+  assert.match(human.stdout, /^signing_secret: whsec_\S{43}$/m);
+});
+
+test("triggers help shows the overlay options and examples", async () => {
+  for (const command of [["triggers", "create"], ["triggers", "update"], ["triggers", "deliveries"], ["triggers", "clear"], ["triggers", "rotate-secret"]]) {
+    const help = commandHelp(command);
+    assert.ok(help.examples && help.examples.length > 0, `${command.join(" ")} has an example`);
+  }
+  const create = JSON.stringify(commandHelp(["triggers", "create"]));
+  for (const text of ["--kind", "--show", "--edge", "--style", "--map", "--signing", "overlay"]) assert.ok(create.includes(text), `create help mentions ${text}`);
+  const guidance = JSON.stringify(commandHelp(["triggers", "create"]));
+  assert.match(guidance, /alert_id/);
+  assert.match(guidance, /Authorization: Bearer/);
+  assert.match(guidance, /ScreenRig-Signature/);
+  assert.doesNotMatch(guidance, /screentinker/i);
 });

@@ -49,8 +49,18 @@ export interface InvitationAdvertising {
   slot_ids: string[];
 }
 
+/** What an uploader may use: the playlists it changes pages of and the media folders it uploads into. */
+export interface UploadScope {
+  playlist_ids: string[];
+  folder_ids: string[];
+  /** A member's level: propose (the default) or manage. Absent on a service client. */
+  access?: "propose" | "manage";
+}
+
 export interface Invitation {
   advertising?: InvitationAdvertising;
+  /** An uploader invitation: the scope the accepting person receives. */
+  upload_scope?: UploadScope;
   created_at: string;
   delivery: "email" | "link";
   expires_at: string;
@@ -63,6 +73,7 @@ export interface Invitation {
 
 export interface InvitationCreate {
   advertising?: InvitationAdvertising;
+  upload_scope?: UploadScope;
   delivery?: "email" | "link";
   emails?: string[];
   kind: "project_member" | "ad_buyer";
@@ -1142,6 +1153,8 @@ export interface MediaUploadDeclaration {
   sha256: string;
   /** Optional mutable query tag. Stored on the ready object, not redeclared at commit. */
   tag?: string;
+  /** The media folder the ready file lands in; omitted lands it at the library root. An uploader must send one of its folders. */
+  folder_id?: string;
 }
 
 /** The subset of a ready Media row that `media download` verifies against. */
@@ -1787,13 +1800,62 @@ export interface TriggerAlert {
   ended_at?: string;
 }
 
+/** What an overlay trigger draws: the text card's static params (theme, accent, colours, alignment). */
+export interface TriggerOverlayStyle {
+  theme?: string;
+  accent?: string | null;
+  background?: "theme" | "none";
+  backgroundColor?: string | null;
+  textColor?: string | null;
+  align?: "start" | "center";
+}
+
+/** One alert an overlay trigger holds; until is null when it is held until cleared. */
+export interface TriggerOverlayAlert {
+  id: string;
+  label?: string;
+  title?: string;
+  message?: string;
+  note?: string;
+  until: string | null;
+  started_at: string;
+  updated_at: string;
+  revision: number;
+}
+
+/** What the latest overlay fan-out did to the target screens. */
+export interface TriggerOverlayScreens {
+  targeted: number;
+  holding: number;
+  taken_over: number;
+  removed: number;
+  edge_taken: number;
+  skipped: number;
+  failed: number;
+}
+
+/** An overlay trigger's configuration and state. */
+export interface TriggerOverlay {
+  show: "bar" | "takeover";
+  edge?: "top" | "bottom";
+  style: TriggerOverlayStyle;
+  mapping?: Record<string, unknown>;
+  enabled: boolean;
+  signing: boolean;
+  card_id?: string;
+  alerts: TriggerOverlayAlert[];
+  screens: TriggerOverlayScreens;
+  pending: boolean;
+}
+
 /**
- * GET /api/triggers/{id}: a CAP alert trigger. url and username are not
- * secret; the password is returned only by create and rotate-secret.
+ * GET /api/triggers/{id}: a CAP alert trigger or an overlay trigger. url and
+ * username are not secret; the password is returned only by create and
+ * rotate-secret.
  */
 export interface Trigger {
   id: string;
-  kind: "cap";
+  kind: "cap" | "overlay";
   label: string;
   target: TriggerTarget;
   default_for_seconds: number;
@@ -1802,6 +1864,7 @@ export interface Trigger {
   username: string;
   playlist_id?: string;
   alert?: TriggerAlert;
+  overlay?: TriggerOverlay;
   last_received_at?: string;
   revision: number;
   created_at: string;
@@ -1810,6 +1873,14 @@ export interface Trigger {
 
 export interface TriggerWithPassword extends Trigger {
   password: string;
+  /** An overlay trigger that signs: shown once. */
+  signing_secret?: string;
+}
+
+/** The answer of an update or a rotation: whichever secret it issued. */
+export interface TriggerWithSecrets extends Trigger {
+  password?: string;
+  signing_secret?: string;
 }
 
 export interface TriggerList {
@@ -1819,11 +1890,36 @@ export interface TriggerList {
 /** CapPull: the CAP sources the platform reads for a trigger and which alerts count; the server validates every member. */
 export type TriggerPull = Record<string, unknown>;
 
+export interface TriggerOverlayWrite {
+  show: "bar" | "takeover";
+  edge?: "top" | "bottom";
+  style?: TriggerOverlayStyle;
+  mapping?: Record<string, unknown>;
+  signing?: boolean;
+}
+
 export interface TriggerWrite {
+  kind?: "cap" | "overlay";
   label: string;
   target: TriggerTarget;
   default_for_seconds?: number;
   pull?: TriggerPull;
+  overlay?: TriggerOverlayWrite;
+}
+
+/** PATCH /api/triggers/{id}: the members it carries change; pull, style and mapping take null to remove. */
+export interface TriggerPatch {
+  label?: string;
+  target?: TriggerTarget;
+  default_for_seconds?: number;
+  pull?: TriggerPull | null;
+  overlay?: {
+    edge?: "top" | "bottom";
+    style?: TriggerOverlayStyle | null;
+    mapping?: Record<string, unknown> | null;
+    enabled?: boolean;
+    signing?: boolean;
+  };
 }
 
 /** POST /api/triggers/{id}/test answers the receipt a CAP message gets. */
@@ -1831,6 +1927,31 @@ export interface TriggerReceipt {
   outcome: "shown" | "updated" | "ended" | "ignored" | "duplicate";
   trigger_id: string;
   alert?: TriggerAlert;
+}
+
+/** POST /api/triggers/{id}/test on an overlay trigger answers what a post to its URL gets. */
+export interface TriggerOverlayReceipt {
+  outcome: "shown" | "updated" | "unchanged" | "ended" | "ignored";
+  trigger_id: string;
+  alert_id?: string;
+  until: string | null;
+  active: number;
+}
+
+/** One post to an overlay trigger, as its seven-day log keeps it: never the body, headers or credentials. */
+export interface TriggerDelivery {
+  at: string;
+  outcome: string;
+  reason?: string;
+  detail?: string;
+  status: number;
+  bytes: number;
+  alert_id?: string;
+  request_id: string;
+}
+
+export interface TriggerDeliveryList {
+  items: TriggerDelivery[];
 }
 
 export type ScreenScheduleDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";

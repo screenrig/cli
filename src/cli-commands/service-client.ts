@@ -4,7 +4,7 @@ import {
   handleServiceClientRemoveKey, handleServiceClientRemoveSecret, handleServiceClientRevoke, handleServiceClientShow,
 } from "../commands.js";
 import { type Command, Option } from "commander";
-import { addCommandNotes } from "./notes.js";
+import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
 import { usageError } from "../problems.js";
 import { ACCESS_LEVELS } from "../oauth.js";
@@ -17,7 +17,7 @@ export function registerServiceClientCommands(root: Command, bind: CommandAction
   group.command("list").description("List this project's service clients").action(bind(handleServiceClientList));
   group.command("show").description("Show one service client").argument("<id>", "Service client id (scl_...)").action(bind(handleServiceClientShow));
 
-  addCommandNotes(group.command("create").description("Create a service client")
+  const create = group.command("create").description("Create a service client")
     .requiredOption("--name <NAME>", "Name the client")
     .addOption(new Option("--capability <NAME>", "Grant a capability (repeatable; default: all six, each within yours)")
       .choices([...AGENT_CAPABILITIES])
@@ -27,11 +27,18 @@ export function registerServiceClientCommands(root: Command, bind: CommandAction
         if (requested.includes(value)) throw usageError(`Capability ${value} was supplied more than once.`);
         return [...requested, value].join(",");
       }))
-    .addOption(new Option("--access <LEVEL>", "Read only, Propose or Manage (default read)").choices([...ACCESS_LEVELS]))
+    .addOption(new Option("--access <LEVEL>", "Read only, Propose or Manage (default read; propose for an uploader)").choices([...ACCESS_LEVELS]))
+    .option("--uploader", "Limit the client to the playlists and media folders given with --playlist-id and --folder-id")
+    .option("--folder-id <ID[,ID]>", "With --uploader, the media folders (mfd_...) it uploads into; at least one")
+    .option("--playlist-id <ID[,ID]>", "With --uploader, the playlists (pl_...) it changes pages of")
     .option("--key-file <PATH>", "Register this public key (a JWK or PEM; a private key file sends only its public half)")
     .option("--secret-file <PATH>", "Generate a secret and write it to this new 0600 file")
-    .action(bind(handleServiceClientCreate)),
-  "Propose access proposes playlist and screen changes for a person to review instead of applying them. Supply --key-file, --secret-file or both. Keys are Ed25519, EC P-256 or RSA of at least 2048 bits; a key without a kid is known by its RFC 7638 thumbprint. The secret is shown once, so it is written only to --secret-file, which must not exist yet. At most 50 live clients per project.");
+    .action(bind(handleServiceClientCreate));
+  requireOptionGroup(create, "requires", ["--folder-id", "--uploader"]);
+  requireOptionGroup(create, "requires", ["--playlist-id", "--uploader"]);
+  requireOptionGroup(create, "requires", ["--uploader", "--folder-id"]);
+  addCommandNotes(create,
+  "Propose access proposes playlist and screen changes for a person to review instead of applying them. An uploader client (--uploader) works only in the folders and playlists it is given: it uploads media into its folders (media upload --folder ID) and adds, replaces and removes pages of its playlists (playlist page add|replace|remove), holds the content and playlists capabilities, and acts at Propose unless --access says otherwise; anything else it asks is outside_upload_scope, whose upload_scope lists what it may use. Its scope is set here and replaced by the project owner; to change what a client may do beyond that, create a new client. Supply --key-file, --secret-file or both. Keys are Ed25519, EC P-256 or RSA of at least 2048 bits; a key without a kid is known by its RFC 7638 thumbprint. The secret is shown once, so it is written only to --secret-file, which must not exist yet. At most 50 live clients per project.");
 
   group.command("add-key").description("Register a second public key for rotation").argument("<id>", "Service client id")
     .requiredOption("--key-file <PATH>", "The public key (a JWK or PEM)").action(bind(handleServiceClientAddKey));
