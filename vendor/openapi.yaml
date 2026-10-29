@@ -24290,7 +24290,7 @@ components:
         - {$ref: "#/components/schemas/PlaylistMediaEndAdvance"}
         - {$ref: "#/components/schemas/PlaylistAudioEndAdvance"}
       discriminator: {propertyName: mode}
-    PlaylistDurationAdvance: {type: object, additionalProperties: false, required: [mode, after_ms], properties: {mode: {type: string, enum: [duration]}, after_ms: {type: integer, minimum: 1000, maximum: 86400000}}}
+    PlaylistDurationAdvance: {type: object, additionalProperties: false, required: [mode, after_ms], properties: {mode: {type: string, enum: [duration]}, after_ms: {type: integer, minimum: 1000, maximum: 86400000}, until: {type: string, enum: [video_end], description: "The page lasts until its YouTube video ends. The page must hold exactly one YouTube video (a link to one video, not a YouTube playlist or live stream); a page that does not is refused at advance.until. after_ms is then how long the page shows when the screen cannot read the video's length."}}}
     PlaylistApplicationAdvance: {type: object, additionalProperties: false, required: [mode, max_ms], properties: {mode: {type: string, enum: [application]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000}}}
     PlaylistMediaEndAdvanceWrite: {type: object, additionalProperties: false, required: [mode], properties: {mode: {type: string, enum: [media_end]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from resolved item lengths.}}}
     PlaylistMediaEndAdvance: {type: object, additionalProperties: false, required: [mode, max_ms], properties: {mode: {type: string, enum: [media_end]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000}}}
@@ -27538,6 +27538,7 @@ components:
         mode: {type: string, enum: [duration, application, media_end, audio_end]}
         afterMs: {type: integer, description: "duration: the page length. audio_end: the cued track's verified duration, the page length when the track cannot play."}
         maxMs: {type: integer}
+        until: {type: string, description: "duration only. video_end: the page lasts until its one YouTube video ends and afterMs is how long it shows when the Player cannot read the video's length (docs/player-compatibility.md, YouTube embeds). A Player ignores a value it does not know and plays afterMs."}
     RuntimePrimitive:
       oneOf:
         - {$ref: "#/components/schemas/RuntimeApplicationPrimitive"}

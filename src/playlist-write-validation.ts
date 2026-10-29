@@ -334,8 +334,10 @@ function validateSelector(
 function validateAdvance(value: unknown, name: string): "duration" | "application" | "media_end" | "audio_end" {
   const advance = record(value, name);
   if (advance.mode === "duration") {
-    exact(advance, ["mode", "after_ms"], name);
+    exact(advance, ["mode", "after_ms", "until"], name);
     number(advance, "after_ms", name, { integer: true, min: 1000, max: 86_400_000 });
+    // The page lasts until its one YouTube video ends; the server checks the page holds exactly one.
+    if (advance.until !== undefined && advance.until !== "video_end") throw usageError(`${name}.until must be video_end.`);
     return "duration";
   }
   if (advance.mode === "application") {

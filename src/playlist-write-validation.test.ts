@@ -388,3 +388,22 @@ test("soundtrack 128 tracks and 129 tracks: the limit is 128 and the refusal nam
     (error: unknown) => error instanceof CliError && error.problem.detail.includes("audio.tracks must contain 1 to 128 tracks; this playlist has 0."),
   );
 });
+
+test("a duration page may last until its YouTube video ends, and nothing else may ask for it", () => {
+  const video = [iframePrimitive("video", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")];
+  const withAdvance = (advance: unknown) => {
+    const value = playlistWithPrimitives(video);
+    return { ...value, pages: [{ ...value.pages[0], advance }] };
+  };
+  const until = { mode: "duration", after_ms: 45000, until: "video_end" };
+  assert.deepEqual(playlistIssues(withAdvance(until)), []);
+  assert.deepEqual(validatePlaylistWrite(withAdvance(until), new Map()), new Set());
+  for (const advance of [{ ...until, until: "sunset" }, { ...until, until: true }, { mode: "application", max_ms: 5000, until: "video_end" }, { mode: "media_end", until: "video_end" }]) {
+    assert.throws(() => validatePlaylistWrite(withAdvance(advance), new Map()), CliError, JSON.stringify(advance));
+    assert.notDeepEqual(playlistIssues(withAdvance(advance)), [], JSON.stringify(advance));
+  }
+  assert.throws(
+    () => validatePlaylistWrite(withAdvance({ ...until, until: "sunset" }), new Map()),
+    (error: unknown) => error instanceof CliError && error.problem.detail.includes("until must be video_end"),
+  );
+});
