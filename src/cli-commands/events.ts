@@ -1,6 +1,6 @@
 import { eventTypeOption, positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleEventsList, handleEventsFollow } from "../commands.js";
+import { handleEventsList, handleEventsFollow } from "../handlers/events.js";
 import { type Command, Option } from "commander";
 
 export function registerEventsCommands(root: Command, bind: CommandActionBinder): void {

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { CliError } from "./problems.js";
 
 const usage = (error: unknown) => error instanceof CliError && error.problem.code === "usage_error";

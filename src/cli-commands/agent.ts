@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleAgentEnroll, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity, handleLogin, handleLogout } from "../commands.js";
+import { handleAgentEnroll, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity, handleLogin, handleLogout } from "../handlers/agent.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { ACCESS_LEVELS } from "../oauth.js";

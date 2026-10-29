@@ -11,7 +11,7 @@ import {
 } from "./campaigns.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";

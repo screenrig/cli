@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import { NOTES_REVIEW_PROMPT, NOTES_TRUST_LINE, noteLines, notesHint, notesHintWarning, parseNoteAbout, parseNoteTtl, resourceNotesWarning, selfNoteCounts } from "./agent-notes.js";
-import { eventTypeMatches } from "./commands.js";
+import { eventTypeMatches } from "./handlers/events.js";
 import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";

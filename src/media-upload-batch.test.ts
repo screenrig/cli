@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { MediaUploadDeclaration, Operation } from "./adapters/protocol.js";
 import { ApiClient } from "./client.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { createMemoryLogger } from "./log/logger.js";

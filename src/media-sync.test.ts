@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { createMemoryLogger } from "./log/logger.js";
 import { run, type CliRuntime } from "./main.js";
 import {

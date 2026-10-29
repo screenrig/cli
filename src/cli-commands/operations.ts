@@ -1,6 +1,6 @@
 import { positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleOperationsGet, handleOperationsWait, handleOperationsCancel } from "../commands.js";
+import { handleOperationsGet, handleOperationsWait, handleOperationsCancel } from "../handlers/operations.js";
 import type { Command } from "commander";
 
 export function registerOperationsCommands(root: Command, bind: CommandActionBinder): void {

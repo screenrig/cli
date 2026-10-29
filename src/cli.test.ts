@@ -1,4 +1,5 @@
-import { commandHelp, CREDIT_HELP } from "./help.js";
+import { CREDIT_HELP } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
@@ -7,7 +8,8 @@ import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS } from "./commands.js";
+import { formatEventLine } from "./handlers/events.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";

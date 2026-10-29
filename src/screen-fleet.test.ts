@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } fr
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { formatEventLine } from "./commands.js";
+import { formatEventLine } from "./handlers/events.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";

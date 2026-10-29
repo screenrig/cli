@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { reportFormatOption, reportOutputOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleReportSubscriptionsCreate, handleReportSubscriptionsDelete, handleReportSubscriptionsList, handleReportSubscriptionsSend,
-  handleReportSubscriptionsShow, handleReportSubscriptionsUpdate, handleReportsList, handleReportsShow,
-} from "../commands.js";
+import { handleReportSubscriptionsCreate, handleReportSubscriptionsDelete, handleReportSubscriptionsList, handleReportSubscriptionsSend, handleReportSubscriptionsShow, handleReportSubscriptionsUpdate, handleReportsList, handleReportsShow } from "../handlers/reports.js";
 import { REPORT_CADENCES, REPORT_GROUPINGS, REPORT_SUBSCRIPTION_FORMATS, REPORT_WEEKDAYS, reportDay, reportFilter } from "../reports.js";
 
 const scheduleOptions = (command: Command, cadenceRequired: boolean): Command => command

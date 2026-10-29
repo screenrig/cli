@@ -1,7 +1,6 @@
 import type { Command, Option } from "commander";
-import { commandPath, createCommandTree, findCommand } from "./command-tree.js";
+import { commandPath } from "./command-tree.js";
 import { commandNotes, commandExamples, commandRelationships, type OptionRelationship } from "./cli-commands/notes.js";
-import { usageError } from "./problems.js";
 export { CREDIT_HELP } from "./help-text.js";
 
 export interface HelpOption {
@@ -94,8 +93,3 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   };
 }
 
-export function commandHelp(path: readonly string[] = [], all = false): HelpDocument {
-  const command = findCommand(createCommandTree().root, path);
-  if (!command) throw usageError("Unknown help topic.");
-  return describeHelp(command, all);
-}

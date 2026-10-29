@@ -1,6 +1,6 @@
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../handlers/playlist.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";

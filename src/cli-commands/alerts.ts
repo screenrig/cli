@@ -2,9 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { reportFormatOption, reportOutputOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleAlertsAck, handleAlertsList, handleAlertsMute, handleAlertsMutes, handleAlertsShow, handleAlertsSnooze, handleAlertsUnmute,
-} from "../commands.js";
+import { handleAlertsAck, handleAlertsList, handleAlertsMute, handleAlertsMutes, handleAlertsShow, handleAlertsSnooze, handleAlertsUnmute } from "../handlers/alerts.js";
 import {
   ALERT_STATES, alertForOption, alertMuteScreenIds, alertMuteTags, alertNote, alertScreenId, alertUntilOption, alertsCursor, alertsLimit,
 } from "../alerts.js";

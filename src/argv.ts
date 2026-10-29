@@ -2,12 +2,14 @@ import { CommanderError } from "commander";
 import { commandInput, createCommandTree } from "./command-tree.js";
 import type { ParsedArgs } from "./command-input.js";
 import { describeHelp, type HelpDocument } from "./help.js";
+import { ALL_COMMAND_REGISTRARS } from "./cli-commands/all.js";
+import { registerGuidance } from "./cli-commands/register-guidance.js";
 
 export { flagString, flagBool, flagNumber, type ParsedArgs } from "./command-input.js";
 
 /** Inspect the same native command tree without executing an application handler. */
 export function parseArgv(argv: string[]): ParsedArgs & { help?: HelpDocument } {
-  const tree = createCommandTree(argv);
+  const tree = createCommandTree(argv, undefined, ALL_COMMAND_REGISTRARS);
   try {
     tree.root.parse(argv, { from: "user" });
   } catch (error) {
@@ -16,6 +18,7 @@ export function parseArgv(argv: string[]): ParsedArgs & { help?: HelpDocument } 
   const args = commandInput(tree.selected());
   if (tree.versionRequested()) args.flags.version = true;
   if (tree.helpRequested()) {
+    registerGuidance(tree.root);
     const help = describeHelp(tree.selected(), tree.inventoryRequested());
     return { command: help.path.slice(0, 2), positionals: help.path, flags: { ...args.flags, help: true }, help };
   }

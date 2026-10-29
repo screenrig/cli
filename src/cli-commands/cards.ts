@@ -2,7 +2,7 @@ import { type Command, Argument, Option } from "commander";
 import {
   cardId, cardUid, feedListOption, FEED_AREA_UNKNOWN, FEED_CERTAINTIES, FEED_FAMILIES, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
 } from "../cards.js";
-import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleFeedsGet } from "../commands.js";
+import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleFeedsGet } from "../handlers/cards.js";
 import { positiveInteger, revision } from "./options.js";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";

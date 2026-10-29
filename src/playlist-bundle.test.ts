@@ -19,7 +19,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
 import { ApiClient } from "./client.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import {
   PLAYLIST_BUNDLE_MANIFEST,

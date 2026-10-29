@@ -6,7 +6,7 @@ import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { ApiClient } from "./client.js";
 import { cardProperties, validatePlaylistCards, type CardDetails } from "./cards.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { parseArgv } from "./argv.js";
 import { run, processRuntime } from "./main.js";
 import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";

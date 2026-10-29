@@ -4,7 +4,7 @@ import type { ParsedArgs } from "./command-input.js";
 import type { CommandHandler } from "./commands.js";
 import { commandError } from "./cli-errors.js";
 import { commandPath, findCommand, flagName, invocationFlags } from "./command-path.js";
-import { registerCommands } from "./cli-commands/index.js";
+import { registerCommands, type CommandRegistrar } from "./cli-commands/index.js";
 import { usageError } from "./problems.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -60,8 +60,9 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
 
 /** Fresh native commands per invocation; actions return their asynchronous work. */
 export function createCommandTree(
-  argv: readonly string[] = [],
-  execute?: (handler: CommandHandler, args: ParsedArgs) => Promise<void>,
+  argv: readonly string[],
+  execute: ((handler: CommandHandler, args: ParsedArgs) => Promise<void>) | undefined,
+  registrars: readonly CommandRegistrar[],
 ): CommandTree {
   const end = argv.indexOf("--");
   const tokens = end < 0 ? argv : argv.slice(0, end);
@@ -83,7 +84,7 @@ export function createCommandTree(
   registerCommands(root, (handler) => (...values: unknown[]) => {
     selected = values[values.length - 1] as Command;
     return execute?.(handler, commandInput(selected));
-  });
+  }, registrars);
   root.command("help [command...]")
     .description("Discover commands; --all lists every command")
     .option("--all", "Include all descendant command paths")

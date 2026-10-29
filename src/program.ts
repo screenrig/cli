@@ -1,5 +1,6 @@
 import { type Command, CommanderError } from "commander";
 import { commandFromArgv, commandPath, createCommandTree } from "./command-tree.js";
+import { loadCommandRegistrars } from "./cli-commands/index.js";
 import { CliError } from "./problems.js";
 import { handleVersion, type CommandResult } from "./commands.js";
 import { describeHelp } from "./help.js";
@@ -29,7 +30,7 @@ export async function executeCommand(argv: string[], runtime: CliRuntime): Promi
   let result: CommandResult | undefined;
   const tree = createCommandTree(argv, async (handler, args) => {
     result = await handler(args, runtime);
-  });
+  }, await loadCommandRegistrars(argv));
   try {
     await tree.root.parseAsync(argv, { from: "user" });
   } catch (error) {
@@ -38,6 +39,9 @@ export async function executeCommand(argv: string[], runtime: CliRuntime): Promi
     }
   }
   if (tree.helpRequested()) {
+    // Help-only examples and notes load only when help is shown.
+    const { registerGuidance } = await import("./cli-commands/register-guidance.js");
+    registerGuidance(tree.root);
     const help = describeHelp(tree.selected(), tree.inventoryRequested());
     return { envelope: successEnvelope(help), exitCode: ExitCode.Success, human: help.usage, output: "help" };
   }

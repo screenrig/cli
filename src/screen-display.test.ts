@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { Screen } from "./adapters/protocol.js";
-import { formatEventLine } from "./commands.js";
+import { formatEventLine } from "./handlers/events.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";

@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { processRuntime, run } from "./main.js";
 import { networkError } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";

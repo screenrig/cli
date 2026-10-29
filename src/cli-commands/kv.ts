@@ -1,10 +1,7 @@
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleKvGet, handleKvSet, handleKvDelete, handleKvList,
-  handleKvWebhookCreate, handleKvWebhookDelete, handleKvWebhookDeliveries, handleKvWebhookList, handleKvWebhookRotateSecret, handleKvWebhookUpdate,
-} from "../commands.js";
+import { handleKvGet, handleKvSet, handleKvDelete, handleKvList, handleKvWebhookCreate, handleKvWebhookDelete, handleKvWebhookDeliveries, handleKvWebhookList, handleKvWebhookRotateSecret, handleKvWebhookUpdate } from "../handlers/kv.js";
 import { kvWebhookDeliveriesLimit, kvWebhookDescription } from "../kv-webhooks.js";
 import { type Command, Option } from "commander";
 

@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { handleOrganizationList, handleOrganizationRename } from "../commands.js";
+import { handleOrganizationList, handleOrganizationRename } from "../handlers/organization.js";
 import type { CommandActionBinder } from "./types.js";
 
 export function registerOrganizationCommands(root: Command, bind: CommandActionBinder): void {

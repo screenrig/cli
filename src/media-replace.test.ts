@@ -5,7 +5,7 @@ import { Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { writeConfigAtomic } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run } from "./main.js";
 import type { SignedRawPut } from "./runtime.js";
 import { testTemp } from "./test-temp.js";

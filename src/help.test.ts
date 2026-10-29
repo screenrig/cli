@@ -1,9 +1,11 @@
+import { ALL_COMMAND_REGISTRARS } from "./cli-commands/all.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCommandTree, findCommand } from "./command-tree.js";
-import { commandHelp, leafCommandPaths } from "./help.js";
+import { leafCommandPaths } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { CLI_VERSION } from "./version.js";
 
 const bin = fileURLToPath(new URL("./bin.js", import.meta.url));
@@ -361,7 +363,7 @@ test("root help is compact and every command is discoverable through immediate c
   ].sort());
   assert.equal(root.allCommands, undefined);
   assert.doesNotMatch(root.usage, /All commands:/);
-  const inventory = leafCommandPaths(createCommandTree().root);
+  const inventory = leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root);
   assert.ok(inventory.includes("help"));
   for (const path of inventory) {
     assert.ok(commandHelp([], true).usage.includes(path), path);
@@ -377,7 +379,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.deepEqual(media.commands.map((child) => child.name), [
     "generate", "upload", "replace", "versions", "restore", "version", "upload-batch", "show", "download", "list", "selector-preview", "update", "availability", "delete", "move", "folder", "sync",
   ]);
-  for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
+  for (const path of leafCommandPaths(findCommand(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
   }
   assert.doesNotMatch(media.usage, /screen assign|project show|agent enroll|playlist create/);
@@ -387,7 +389,7 @@ test("explicit human inventory includes every leaf while default root stays comp
   const text = execFileSync(process.execPath, [bin, "help", "--all"], {
     encoding: "utf8", env: { ...process.env, SCREENRIG_CONFIG: "/nonexistent/screenrig-help-config" },
   });
-  for (const path of leafCommandPaths(createCommandTree().root)) {
+  for (const path of leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root)) {
     assert.ok(text.includes(path), path);
   }
 });
@@ -481,7 +483,7 @@ test("agent enroll documents --setup-code as an optional addition to either cred
 
 
 test("explicit JSON inventory can be scoped to a group", () => {
-  assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));
+  assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root));
   const media = invoke(["help", "media", "--all"]).data;
   assert.ok(media.allCommands?.every((path) => path.startsWith("media ")));
   assert.ok(media.allCommands?.includes("media generate"));
@@ -588,7 +590,7 @@ test("every operational command has examples that parse and stdin help matches i
   const { parseArgv } = await import("./argv.js");
   // Tokenize only our authored examples, preserving quoted JSON and paths.
   const words = (text: string) => [...text.matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/g)].map(match => match[1] ?? match[2] ?? match[3]!);
-  for (const path of leafCommandPaths(createCommandTree().root)) {
+  for (const path of leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root)) {
     if (path === "help") continue;
     const help = commandHelp(path.split(" "));
     assert.ok(help.examples.length > 0, path);

@@ -19,10 +19,17 @@ is not required to contribute.
   pins their bytes, including the built `assets/screenrig.runtime.js`. The
   OpenAPI is backend's public document (`api/public/`), which leaves out the
   staff routes; `check:public` fails on any staff route in the tree.
-- `scripts/package-release.sh` builds the deterministic `screenrig-cli.tgz`: one
-  minified `dist/bin.js` with the runtime dependencies inside, recorded in
-  `runtime-dependencies.lock.json`. `scripts/check-release-artifact.mjs` states
-  its inventory.
+- `scripts/package-release.sh` builds the deterministic `screenrig-cli.tgz`:
+  minified `dist/bin.js` and the flat `dist/*.js` chunks it loads per command
+  bundle, with the runtime dependencies inside (recorded in
+  `runtime-dependencies.lock.json`), plus `assets/`. No bundled file may exceed
+  256 KiB (the Claude plugin directory reads no more), and the bundler fails on
+  one. `scripts/check-release-artifact.mjs` states its inventory.
+- Commands load on demand: `src/cli-commands/index.ts` maps each top-level
+  command to a bundle in `src/bundles/`, which registers its commands and
+  imports their handlers from `src/handlers/`; `src/commands.ts` keeps what
+  bundles share. A new registration module joins a bundle there (the catalog
+  test fails otherwise); help guidance loads only for help.
 - `.github/workflows/ci.yml` runs the public, test, package and secret gates;
   `npm-release.yml` is the only npm publication path. Never publish from a laptop.
 

@@ -2,7 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { positiveInteger, reportFormatOption, reportOutputOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaybackCompleteness, handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../commands.js";
+import { handlePlaybackCompleteness, handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../handlers/playback.js";
 import { playsCursor, playsInstantOption, playsLimit } from "../playback-export.js";
 
 const formatOption = () => new Option("--format <FORMAT>", "json (default), csv, xlsx or pdf").choices(["json", "csv", "xlsx", "pdf"]);
