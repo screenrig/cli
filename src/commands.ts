@@ -3741,7 +3741,8 @@ export const handleSelectorPreview = commandHandler(async (args, runtime, resolv
     if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) throw usageError("media selector-preview --rect takes WIDTHxHEIGHT, both above 0, for example 1080x1920.");
     rectBody = { width: Number(match[1]), height: Number(match[2]) };
   }
-  const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector, ...(rectBody ? { rect: rectBody } : {}) } });
+  const timezone = flagString(args.flags, "timezone");
+  const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector, ...(rectBody ? { rect: rectBody } : {}), ...(timezone === undefined ? {} : { timezone }) } });
   const preview = response.body as { candidates?: Array<{ filename: string; media_id: string; weight?: number; share_percent?: number }>; excluded?: Array<{ filename: string; media_id: string; reason: string }>; cycle?: number };
   const shares = (preview.candidates ?? []).filter((item) => item.share_percent !== undefined).map((item) => `${item.share_percent}%\t${item.filename}\t${item.media_id}`);
   const left = (preview.excluded ?? []).map((item) => `left out (${item.reason})\t${item.filename}\t${item.media_id}`);
@@ -4218,7 +4219,62 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   };
 }
 
-const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist or open proposal applies without one. Do not repeat the write.";
+const MEDIA_AVAILABILITY_KEYS = ["from", "until", "windows", "monthly", "dates", "except"];
+
+/** The availability rule of a media item: the schedule's clock grammar without data or interaction. The server checks every value; this refuses a file that cannot be a rule at all. */
+function mediaAvailabilityRule(parsed: unknown, file: string): Record<string, unknown> {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw usageError(`${file} must hold one JSON object, for example {"from": "2026-11-27T00:00", "until": "2026-11-30T00:00"}.`);
+  }
+  const rule = parsed as Record<string, unknown>;
+  const keys = Object.keys(rule);
+  if (keys.length === 0) {
+    throw usageError(`${file} holds an empty rule. Give at least one of ${MEDIA_AVAILABILITY_KEYS.join(", ")}, or use --clear to make the file always available.`);
+  }
+  for (const key of keys) {
+    if (key === "data" || key === "interaction") {
+      throw usageError(`An availability rule says when a file may play, not what plays: remove "${key}" from ${file}.`);
+    }
+    if (!MEDIA_AVAILABILITY_KEYS.includes(key)) {
+      throw usageError(`${file} has "${key}", which an availability rule does not take. Use ${MEDIA_AVAILABILITY_KEYS.join(", ")}.`);
+    }
+  }
+  return rule;
+}
+
+export const handleMediaAvailability = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const file = flagString(args.flags, "file");
+  const clear = flagBool(args.flags, "clear");
+  if (!id) throw usageError("media availability requires <id> and exactly one of --file RULE.json or --clear.");
+  if (!MEDIA_ID_PATTERN.test(id)) throw usageError(`media availability takes a media ID (med_...), not ${JSON.stringify(id)}; media list shows them.`);
+  if ((file === undefined) === !clear) throw usageError("media availability requires exactly one of --file RULE.json (or - for stdin) or --clear.");
+  const rule = file === undefined ? null : mediaAvailabilityRule(await readAuthoringJson(file, runtime), file);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  // The route requires the media revision: read it unless --expect-rev names it.
+  let revision = flagString(args.flags, "if-match");
+  if (revision === undefined) {
+    const current = await client.call({ method: "GET", path: `/api/media/${id}` });
+    const value = (current.body as { revision?: unknown } | undefined)?.revision;
+    if (typeof value !== "number") throw usageError(`Media ${id} returned no revision; pass --expect-rev REVISION.`);
+    revision = String(value);
+  }
+  const response = await client.call({
+    method: "PATCH",
+    path: `/api/media/${id}/availability`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(revision) },
+    body: { availability: rule },
+  });
+  const done = rule === null ? `Cleared availability on media ${id}: the file is always available to dynamic selectors` : `Set availability on media ${id}`;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: `${done}\n${JSON.stringify(response.body, null, 2)}`,
+  };
+}, true);
+
+const MEDIA_REVIEW_PENDING_SENTENCE ="Screens keep playing what was approved until a person approves this change. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist or open proposal applies without one. Do not repeat the write.";
 
 /**
  * Media a Propose write left pending (review_state pending): a success, exit

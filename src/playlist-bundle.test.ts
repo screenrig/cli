@@ -1347,3 +1347,23 @@ test("empty dynamic selectors leave other bundle primitives intact", async () =>
   assert.deepEqual(normalized.mediaIds, []);
   assert.equal((normalized.playlist.pages as any[])[0].primitives.length, 1);
 });
+
+test("bundle export refuses a tag selector with a screen token and names the page and primitive", async () => {
+  for (const selector of [
+    { by: "tag", tag: "Store{screen.field.store_no}", order: "filename", one_at_a_time: true },
+    { by: "tag", tag: "{screen.id}", order: "filename", one_at_a_time: true },
+    { by: "tag", tags: { all: ["Lobby", "Region{screen.field.region}"] }, order: "filename", one_at_a_time: true },
+  ]) {
+    const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
+    await assert.rejects(
+      () => snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive(selector))),
+      (error: unknown) => {
+        const detail = String((error as { problem?: { detail?: string } }).problem?.detail ?? error);
+        assert.match(detail, /page page, image primitive hero/);
+        assert.match(detail, /Replace the token with a concrete tag/);
+        return true;
+      },
+    );
+    assert.equal(transport.calls.length, 0, "nothing is previewed for a selector that cannot be frozen");
+  }
+});
