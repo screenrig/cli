@@ -276,6 +276,10 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         const mediaSelector = object(primitive.selector);
         if (mediaSelector.by === "tag" && object(mediaSelector.tags) && mediaSelector.tags !== undefined && Object.keys(object(mediaSelector.tags)).length === 0) fail(`${itemPath}/selector/tags`, "must contain at least one filter");
         if (mediaSelector.one_at_a_time === true && mediaSelector.batch_size !== undefined && mediaSelector.batch_size !== 1) fail(`${itemPath}/selector/batch_size`, "one_at_a_time requires batch_size 1");
+        if (mediaSelector.order === "weighted") {
+          if (mediaSelector.weights === undefined) fail(`${itemPath}/selector/weights`, "is required with order weighted");
+          if (mediaSelector.one_at_a_time !== true && mediaSelector.batch_size !== 1) fail(`${itemPath}/selector/order`, "weighted plays one item per visit: set one_at_a_time or batch_size 1");
+        } else if (mediaSelector.weights !== undefined) fail(`${itemPath}/selector/weights`, "is allowed only with order weighted");
         if (mode === "duration" || mode === "application" || mode === "audio_end") {
           if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");
           const selector = object(primitive.selector);
