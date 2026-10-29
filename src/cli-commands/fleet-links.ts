@@ -2,9 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleFleetLinksCreate, handleFleetLinksDelete, handleFleetLinksList, handleFleetLinksRotate, handleFleetLinksShow, handleFleetLinksUpdate,
-} from "../commands.js";
+import { handleFleetLinksCreate, handleFleetLinksDelete, handleFleetLinksList, handleFleetLinksRotate, handleFleetLinksShow, handleFleetLinksUpdate } from "../handlers/fleet-links.js";
 import { fleetLinkExpiresAt, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkTags } from "../fleet-links.js";
 import { fleetLinkFieldOption } from "../screen-facts.js";
 

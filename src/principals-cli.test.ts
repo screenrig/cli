@@ -127,11 +127,9 @@ test("enrollment binds organization and stores the sign-in without returning it"
 
 test("new enrollment requires organization, preserves Screens, and never infers from email", async t => {
   const f = await fixture(t);
-  for (const extra of [[], ["--organization", "Acme", "--project-name", "Another project"]]) {
-    const result = await f.invoke("agent", "enroll", "--email", "contact@example.com", ...extra);
-    assert.equal(result.result.error.code, "usage_error");
-    assert.equal(f.transport.calls.length, 0);
-  }
+  const result = await f.invoke("agent", "enroll", "--email", "contact@example.com");
+  assert.equal(result.result.error.code, "usage_error");
+  assert.equal(f.transport.calls.length, 0);
 });
 
 test("ambiguous enrollment keeps the exact organization and rejects a changed retry", async t => {

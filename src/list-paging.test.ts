@@ -175,7 +175,7 @@ test("screen, media, app, playlist, and kv list return every page as one list", 
     [["media", "list", "--tag", "lobby", "--primitive", "image"], "/api/media", media, { tag: "lobby", primitive: "image" }],
     [["app", "list"], "/api/applications", apps, {}],
     [["playlist", "list"], "/api/playlists", playlists, {}],
-    [["kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], kvRoute, kv, {}],
+    [["kv", "list", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], kvRoute, kv, {}],
   ];
   for (const [argv, route, all, query] of cases) {
     transport.calls.length = 0;

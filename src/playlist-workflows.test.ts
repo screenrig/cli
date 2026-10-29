@@ -112,10 +112,10 @@ test("editable stream preserves sources and fallback without resolved media", ()
  assert.equal(resolved.pages[0].primitives[0].resolved_media.length, 1);
 });
 
-test("revision aliases normalize, but duplicate spellings fail", () => {
- for(const flag of ["--expect-rev", "--if-match"]) assert.equal(parseArgv(["playlist","update","pl_TEST","x.json",flag,"3"]).flags["if-match"], "3");
- assert.equal(parseArgv(["playlist","update","pl_TEST","x.json","--if-match=3"]).flags["if-match"], "3");
- assert.throws(()=>parseArgv(["playlist","update","pl_TEST","x.json","--expect-rev","3","--if-match","3"]));
+test("the revision guard is --expect-rev only", () => {
+ assert.equal(parseArgv(["playlist","update","pl_TEST","x.json","--expect-rev","3"]).flags["expect-rev"], "3");
+ assert.equal(parseArgv(["playlist","update","pl_TEST","x.json","--expect-rev=3"]).flags["expect-rev"], "3");
+ assert.throws(()=>parseArgv(["playlist","update","pl_TEST","x.json","--if-match","3"]), /does not accept --if-match/);
 });
 
 test("stdin validation and editable output need no jq or metadata stripping", async t => {
@@ -319,7 +319,7 @@ test("assignment conflicts retain the created playlist and never create another 
   // The placeholder cannot accidentally execute a write before reconciliation.
   assert.throws(()=>parseArgv(e.problem.next.after_inspection.argv));
   const reconciled=e.problem.next.after_inspection.argv.map((arg:string)=>arg==='<REVIEWED_REVISION>'?'8':arg);
-  assert.equal(parseArgv(reconciled).flags['if-match'],'8');
+  assert.equal(parseArgv(reconciled).flags['expect-rev'],'8');
   return true;
  });
  assert.equal(transport.calls.filter(c=>c.method==='POST').length,1);
@@ -354,7 +354,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
   .on('GET',`/api/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
   .on('GET','/api/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
  async function invoke(inputs:string[], output='prepared.json', extra:string[]=[]) {
-  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen',`${prefix}scr_TEST`,'--output',output,...extra],env:{},cwd:()=>dir,transport,
+  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen-id',`${prefix}scr_TEST`,'--output',output,...extra],env:{},cwd:()=>dir,transport,
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
@@ -373,7 +373,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  assert.deepEqual(result.body.warnings,[]);
  assert.equal(doc.pages[2].primitives[0].src,'https://example.com/board');
  const publish=parseArgv(result.body.data.publish.argv);
- assert.equal(publish.flags['if-match'],undefined); assert.equal(publish.positionals[3],dir+'/prepared.json');
+ assert.equal(publish.flags['expect-rev'],undefined); assert.equal(publish.positionals[3],dir+'/prepared.json');
  // An explicit --duration-ms applies to every non-video page and warns for the short application page, never blocks.
  const timed=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'timed.json',['--duration-ms','8000']);
  assert.equal(timed.code,0,JSON.stringify(timed.body));
@@ -382,7 +382,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  assert.match(timed.body.warnings[0].message,/page_2 \(8000 ms\)/);
  const longer=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'longer.json',['--duration-ms','60000']);
  assert.equal(longer.code,0); assert.deepEqual(longer.body.warnings,[]);
- assert.equal(parseArgv(result.body.data.preview.argv).positionals[2],dir+'/prepared.json');
+ assert.equal(result.body.data.preview,undefined);
  // A sign shows LAN pages over http and pages behind a login, stored as authored.
  for (const [src, output] of [['http://user:secret@192.168.1.20:8080/status','lan.json'],['http://printer.local/','local.json']] as const) {
   const lan = await invoke([src], output);

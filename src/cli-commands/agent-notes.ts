@@ -3,7 +3,7 @@ import { isResourceID } from "../generated/resource-ids.js";
 import { usageError } from "../problems.js";
 import { positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleNotesList, handleNotesShow, handleNotesAdd, handleNotesConfirm, handleNotesResolve } from "../commands.js";
+import { handleNotesList, handleNotesShow, handleNotesAdd, handleNotesConfirm, handleNotesResolve } from "../handlers/agent-notes.js";
 import { type Command, Option } from "commander";
 
 function aboutOption(value: string): string {

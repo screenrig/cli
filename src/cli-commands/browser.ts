@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleBrowserSetup } from "../commands.js";
+import { handleBrowserSetup } from "../handlers/browser.js";
 import type { Command } from "commander";
 
 export function registerBrowserCommands(root: Command, bind: CommandActionBinder): void {

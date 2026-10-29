@@ -1,8 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleServiceClientAddKey, handleServiceClientAddSecret, handleServiceClientCreate, handleServiceClientList,
-  handleServiceClientRemoveKey, handleServiceClientRemoveSecret, handleServiceClientRevoke, handleServiceClientShow,
-} from "../commands.js";
+import { handleServiceClientAddKey, handleServiceClientAddSecret, handleServiceClientCreate, handleServiceClientList, handleServiceClientRemoveKey, handleServiceClientRemoveSecret, handleServiceClientRevoke, handleServiceClientShow } from "../handlers/service-client.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";

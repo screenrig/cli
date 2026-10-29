@@ -243,7 +243,7 @@ export function inputGuardArgs(demuxer?: string): string[] {
 }
 
 /** The ffmpeg demuxer for a file's recognised container, or undefined for an unrecognised head. */
-export async function sniffedDemuxer(filePath: string): Promise<string | undefined> {
+async function sniffedDemuxer(filePath: string): Promise<string | undefined> {
   return sniffMediaContainer(await readMediaHead(filePath))?.demuxer;
 }
 

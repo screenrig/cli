@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { reportFormatOption, reportOutputOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleReportSubscriptionsCreate, handleReportSubscriptionsDelete, handleReportSubscriptionsList, handleReportSubscriptionsSend,
-  handleReportSubscriptionsShow, handleReportSubscriptionsUpdate, handleReportsList, handleReportsShow,
-} from "../commands.js";
+import { handleReportSubscriptionsCreate, handleReportSubscriptionsDelete, handleReportSubscriptionsList, handleReportSubscriptionsSend, handleReportSubscriptionsShow, handleReportSubscriptionsUpdate, handleReportsList, handleReportsShow } from "../handlers/reports.js";
 import { REPORT_CADENCES, REPORT_GROUPINGS, REPORT_SUBSCRIPTION_FORMATS, REPORT_WEEKDAYS, reportDay, reportFilter } from "../reports.js";
 
 const scheduleOptions = (command: Command, cadenceRequired: boolean): Command => command
@@ -78,7 +75,7 @@ export function registerReportsCommands(root: Command, bind: CommandActionBinder
     .requiredOption("--name <NAME>", "Name, at most 100 characters")
     .addOption(new Option("--kind <KIND>", "fleet_health, uptime, publishing, alerts, alert_log or proof_of_play").makeOptionMandatory())
     .addOption(new Option("--format <FORMAT>", "Attachment: pdf, xlsx or csv").choices(REPORT_SUBSCRIPTION_FORMATS).makeOptionMandatory())
-    .requiredOption("--recipients <MEMBERS>", "Project members, comma-separated: a user id or a member's email address (at most 25)")
+    .requiredOption("--recipients <MEMBERS>", "Project members, comma-separated: a user id, a member's email address or owner (at most 25)")
     .option("--filter <NAME=VALUE>", "A report filter such as group_by=screen, folder_id=sfd_ID, tag=Lobby, advertiser=Acme (repeatable)", reportFilter);
   scheduleOptions(create, true);
   create.action(bind(handleReportSubscriptionsCreate));

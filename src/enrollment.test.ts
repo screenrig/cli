@@ -42,7 +42,6 @@ test("explicit enrollment atomically persists email, verifies, and completes out
     generateClientId: () => `cli_${"A".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-first-idempotency",
     enrollmentEmail: "Owner@example.com",
-    enrollmentProjectName: "Lobby displays",
     verify: async (token, projectId) => {
       assert.equal(token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret");
       assert.equal(projectId, "prj_enrollment");
@@ -57,7 +56,6 @@ test("explicit enrollment atomically persists email, verifies, and completes out
           idempotency_key: "enroll-first-idempotency",
           credential_format: "oauth",
           email: "Owner@example.com",
-          project_name: "Lobby displays",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
@@ -69,7 +67,6 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         idempotencyKey: "enroll-first-idempotency",
         credentialFormat: "oauth",
         email: "Owner@example.com",
-        projectName: "Lobby displays",
       });
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
@@ -78,7 +75,6 @@ test("explicit enrollment atomically persists email, verifies, and completes out
           idempotency_key: "enroll-first-idempotency",
           credential_format: "oauth",
           email: "Owner@example.com",
-          project_name: "Lobby displays",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
@@ -164,7 +160,6 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
       runtime,
       ...generators,
       enrollmentEmail: "owner@example.com",
-      enrollmentProjectName: "Lobby displays",
       verify: async () => undefined,
       enroll: async (state) => {
         seen.push(state);
@@ -179,16 +174,7 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
     idempotency_key: "enroll-retry-idempotency",
     credential_format: "oauth",
     email: "owner@example.com",
-    project_name: "Lobby displays",
   });
-  await assert.rejects(ensureCredential({
-    resolved,
-    runtime,
-    enrollmentProjectName: "Different project",
-    enroll: async () => { throw new Error("must reject before sending another enrollment"); },
-    verify: async () => undefined,
-  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
-  assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, pending?.enrollment);
   const result = await ensureCredential({
     resolved,
     runtime,
@@ -459,5 +445,26 @@ test("enrollment without a contact email or an AgentID claim is refused", async 
     enroll: async () => { throw new Error("enrollment must not run"); },
     verify: async () => undefined,
   }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
+  await rm(home, { recursive: true, force: true });
+});
+
+test("a pending enrollment saved with a project name by an earlier CLI resumes with it", async () => {
+  const home = await testTemp("enrollment-saved-project-name-");
+  const { fs, resolved } = fixture(home);
+  await writeConfigAtomic(resolved.configPath, {
+    api_url: resolved.apiUrl,
+    enrollment: { client_id: `cli_${"P".repeat(43)}`, idempotency_key: "enroll-saved-name", credential_format: "oauth", email: "owner@example.com", organization: "Acme", project_name: "Lobby displays" },
+  }, fs);
+  let sent: { projectName?: string } | undefined;
+  await ensureCredential({
+    resolved,
+    runtime: { fs, now: () => new Date("2026-08-14T20:00:00.000Z"), sleep: async () => undefined },
+    enroll: async (state) => {
+      sent = state;
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_saved_name_secret", projectId: "prj_saved_name", oauth: OAUTH };
+    },
+    verify: async () => undefined,
+  });
+  assert.equal(sent?.projectName, "Lobby displays");
   await rm(home, { recursive: true, force: true });
 });

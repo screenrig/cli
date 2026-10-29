@@ -1,16 +1,14 @@
-import { addValueAlias } from "./aliases.js";
-import { NOTE_HELP, nonnegativeInteger, positiveInteger, reviewNoteOption, revision } from "./options.js";
+import { NOTE_HELP, positiveInteger, reviewNoteOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../handlers/playlist.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
-import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
 import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
 import { handlePlaylistFields, handlePlaylistInstances, templateClearOption, templateSetOption } from "../playlist-fields.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
-  const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
+  const playlist = root.command("playlist").description("Author, validate, and manage playlists");
 
   const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or http(s) URLs")
     .argument("<inputs...>", "Local image/video/audio files, med_ IDs, rel_ IDs, http(s) URLs or pasted <iframe> embed codes (iframe pages) in playback order; audio becomes the soundtrack")
@@ -24,27 +22,16 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--no-transcode", "Upload accepted file bytes unchanged")
     .option("--no-progress", "Suppress upload progress on stderr")
     .option("--poll-ms <MS>", "Upload polling interval", positiveInteger("poll-ms"))
+    .option("--screen-id <ID>", "Use this screen’s identity, revision, and reported dimensions (a video wall’s canvas and format when it has one)")
     .action(bind(handlePlaylistInit));
-  addValueAlias(init, "--screen-id", "--screen", "Use this screen’s identity, revision, and reported dimensions (a video wall’s canvas and format when it has one)");
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; preview/server validation checks availability, and data.release_ids and data.media_ids report what the document holds. An existing non-empty --output file fails with usage_error (exit 2) and is left untouched; choose a new path or pass --overwrite to rebuild it from these inputs, never publish the old file. Application pages hold for 24 hours (86400000 ms, the contract maximum) unless --duration-ms is given, because an app that rotates internally restarts each time its page advances; an application page set under 60 seconds earns an application_page_short warning here, in playlist validate and preview, and in screen publish. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. A screen with a video wall (screen wall set) uses the wall's canvas and the document carries the matching format {displays, arrangement, orientation, columns for a grid}: each tile is 1920x1080, or 1080x1920 for rotation 90 and 270, a row is that many tiles wide, a column that many tiles high and a grid its columns wide (data.format reports it). Explicit --target-width and --target-height instead make an ordinary playlist that every display mirrors. Inspect the document and preview before publishing. A pasted <iframe> embed code (from Google's Publish to web or Microsoft's Embed dialog) is read for its src and becomes an iframe page; Google Slides, Docs and Sheets and Microsoft 365 Embed links are rebuilt for the screen when the playlist is written, and a Slides deck advances on its link's delay held to --duration-ms (give the page the time of the whole deck).");
+  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; server validation checks availability, and data.release_ids and data.media_ids report what the document holds. An existing non-empty --output file fails with usage_error (exit 2) and is left untouched; choose a new path or pass --overwrite to rebuild it from these inputs, never publish the old file. Application pages hold for 24 hours (86400000 ms, the contract maximum) unless --duration-ms is given, because an app that rotates internally restarts each time its page advances; an application page set under 60 seconds earns an application_page_short warning here, in playlist validate and in screen publish. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. A screen with a video wall (screen wall set) uses the wall's canvas and the document carries the matching format {displays, arrangement, orientation, columns for a grid}: each tile is 1920x1080, or 1080x1920 for rotation 90 and 270, a row is that many tiles wide, a column that many tiles high and a grid its columns wide (data.format reports it). Explicit --target-width and --target-height instead make an ordinary playlist that every display mirrors. Inspect the document before publishing. A pasted <iframe> embed code (from Google's Publish to web or Microsoft's Embed dialog) is read for its src and becomes an iframe page; Google Slides, Docs and Sheets and Microsoft 365 Embed links are rebuilt for the screen when the playlist is written, and a Slides deck advances on its link's delay held to --duration-ms (give the page the time of the whole deck).");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen-id scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 
   playlist.command("validate").description("Validate a playlist file")
     .argument("<file>", "Playlist JSON file, or - for stdin")
-    .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistValidate));
-
-  addCommandNotes(playlist.command("preview").description("Render pages and cards locally; inspect the contact sheet before publishing")
-    .argument("<file|id>", "Playlist JSON file, playlist identifier, or - for stdin")
-    .requiredOption("--output <PATH>", "Write preview files to this directory (required)")
-    .option("--frame-ms <MS>", "Select the preview frame time", nonnegativeInteger("frame-ms"))
-    .option("--contact-sheet", "Include a contact sheet")
-    .option("--now <ISO>", "Freeze card clocks at this instant")
-    .option("--timezone <ZONE>", "Render cards in this IANA timezone, which also reads the files' availability windows in selector previews")
-    .option("--lint-only", "Run the command's local validation/lint mode")
-    .action(bind(handlePlaylistPreview)), LOOK_AT_THE_CONTACT_SHEET);
 
   const create = playlist.command("create").description("Create a playlist from a file, from a template, or the built-in Urgent notice template")
     .argument("[file]", "Playlist JSON file, or - for stdin")
@@ -137,7 +124,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--output <FILE>", "Create an editable playlist file; report its revision on stdout")
     .option("--editable", "Return an editable document and revision in the JSON envelope")
     .option("--overwrite", "Replace an existing output file atomically")
-    .alias("get")
     .argument("<id>", "Playlist identifier")
     .action(bind(handlePlaylistShow));
   addCommandExamples(show, 'screenrig playlist show pl_PLAYLIST --output playlist.json',

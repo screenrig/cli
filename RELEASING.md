@@ -27,7 +27,7 @@ the same SHA reuses the tag, and a failed job does not tag.
    and attaches the archive and its SHA-256 file to the release.
 3. The Linux, macOS and Windows clean-install jobs must pass: each installs the
    exact registry version on Node 22.23.4 and runs `screenrig --json version`
-   and `screenrig --json compose catalog`.
+   and `screenrig --json help playlist validate`.
 4. Confirm the npm page shows provenance before announcing.
 
 npm versions are immutable: never move a tag or replace a published version, and

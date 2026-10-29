@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleWebhooksCreate, handleWebhooksDeliveries, handleWebhooksDelete, handleWebhooksList,
-  handleWebhooksRotateSecret, handleWebhooksShow, handleWebhooksTest, handleWebhooksUpdate,
-} from "../commands.js";
+import { handleWebhooksCreate, handleWebhooksDeliveries, handleWebhooksDelete, handleWebhooksList, handleWebhooksRotateSecret, handleWebhooksShow, handleWebhooksTest, handleWebhooksUpdate } from "../handlers/webhooks.js";
 import { webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
 const eventTypesOption = (value: string): string => { webhookEventTypes(value); return value; };

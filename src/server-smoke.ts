@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     assert.ok(pairingCookie, "pairing start must issue a localhost HttpOnly cookie");
     const pairingSession = await pairingStartResponse.json() as { code?: string };
     assert.match(pairingSession.code ?? "", /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
-    const pairing = await run(["--api-url", apiUrl, "screen", "pair", pairingSession.code ?? "", "--label", "CLI pairing smoke"]);
+    const pairing = await run(["--api-url", apiUrl, "screen", "pair", pairingSession.code ?? "", "--name", "CLI pairing smoke"]);
     const pairedScreen = pairing.data?.screen as Record<string, unknown> | undefined;
     screenId = String(pairedScreen?.id ?? "");
     screenRevision = Number(pairedScreen?.revision);
@@ -206,25 +206,25 @@ async function main(): Promise<void> {
     mediaRevision = Number(mediaShow.data?.revision);
     assert.ok(Number.isInteger(mediaRevision));
     await run(["media", "list"]);
-    const kv = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"ok\"}"]);
+    const kv = await run(["kv", "set", "smoke", "--app-id", applicationId, "--json-value", "{\"status\":\"ok\"}"]);
     kvRevision = Number(kv.data?.revision);
     assert.ok(Number.isInteger(kvRevision));
-    const kvUpdated = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"updated\"}", "--expect-rev", String(kvRevision)]);
+    const kvUpdated = await run(["kv", "set", "smoke", "--app-id", applicationId, "--json-value", "{\"status\":\"updated\"}", "--expect-rev", String(kvRevision)]);
     kvRevision = Number(kvUpdated.data?.revision);
-    const staleUpdate = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"stale\"}", "--expect-rev", "1"], true);
+    const staleUpdate = await run(["kv", "set", "smoke", "--app-id", applicationId, "--json-value", "{\"status\":\"stale\"}", "--expect-rev", "1"], true);
     assert.equal(staleUpdate.ok, false);
     assert.equal(staleUpdate.error?.code, "revision_conflict");
-    await run(["kv", "get", "smoke", "--application-id", applicationId]);
-    const kvBinary = await run(["kv", "set", "smoke-binary", "--application-id", applicationId, "--file", mediaFile, "--content-type", "image/png"]);
+    await run(["kv", "get", "smoke", "--app-id", applicationId]);
+    const kvBinary = await run(["kv", "set", "smoke-binary", "--app-id", applicationId, "--file", mediaFile, "--content-type", "image/png"]);
     kvBinaryRevision = Number(kvBinary.data?.revision);
     assert.ok(Number.isInteger(kvBinaryRevision));
-    await run(["kv", "get", "smoke-binary", "--application-id", applicationId]);
-    await run(["kv", "list", "--application-id", applicationId]);
+    await run(["kv", "get", "smoke-binary", "--app-id", applicationId]);
+    await run(["kv", "list", "--app-id", applicationId]);
     const events = await run(["events", "list"]);
     const cursor = String(events.data?.next_cursor ?? "");
-    await run(["kv", "delete", "smoke", "--application-id", applicationId, "--expect-rev", String(kvRevision)]);
+    await run(["kv", "delete", "smoke", "--app-id", applicationId, "--expect-rev", String(kvRevision)]);
     kvRevision = undefined;
-    await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--expect-rev", String(kvBinaryRevision)]);
+    await run(["kv", "delete", "smoke-binary", "--app-id", applicationId, "--expect-rev", String(kvBinaryRevision)]);
     kvBinaryRevision = undefined;
     const followed = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const child = spawn(process.execPath, [path.join(packageRoot, "dist", "bin.js"), "--json", "events", "follow", "--after", cursor, "--timeout", "1500"], { cwd: packageRoot, env });
@@ -275,10 +275,10 @@ async function main(): Promise<void> {
     }) + "\n");
   } finally {
     if (applicationId && kvRevision) {
-      await run(["kv", "delete", "smoke", "--application-id", applicationId, "--expect-rev", String(kvRevision)], true).catch(() => undefined);
+      await run(["kv", "delete", "smoke", "--app-id", applicationId, "--expect-rev", String(kvRevision)], true).catch(() => undefined);
     }
     if (applicationId && kvBinaryRevision) {
-      await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--expect-rev", String(kvBinaryRevision)], true).catch(() => undefined);
+      await run(["kv", "delete", "smoke-binary", "--app-id", applicationId, "--expect-rev", String(kvBinaryRevision)], true).catch(() => undefined);
     }
     if (mediaId && Number.isInteger(mediaRevision)) {
       await run(["media", "delete", mediaId, "--expect-rev", String(mediaRevision)], true).catch(() => undefined);

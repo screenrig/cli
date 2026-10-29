@@ -90,10 +90,10 @@ test("invalid preview flags and wrong targets never write", async () => {
   await assert.rejects(() => replacePlaylistRelease(f.options), /application/);
 });
 
-test("CLI exposes explicit targets and revision aliases", () => {
+test("CLI exposes explicit targets and the revision guard", () => {
   const argv = ["playlist", "replace-release", "pl_BOARD", "--page", "page_1", "--primitive", "content", "--release-id", "rel_NEW"];
   assert.equal(parseArgv(argv).flags.page, "page_1");
-  assert.equal(parseArgv([...argv, "--apply", "--expect-rev", "4", "--expect-impact", "token"]).flags["if-match"], "4");
+  assert.equal(parseArgv([...argv, "--apply", "--expect-rev", "4", "--expect-impact", "token"]).flags["expect-rev"], "4");
   assert.throws(() => parseArgv(["playlist", "replace-release", "pl_BOARD"]));
 });
 

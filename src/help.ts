@@ -1,12 +1,9 @@
-import { optionAliases } from "./cli-commands/aliases.js";
 import type { Command, Option } from "commander";
-import { commandPath, createCommandTree, findCommand } from "./command-tree.js";
+import { commandPath } from "./command-tree.js";
 import { commandNotes, commandExamples, commandRelationships, type OptionRelationship } from "./cli-commands/notes.js";
-import { usageError } from "./problems.js";
 export { CREDIT_HELP } from "./help-text.js";
 
 export interface HelpOption {
-  aliases: string[];
   name: string;
   type: "boolean" | "value";
   description: string;
@@ -20,7 +17,6 @@ export interface HelpOption {
 
 export interface HelpDocument {
   path: string[];
-  aliases: string[][];
   kind: "group" | "command";
   usage: string;
   synopsis: string[];
@@ -34,7 +30,7 @@ export interface HelpDocument {
   notes: string[];
 }
 
-/** Canonical and alias paths of every visible descendant leaf, in tree order; hidden commands stay out of discovery. */
+/** Paths of every visible descendant leaf, in tree order; hidden commands stay out of discovery. */
 export function leafCommandPaths(command: Command): string[] {
   const paths: string[] = [];
   const children = (node: Command): Command[] => node.createHelp().visibleCommands(node);
@@ -46,7 +42,6 @@ export function leafCommandPaths(command: Command): string[] {
     const path = commandPath(node);
     if (!path.length) return;
     paths.push(path.join(" "));
-    for (const alias of node.aliases()) paths.push([...path.slice(0, -1), alias].join(" "));
   };
   children(command).forEach(visit);
   return paths;
@@ -67,7 +62,6 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   const examples = commandExamples(command);
   const visibleOptions = [...helper.visibleOptions(command), ...helper.visibleGlobalOptions(command)];
   const describeOption = (option: Option): HelpOption => ({
-    aliases: option.long === "--expect-rev" ? ["--if-match"] : optionAliases(option),
     name: option.long!, type: (option.negate || option.isBoolean()) ? "boolean" : "value", description: option.description, required: option.mandatory,
     valueRequired: option.required, variadic: option.variadic,
     ...(option.argChoices ? { choices: option.argChoices } : {}),
@@ -78,7 +72,6 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   });
   return {
     path,
-    aliases: command.aliases().map((alias) => [...path.slice(0, -1), alias]),
     kind: command.commands.length ? "group" : "command",
     usage: [command.helpInformation().trimEnd(), inventory, ...notes, ...(examples.length ? [`Examples:\n${examples.map((example) => `  ${example}`).join("\n")}`] : [])].filter((part): part is string => part !== undefined).join("\n\n"),
     synopsis: [helper.commandUsage(command)],
@@ -100,8 +93,3 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   };
 }
 
-export function commandHelp(path: readonly string[] = [], all = false): HelpDocument {
-  const command = findCommand(createCommandTree().root, path);
-  if (!command) throw usageError("Unknown help topic.");
-  return describeHelp(command, all);
-}

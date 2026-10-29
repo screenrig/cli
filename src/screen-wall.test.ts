@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { editablePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { run, processRuntime } from "./main.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";

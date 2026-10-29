@@ -85,10 +85,10 @@ test("human rendering includes next-action guidance", () => {
     code: "revision_conflict",
     request_id: "req_01",
     errors: [],
-    next: { command: "screenrig playlist get pl_01 --json", reason: "Retry with revision 8." },
+    next: { command: "screenrig playlist show pl_01 --json", reason: "Retry with revision 8." },
   });
   assert.match(text, /revision_conflict\/412/);
-  assert.match(text, /next: screenrig playlist get pl_01 --json/);
+  assert.match(text, /next: screenrig playlist show pl_01 --json/);
 });
 
 const PAYMENT_BASE = {
