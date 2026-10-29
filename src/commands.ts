@@ -222,6 +222,7 @@ import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
+import { screenLinkSummaryLines } from "./screen-link-format.js";
 import { applicationNameHeaders, normalizeApplicationName } from "./application-name.js";
 import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.js";
 import { loadCanvas } from "./canvas.js";
@@ -6072,6 +6073,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
       ...screenFactsLines(screen),
       ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
+      ...screenLinkSummaryLines(screen?.link),
       ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
       ...(screen?.playlist_schedule?.entries?.length

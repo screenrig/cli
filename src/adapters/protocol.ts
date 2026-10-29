@@ -799,6 +799,8 @@ export interface ScreenManifestUpgrade {
 export interface Screen {
   content_access_generation: number;
   created_at: string;
+  /** The screen's link, when it has one. Never carries the url. */
+  link?: ScreenLinkSummary;
   /** Player-reported host hint. Absent until a native player sends one. */
   host?: HostContext;
   /** Instant the stored host hint was last replaced. Project cannot write it. */
@@ -1713,6 +1715,22 @@ export interface FleetLink {
   url_redacted?: boolean;
   /** Fields each screen the link creates starts with; absent when none. */
   fields?: Record<string, string>;
+}
+
+/** The screen's link without its url (Screen.link). */
+export interface ScreenLinkSummary {
+  hint: string;
+  created_at: string;
+  last_used_at?: string;
+}
+
+/** A Player URL that opens one screen in a browser that keeps no storage. */
+export interface ScreenLink extends ScreenLinkSummary {
+  url?: string;
+  /** Present and true when url was withheld from a Read only credential. */
+  url_redacted?: boolean;
+  /** Only on the answer to create: true when the new link replaced an earlier one. */
+  replaced?: boolean;
 }
 
 export interface FleetLinkList {

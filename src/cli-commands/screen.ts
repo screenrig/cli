@@ -10,6 +10,7 @@ import { liveFrameIntervalOption } from "../screen-live-frame.js";
 import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
+import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } from "../screen-link.js";
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
 import { handleScreenCompositionRemoved } from "../playlist-revisions.js";
 import { type Command, Option } from "commander";
@@ -152,6 +153,20 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenRotatePublicId));
+
+  const link = screen.command("link").description("Give a screen a Player URL for a browser that keeps no storage, such as a vMix or OBS browser source");
+  addCommandNotes(link, "Screen links:\n  A screen link is the Player URL (https://play.<domain>/player/#screen=...) that\n  opens one screen in a browser that keeps no storage. Pair the screen once with\n  its code, create the link, paste it into the browser source. The URL is a\n  credential: open it in one place, and replace it when it leaks.");
+  link.command("create").description("Create the screen's link, or replace it, and print its Player URL (the old URL stops working at once)")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision", revision)
+    .action(bind(handleScreenLinkCreate));
+  link.command("show").description("Print the screen's link and its Player URL")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenLinkShow));
+  link.command("delete").description("Turn the screen's link off; its URL stops working at once")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision", revision)
+    .action(bind(handleScreenLinkDelete));
 
   const recover = screen.command("recover").description("Reconnect a display that reports this screen's identifiers")
     .argument("<id>", "Screen identifier")

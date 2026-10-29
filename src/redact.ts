@@ -5,6 +5,8 @@ const BEARER_RE = /Bearer\s+\S+/gi;
 const WEBHOOK_SECRET_RE = /\bwhsec_[A-Za-z0-9_-]{8,}/g;
 /** Fleet link secrets (srfl_ + 43 URL-safe characters), carried in a Player URL's #fleet= fragment. */
 const FLEET_LINK_SECRET_RE = /\bsrfl_[A-Za-z0-9_-]{8,}/g;
+/** Screen link secrets (srsl_ + 43 URL-safe characters), carried in a Player URL's #screen= fragment. */
+const SCREEN_LINK_SECRET_RE = /\bsrsl_[A-Za-z0-9_-]{8,}/g;
 /** CAP trigger passwords (srtg_ + 43 URL-safe characters). */
 const TRIGGER_PASSWORD_RE = /\bsrtg_[A-Za-z0-9_-]{8,}/g;
 /** Incoming K/V webhook secrets (srkw_ + 43 URL-safe characters). */
@@ -25,12 +27,12 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}
  * credential, so a link that reaches an error detail, an event, or a message
  * must lose its fragment rather than be echoed back.
  */
-const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision|fleet)=[A-Za-z0-9_-]{8,}/gi;
+const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision|fleet|screen)=[A-Za-z0-9_-]{8,}/gi;
 
 const SENSITIVE_KEY_RE =
   /(authorization|access_token|token|password|secret|private[_-]?(?:key|jwk)|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|agentid_claim|claim_code|idempotency|beta_key|device_code|assertion)/i;
 const SENSITIVE_VALUE_RE =
-  /(sr_live_|sac_|whsec_|srfl_|srtg_|srkw_|agid_|(?:cli|xchg)_[A-Za-z0-9_-]{43}|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision|fleet)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=|\beyJ[A-Za-z0-9_-]{8,}\.eyJ)/i;
+  /(sr_live_|sac_|whsec_|srfl_|srsl_|srtg_|srkw_|agid_|(?:cli|xchg)_[A-Za-z0-9_-]{43}|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision|fleet|screen)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=|\beyJ[A-Za-z0-9_-]{8,}\.eyJ)/i;
 
 /**
  * Lookup segment of a credential, for internal correlation only. A redacted
@@ -65,6 +67,7 @@ export function redactText(value: string): string {
     .replace(WEBHOOK_SECRET_RE, "whsec_***")
     .replace(URL_FRAGMENT_TOKEN_RE, (_match, name: string) => `#${name.toLowerCase()}=***`)
     .replace(FLEET_LINK_SECRET_RE, "srfl_***")
+    .replace(SCREEN_LINK_SECRET_RE, "srsl_***")
     .replace(TRIGGER_PASSWORD_RE, "srtg_***")
     .replace(KV_WEBHOOK_SECRET_RE, "srkw_***")
     .replace(URL_SIGNATURE_RE, "$1***")
