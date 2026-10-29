@@ -1,13 +1,45 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
-import path from "node:path";
+import { rm } from "node:fs/promises";
 import { test, type TestContext } from "node:test";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { inflateSync } from "node:zlib";
 import { withCardPreview, type CardPreviewInput } from "./card-preview.js";
-import { previewPlaylist } from "./playlist-preview.js";
 import { processRuntime, type CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
+
+/** RGBA pixels of an 8-bit, non-interlaced RGB or RGBA PNG: inflate the IDAT stream and undo each scanline's filter. */
+function decodePng(png: Buffer): { width: number; height: number; data: Uint8Array } {
+  assert.ok(png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "not a PNG");
+  let width = 0, height = 0, channels = 0;
+  const chunks: Buffer[] = [];
+  for (let offset = 8; offset < png.length;) {
+    const length = png.readUInt32BE(offset), type = png.toString("latin1", offset + 4, offset + 8), body = png.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      assert.equal(body[8], 8, "bit depth");
+      assert.ok(body[9] === 2 || body[9] === 6, `color type ${body[9]}`);
+      assert.equal(body[12], 0, "interlaced");
+      channels = body[9] === 6 ? 4 : 3;
+    } else if (type === "IDAT") chunks.push(body);
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(chunks)), stride = width * channels, out = new Uint8Array(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]!, line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const left = x >= channels ? out[y * stride + x - channels]! : 0, up = y > 0 ? out[(y - 1) * stride + x]! : 0, upLeft = y > 0 && x >= channels ? out[(y - 1) * stride + x - channels]! : 0;
+      const guess = left + up - upLeft, pl = Math.abs(guess - left), pu = Math.abs(guess - up), pul = Math.abs(guess - upLeft);
+      const predictor = [0, left, up, (left + up) >> 1, pl <= pu && pl <= pul ? left : pu <= pul ? up : upLeft][filter];
+      assert.notEqual(predictor, undefined, `PNG filter ${filter}`);
+      out[y * stride + x] = (line[x]! + predictor!) & 255;
+    }
+  }
+  if (channels === 4) return { width, height, data: out };
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) rgba.set([out[i * 3]!, out[i * 3 + 1]!, out[i * 3 + 2]!, 255], i * 4);
+  return { width, height, data: rgba };
+}
 
 /** Serves a stub public card renderer (`script`) in place of the site's and returns a runtime that drives the test browser. */
 function stubPublicRenderer(t: TestContext, directory: string, script: string): CliRuntime {
@@ -73,11 +105,10 @@ test("standalone card pixels occupy the reported layout rectangle, as in a playl
     for (const { input, expected } of cases) {
       const standalone = await renderer.render({ card: "test", width: 1920, height: 1080, ...input });
       assert.deepEqual(standalone.result.geometry, expected);
-      const image = await loadImage(standalone.png);
-      const canvas = createCanvas(1920, 1080);
-      const context = canvas.getContext("2d");
-      context.drawImage(image, 0, 0);
-      const pixels = context.getImageData(0, 0, 1920, 1080).data;
+      const decoded = decodePng(standalone.png);
+      assert.equal(decoded.width, 1920);
+      assert.equal(decoded.height, 1080);
+      const pixels = decoded.data;
       let painted = 0;
       for (let y = 0; y < 1080; y++) for (let x = 0; x < 1920; x++) {
         const alpha = pixels[(y * 1920 + x) * 4 + 3];
@@ -92,50 +123,4 @@ test("standalone card pixels occupy the reported layout rectangle, as in a playl
       }
     }
   });
-});
-
-test("a playlist preview paints a header and footer at the strip layer and moves a chip in past the footer", {
-  skip: process.platform === "win32" || !process.env.SCREENRIG_TEST_BROWSER,
-}, async t => {
-  const directory = await testTemp("card-preview-bars-");
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  // Each stub card paints its layout's colour inside its box: header blue, footer green, chip red.
-  const boxes = {
-    header: { x: 0, y: 0, w: 1920, h: 80, rotation: 0 },
-    footer: { x: 0, y: 1000, w: 1920, h: 80, rotation: 0 },
-    chip: { x: 1650, y: 980, w: 240, h: 70, rotation: 0 },
-    strip: { x: 0, y: 960, w: 1920, h: 120, rotation: 0 },
-  };
-  const script = `window.ScreenRigCards={
-    configure(){}, versions(){return {cards:{test:'1.0.0'}}}, manifest(){return {}},
-    place(layout){return (${JSON.stringify(boxes)})[layout] || (${JSON.stringify(boxes.chip)})},
-    mount(element,options){element.style.background=({header:'#0000ff',footer:'#00ff00',chip:'#cc3300'})[options.params.layout];options.onReady();return {}}
-  };`;
-  const runtime = stubPublicRenderer(t, directory, script);
-  const card = (id: string, layout: string, anchor?: string) => ({ id, primitive: "card", card: "test", major: 1, params: {}, layout, ...(anchor ? { anchor } : {}), content_fit: "fill" });
-  const page = (primitives: object[]) => ({ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives });
-  const pixel = async (file: string, x: number, y: number): Promise<number[]> => {
-    const image = await loadImage(await readFile(file));
-    const canvas = createCanvas(image.width, image.height);
-    const context = canvas.getContext("2d");
-    context.drawImage(image, 0, 0);
-    return Array.from(context.getImageData(x, y, 1, 1).data);
-  };
-  const RED = [0xcc, 0x33, 0x00, 255], BLUE = [0, 0, 0xff, 255], GREEN = [0, 0xff, 0, 255];
-  const render = async (name: string, primitives: object[]) => {
-    const result = await previewPlaylist({ playlist: { name, pages: [page(primitives)] }, outputDirectory: path.join(directory, name), runtime, apiUrl: "https://api.example.test" });
-    assert.deepEqual(result.placeholders, []);
-    return result.pages[0]!.files.rest;
-  };
-  // Without a footer the chip sits at its own box; with one it moves in 80 and the footer shows where it was.
-  const free = await render("free", [card("chip", "chip", "bottom-right")]);
-  assert.deepEqual(await pixel(free, 1700, 1020), RED);
-  const bars = await render("bars", [card("header", "header"), card("footer", "footer"), card("chip", "chip", "bottom-right")]);
-  assert.deepEqual(await pixel(bars, 960, 40), BLUE);
-  assert.deepEqual(await pixel(bars, 960, 1040), GREEN);
-  assert.deepEqual(await pixel(bars, 1700, 1020), GREEN, "the footer paints under the chip's old place");
-  assert.deepEqual(await pixel(bars, 1700, 935), RED, "the chip moved in 80 past the footer");
-  // A header leaves a bottom chip where it is.
-  const header = await render("header", [card("header", "header"), card("chip", "chip", "bottom-right")]);
-  assert.deepEqual(await pixel(header, 1700, 1020), RED);
 });

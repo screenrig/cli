@@ -60,21 +60,3 @@ export async function loadRuntimeDependencyLock(root) {
     packages,
   };
 }
-
-/**
- * The renderer's per-platform native packages stay out of the release
- * artifact. The lock keeps their registry URL and integrity, and the CLI
- * fetches the one this machine needs on its first render.
- */
-export function isRendererPlatformPackage(dependency) {
-  return dependency.name.startsWith("@napi-rs/canvas-");
-}
-
-export function verifyIntegrity(bytes, integrity, label) {
-  const actual = createHash("sha512").update(bytes).digest("base64");
-  const accepted = integrity
-    .split(/\s+/)
-    .filter((value) => value.startsWith("sha512-"))
-    .map((value) => value.slice("sha512-".length));
-  if (!accepted.includes(actual)) throw new Error(`${label}: downloaded bytes differ from package-lock.json integrity`);
-}

@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleTriggersClear, handleTriggersCreate, handleTriggersDelete, handleTriggersDeliveries, handleTriggersList, handleTriggersRotateSecret, handleTriggersShow,
-  handleTriggersTest, handleTriggersUpdate,
-} from "../commands.js";
+import { handleTriggersClear, handleTriggersCreate, handleTriggersDelete, handleTriggersDeliveries, handleTriggersList, handleTriggersRotateSecret, handleTriggersShow, handleTriggersTest, handleTriggersUpdate } from "../handlers/triggers.js";
 import { triggerDeliveriesLimit, triggerHoldOption, triggerName, triggerScreenIds, triggerTag } from "../triggers.js";
 
 const nameOption = (value: string): string => { triggerName(value); return value; };

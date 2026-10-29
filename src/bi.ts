@@ -563,7 +563,7 @@ export function addressOriginChanged(current: string | undefined, next: string):
 }
 
 function revisionHeader(args: Args): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 

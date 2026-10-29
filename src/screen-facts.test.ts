@@ -9,7 +9,7 @@ import { cardDataKeyTemplate, screenLocationStandIn, validatePlaylistCards, type
 import { ApiClient } from "./client.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { screenFactsPatch } from "./screen-facts.js";
 import { testTemp } from "./test-temp.js";
@@ -520,10 +520,6 @@ test("a card data key may carry {screen.field.NAME}, checked with each token as 
   }
   // The bound card still takes only static params, whatever its key.
   await assert.rejects(() => validate("menu", { title: "Lunch", sections: [{ title: "x" }] }, "menu-{screen.field.store_number}"), /sections is dynamic/);
-  // card-data get, put and delete name concrete keys.
-  assert.throws(() => parseArgv(["card-data", "get", "menu-{screen.field.store_number}"]), /Card data key must follow the K\/V key grammar and may not start with feed:\.$/);
-  assert.throws(() => parseArgv(["card-data", "put", "menu-{screen.field.store_number}", "--file", "-"]), /K\/V key grammar/);
-  assert.throws(() => parseArgv(["card-data", "delete", "menu-{screen.field.store_number}", "--expect-rev", "1"]), /K\/V key grammar/);
 });
 
 test("a playlist write reads the tokens through the same checks", async () => {

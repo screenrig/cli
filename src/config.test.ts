@@ -152,12 +152,12 @@ test("log_socket is resolved from the user config and rejected when it is a dire
   await rm(home, { recursive: true, force: true });
 });
 
-test("token paste branches are rejected instead of overriding durable credentials", async () => {
+test("a pasted SCREENRIG_TOKEN is rejected instead of overriding durable credentials", async () => {
   const home = await testTemp("config-token-branch-");
   const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_TOKEN: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_pasted_secret" });
   await assert.rejects(
     resolveConfig({ flags: {}, fs: fsLike }),
-    /Token flags and SCREENRIG_TOKEN are not supported/,
+    /SCREENRIG_TOKEN is not supported/,
   );
   await rm(home, { recursive: true, force: true });
 });

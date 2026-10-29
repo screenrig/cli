@@ -1,4 +1,5 @@
-import { commandHelp, CREDIT_HELP } from "./help.js";
+import { CREDIT_HELP } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
@@ -7,7 +8,8 @@ import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine, selectorPreviewLines } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS } from "./commands.js";
+import { formatEventLine } from "./handlers/events.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";
@@ -48,13 +50,6 @@ async function withRuntime(
   transport: FakeTransport,
   extra?: Partial<CliRuntime>,
 ): Promise<{ code: number; stdout: string; stderr: string; configDir: string }> {
-  if (argv.includes("connect")) {
-    transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: {
-      id: "prj_CONNECTEDAAAAAAAAAAAAAAA", name: "Screens",
-      organization_id: "org_CONNECTEDAAAAAAAAAAAAAAA", organization_name: "Connected organization",
-      revision: 1, status: "active", screen_count: 0, used_bytes: 0, reserved_bytes: 0,
-    } }));
-  }
   const configDir = extra?.fs ? "" : await testTemp("cfg-");
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -137,7 +132,7 @@ test("--request-id goes on the first HTTP request of the invocation and every re
   assert.ok(sent.length > 1, JSON.stringify(sent));
   assert.equal(sent[0], requested);
   assert.equal(new Set(sent).size, sent.length);
-  const tooLong = await withRuntime(["--json", "--request-id", `req_${"a".repeat(65)}`, "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const tooLong = await withRuntime(["--json", "--request-id", `req_${"a".repeat(65)}`, "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal((JSON.parse(tooLong.stdout) as { error: { code: string } }).error.code, "usage_error");
 });
 
@@ -145,7 +140,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   const transport = memoryBackend();
   const configDir = await testTemp("explicit-enrollment-pair-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(missing.code, ExitCode.Auth);
   const blocked = JSON.parse(missing.stdout) as { error: { code: string; next: { command: string } } };
   assert.equal(blocked.error.code, "not_enrolled");
@@ -158,7 +153,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
     { fs: fsLike },
   );
   assert.equal(enrolled.code, 0, enrolled.stdout);
-  const paired = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const paired = await withRuntime(["--json", "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(paired.code, 0, paired.stdout);
   const envelope = JSON.parse(paired.stdout) as {
     ok: boolean;
@@ -1108,7 +1103,7 @@ test("agent disconnect shares the last-agent guard and explicit allow-lockout ov
 
 test("screen pair normalizes safe lowercase input and reports canonical uppercase", async () => {
   const transport = memoryBackend();
-  const result = await withAuthenticatedRuntime(["--human", "screen", "pair", "abc234", "--label", "Lobby"], transport);
+  const result = await withAuthenticatedRuntime(["--human", "screen", "pair", "abc234", "--name", "Lobby"], transport);
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /Screen paired/);
   assert.match(result.stdout, /code: ABC234/);
@@ -1216,7 +1211,7 @@ test("screen provision --open launches by argv and returns only safe fields", as
   const transport = memoryBackend();
   const opened: string[] = [];
   const result = await withAuthenticatedRuntime(
-    ["--json", "screen", "provision", "--open", "--label", "Demo"],
+    ["--json", "screen", "provision", "--open", "--name", "Demo"],
     transport,
     { openUrl: async (url) => { opened.push(url); return true; } },
   );
@@ -1255,7 +1250,7 @@ test("failed browser launch retains only the exact retry key and label", async (
   const transport = memoryBackend();
   const configDir = await testTemp("provision-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const argv = ["--json", "screen", "provision", "--open", "--label", "Retry demo"];
+  const argv = ["--json", "screen", "provision", "--open", "--name", "Retry demo"];
   const first = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   const second = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   assert.equal(first.code, 0);
@@ -1457,19 +1452,6 @@ test("removed identity commands and dashboard credential switches fail before ne
     const result = await withRuntime(["--json", ...args], transport);
     assert.equal(result.code, ExitCode.Usage);
     assert.equal(transport.calls.length, 0);
-    await rm(result.configDir, { recursive: true, force: true });
-  }
-  for (const [args, replacement] of [
-    [["account", "show"], "project show"],
-    [["account", "capabilities"], "project capabilities"],
-    [["account", "invite", "--email", "guest@example.com"], "invitations create"],
-    [["account", "recover", "--email", "owner@example.com"], "dashboard reset-sign-in"],
-    [["account", "constructor"], "project"],
-  ] as const) {
-    const result = await withRuntime(["--json", ...args], new FakeTransport());
-    const error = JSON.parse(result.stdout).error;
-    assert.equal(error.detail, `account commands are retired. Use screenrig ${replacement}.`);
-    assert.equal(error.next.command, `screenrig ${replacement} --help`);
     await rm(result.configDir, { recursive: true, force: true });
   }
 });
@@ -1686,7 +1668,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
       request_id: "req_AAAAAAAAAAAAAAAAAAAAAAAA",
       current_revision: 8,
       next: {
-        command: "screenrig playlist get pl_01 --json",
+        command: "screenrig playlist show pl_01 --json",
         reason: "Fetch revision 8, reapply the intended edit, and retry.",
       },
     },
@@ -1703,7 +1685,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
   assert.equal(code, ExitCode.Precondition);
   const envelope = JSON.parse(stdout) as { ok: false; error: { code: string; next: { command: string } } };
   assert.equal(envelope.error.code, "revision_conflict");
-  assert.equal(envelope.error.next.command, "screenrig playlist get pl_01 --json");
+  assert.equal(envelope.error.next.command, "screenrig playlist show pl_01 --json");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2090,7 +2072,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
     fsLike,
   );
   const { code, stdout } = await withRuntime(
-    ["--json", "events", "follow", "--cursor", "ev1_0", "--timeout", "50"],
+    ["--json", "events", "follow", "--after", "ev1_0", "--timeout", "50"],
     transport,
     { fs: fsLike },
   );
@@ -2897,7 +2879,7 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
   assert.equal(uploadEnvelope.data.id, "app_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(uploadEnvelope.data.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
 
-  result = await withRuntime(["--json", "screen", "pair", "ABC234", "--label", "Lobby"], transport, { fs: fsLike });
+  result = await withRuntime(["--json", "screen", "pair", "ABC234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   const pairingCall = transport.calls.at(-1);
   assert.equal(pairingCall?.path, "/api/screens/pair");
@@ -4320,7 +4302,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   await writeFile(file, Buffer.from([0, 255, 1]));
   try {
     let result = await withRuntime(
-      ["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"z":1,"a":{"z":2,"a":3}}'],
+      ["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"z":1,"a":{"z":2,"a":3}}'],
       transport,
       { fs: fsLike },
     );
@@ -4337,7 +4319,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
     assert.match(envelope.data.sha256, /^[a-f0-9]{64}$/);
 
     result = await withRuntime(
-      ["--json", "kv", "set", "binary", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--file", file, "--content-type", "application/x.custom; Version=1"],
+      ["--json", "kv", "set", "binary", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--file", file, "--content-type", "application/x.custom; Version=1"],
       transport,
       { fs: fsLike },
     );
@@ -4346,20 +4328,20 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
     assert.deepEqual(call?.body, { value_base64: "AP8B", content_type: "application/x.custom; Version=1" });
 
     result = await withRuntime(
-      ["--json", "kv", "set", "encoded", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value-base64", "AP8B", "--content-type", "application/octet-stream"],
+      ["--json", "kv", "set", "encoded", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value-base64", "AP8B", "--content-type", "application/octet-stream"],
       transport,
       { fs: fsLike },
     );
     assert.equal(result.code, 0, result.stdout);
     assert.deepEqual(transport.calls.at(-1)?.body, { value_base64: "AP8B", content_type: "application/octet-stream" });
 
-    result = await withRuntime(["--json", "kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    result = await withRuntime(["--json", "kv", "list", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     envelope = JSON.parse(result.stdout) as typeof envelope;
     const listData = (envelope as unknown as { data: { items: Array<Record<string, unknown>> } }).data.items;
     assert.equal(Object.hasOwn(listData[0] ?? {}, "value_base64"), false);
 
     result = await withRuntime(
-      ["--json", "kv", "set", "bad", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value", "stale"],
+      ["--json", "kv", "set", "bad", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value", "stale"],
       transport,
       { fs: fsLike },
     );
@@ -4759,12 +4741,12 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     assert.equal(transport.calls.at(-1)?.path, `/api/screens/${paired.id}/toast`);
     assert.ok(transport.calls.at(-1)?.headers?.["idempotency-key"]);
 
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--expect-rev", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["if-match"], '"1"');
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--expect-rev", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, ExitCode.Precondition);
     assert.equal((JSON.parse(result.stdout) as { error: { current_revision: number } }).error.current_revision, 2);
   } finally {
@@ -4873,17 +4855,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     );
     assert.equal(revoked.code, ExitCode.Usage, revoked.stdout);
     assert.equal(transport.calls.length, callsBeforeRevoke);
-    assert.equal(transport.calls.length, callsBeforeDelete + 3, "delete, show and its notes read reach the server; revoke-credential does not");
-    const revokeEnvelope = JSON.parse(revoked.stdout) as {
-      error: { code: string; detail: string; next?: { command: string; reason: string } };
-    };
-    assert.equal(revokeEnvelope.error.code, "usage_error");
-    assert.match(revokeEnvelope.error.detail, /retired/);
-    assert.match(revokeEnvelope.error.next?.command ?? "", /screen archive/);
-    assert.equal(
-      transport.calls.some((call) => String(call.path).includes("/credential/revoke")),
-      false,
-    );
+    assert.equal(transport.calls.length, callsBeforeDelete + 3, "delete, show and its notes read reach the server; an unknown command does not");
 
     const badState = await withRuntime(["--json", "screen", "list", "--state", "active"], transport, { fs: fsLike });
     assert.equal(badState.code, ExitCode.Usage, badState.stdout);
@@ -6137,6 +6109,11 @@ test("screen reload validates its id and revision before calling the server and 
     assert.match((JSON.parse(badId.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
 
     body = { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" };
+    const stateless = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.notEqual(stateless.code, ExitCode.Success, stateless.stdout);
+    assert.match((JSON.parse(stateless.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
+
+    body = { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z", state: "sent" };
     const ok = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
     assert.equal(ok.code, ExitCode.Success, ok.stdout);
   } finally {
@@ -6144,31 +6121,18 @@ test("screen reload validates its id and revision before calling the server and 
   }
 });
 
-test("screen reload explains a server that predates the route and encodes the id", async () => {
+test("screen reload encodes the id and keeps the server's problems", async () => {
   const transport = new FakeTransport();
-  let answer: TransportResponse = { status: 404, headers: { "content-type": "text/plain; charset=utf-8" }, body: "404 page not found\n" };
+  let answer: TransportResponse = { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Resource was not found." } };
   transport.on("POST", /^\/api\/screens\/[^/]+\/reload$/, () => answer);
-  const { configDir, fsLike } = await hostConfigFs("screen-reload-old-server-");
+  const { configDir, fsLike } = await hostConfigFs("screen-reload-ids-");
   try {
-    const old = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
-    assert.notEqual(old.code, ExitCode.Success, old.stdout);
-    const oldError = (JSON.parse(old.stdout) as { error: { status: number; detail: string; next?: { command?: string } } }).error;
-    assert.equal(oldError.status, 404);
-    assert.match(oldError.detail, /does not offer screen reload/);
-    assert.equal(oldError.next?.command, "screenrig screen show scr_TEST");
-
-    answer = { status: 405, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Method Not Allowed\n" };
-    const notAllowed = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
-    assert.match((JSON.parse(notAllowed.stdout) as { error: { detail: string } }).error.detail, /does not offer screen reload/);
-
-    // A real missing screen keeps the server's not_found problem.
-    answer = { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Resource was not found." } };
     const missing = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
     const missingError = (JSON.parse(missing.stdout) as { error: { code: string; detail: string } }).error;
     assert.equal(missingError.code, "not_found");
     assert.equal(missingError.detail, "Resource was not found.");
 
-    answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" } };
+    answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z", state: "sent" } };
     const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../project"], transport, { fs: fsLike });
     assert.equal(traversal.code, ExitCode.Success, traversal.stdout);
     assert.equal(transport.calls.at(-1)?.path, "/api/screens/scr_TEST%2F..%2F..%2Fproject/reload");
@@ -6492,7 +6456,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create refuses a text primitive and points at compose", async () => {
+test("playlist create refuses a text primitive and points at media generate and cards", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-text-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -6513,8 +6477,8 @@ test("playlist create refuses a text primitive and points at compose", async () 
   assert.equal(result.code, ExitCode.Usage, result.stdout);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /Compose copy and chrome locally/);
-  assert.equal(envelope.error.next?.command, "screenrig compose catalog");
+  assert.match(envelope.error.detail, /Generate a finished still with media generate, or use a built-in card for live text/);
+  assert.equal(envelope.error.next?.command, "screenrig media generate --help");
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -6644,13 +6608,13 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(badPrimitive.code, ExitCode.Usage, badPrimitive.stdout);
     assert.match(JSON.parse(badPrimitive.stdout).error.detail, /--primitive must be image, video, or audio/);
 
-    const retiredKind = await withRuntime(
+    const unknownKind = await withRuntime(
       ["--json", "media", "list", "--kind", "image"],
       transport,
       { fs: fsLike },
     );
-    assert.equal(retiredKind.code, ExitCode.Usage, retiredKind.stdout);
-    assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video\|audio, not --kind/);
+    assert.equal(unknownKind.code, ExitCode.Usage, unknownKind.stdout);
+    assert.match(JSON.parse(unknownKind.stdout).error.detail, /media list does not accept --kind/);
     const tagSet = await withRuntime(["media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tags", "Summer,Drinks"], transport, { fs: fsLike });
     assert.equal(tagSet.code, ExitCode.Success, tagSet.stdout);
     assert.deepEqual(transport.calls.filter(c => c.method === "PATCH" && c.path.startsWith("/api/media/")).at(-1)?.body, { tags: ["Summer", "Drinks"] });
@@ -6676,10 +6640,6 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(sharesData.cycle, 10);
     assert.equal(sharesData.candidates[0].share_percent, 60);
     assert.equal(sharesData.excluded[0].reason, "aspect_mismatch");
-    assert.deepEqual(selectorPreviewLines([{ page_id: "p", primitive_id: "i", matched_count: 2, cycle: 10,
-      items: [{ media_id: "med_a", filename: "a.png", weight: 6, share_percent: 60 }],
-      excluded: [{ media_id: "med_c", filename: "c.png", reason: "aspect_mismatch" }] }]),
-    ["selector p/i: 2 file(s), one cycle is 10 plays", "  60%\ta.png\tmed_a", "  left out (aspect_mismatch)\tc.png\tmed_c"]);
     const badRect = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "image", "--rect", "wide"], transport, { fs: fsLike });
     assert.equal(badRect.code, ExitCode.Usage, badRect.stdout);
   } finally {
@@ -6760,7 +6720,7 @@ for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pai
     const enrolled = await withRuntime(["agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(enrolled.code, 0, enrolled.stdout);
     assert.equal(JSON.parse(enrolled.stdout).data.agent.id, prefix + TEST_AGENT.id);
-    const paired = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+    const paired = await withRuntime(["screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
     assert.equal(paired.code, 0, paired.stdout);
     assert.ok(JSON.parse(paired.stdout).data.screen.id.startsWith(prefix + "scr_"));
     assert.doesNotMatch(enrolled.stdout + paired.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);

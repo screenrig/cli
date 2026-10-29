@@ -1,6 +1,6 @@
 import { type Command, Option } from "commander";
 import type { CommandActionBinder } from "./types.js";
-import { handleInvitationsCreate, handleInvitationsList, handleInvitationsRevoke } from "../commands.js";
+import { handleInvitationsCreate, handleInvitationsList, handleInvitationsRevoke } from "../handlers/invitations.js";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { INVITATION_HELP } from "../help-text.js";
 

@@ -1,11 +1,10 @@
-import { handlerOptionName } from "./cli-commands/aliases.js";
 import { FEED_REPEATABLE_FLAGS } from "./cards.js";
 import { Command, Option } from "commander";
 import type { ParsedArgs } from "./command-input.js";
 import type { CommandHandler } from "./commands.js";
 import { commandError } from "./cli-errors.js";
-import { commandPath, findCommand, invocationFlags } from "./command-path.js";
-import { registerCommands } from "./cli-commands/index.js";
+import { commandPath, findCommand, flagName, invocationFlags } from "./command-path.js";
+import { registerCommands, type CommandRegistrar } from "./cli-commands/index.js";
 import { usageError } from "./problems.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -42,8 +41,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     });
   }
   command.on(`option:${option.name()}`, () => {
-    const repeatable = (name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
-      || (command.name() === "create" && command.parent?.name() === "service-client")))
+    const repeatable = (name === "capability" && command.name() === "create" && command.parent?.name() === "service-client")
       || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
       || (["any-tag", "all-tags", "severity", "active-hours"].includes(name) && command.parent?.name() === "notifications" && ["create", "update"].includes(command.name()))
       || (name === "window" && command.parent?.name() === "reboot-schedule" && command.name() === "set")
@@ -53,18 +51,20 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (name === "screen-id" && command.parent?.name() === "triggers" && ["create", "update"].includes(command.name()))
       || (["set", "secret", "unset-secret"].includes(name) && command.parent?.name() === "source" && ["create", "update", "test"].includes(command.name()))
       || (["screen-id", "tag"].includes(name) && command.parent?.name() === "alerts" && command.name() === "mute")
+      || (name === "filter" && command.parent?.name() === "subscriptions" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
       || (["tag", "any-tag", "screen-id", "window", "monthly", "date", "except"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
-    if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
-    seen.add(handlerOptionName(option));
+    if (seen.has(flagName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
+    seen.add(flagName(option));
   });
 }
 
 /** Fresh native commands per invocation; actions return their asynchronous work. */
 export function createCommandTree(
-  argv: readonly string[] = [],
-  execute?: (handler: CommandHandler, args: ParsedArgs) => Promise<void>,
+  argv: readonly string[],
+  execute: ((handler: CommandHandler, args: ParsedArgs) => Promise<void>) | undefined,
+  registrars: readonly CommandRegistrar[],
 ): CommandTree {
   const end = argv.indexOf("--");
   const tokens = end < 0 ? argv : argv.slice(0, end);
@@ -86,7 +86,7 @@ export function createCommandTree(
   registerCommands(root, (handler) => (...values: unknown[]) => {
     selected = values[values.length - 1] as Command;
     return execute?.(handler, commandInput(selected));
-  });
+  }, registrars);
   root.command("help [command...]")
     .description("Discover commands; --all lists every command")
     .option("--all", "Include all descendant command paths")
@@ -111,7 +111,6 @@ export function createCommandTree(
         throw error;
       });
     for (const option of command.options) {
-      if (option.long === "--expect-rev") option.description += " (--if-match alias)";
       // Commander handles the built-in version option before emitting option events.
       if (option.long !== "--version") protectOption(command, option, tokens, seen);
     }

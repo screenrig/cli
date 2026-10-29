@@ -215,7 +215,7 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
   const root = flagBool(args.flags, "root");
   const playlist = flagString(args.flags, "default-playlist-id");
   const clearDefault = flagBool(args.flags, "clear-default");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   if (name === undefined && parent === undefined && !root && playlist === undefined && !clearDefault) {
     throw usageError("screen folder update requires --name NAME, --parent ID, --root, --default-playlist-id ID or --clear-default.");
   }
@@ -238,7 +238,7 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
 
 export const handleScreenFolderDelete = commandHandler(async (args, runtime, resolved) => {
   const id = screenFolderId(args.positionals[3], "screen folder delete <id>");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await folderCall(client, {
     method: "DELETE", path: `${FOLDERS_PATH}/${id}`, idempotent: true,

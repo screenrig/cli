@@ -136,7 +136,7 @@ async function main(): Promise<void> {
 
   try {
     await run("--api-url", apiUrl, "agent", "enroll", "--email", "smoke@example.com", "--organization", "Smoke organization");
-    const pairing = await run("--api-url", apiUrl, "screen", "pair", "abc234", "--label", "Pairing smoke");
+    const pairing = await run("--api-url", apiUrl, "screen", "pair", "abc234", "--name", "Pairing smoke");
     const pairingData = pairing.data as { public_url?: string; screen?: { id?: string } };
     assert.equal(pairingData.screen?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
     assert.equal(pairingData.public_url, "https://play.screenrig.ai/player/s/scr_public_pairing");
@@ -294,10 +294,10 @@ async function main(): Promise<void> {
     const playsStdout = await invoke(["playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--format", "csv", "--output", "-"]);
     assert.equal(playsStdout.code, 0, playsStdout.stderr);
     assert.equal(playsStdout.stdout.split("\r\n").filter(Boolean).length, 6, "--output - writes only the CSV to stdout");
-    await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
-    await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
-    await run("kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
-    await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"updated\"}", "--expect-rev", "1");
+    await run("kv", "set", "greeting", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
+    await run("kv", "get", "greeting", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
+    await run("kv", "list", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
+    await run("kv", "set", "greeting", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"updated\"}", "--expect-rev", "1");
     const bug = await run("feedback", "bug", "Smoke bug", "--body", "Recorded by the localhost smoke.", "--command", "media upload");
     assert.equal((bug.data as { kind?: string }).kind, "bug");
     await run("feedback", "feature", "Smoke feature", "--body", "Recorded by the localhost smoke.");
@@ -381,7 +381,7 @@ async function main(): Promise<void> {
     await run("events", "follow", "--after", "ev1_0", "--timeout", "200");
     await run("operations", "wait", "op_AAAAAAAAAAAAAAAAAAAAAAAA", "--poll-ms", "1");
     await run("operations", "cancel", "op_MEDIAAAAAAAAAAAAAAAAAAAAA");
-    await run("kv", "delete", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
+    await run("kv", "delete", "greeting", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
     await run("media", "delete", mediaId, "--expect-rev", "2");
     await run("screen", "rotate-public-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "2");
     const archived = await run("screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "3");

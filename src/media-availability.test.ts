@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";

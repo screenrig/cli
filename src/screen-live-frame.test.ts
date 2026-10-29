@@ -7,7 +7,7 @@ import { test } from "node:test";
 import type { LiveSession } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { LIVE_DURATION_MAX_S } from "./screen-live.js";
 import { liveFrameFileName, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesBody, readLiveFrame, resolveFrameOutput } from "./screen-live-frame.js";

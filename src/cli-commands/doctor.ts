@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleDoctor } from "../commands.js";
+import { handleDoctor } from "../handlers/doctor.js";
 import type { Command } from "commander";
 
 export function registerDoctorCommands(root: Command, bind: CommandActionBinder): void {

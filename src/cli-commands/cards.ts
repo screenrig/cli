@@ -1,8 +1,8 @@
 import { type Command, Argument, Option } from "commander";
 import {
-  cardId, cardUid, cardDataKey, feedListOption, FEED_AREA_UNKNOWN, FEED_CERTAINTIES, FEED_FAMILIES, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
+  cardId, cardUid, feedListOption, FEED_AREA_UNKNOWN, FEED_CERTAINTIES, FEED_FAMILIES, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
 } from "../cards.js";
-import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
+import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleFeedsGet } from "../handlers/cards.js";
 import { positiveInteger, revision } from "./options.js";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
@@ -53,24 +53,6 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .option("--expires-at <INSTANT>", "Blank data at this ISO timestamp with timezone")
     .option("--expect-rev <REVISION>", "Require the current data revision (If-Match)", revision).action(bind(handleCardInstanceDataPut));
   requireOptionGroup(instancePut, "atMostOne", ["--ttl", "--expires-at"]);
-
-  const data = root.command("card-data").description("Read and write dynamic data for cards");
-  data.command("get").description("Read a card data document and its revision")
-    .argument("<key>", "Card data key", cardDataKey).action(bind(handleCardDataGet));
-  const dataPut = data.command("put").description("Create or replace a card data document")
-    .argument("<key>", "Card data key", cardDataKey)
-    .requiredOption("--file <FILE>", "Read a JSON object from a file, or - for stdin")
-    .option("--ttl <DURATION>", "Blank data after this long: 30m, 12h or 1d", cardTtl)
-    .option("--expires-at <INSTANT>", "Blank data at this ISO timestamp with timezone")
-    .option("--expect-rev <REVISION>", "Require the current document revision (If-Match)", revision)
-    .action(bind(handleCardDataPut));
-  requireOptionGroup(dataPut, "atMostOne", ["--ttl", "--expires-at"]);
-  data.command("list").description("List card data keys and revisions across all pages")
-    .action(bind(handleCardDataList));
-  data.command("delete").description("Delete a card data document at its current revision")
-    .argument("<key>", "Card data key", cardDataKey)
-    .requiredOption("--expect-rev <REVISION>", "Require the revision read with card-data get (If-Match)", revision)
-    .action(bind(handleCardDataDelete));
 
   const feeds = root.command("feeds").description("Read third-party data fetched and cached by screenRIG");
   const get = feeds.command("get").description("Read a feed once; report pending and its retry time")

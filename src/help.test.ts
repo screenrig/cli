@@ -1,9 +1,11 @@
+import { ALL_COMMAND_REGISTRARS } from "./cli-commands/all.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCommandTree, findCommand } from "./command-tree.js";
-import { commandHelp, leafCommandPaths } from "./help.js";
+import { leafCommandPaths } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { CLI_VERSION } from "./version.js";
 
 const bin = fileURLToPath(new URL("./bin.js", import.meta.url));
@@ -16,8 +18,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources and bi add twelve immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 61);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources, bi, schedule and reports add fourteen immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 64);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -35,8 +37,9 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), [
+    "reports list", "reports show", "reports subscriptions list", "reports subscriptions show", "reports subscriptions create", "reports subscriptions update", "reports subscriptions delete", "reports subscriptions send", "project export",
     "project token", "card preview", "card create", "card list", "card show", "card params", "card delete", "card data get", "card data put",
-    "cards list", "cards show", "card-data get", "card-data put", "card-data list", "card-data delete", "feeds get",
+    "cards list", "cards show", "feeds get",
     "recovery list",
     "recovery show",
     "recovery reconcile",
@@ -108,7 +111,6 @@ test("root help is compact and every command is discoverable through immediate c
     "billing balance",
     "billing statement",
     "agent enroll",
-    "agent connect",
     "agent status",
     "agent disconnect",
     "agent revoke-identity",
@@ -163,12 +165,8 @@ test("root help is compact and every command is discoverable through immediate c
     "media sync update",
     "media sync run",
     "media sync delete",
-    "compose catalog",
-    "compose batch",
-    "compose render",
     "playlist init",
     "playlist validate",
-    "playlist preview",
     "playlist replace-release",
     "playlist create",
     "playlist update",
@@ -215,6 +213,8 @@ test("root help is compact and every command is discoverable through immediate c
     "campaign delete",
     "campaign screens",
     "campaign explain",
+    "schedule import",
+    "schedule template",
     "screen update",
     "screen list",
     "screen live frame",
@@ -303,6 +303,9 @@ test("root help is compact and every command is discoverable through immediate c
     "screen takeover set",
     "screen takeover clear",
     "screen reboot",
+    "screen clear-cache",
+    "screen restart-app",
+    "screen update-software",
     "screen display set",
     "screen display clear",
     "screen display-schedule show",
@@ -356,6 +359,7 @@ test("root help is compact and every command is discoverable through immediate c
     "source update",
     "source test",
     "source refresh",
+    "source rooms",
     "source delete",
     "doctor",
     "version",
@@ -363,7 +367,7 @@ test("root help is compact and every command is discoverable through immediate c
   ].sort());
   assert.equal(root.allCommands, undefined);
   assert.doesNotMatch(root.usage, /All commands:/);
-  const inventory = leafCommandPaths(createCommandTree().root);
+  const inventory = leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root);
   assert.ok(inventory.includes("help"));
   for (const path of inventory) {
     assert.ok(commandHelp([], true).usage.includes(path), path);
@@ -379,7 +383,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.deepEqual(media.commands.map((child) => child.name), [
     "generate", "upload", "replace", "versions", "restore", "version", "upload-batch", "show", "download", "list", "selector-preview", "update", "availability", "delete", "move", "folder", "sync",
   ]);
-  for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
+  for (const path of leafCommandPaths(findCommand(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
   }
   assert.doesNotMatch(media.usage, /screen assign|project show|agent enroll|playlist create/);
@@ -389,7 +393,7 @@ test("explicit human inventory includes every leaf while default root stays comp
   const text = execFileSync(process.execPath, [bin, "help", "--all"], {
     encoding: "utf8", env: { ...process.env, SCREENRIG_CONFIG: "/nonexistent/screenrig-help-config" },
   });
-  for (const path of leafCommandPaths(createCommandTree().root)) {
+  for (const path of leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root)) {
     assert.ok(text.includes(path), path);
   }
 });
@@ -432,14 +436,9 @@ test("unknown help paths fail rather than silently showing root help", () => {
   });
 });
 
-test("compatibility aliases resolve canonical help", () => {
-  assert.deepEqual(commandHelp(["playlist", "get"]), commandHelp(["playlist", "show"]));
-  assert.deepEqual(commandHelp(["playlist", "show"]).aliases, [["playlist", "get"]]);
-});
-
 test("help appended to an invocation resolves the command without echoing argument values", () => {
   assert.deepEqual(invoke(["screen", "assign", "scr_TEST", "--help"]), invoke(["screen", "assign", "--help"]));
-  assert.deepEqual(invoke(["playlist", "get", "pl_TEST", "--help"]), invoke(["playlist", "show", "--help"]));
+  assert.deepEqual(invoke(["playlist", "show", "pl_TEST", "--help"]), invoke(["playlist", "show", "--help"]));
 });
 
 test("negative switches are documented as booleans without value placeholders", () => {
@@ -488,7 +487,7 @@ test("agent enroll documents --setup-code as an optional addition to either cred
 
 
 test("explicit JSON inventory can be scoped to a group", () => {
-  assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));
+  assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root));
   const media = invoke(["help", "media", "--all"]).data;
   assert.ok(media.allCommands?.every((path) => path.startsWith("media ")));
   assert.ok(media.allCommands?.includes("media generate"));
@@ -499,7 +498,6 @@ test("declared relationships and choices reject invalid commands before authenti
     ["media", "generate"],
     ["media", "generate", "--prompt", "test", "--quality", "ultra"],
     ["playlist", "init", "med_TEST", "--name", "Test", "--output", "out.json", "--target-width", "1920"],
-    ["compose", "render", "input.json", "--target-height", "1080"],
     ["playlist", "import", "bundle", "--expect-rev", "1"],
     ["notifications", "create"],
     ["notifications", "create", "--email", "owner"],
@@ -524,30 +522,42 @@ test("declared relationships and choices reject invalid commands before authenti
   }
 });
 
-test("canonical vocabulary keeps legacy invocations equivalent without rewriting values", async () => {
+test("the canonical vocabulary is the only vocabulary", async () => {
   const { parseArgv } = await import("./argv.js");
-  for (const [prefix, canonical, legacy, value, suffix] of [
-    [["playlist", "init", "med_TEST"], "--screen-id", "--screen", "scr_TEST", ["--name", "Lobby", "--output", "out.json"]],
-    [["screen", "pair", "234567"], "--name", "--label", "--screen", []],
-    [["screen", "provision"], "--name", "--label", "Lobby", ["--print-url"]],
-    [["kv", "get", "greeting"], "--app-id", "--application-id", "app_TEST", []],
-    [["kv", "webhook", "create", "greeting"], "--app-id", "--application-id", "app_TEST", []],
+  for (const [argv, flag, value] of [
+    [["playlist", "init", "med_TEST", "--name", "Lobby", "--output", "out.json"], "screen-id", "scr_TEST"],
+    [["screen", "pair", "234567"], "name", "Lobby"],
+    [["screen", "provision", "--print-url"], "name", "Lobby"],
+    [["kv", "get", "greeting"], "app-id", "app_TEST"],
+    [["kv", "webhook", "create", "greeting"], "app-id", "app_TEST"],
   ] as const) {
-    assert.deepEqual(parseArgv([...prefix, `${canonical}=${value}`, ...suffix]), parseArgv([...prefix, `${legacy}=${value}`, ...suffix]));
-    assert.throws(() => parseArgv([...prefix, `${canonical}=${value}`, `${legacy}=${value}`, ...suffix]), /only once/);
+    assert.equal(parseArgv([...argv, `--${flag}=${value}`]).flags[flag], value, argv.join(" "));
+    assert.throws(() => parseArgv([...argv, `--${flag}=${value}`, `--${flag}=${value}`]), /only once/);
   }
-  assert.deepEqual(parseArgv(["operations", "get", "op_TEST"]), parseArgv(["operations", "show", "op_TEST"]));
-  assert.deepEqual(commandHelp(["operations", "get"]), commandHelp(["operations", "show"]));
+  // The retired spellings are unknown options.
+  for (const [argv, spelling] of [
+    [["playlist", "init", "med_TEST", "--name", "Lobby", "--output", "out.json"], "--screen"],
+    [["screen", "pair", "234567"], "--label"],
+    [["screen", "provision", "--print-url"], "--label"],
+    [["kv", "get", "greeting", "--app-id", "app_TEST"], "--application-id"],
+    [["kv", "webhook", "create", "greeting"], "--application-id"],
+    [["events", "list"], "--application-id"],
+    [["events", "list"], "--cursor"],
+    [["events", "follow"], "--cursor"],
+    [["screen", "update", "scr_TEST", "--name", "Lobby"], "--if-match"],
+  ] as const) {
+    assert.throws(() => parseArgv([...argv, spelling, "x"]), /does not accept|requires/, `${argv.join(" ")} ${spelling}`);
+  }
+  assert.throws(() => parseArgv(["operations", "get", "op_TEST"]), /operations has no command get/);
+  assert.throws(() => parseArgv(["playlist", "get", "pl_TEST"]), /playlist has no command get/);
   const selector = commandHelp(["kv", "get"]).options.find(option => option.name === "--app-id");
   assert.equal(selector?.required, true);
-  assert.deepEqual(selector?.aliases, ["--application-id"]);
   assert.equal(commandHelp(["kv", "get"]).options.some(option => option.name === "--application-id"), false);
   // A webhook writes an application key or a card's document: exactly one of --app-id and --card.
   for (const action of ["create", "list", "rotate-secret", "delete"]) {
     const help = commandHelp(["kv", "webhook", action]);
     const webhookSelector = help.options.find(option => option.name === "--app-id");
     assert.equal(webhookSelector?.required, false, action);
-    assert.deepEqual(webhookSelector?.aliases, ["--application-id"], action);
     assert.equal(help.options.some(option => option.name === "--card"), true, action);
     assert.deepEqual(help.relationships?.map(({ kind, options }) => ({ kind, options })), [{ kind: "exactlyOne", options: ["--app-id", "--card"] }], action);
   }
@@ -584,13 +594,13 @@ test("every operational command has examples that parse and stdin help matches i
   const { parseArgv } = await import("./argv.js");
   // Tokenize only our authored examples, preserving quoted JSON and paths.
   const words = (text: string) => [...text.matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/g)].map(match => match[1] ?? match[2] ?? match[3]!);
-  for (const path of leafCommandPaths(createCommandTree().root)) {
+  for (const path of leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root)) {
     if (path === "help") continue;
     const help = commandHelp(path.split(" "));
     assert.ok(help.examples.length > 0, path);
     for (const example of help.examples) assert.doesNotThrow(() => parseArgv(words(example).slice(1)), example);
   }
-  for (const action of ["validate", "preview", "create", "update"]) {
+  for (const action of ["validate", "create", "update"]) {
     assert.ok(commandHelp(["playlist", action]).arguments.some(argument => argument.description.includes("stdin")), action);
   }
   assert.match(commandHelp(["screen", "publish"]).usage, /does not update an existing playlist/);

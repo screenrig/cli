@@ -640,26 +640,40 @@ export interface ScreenRebootAccepted {
   state: ScreenCommandDelivery;
 }
 
-/** The optional body of POST /api/screens/{id}/reboot and /reload: how long the command stays actionable, 60 to 86400 seconds (default 86400). */
+/** The 202 answer of POST /api/screens/{id}/clear-cache, /restart-app and /update. */
+export type ScreenMaintenanceCommand = "clear_cache" | "restart_app" | "update";
+
+export interface ScreenMaintenanceAccepted {
+  command_id: string;
+  command: ScreenMaintenanceCommand;
+  expires_at: string;
+  state: ScreenCommandDelivery;
+}
+
+/** The optional body of POST /api/screens/{id}/reboot, /reload, /clear-cache, /restart-app and /update: how long the command stays actionable, 60 to 86400 seconds (default 86400). */
 export interface ScreenCommandWrite {
   expires_in_s?: number;
 }
 
 /**
- * One reboot or reload asked of a screen, in Screen.commands (oldest first, at
- * most 10). expired is derived by the server on read for a queued command past
- * expires_at; a reload never reaches done.
+ * One reboot, reload, clear_cache, restart_app or update asked of a screen, in
+ * Screen.commands (oldest first, at most 10). expired is derived by the server
+ * on read for a queued command past expires_at; a reload never reaches done.
+ * cause and detail are what the Player reported when it ended a clear_cache,
+ * restart_app or update (done or failed).
  */
 export interface ScreenCommand {
   id: string;
-  type: "reboot" | "reload";
-  state: "queued" | "sent" | "done" | "expired" | "cancelled" | "superseded";
+  type: "reboot" | "reload" | ScreenMaintenanceCommand;
+  state: "queued" | "sent" | "done" | "failed" | "expired" | "cancelled" | "superseded";
   requested_at: string;
   expires_at: string;
   sent_at?: string;
   done_at?: string;
   /** schedule: issued by the screen's reboot schedule at the start of a window. Absent for a reboot a person or agent asked for. */
   source?: "schedule";
+  cause?: string;
+  detail?: string;
 }
 
 /** Screen.glass: the backend's conclusions about the picture. Readers keep a member and a verdict they do not know. */
@@ -897,7 +911,7 @@ export interface Screen {
   archived_at?: string;
   /** Present when archive_reason is replaced: the screen this screen's device moved to (screen replace). Read-only. */
   replaced_by?: string;
-  /** The reboots and reloads asked of this screen, oldest first, at most 10. Absent when it has none. Read-only: screen reboot and reload add to it, screen command cancel cancels a queued entry. */
+  /** The reboots, reloads, cache clears, app restarts and updates asked of this screen, oldest first, at most 10. Absent when it has none. Read-only: screen reboot, reload, clear-cache, restart-app and update-software add to it, screen command cancel cancels a queued entry. */
   commands?: ScreenCommand[];
   /** Present while the screen shows a notice instead of its content (screen suspend). Read-only. */
   suspension?: ScreenSuspension;
@@ -1010,6 +1024,7 @@ export type ScreenAction =
   | { type: "set_playlist_schedule"; entries: ScreenScheduleEntryWrite[] }
   | { type: "clear_playlist_schedule" }
   | ({ type: "reboot" } & ScreenCommandWrite)
+  | ({ type: ScreenMaintenanceCommand } & ScreenCommandWrite)
   | { type: "display"; power: "on" | "off"; until?: string | null }
   | { type: "display_clear" }
   | { type: "set_display_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
@@ -1033,6 +1048,7 @@ export interface ScreenActionScreenResult {
   reload?: ScreenReloadAccepted;
   toast?: ScreenToastAccepted;
   reboot?: ScreenRebootAccepted;
+  command?: ScreenMaintenanceAccepted;
   problem?: { type?: string; title?: string; status?: number; detail?: string; code?: string; [key: string]: unknown };
 }
 
@@ -1518,7 +1534,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing" | "source_failed" | "source_stale";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty

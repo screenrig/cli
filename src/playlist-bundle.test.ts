@@ -19,7 +19,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
 import { ApiClient } from "./client.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import {
   PLAYLIST_BUNDLE_MANIFEST,
@@ -1244,7 +1244,7 @@ function collect(stream: PassThrough): Promise<string> {
 test("command parser and JSON help expose playlist export/import including update", async () => {
   const parsed = parseArgv(["playlist", "import", "./bundle", "--update", "pl_TARGET", "--expect-rev", "8"]);
   assert.equal(parsed.flags.update, "pl_TARGET");
-  assert.equal(parsed.flags["if-match"], "8");
+  assert.equal(parsed.flags["expect-rev"], "8");
   const exportHelp = commandHelp(["playlist", "export"]);
   assert.match(exportHelp.synopsis[0]!, /playlist export \[options\] <id>/);
   assert.equal(exportHelp.options.find((option) => option.name === "--output")?.type, "value");

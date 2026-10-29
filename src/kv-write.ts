@@ -61,9 +61,6 @@ function checkedLength(valueBase64: string): string {
 }
 
 export async function kvWriteFromArgs(args: ParsedArgs, cwd: string, runtime?: CliRuntime): Promise<KVWrite> {
-  if (Object.hasOwn(args.flags, "value")) {
-    throw usageError("--value used the retired JSON-unsafe contract; use --json-value, --file, or --value-base64.");
-  }
   const modeNames = ["json-value", "file", "value-base64"] as const;
   const selected = modeNames.filter((name) => Object.hasOwn(args.flags, name));
   if (selected.length !== 1) {

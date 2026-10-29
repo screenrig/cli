@@ -1,6 +1,6 @@
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleCommentShowScreen, handleCommentShowPlaylist, handleCommentSetScreen, handleCommentSetPlaylist, handleCommentDeleteScreen, handleCommentDeletePlaylist } from "../commands.js";
+import { handleCommentShowScreen, handleCommentShowPlaylist, handleCommentSetScreen, handleCommentSetPlaylist, handleCommentDeleteScreen, handleCommentDeletePlaylist } from "../handlers/comment.js";
 import { type Command, Option } from "commander";
 
 export function registerCommentCommands(root: Command, bind: CommandActionBinder): void {

@@ -58,6 +58,7 @@ function screenTemplateRefusal(source: string): string | undefined {
   const origin = /^https?:\/\/[^/?#]*/i.exec(source)?.[0];
   if (origin === undefined) return "must start with http:// or https:// to carry {screen.…} tokens";
   if (hasScreenToken(origin)) return "{screen.…} tokens may stand only in the path, query or fragment, not in the scheme, credentials, host or port";
+  if (source.includes("\\")) return "cannot carry {screen.…} tokens together with a backslash";
   let host: string;
   try { host = new URL(screenTokenStandIn(source)).hostname.toLowerCase().replace(/\.$/, ""); } catch { return undefined; }
   if (YOUTUBE_HOSTS.has(host)) return "cannot carry {screen.…} tokens: a YouTube link is rewritten to its embed form";

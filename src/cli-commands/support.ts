@@ -1,7 +1,7 @@
 import { type Command, Option } from "commander";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleSupportStatus, handleSupportSubmit, handleSupportHistory, handleSupportFollow, handleSupportRead, handleSupportClose } from "../commands.js";
+import { handleSupportStatus, handleSupportSubmit, handleSupportHistory, handleSupportFollow, handleSupportRead, handleSupportClose } from "../handlers/support.js";
 
 export function registerSupportCommands(root: Command, bind: CommandActionBinder): void {
   const support = root.command("support").description("Project support conversations on every plan");

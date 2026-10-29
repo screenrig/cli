@@ -1,6 +1,6 @@
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleFeedbackBug, handleFeedbackFeature, handleFeedbackList, handleFeedbackShow, handleFeedbackReply } from "../commands.js";
+import { handleFeedbackBug, handleFeedbackFeature, handleFeedbackList, handleFeedbackShow, handleFeedbackReply } from "../handlers/feedback.js";
 import { type Command, Option } from "commander";
 
 export function registerFeedbackCommands(root: Command, bind: CommandActionBinder): void {

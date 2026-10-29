@@ -218,7 +218,7 @@ export const handleMediaReplace = commandHandler(async (args, runtime, resolved)
     }
     const primitive = media.primitive === "image" || media.primitive === "video" || media.primitive === "audio" ? media.primitive : undefined;
     const note = flagString(args.flags, "note");
-    const ifMatch = flagString(args.flags, "if-match");
+    const ifMatch = flagString(args.flags, "expect-rev");
     const noWait = flagBool(args.flags, "no-wait");
     let uploaded: MediaFileUploadResult;
     try {
@@ -305,7 +305,7 @@ export const handleMediaRestore = commandHandler(async (args, runtime, resolved)
   const id = mediaIdArg(args.positionals[2], "media restore");
   const number = versionNumber(args, "media restore");
   const note = flagString(args.flags, "note");
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await versionCall(client, {
     method: "POST",

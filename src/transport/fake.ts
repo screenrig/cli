@@ -21,6 +21,8 @@ import type {
   Operation,
   Screen,
   ScreenCommand,
+  ScreenMaintenanceAccepted,
+  ScreenMaintenanceCommand,
 } from "../adapters/protocol.js";
 import type {
   Transport,
@@ -1178,11 +1180,11 @@ export function memoryBackend(options: {
     }
     return { seconds: value };
   };
-  const issueCommand = (screen: Screen, type: "reboot" | "reload", seconds: number): CommandAnswer => {
+  const issueCommand = (screen: Screen, type: ScreenCommand["type"], seconds: number): CommandAnswer => {
     const now = clock();
     const state = screen.online ? "sent" : "queued";
     const command: ScreenCommand = {
-      id: `${type === "reboot" ? "rbt" : "rld"}_${String(++commandSequence).padStart(8, "0")}`,
+      id: `${type === "reboot" ? "rbt" : type === "reload" ? "rld" : "cmd"}_${String(++commandSequence).padStart(8, "0")}`,
       type, state, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + seconds * 1000).toISOString(),
       ...(state === "sent" ? { sent_at: now.toISOString() } : {}),
     };
@@ -1200,6 +1202,18 @@ export function memoryBackend(options: {
     }
     const issued = issueCommand(screen, "reboot", lifetime.seconds);
     return { accepted: { reboot_id: issued.id, expires_at: issued.expires_at, state: issued.state } };
+  };
+  // clear_cache, restart_app and update (§6.5.1): reboot's refusals, with the capability of the same name.
+  const maintenanceOutcome = (screen: Screen, type: ScreenMaintenanceCommand, body?: unknown): { accepted: ScreenMaintenanceAccepted } | { problem: ReturnType<typeof controlProblem> } => {
+    const lifetime = commandLifetime(body);
+    if ("problem" in lifetime) return lifetime;
+    if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
+    if (!(screen.host?.capabilities ?? []).includes(type)) {
+      return { problem: controlProblem(409, "command_unsupported", `The screen's Player does not declare the ${type} capability.`) };
+    }
+    const issued = issueCommand(screen, type, lifetime.seconds);
+    return { accepted: { command_id: issued.id, command: type, expires_at: issued.expires_at, state: issued.state } };
   };
   // A reload works on an archived screen; one still waiting to pair has no Player.
   const reloadOutcome = (screen: Screen, body?: unknown): { accepted: { reload_id: string; expires_at: string; state: "queued" | "sent" } } | { problem: ReturnType<typeof controlProblem> } => {
@@ -1234,6 +1248,22 @@ export function memoryBackend(options: {
     if (key) commandReplays.set(key, outcome.accepted);
     return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
   });
+  for (const [route, type] of [["clear-cache", "clear_cache"], ["restart-app", "restart_app"], ["update", "update"]] as const) {
+    transport.on("POST", new RegExp(`^/api/screens/[^/]+/${route}$`), (req): TransportResponse => {
+      const screen = screenOf(req);
+      if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+      const ifMatch = req.headers?.["if-match"];
+      if (ifMatch && ifMatch !== `"${screen.revision}"`) {
+        return { status: 412, headers: { "content-type": "application/problem+json" }, body: controlProblem(412, "revision_conflict", "The screen revision changed.") };
+      }
+      const key = req.headers?.["idempotency-key"] ? `${type}:${screen.id}:${req.headers["idempotency-key"]}` : undefined;
+      if (key && commandReplays.has(key)) return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: commandReplays.get(key) };
+      const outcome = maintenanceOutcome(screen, type, req.body);
+      if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+      if (key) commandReplays.set(key, outcome.accepted);
+      return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
+    });
+  }
   transport.on("POST", /^\/api\/screens\/[^/]+\/play-page$/, (req): TransportResponse => {
     const screen = screenOf(req);
     const problem = (status: number, code: string, detail: string): TransportResponse => ({ status, headers: { "content-type": "application/problem+json" }, body: controlProblem(status, code, detail) });
@@ -1309,6 +1339,10 @@ export function memoryBackend(options: {
       if (action.type === "reload") {
         const outcome = reloadOutcome(screen, action);
         return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", reload: outcome.accepted };
+      }
+      if (action.type === "clear_cache" || action.type === "restart_app" || action.type === "update") {
+        const outcome = maintenanceOutcome(screen, action.type, action);
+        return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", command: outcome.accepted };
       }
       if (action.type === "toast") return { screen_id: id, status: "ok", toast: { expires_at: "2026-08-14T17:00:10.000Z" } };
       if (action.type === "reboot") {
@@ -1976,7 +2010,7 @@ export function memoryBackend(options: {
     if (added.length) notifications.set(id, { ...stored, unsubscribed: [...listed, ...added], revision: (stored.revision as number) + 1 });
   };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },

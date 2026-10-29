@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList,
-  handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate,
-} from "../commands.js";
+import { handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList, handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate } from "../handlers/notifications.js";
 import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationAudienceOption, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
 import { weeklyWindows } from "../campaigns.js";
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
@@ -40,7 +37,9 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  A notification sends an email, a signed webhook POST, or a message in Slack,",
     "  Teams, PagerDuty or Telegram when a screen changes",
     "  state: screen_offline, display_disconnected, running_hot, storage_full,",
-    "  content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen or crashing. A condition notifies once it has lasted",
+    "  content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen or crashing,",
+    "  or when a data source fails to refresh or goes stale (source_failed,",
+    "  source_stale; --tag never matches a source). A condition notifies once it has lasted",
     "  --hold minutes (default 10), and a resolved notice follows when it clears after",
     "  a notice went out; crashing is sent at once. A notice sends nothing when the",
     "  screen's alert is acknowledged or snoozed during the hold, or a mute covers the",

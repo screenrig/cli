@@ -44,7 +44,7 @@ export const handleScreenLinkCreate = commandHandler(async (args, runtime, resol
   const id = screenLinkScreenId(args.positionals[3], "create");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await linkCall(client, {
-    method: "POST", path: linkPath(id), idempotent: true, headers: revisionHeaders(flagString(args.flags, "if-match")),
+    method: "POST", path: linkPath(id), idempotent: true, headers: revisionHeaders(flagString(args.flags, "expect-rev")),
   }, id);
   const replaced = (response.body as ScreenLink | undefined)?.replaced === true;
   return linkResult(id, response, client.requestId,
@@ -64,7 +64,7 @@ export const handleScreenLinkDelete = commandHandler(async (args, runtime, resol
   const id = screenLinkScreenId(args.positionals[3], "delete");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await linkCall(client, {
-    method: "DELETE", path: linkPath(id), idempotent: true, headers: revisionHeaders(flagString(args.flags, "if-match")),
+    method: "DELETE", path: linkPath(id), idempotent: true, headers: revisionHeaders(flagString(args.flags, "expect-rev")),
   }, id);
   return {
     envelope: jsonBody({ ...response, body: { screen_id: id, deleted: true } }, client.requestId),

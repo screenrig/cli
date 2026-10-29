@@ -62,8 +62,7 @@ export async function ensureCredential(options: {
   enrollmentEmail?: string;
   /** Exact AgentID claim code redeemed in place of a contact email. */
   enrollmentAgentIdClaim?: string;
-  /** Project name fixed for the lifetime of one pending enrollment. */
-  enrollmentProjectName?: string;
+  /** Organization name fixed for the lifetime of one pending enrollment. */
   enrollmentOrganization?: string;
   /**
    * Enrollment purpose for a new enrollment; a pending enrollment keeps the
@@ -131,10 +130,6 @@ export async function ensureCredential(options: {
           ? "Pending enrollment is bound to a different setup code. Resume it without changing --setup-code, or discard it with agent enroll --force."
           : "Pending enrollment was started without a setup code. Resume it without --setup-code, or discard it with agent enroll --force.");
       }
-      if (existingEnrollment && options.enrollmentProjectName !== undefined
-        && existingEnrollment.project_name !== options.enrollmentProjectName) {
-        throw configError("Pending enrollment is bound to a different project name. Resume it without changing --project-name, or discard it with agent enroll --force.");
-      }
       const email = existingEnrollment?.email ?? options.enrollmentEmail;
       const agentidClaim = existingEnrollment?.agentid_claim ?? options.enrollmentAgentIdClaim;
       if (existingEnrollment && options.enrollmentOrganization !== undefined && existingEnrollment.organization !== options.enrollmentOrganization) {
@@ -145,7 +140,7 @@ export async function ensureCredential(options: {
       }
       const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
       const setupCode = existingEnrollment?.setup_code ?? options.enrollmentSetupCode;
-      const projectName = existingEnrollment ? existingEnrollment.project_name : options.enrollmentProjectName;
+      const projectName = existingEnrollment?.project_name;
       const organization = existingEnrollment ? existingEnrollment.organization : options.enrollmentOrganization;
       // Only the oauth format is issued: a pending enrollment that did not ask for it starts again under a new key.
       const enrollment = {

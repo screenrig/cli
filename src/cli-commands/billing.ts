@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleBillingBalance, handleBillingStatement } from "../commands.js";
+import { handleBillingBalance, handleBillingStatement } from "../handlers/billing.js";
 import type { Command } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger } from "./options.js";

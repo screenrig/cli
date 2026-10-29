@@ -1,6 +1,6 @@
 import { positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../commands.js";
+import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../handlers/app.js";
 import type { Command } from "commander";
 
 export function registerAppCommands(root: Command, bind: CommandActionBinder): void {

@@ -2,10 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import {
-  handleCampaignCreate, handleCampaignDelete, handleCampaignExplain, handleCampaignList, handleCampaignPause, handleCampaignResume,
-  handleCampaignScreens, handleCampaignShow, handleCampaignUpdate,
-} from "../commands.js";
+import { handleCampaignCreate, handleCampaignDelete, handleCampaignExplain, handleCampaignList, handleCampaignPause, handleCampaignResume, handleCampaignScreens, handleCampaignShow, handleCampaignUpdate } from "../handlers/campaign.js";
 import {
   campaignAnyTags, campaignAudienceOption, campaignDates, campaignDisplays, campaignExceptDates, campaignExplainTime, campaignFolder, campaignInstant, campaignMonthlies, campaignName,
   campaignOnTouch, campaignPlaylistId, campaignPriority, campaignScreenIds, campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,

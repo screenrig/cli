@@ -310,7 +310,7 @@ async function playlistOf(client: ReturnType<typeof clientFor>, id: string): Pro
 }
 
 function pageWrite(client: ReturnType<typeof clientFor>, args: ParsedArgs, request: { method: "POST" | "PUT" | "DELETE"; path: string; body?: unknown; revision?: string }) {
-  const expected = request.revision ?? flagString(args.flags, "if-match");
+  const expected = request.revision ?? flagString(args.flags, "expect-rev");
   return client.call({
     method: request.method, path: request.path, idempotent: true,
     ...(request.body === undefined ? {} : { body: request.body }),
@@ -387,7 +387,7 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
     // The page was derived from the stored one, so the write is held to the revision it was read at.
     revision = String(current);
   }
-  const response = await pageWrite(client, args, { method: "PUT", path: `${pagesPath(id)}/${encodeURIComponent(pageId)}`, body: page, ...(revision && flagString(args.flags, "if-match") === undefined ? { revision } : {}) });
+  const response = await pageWrite(client, args, { method: "PUT", path: `${pagesPath(id)}/${encodeURIComponent(pageId)}`, body: page, ...(revision && flagString(args.flags, "expect-rev") === undefined ? { revision } : {}) });
   return pageResult(response, client.requestId, `Page ${pageId} of ${id} replaced.`);
 }, true);
 

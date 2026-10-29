@@ -3,7 +3,7 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:
 import path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { test } from "node:test";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { createMemoryLogger } from "./log/logger.js";
@@ -1222,7 +1222,7 @@ test("notifications create and update expose severity, active hours and audience
   }
   assert.ok(create.examples.some((example) => example.includes("--active-hours")));
   assert.ok(update.examples.some((example) => example.includes("--clear-severity")));
-  assert.match(create.usage + create.notes.join("\n"), /error for\s+screen_offline and warning for every other condition/);
+  assert.match((create.usage + create.notes.join("\n")).replace(/\s+/g, " "), /error for screen_offline and warning for every other condition/);
 });
 
 test("notification lines show the severity filter, overrides, hours and audience only while they are set", () => {
