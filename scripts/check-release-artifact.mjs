@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,18 +9,24 @@ import { isProductVersion } from "./calver.mjs";
 import { loadRuntimeDependencyLock, NOTICES_FILE, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-// The whole release: one bundled executable and the files that travel with it.
+// The whole release: the bundled executable dist/bin.js, the flat dist/*.js
+// chunks it loads per command group, the assets/ files it reads, and the files
+// that travel with them.
 const INVENTORY = [
   "package",
   "package/LICENSE",
   "package/README.md",
   "package/SECURITY.md",
   `package/${NOTICES_FILE}`,
+  "package/assets",
   "package/dist",
   "package/dist/bin.js",
   "package/package.json",
   `package/${RUNTIME_LOCK_FILE}`,
-].sort();
+];
+const CHUNK = /^package\/dist\/[A-Za-z0-9_-]+\.js$/;
+// The Claude plugin directory reads at most 256 KiB of a script.
+const MAX_FILE_BYTES = 256 * 1024;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -58,9 +64,14 @@ async function main() {
       throw new Error("release archive has an unsafe or empty inventory");
     }
     const inventory = names.map((name) => name.replace(/\/$/, "")).sort();
-    if (JSON.stringify(inventory) !== JSON.stringify(INVENTORY)) {
-      throw new Error(`release archive must hold exactly ${INVENTORY.join(", ")}; it holds ${inventory.join(", ")}`);
+    const assets = (await readdir(path.join(root, "assets"))).map((name) => `package/assets/${name}`);
+    const unexpected = inventory.filter((name) => !INVENTORY.includes(name) && !assets.includes(name) && !CHUNK.test(name));
+    const missing = [...INVENTORY, ...assets].filter((name) => !inventory.includes(name));
+    if (unexpected.length || missing.length) {
+      throw new Error(`release archive must hold ${INVENTORY.join(", ")}, every assets/ file and flat dist/*.js chunks; unexpected ${unexpected.join(", ") || "none"}; missing ${missing.join(", ") || "none"}`);
     }
+    const oversized = verbose.map((line) => line.trim().split(/\s+/)).filter((fields) => Number(fields[2]) > MAX_FILE_BYTES).map((fields) => fields.at(-1));
+    if (oversized.length) throw new Error(`release archive files over ${MAX_FILE_BYTES} bytes: ${oversized.join(", ")}`);
     run("tar", ["-xzf", artifact, "-C", temporary]);
     const packageRoot = path.join(temporary, "package");
     const readme = await readFile(path.join(packageRoot, "README.md"), "utf8");
@@ -110,12 +121,13 @@ async function main() {
     if (version.data?.version !== packaged.version) {
       throw new Error(`bundled CLI returned ${version.data?.version}; package.json is ${packaged.version}`);
     }
-    // The bundle inflates its embedded command guidance at startup; help reads it offline.
+    // Help loads its guidance chunk on demand, offline.
     successfulEnvelope(packageRoot, ["help", "playlist", "validate"], environment);
+    successfulEnvelope(packageRoot, ["help", "--all"], environment);
   const playlistFile = path.join(temporary, "playlist.json");
   await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));
     successfulEnvelope(packageRoot, ["playlist", "validate", playlistFile], environment);
-    // The bundle carries the pinned browser runtime inline; it must be the same bytes.
+    // The release carries the pinned browser runtime in assets/; it must be the same bytes.
     const packed = successfulEnvelope(packageRoot, ["app", "pack", path.join(root, "fixtures", "pack", "ok-app"), "--output", path.join(temporary, "app.tgz")], environment);
     const runtime = createHash("sha256").update(await readFile(path.join(root, "assets", "screenrig.runtime.js"))).digest("hex");
     if (packed.data?.sdk_injection?.asset_sha256 !== runtime) throw new Error("bundled browser runtime differs from assets/screenrig.runtime.js");
