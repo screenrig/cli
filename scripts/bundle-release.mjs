@@ -6,7 +6,8 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { build } from "esbuild";
 import { isRendererPlatformPackage, loadRuntimeDependencyLock, NOTICES_FILE, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
 
@@ -32,6 +33,26 @@ const embedAssets = {
         loader: "js",
         contents: `import { gunzipSync } from "node:zlib";\nconst assets = ${JSON.stringify(assets)};\nconst inflated = new Map();\n`
           + `export function readAsset(name) { let bytes = inflated.get(name); if (!bytes) { bytes = gunzipSync(Buffer.from(assets[name], "base64")); inflated.set(name, bytes); } return Buffer.from(bytes); }\n`,
+      };
+    });
+  },
+};
+
+// The help-only guidance (src/cli-commands/guidance.ts) is plain JSON data and a
+// tenth of the bundle as minified strings, so it travels gzip-compressed too and
+// is inflated once at startup.
+const embedGuidance = {
+  name: "embed-guidance",
+  setup(build) {
+    build.onLoad({ filter: /[\\/]dist[\\/]cli-commands[\\/]guidance\.js$/ }, async (args) => {
+      const exported = { ...(await import(pathToFileURL(args.path).href)) };
+      const json = JSON.stringify(exported);
+      if (!isDeepStrictEqual(JSON.parse(json), exported)) throw new Error(`${args.path} must export plain JSON data only`);
+      const packed = gzipSync(Buffer.from(json, "utf8"), { level: 9 }).toString("base64");
+      return {
+        loader: "js",
+        contents: `import { gunzipSync } from "node:zlib";\nconst guidance = JSON.parse(gunzipSync(Buffer.from(${JSON.stringify(packed)}, "base64")).toString("utf8"));\n`
+          + Object.keys(exported).map((name) => `export const ${name} = guidance[${JSON.stringify(name)}];\n`).join(""),
       };
     });
   },
@@ -73,7 +94,7 @@ async function main() {
     // The renderer's own loader requires its native binary by path at run time.
     banner: { js: 'import { createRequire as screenrigCreateRequire } from "node:module";\nconst require = screenrigCreateRequire(import.meta.url);' },
     external: ["@napi-rs/canvas-*"],
-    plugins: [embedAssets],
+    plugins: [embedAssets, embedGuidance],
   });
 
   const bundled = [...new Set(Object.keys(result.metafile.inputs).map(packageOf).filter(Boolean))].sort();

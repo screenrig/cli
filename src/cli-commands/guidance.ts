@@ -1,13 +1,13 @@
-import type { Command } from "commander";
-import { findCommand } from "../command-path.js";
-import { addCommandExamples, addCommandNotes, commandExamples } from "./notes.js";
 import { PLAYLIST_TRANSITION_HELP } from "../help-text.js";
 
 const DOCUMENT_LINK_HELP = " An iframe page whose src is a Google Slides, Docs or Sheets share, Publish to web or embed link, or a Microsoft 365 Embed link (File → Share → Embed in Word, Excel or PowerPoint on OneDrive or SharePoint), is stored rebuilt for the screen: Slides and PowerPoint decks loop, a Slides deck advances on the link's own delay held to the page duration (give the page the time of the whole deck), and Docs, Sheets, Word and Excel reload every 5 minutes. A file that asks viewers to sign in is refused with document_not_shared, whose detail names the sharing setting to change.";
 
-/** Help-only workflow guidance. Syntax and validation belong to the native commands. */
-export function registerGuidance(root: Command): void {
-  const examples: Record<string, string[]> = {
+/**
+ * Help-only workflow guidance, keyed by command path: plain JSON data and nothing
+ * else, so the release bundle can carry it compressed (scripts/bundle-release.mjs).
+ * Syntax and validation belong to the native commands; register-guidance.ts attaches it.
+ */
+export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "bi connection create grafana": ["--url https://grafana.example.com --token-file token.txt", '--url https://example.com/grafana --token-file - --name "Ops Grafana" --org-id 2'],
     "bi connection create powerbi": ['--tenant-id 11111111-2222-3333-4444-555555555555 --client-id aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee --secret-file secret.txt', '--tenant-id contoso.onmicrosoft.com --client-id aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee --secret-file - --name "Contoso Power BI"'],
     "bi connection create tableau": [
@@ -303,13 +303,8 @@ export function registerGuidance(root: Command): void {
     "migrate scan": ["--from files --files ./signage-media", "--from files --files ./signage-media.zip --dir ./old-signage --timezone America/Toronto"],
     "migrate apply": ["--dry-run", "--dir ./screenrig-migration-files", "--only media,playlists --concurrency 2"],
     "migrate pair": ['ABC 234 --screen "Front desk"', "ABC234 --screen 3 --dir ./old-signage"],
-  };
-  for (const [path, suffixes] of Object.entries(examples)) {
-    const command = findCommand(root, path.split(" "));
-    if (!command) throw new Error(`Unknown example command ${path}`);
-    if (!commandExamples(command).length) addCommandExamples(command, ...suffixes.map(suffix => `screenrig ${path}${suffix ? ` ${suffix}` : ""}`));
-  }
-  const notes: Record<string, string> = {
+};
+export const GUIDANCE_NOTES: Record<string, string> = {
     "project token": "Replaces the current token subset with 1–64 consented projects. Discovery with project list does not grant access. A lost response keeps the rotation request ID for an identical retry.",
     "bi connection create grafana": "Adds a Grafana connection and prints it with data.secret {set, hint}; the token is sealed on the server and never shown again. Read it from --token-file FILE (the file holds only the token) or - for stdin, never an argument. In Grafana: install the Grafana Image Renderer plugin or the remote rendering service (it draws dashboards as images; without it nothing renders), then create a service account with the Viewer role and add a token. --url is Grafana's own address, including https and any path prefix (https://example.com/grafana); the server calls it from the public Internet, so a private, loopback or reserved address is invalid_request (exit 8), and Grafana must answer without redirecting. Run bi connection test next. Connections belong to one project and are not shared. Creating needs Manage access.",
     "bi connection create tableau": "Adds a Tableau connection: a connected app (direct trust) of your Tableau Server or Tableau Cloud site, and the Tableau user the screens' views are shown as. The app's secret value is sealed on the server and never shown again; data.secret is {set, hint}. Read it from --secret-file FILE (the file holds only the secret VALUE, not the secret ID) or - for stdin, never an argument. Setup, once: (1) in Tableau, Settings > Connected Apps > New Connected App > Direct trust; (2) copy its Client ID, generate a secret and copy the Secret ID and the secret value; enable the app and the secret; (3) pick or create the Tableau user the screens show, and give it access to only the views screens show: anyone who holds a screen's ticket can embed any view that user can see; (4) run bi connection show ID and enter its embed_origin's host in the connected app's domain allowlist (Only specific domains; Tableau also accepts it with a leading https://). --url is the https address of Tableau Server or of your Tableau Cloud pod (https://10ay.online.tableau.com: the pod, not online.tableau.com) and --site the site's content URL, the part after /site/ or /t/ in a view's address; omit --site for Tableau Server's default site. Tableau Cloud, or Tableau Server 2023.3 or later; the screens must reach the Tableau host, and their browser must accept third-party cookies from it. Run bi connection test next, then bi connection browse to find a view. Connections belong to one project and are not shared. Creating needs Manage access.",
@@ -508,11 +503,4 @@ export function registerGuidance(root: Command): void {
     "migrate scan": "Reads the account and writes scan.json in the migration directory (--dir, default ./screenrig-migration-VENDOR, mode 0700); it needs no sign-in and sends nothing to screenRIG. The data is the report: found and importable counts, not_imported (what cannot come over, each with its reason and what to do about it), lossy (what changes on the way) and notes. It exits 0 when the scan completes, even when some items cannot come over. The vendor's key is read from the environment variables migrate vendors VENDOR names, or from --credentials FILE (NAME=VALUE lines); it goes only to that vendor and is never stored, printed or logged, and no flag takes it. --files names a folder or .zip of originals the vendor's API cannot hand out, matched to the vendor's media by file name. A new scan replaces scan.json; the id map next to it stays.",
     "migrate apply": "Reads scan.json and imports it into the signed-in project: media into one folder, playlists and layouts, one waiting screen per old screen, and a campaign per schedule that campaigns can express. It never reads the vendor again, except to download media files; --dry-run reads only the project and prints the plan, and needs no vendor key. Safe to rerun: map.json records every object made, bound to this API URL, project, vendor and account (migration_dir_mismatch otherwise), and a rerun reuses what still exists, makes again what was deleted, and never changes what it made. Waiting screens are fleet links of one screen carrying the old name, groups as tags and playlist; the project holds at most 50 links, and the rest wait for a Player code (migrate pair). Opening a link on a Player and running apply again finishes the screen with its old name and time zone and deletes the link. Per-item failures keep ok true with data.failed and warning migration_items_failed. A refusal that would repeat for every item (payment_required, quota_exceeded, campaign_limit_reached, insufficient_access, the vendor refusing the key, a lost connection) ends the run with data.stopped {code, detail, next} and that problem's exit code; run the same command again after fixing it. A vendor file that fails alone (an address that no longer works, an answer that is not a file, a download that goes silent) fails that media only; for an address that no longer works, run migrate scan again to refresh the file addresses. Needs Manage access. Never prints a fleet link URL: fleet-links show ID does.",
     "migrate pair": "Claims the code a Player shows for one waiting screen, chosen by its source id or its exact old name (an ambiguous name lists the ids): it pairs the screen under the old name, sets its playlist, time zone and migrated_from field, sets its tags, deletes the waiting screen's link, and records the result. Each step is recorded as it lands, so a rerun finishes what an interrupted pair left. A screen that is already paired is resource_conflict (exit 5) naming it. Run migrate apply first: pairing needs the map and the playlist it made.",
-  };
-  for (const [path, note] of Object.entries(notes)) {
-    const command = findCommand(root, path.split(" "));
-    if (!command) throw new Error(`Unknown guidance command ${path}`);
-    addCommandNotes(command, note);
-    if (path === "comment set") for (const child of command.commands) addCommandNotes(child, note);
-  }
-}
+};

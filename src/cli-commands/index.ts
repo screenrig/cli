@@ -1,4 +1,4 @@
-import { registerGuidance } from "./guidance.js";
+import { registerGuidance } from "./register-guidance.js";
 import { registerGlobalOptions } from "./globals.js";
 import type { CommandActionBinder } from "./types.js";
 import type { Command } from "commander";
