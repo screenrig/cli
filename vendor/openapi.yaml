@@ -26933,10 +26933,10 @@ components:
       required: [rows]
       properties:
         name: {type: string, minLength: 1, maxLength: 80, description: "Identifies the import; the same name updates the levels it made (default import)."}
-        source: {type: string, maxLength: 200, description: The file the rows came from.}
-        timezone: {type: string, description: The IANA zone the times are written in when a row has no timezone.}
-        code_field: {type: string, description: Read a screen code only from this screen field.}
-        fingerprint: {type: string, description: The preview's fingerprint; required by the commit.}
+        source: {type: string, maxLength: 200, description: "The file the rows came from."}
+        timezone: {type: string, description: "The IANA zone the times are written in when a row has no timezone."}
+        code_field: {type: string, description: "Read a screen code only from this screen field."}
+        fingerprint: {type: string, description: "The preview's fingerprint; required by the commit."}
         rows:
           type: array
           minItems: 1
@@ -26950,7 +26950,7 @@ components:
       additionalProperties: false
       required: [code, message]
       properties:
-        column: {type: string, description: The column of the cell; absent for a problem of the whole row.}
+        column: {type: string, description: "The column of the cell; absent for a problem of the whole row."}
         code: {type: string, description: "required, unknown_screen, ambiguous_screen, unknown_folder, ambiguous_folder, unknown_tag, unknown_file, ambiguous_file, not_playable, invalid_time, reversed_times, past_end, no_timing, invalid_value, timezone, screen_not_ready, overlap or limit; outranked and open_end are warnings."}
         message: {type: string}
     ScheduleImportResolved:
@@ -26961,22 +26961,22 @@ components:
         kind: {type: string, description: "screen, folder, tag or list for a target; file or playlist for content."}
         id: {type: string}
         name: {type: string}
-        screens: {type: integer, minimum: 0, description: The screens a target reaches.}
+        screens: {type: integer, minimum: 0, description: "The screens a target reaches."}
     ScheduleImportRow:
       type: object
       additionalProperties: false
       required: [row, status]
       properties:
-        row: {type: integer, minimum: 2, description: The row's place in the file; the header is row 1.}
+        row: {type: integer, minimum: 2, description: "The row's place in the file; the header is row 1."}
         status: {type: string, enum: [ok, error]}
         cells: {type: object, additionalProperties: {type: string}, description: "The row's cells by column as the sheet gave them (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); send them again, with corrections, as rows."}
         errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
         warnings: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
         target: {$ref: "#/components/schemas/ScheduleImportResolved"}
         content: {$ref: "#/components/schemas/ScheduleImportResolved"}
-        from: {type: string, description: The start as written, 'YYYY-MM-DDTHH:MM.': ''}
-        until: {type: string, description: The end as written, exclusive: '', 'YYYY-MM-DDTHH:MM.': ''}
-        level: {type: string, description: The key of the level the row feeds.}
+        from: {type: string, description: "The start as written, YYYY-MM-DDTHH:MM."}
+        until: {type: string, description: "The end as written, exclusive, YYYY-MM-DDTHH:MM."}
+        level: {type: string, description: "The key of the level the row feeds."}
     ScheduleImportLevel:
       type: object
       additionalProperties: false
@@ -26986,9 +26986,9 @@ components:
         action: {type: string, enum: [create, update, unchanged]}
         home: {type: string, enum: [screen, shared], description: "screen is an entry of one screen's own schedule; shared is a campaign over an audience."}
         screen_id: {type: string}
-        entry_id: {type: string, description: The entry (imp_ then the import and level keys) the level is or will be.}
-        campaign_id: {type: string, description: The campaign a stored shared level already is.}
-        name: {type: string, description: The shared level's campaign name.}
+        entry_id: {type: string, description: "The entry (imp_ then the import and level keys) the level is or will be."}
+        campaign_id: {type: string, description: "The campaign a stored shared level already is."}
+        name: {type: string, description: "The shared level's campaign name."}
         content: {$ref: "#/components/schemas/ScheduleImportResolved"}
         screens: {type: integer, minimum: 0}
         priority: {type: integer, minimum: 0, maximum: 100}
@@ -27017,8 +27017,8 @@ components:
         updates: {type: integer}
         unchanged: {type: integer}
         removes: {type: integer}
-        screens: {type: integer, description: The screens whose own schedules a commit writes.}
-        playlists: {type: integer, description: The one-file playlists a commit makes for the files the sheet names.}
+        screens: {type: integer, description: "The screens whose own schedules a commit writes."}
+        playlists: {type: integer, description: "The one-file playlists a commit makes for the files the sheet names."}
     ScheduleImportPreview:
       type: object
       additionalProperties: false
@@ -27027,16 +27027,16 @@ components:
         name: {type: string}
         source: {type: string}
         timezone: {type: string}
-        columns: {type: array, items: {type: string}, description: The columns the sheet had.}
-        ignored_columns: {type: array, items: {type: string}, description: Headers nothing reads.}
-        valid: {type: boolean, description: No row has an error; only then can the import commit.}
+        columns: {type: array, items: {type: string}, description: "The columns the sheet had."}
+        ignored_columns: {type: array, items: {type: string}, description: "Headers nothing reads."}
+        valid: {type: boolean, description: "No row has an error; only then can the import commit."}
         fingerprint: {type: string}
         summary: {$ref: "#/components/schemas/ScheduleImportSummary"}
-        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: Problems of the whole file.}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: "Problems of the whole file."}
         rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}}
         levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}}
         removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}}
-        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: The stacks of the screens the import changes, as they would be after a commit.: ''}
+        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: "The stacks of the screens the import changes, as they would be after a commit."}
     ScheduleImportCommitted:
       type: object
       additionalProperties: false
@@ -28325,6 +28325,18 @@ components:
         status: {type: string, enum: [mapped, missing, unknown], description: "mapped: the value reaches a room or area. missing: the screen's playlist reads the field and the screen has no value. unknown: the value names nothing the source offers."}
         key: {type: string, description: The room or area a mapped screen shows.}
         suggestion: {type: string, description: "The key an unknown value probably meant: the same letters in another case, or the room's code or name."}
+    SourceRoomsSummary:
+      type: object
+      additionalProperties: false
+      required: [rooms, unmapped_rooms, areas, unmapped_areas, screens, missing_screens, unknown_screens]
+      properties:
+        rooms: {type: integer}
+        unmapped_rooms: {type: integer, description: Rooms no screen shows.}
+        areas: {type: integer}
+        unmapped_areas: {type: integer}
+        screens: {type: integer}
+        missing_screens: {type: integer, description: Screens that read a room or area document and have no value for its field.}
+        unknown_screens: {type: integer, description: Screens whose value names no room or area the source offers.}
     SourceRooms:
       type: object
       additionalProperties: false
@@ -28338,18 +28350,7 @@ components:
         area_field: {type: string}
         area_key_prefix: {type: string}
         rooms_as_of: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The last good refresh the room list is from; null before one."}
-        summary:
-          type: object
-          additionalProperties: false
-          required: [rooms, unmapped_rooms, areas, unmapped_areas, screens, missing_screens, unknown_screens]
-          properties:
-            rooms: {type: integer}
-            unmapped_rooms: {type: integer, description: Rooms no screen shows.}
-            areas: {type: integer}
-            unmapped_areas: {type: integer}
-            screens: {type: integer}
-            missing_screens: {type: integer, description: Screens that read a room or area document and have no value for its field.}
-            unknown_screens: {type: integer, description: Screens whose value names no room or area the source offers.}
+        summary: {$ref: "#/components/schemas/SourceRoomsSummary"}
         rooms: {type: array, items: {$ref: "#/components/schemas/SourceRoom"}}
         areas: {type: array, items: {$ref: "#/components/schemas/SourceArea"}}
         screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomScreen"}}
