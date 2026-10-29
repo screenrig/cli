@@ -49,7 +49,9 @@ is not required to contribute.
   display names use `--name`, selectors use `--screen-id`, `--app-id`,
   `--playlist-id`, `--release-id`, revision guards use `--expect-rev`, event
   cursors use `--after`. The group is `app`; prose says "application".
-  Keep existing aliases working and never rename backend fields to match flags.
+  Aliases and compatibility shims for old spellings or old servers are removed,
+  not kept; only code that reads credentials or config files saved by released
+  CLIs stays. Never rename backend fields to match flags.
 - Declare option relationships with `requireOptionGroup` so human help, JSON
   help and preflight validation agree. Every command gets a working example, and
   help states write scope, waiting and recovery where relevant. Document stdin
