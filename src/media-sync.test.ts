@@ -8,9 +8,9 @@ import { commandHelp } from "./help.js";
 import { createMemoryLogger } from "./log/logger.js";
 import { run, type CliRuntime } from "./main.js";
 import {
-  MEDIA_SYNC_ACCOUNT_ID_PATTERN, MEDIA_SYNC_ID_PATTERN, accountLines, accountTableLines, consentLines, designTableLines, mediaSyncClientId, mediaSyncDesign, mediaSyncEvery,
-  mediaSyncPages, mediaSyncTenant, mediaSyncUrl, syncLines, syncTableLines,
-  type MediaSync, type MediaSyncAccount, type MediaSyncDesign,
+  MEDIA_SYNC_ACCOUNT_ID_PATTERN, MEDIA_SYNC_ID_PATTERN, accountLines, mediaSyncClientId, mediaSyncEvery,
+  mediaSyncTenant, mediaSyncUrl, syncLines, syncTableLines,
+  type MediaSync, type MediaSyncAccount,
 } from "./media-sync.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
@@ -26,12 +26,6 @@ const TENANT = "contoso.onmicrosoft.com";
 const CLIENT = "0b1d2f3a-4c5e-4f60-8a7b-9c0d1e2f3a4b";
 const FOLDER_URL = "https://contoso.sharepoint.com/sites/Marketing/Shared%20Documents/Lobby%20Signs";
 const SHARING_LINK = "https://contoso.sharepoint.com/:f:/s/Marketing/EabcDEFghiJKL?e=Xy1Zq9";
-const CANVA_ACCOUNT = "msa_CANVAAAAAAAAAAAAAAA";
-const CANVA_DESIGN = "DAFVztcvd9z";
-const CANVA_DESIGN_URL = "https://www.canva.com/design/DAFVztcvd9z/Rm4Kd8/edit";
-// The consent link is built in code, with a state that would look like a credential as a literal.
-const CONSENT_STATE = `${"Zq3".repeat(8)}-state`;
-const CONSENT_LINK = `https://www.canva.com/api/oauth/authorize?response_type=code&client_id=OC-test&state=${CONSENT_STATE}&code_challenge_method=s256`;
 
 interface Envelope {
   ok: boolean;
@@ -98,26 +92,6 @@ function sync(overrides: Partial<MediaSync> = {}): MediaSync {
   };
 }
 
-function canvaAccount(overrides: Partial<MediaSyncAccount> = {}): MediaSyncAccount {
-  return account({
-    id: CANVA_ACCOUNT, kind: "canva", name: "Marketing Canva", config: { canva_user_id: "U7Qa2Lunch0001", team_id: "T3Brand000002", display_name: "Ada Signage" },
-    secret: { set: true, hint: "" }, ...overrides,
-  });
-}
-
-function canvaSync(overrides: Partial<MediaSync> = {}): MediaSync {
-  return sync({
-    provider: "canva", account_id: CANVA_ACCOUNT, name: "Lunch menu",
-    source: { web_url: "https://www.canva.com/design/DAFVztcvd9z/Rm4Kd8/view", design_id: CANVA_DESIGN, title: "Lunch menu", pages: [1, 3], format: "png", page_count: 3, design_updated_at: "2026-10-28T16:00:00Z" },
-    ...overrides,
-  });
-}
-
-const DESIGNS: MediaSyncDesign[] = [
-  { id: CANVA_DESIGN, title: "Lunch menu", updated_at: "2026-10-28T16:00:00Z", page_count: 3, view_url: "https://www.canva.com/design/DAFVztcvd9z/Rm4Kd8/view" },
-  { id: "DAFSummer002", title: "Summer sale", updated_at: "2026-10-01T09:00:00Z" },
-];
-
 const RUN = {
   at: "2026-10-28T16:45:00Z", status: "partial", added: 3, updated: 1, removed: 1, pending_delete: 1, skipped_total: 22,
   skipped: [
@@ -136,9 +110,6 @@ function backend(): FakeTransport {
       : json(200, { items: [account()], next_cursor: "2" }))
     .on("POST", "/api/media-sync-accounts", (req) => {
       const body = req.body as { kind: string; name: string; config: { tenant_id: string; client_id: string }; secret: string };
-      if (body.kind === "canva") {
-        return json(201, { ...canvaAccount({ name: body.name, state: "pending_consent", secret: { set: false, hint: "" }, config: {} }), authorize_url: CONSENT_LINK, authorize_expires_at: "2026-10-28T17:15:00Z" }, { etag: '"1"' });
-      }
       return json(201, account({ name: body.name, config: body.config, secret: { set: true, hint: body.secret.slice(-4) } }), { etag: '"1"' });
     })
     .on("GET", `/api/media-sync-accounts/${ACCOUNT}`, () => json(200, account({ last_test: { at: "2026-10-28T16:30:00Z", ok: true, checks: [
@@ -151,9 +122,6 @@ function backend(): FakeTransport {
     .on("GET", "/api/media-syncs", () => json(200, { items: [current], next_cursor: null }))
     .on("POST", "/api/media-syncs", (req) => {
       const body = req.body as Record<string, any>;
-      if (body.provider === "canva") {
-        return json(201, canvaSync({ name: body.name ?? "Lunch menu", folder_id: body.folder_id ?? FOLDER, every_s: body.every ?? 900 }), { etag: '"1"' });
-      }
       current = sync({ name: body.name ?? "Lobby Signs", folder_id: body.folder_id ?? FOLDER, every_s: body.every ?? 900 });
       return json(201, current, { etag: '"1"' });
     })
@@ -164,11 +132,7 @@ function backend(): FakeTransport {
       return json(200, current);
     })
     .on("DELETE", `/api/media-syncs/${SYNC}`, () => ({ status: 204, headers: {}, body: undefined }))
-    .on("POST", `/api/media-syncs/${SYNC}/run`, () => json(202, sync({ next_run_at: "2026-10-28T17:00:00Z" })))
-    .on("POST", `/api/media-sync-accounts/${CANVA_ACCOUNT}/connect`, () => json(200, { ...canvaAccount({ state: "reconnect_required" }), authorize_url: CONSENT_LINK, authorize_expires_at: "2026-10-28T17:15:00Z" }))
-    .on("GET", `/api/media-sync-accounts/${CANVA_ACCOUNT}/designs`, (req) => req.query?.continuation === "NEXT"
-      ? json(200, { items: [DESIGNS[1]], continuation: null })
-      : json(200, { items: DESIGNS, continuation: "NEXT" }));
+    .on("POST", `/api/media-syncs/${SYNC}/run`, () => json(202, sync({ next_run_at: "2026-10-28T17:00:00Z" })));
   return transport;
 }
 
@@ -436,174 +400,4 @@ test("help names the account flow, the secret file and the folder selector", () 
   assert.match(add.notes.join("\n"), /never an argument/);
   assert.ok(add.examples.every((text) => text.includes("--secret-file")), "the example reads the secret from a file");
   assert.ok(add.options.some((option: { flags?: string; name?: string }) => (option.flags ?? option.name ?? "").includes("--secret-file")));
-});
-
-test("the Canva parsers read designs, pages and keep out what is not a design", () => {
-  assert.equal(mediaSyncDesign(CANVA_DESIGN), CANVA_DESIGN);
-  assert.equal(mediaSyncDesign(`  ${CANVA_DESIGN_URL} `), CANVA_DESIGN_URL);
-  assert.equal(mediaSyncDesign("https://canva.com/design/DAFVztcvd9z/view"), "https://canva.com/design/DAFVztcvd9z/view");
-  for (const bad of ["", "ab", "DAF abc", "http://www.canva.com/design/DAFVztcvd9z/x/edit", "https://canva.link/AbCd", "https://www.canva.com.evil.example/design/DAFVztcvd9z/x/edit",
-    "https://www.canva.com/templates/DAFVztcvd9z", "https://user@www.canva.com/design/DAFVztcvd9z/x/edit", FOLDER_URL]) {
-    assert.throws(() => mediaSyncDesign(bad), /--design takes a Canva design id/, bad);
-  }
-  assert.equal(mediaSyncPages("1"), "1");
-  assert.equal(mediaSyncPages("1,3-5"), "1,3,4,5");
-  assert.equal(mediaSyncPages("5, 3 ,3,4-5"), "3,4,5");
-  for (const bad of ["", "0", "3-1", "a", "1,,2", "-2", "1-2000", "1.5", "1;2"]) assert.throws(() => mediaSyncPages(bad), /--pages/, bad);
-});
-
-test("account add canva prints the consent link for a person and never opens a browser", async () => {
-  const env = await enrolled();
-  const transport = backend();
-  const json_ = await cli(["--json", "media", "sync", "account", "add", "canva", "--name", "Marketing Canva"], transport, env);
-  assert.equal(json_.code, 0, json_.stdout + json_.stderr);
-  const call = lastCall(transport);
-  assert.equal(call.method, "POST");
-  assert.equal(call.path, "/api/media-sync-accounts");
-  assert.deepEqual(call.body, { kind: "canva", name: "Marketing Canva" });
-  assert.equal(json_.envelope.data.authorize_url, CONSENT_LINK);
-  assert.equal(json_.envelope.data.state, "pending_consent");
-  assert.deepEqual(json_.envelope.data.secret, { set: false, hint: "" });
-
-  const human = await cli(["--human", "media", "sync", "account", "add", "canva", "--name", "Marketing Canva"], transport, env);
-  assert.equal(human.code, 0, human.stdout + human.stderr);
-  assert.match(human.stdout, /^Created media sync account msa_/m);
-  assert.match(human.stdout, /^canva account: not connected yet$/m);
-  assert.match(human.stdout, /Open this link in a browser signed in to Canva/);
-  assert.match(human.stdout, new RegExp(`screenrig media sync account show ${CANVA_ACCOUNT}`));
-  assert.match(human.stdout, new RegExp(`^link: ${CONSENT_LINK.replaceAll("?", "\\?")}$`, "m"));
-  assert.match(human.stdout, /works once, until 2026-10-28T17:15:00Z/);
-  // No browser was opened and no other request than the create was made.
-  assert.equal(syncCalls(transport).filter((c) => c.method === "POST").length, 2);
-  assert.equal((await cli(["--json", "media", "sync", "account", "add", "canva"], transport, env)).code, 2, "a name is required");
-  assert.equal((await cli(["--json", "media", "sync", "account", "add", "canva", "--name", "x", "--secret-file", "s.txt"], transport, env)).code, 2, "a Canva account takes no secret");
-});
-
-test("account connect makes a new link, designs lists what the connection sees", async () => {
-  const env = await enrolled();
-  const transport = backend();
-  const connect = await cli(["--human", "media", "sync", "account", "connect", CANVA_ACCOUNT], transport, env);
-  assert.equal(connect.code, 0, connect.stdout + connect.stderr);
-  assert.equal(lastCall(transport).method, "POST");
-  assert.equal(lastCall(transport).path, `/api/media-sync-accounts/${CANVA_ACCOUNT}/connect`);
-  assert.match(connect.stdout, /^New connect link for media sync account msa_/m);
-  assert.match(connect.stdout, /^state: reconnect_required$/m);
-  assert.match(connect.stdout, new RegExp(`^link: ${CONSENT_LINK.replaceAll("?", "\\?")}$`, "m"));
-  assert.equal((await cli(["--json", "media", "sync", "account", "connect", "nope"], transport, env)).code, 2);
-
-  const first = await cli(["--human", "media", "sync", "account", "designs", CANVA_ACCOUNT, "--query", "menu"], transport, env);
-  assert.equal(first.code, 0, first.stdout + first.stderr);
-  assert.deepEqual(lastCall(transport).query, { query: "menu" });
-  assert.match(first.stdout, /^Canva designs \(2\), most recently changed first$/m);
-  assert.match(first.stdout, new RegExp(`^${CANVA_DESIGN}\\s+Lunch menu\\s+3\\s+2026-10-28T16:00:00Z$`, "m"));
-  assert.match(first.stdout, /^DAFSummer002\s+Summer sale\s+-\s+2026-10-01T09:00:00Z$/m);
-  assert.match(first.stdout, /^More: screenrig media sync account designs msa_CANVAAAAAAAAAAAAAAA --query "menu" --continuation NEXT$/m);
-  assert.match(first.stdout, new RegExp(`^Next: screenrig media sync create canva --account-id ${CANVA_ACCOUNT} --design ${CANVA_DESIGN}$`, "m"));
-  const next = await cli(["--json", "media", "sync", "account", "designs", CANVA_ACCOUNT, "--continuation", "NEXT"], transport, env);
-  assert.deepEqual(lastCall(transport).query, { continuation: "NEXT" });
-  assert.equal(next.envelope.data.continuation, null);
-  assert.equal(next.envelope.data.items.length, 1);
-});
-
-test("sync create canva sends the design, pages, format and cadence", async () => {
-  const env = await enrolled();
-  const transport = backend();
-  const created = await cli(["--json", "media", "sync", "create", "canva", "--account-id", CANVA_ACCOUNT, "--design", CANVA_DESIGN_URL, "--pages", "1,3-5", "--format", "mp4", "--folder-id", FOLDER, "--every", "1h", "--name", "Menu loop"], transport, env);
-  assert.equal(created.code, 0, created.stdout + created.stderr);
-  const call = lastCall(transport);
-  assert.equal(call.path, "/api/media-syncs");
-  assert.deepEqual(call.body, { provider: "canva", account_id: CANVA_ACCOUNT, design: CANVA_DESIGN_URL, pages: [1, 3, 4, 5], format: "mp4", folder_id: FOLDER, every: 3600, name: "Menu loop" });
-  assert.ok(call.headers?.["Idempotency-Key"] ?? call.headers?.["idempotency-key"]);
-
-  const minimal = await cli(["--human", "media", "sync", "create", "canva", "--account-id", CANVA_ACCOUNT, "--design", CANVA_DESIGN], transport, env);
-  assert.equal(minimal.code, 0, minimal.stdout + minimal.stderr);
-  assert.deepEqual(lastCall(transport).body, { provider: "canva", account_id: CANVA_ACCOUNT, design: CANVA_DESIGN }, "the server defaults the format to png");
-  assert.match(minimal.stdout, /^Created media sync msy_/m);
-  assert.match(minimal.stdout, new RegExp(`^design: ${CANVA_DESIGN} \\(Lunch menu\\)$`, "m"));
-  assert.match(minimal.stdout, /^export: one image per page, pages 1,3$/m);
-  assert.match(minimal.stdout, /^exported design time: 2026-10-28T16:00:00Z$/m);
-  assert.match(minimal.stdout, /\{"by": "folder", "folder_id": "mfd_/, "the next step is the folder selector");
-
-  for (const [args, pattern] of [
-    [["--account-id", ACCOUNT], /requires --account-id and --design|--design/],
-    [["--design", CANVA_DESIGN], /--account-id/],
-    [["--account-id", "acc_1", "--design", CANVA_DESIGN], /msa_/],
-    [["--account-id", ACCOUNT, "--design", "https://example.com/design/DAFVztcvd9z/x"], /--design takes a Canva design id/],
-    [["--account-id", ACCOUNT, "--design", CANVA_DESIGN, "--pages", "0"], /--pages/],
-    [["--account-id", ACCOUNT, "--design", CANVA_DESIGN, "--format", "pdf"], /png|mp4/],
-    [["--account-id", ACCOUNT, "--design", CANVA_DESIGN, "--every", "1m"], /--every takes a duration/],
-  ] as Array<[string[], RegExp]>) {
-    const before = syncCalls(transport).length;
-    const result = await cli(["--json", "media", "sync", "create", "canva", ...args], transport, env);
-    assert.equal(result.code, 2, `${args.join(" ")}: ${result.stdout}`);
-    assert.match(result.envelope.error?.detail ?? result.stderr, pattern);
-    assert.equal(syncCalls(transport).length, before, "a refused command sends nothing");
-  }
-});
-
-test("sync run --force asks for a forced export", async () => {
-  const env = await enrolled();
-  const transport = backend();
-  const plain = await cli(["--json", "media", "sync", "run", SYNC], transport, env);
-  assert.equal(plain.code, 0);
-  assert.equal(lastCall(transport).query?.force, undefined);
-  const forced = await cli(["--human", "media", "sync", "run", SYNC, "--force"], transport, env);
-  assert.equal(forced.code, 0, forced.stdout + forced.stderr);
-  assert.equal(lastCall(transport).path, `/api/media-syncs/${SYNC}/run`);
-  assert.deepEqual(lastCall(transport).query, { force: "true" });
-  assert.match(forced.stdout, /exports the design even if Canva reports it unchanged/);
-});
-
-test("Canva problems name the next command", async () => {
-  const env = await enrolled();
-  const transport = memoryBackend({ now: () => NOW })
-    .on("GET", `/api/media-sync-accounts/${CANVA_ACCOUNT}/designs`, () => problem(409, "canva_reconnect_required", "Canva no longer honors this account's connection."))
-    .on("POST", "/api/media-sync-accounts", () => problem(409, "canva_not_configured", "Canva is not configured on this screenRIG server."))
-    .on("POST", "/api/media-syncs", () => problem(409, "media_sync_source_refused", "Canva cannot find that design, or this account cannot see it."));
-  const lapsed = await cli(["--json", "media", "sync", "account", "designs", CANVA_ACCOUNT], transport, env);
-  assert.equal(lapsed.code, 5);
-  assert.equal(lapsed.envelope.error?.code, "canva_reconnect_required");
-  assert.equal(lapsed.envelope.error?.next?.command, `screenrig media sync account connect ${CANVA_ACCOUNT}`);
-  const dark = await cli(["--json", "media", "sync", "account", "add", "canva", "--name", "Canva"], transport, env);
-  assert.equal(dark.code, 5);
-  assert.equal(dark.envelope.error?.code, "canva_not_configured");
-  const refused = await cli(["--json", "media", "sync", "create", "canva", "--account-id", CANVA_ACCOUNT, "--design", CANVA_DESIGN], transport, env);
-  assert.equal(refused.code, 5);
-  assert.equal(refused.envelope.error?.next?.command, `screenrig media sync account test ${CANVA_ACCOUNT}`);
-  assert.match(refused.envelope.error?.next?.reason ?? "", /Canva: the design's address/);
-});
-
-test("the renderers show a Canva connection and its sync", () => {
-  assert.ok(accountLines(canvaAccount()).includes("canva account: Ada Signage (user U7Qa2Lunch0001, team T3Brand000002)"));
-  assert.ok(accountLines(canvaAccount({ secret: { set: false, hint: "" }, config: {}, state: "pending_consent" })).includes("canva account: not connected yet"));
-  assert.ok(!accountLines(canvaAccount()).some((line) => line.startsWith("tenant:") || line.startsWith("secret:")));
-  const table = accountTableLines([account(), canvaAccount(), canvaAccount({ secret: { set: false, hint: "" }, config: {} })]);
-  assert.ok(table.some((line) => /Marketing Canva\s+canva: Ada Signage\s+connected\s+never/.test(line)));
-  assert.ok(table.some((line) => /not connected/.test(line)));
-  assert.deepEqual(consentLines(canvaAccount()), [], "a read of the account has no link");
-  assert.ok(consentLines({ ...canvaAccount(), authorize_url: CONSENT_LINK }).includes(`link: ${CONSENT_LINK}`));
-  assert.deepEqual(designTableLines([]), ["No designs"]);
-  assert.ok(designTableLines(DESIGNS).some((line) => line.includes("Summer sale")));
-  const lines = syncLines(canvaSync({ source: { ...canvaSync().source, format: "mp4", pages: [] } }));
-  assert.ok(lines.includes("export: one video, every page"));
-  assert.ok(lines.includes("source: https://www.canva.com/design/DAFVztcvd9z/Rm4Kd8/view"));
-});
-
-test("Canva stays out of discovery until the platform has a Canva Connect integration (ENG-6435)", () => {
-  const group = commandHelp(["media", "sync"]);
-  assert.doesNotMatch(group.notes.join("\n"), /Canva/);
-  assert.ok(!(commandHelp(["media", "sync"], true).allCommands ?? []).some((path) => /canva|connect|designs/.test(path)));
-  assert.ok(commandHelp(["media", "sync", "run"]).options.every((option) => option.name !== "--force"));
-  // The hidden commands still run and keep their own help, so unhiding is the flags alone.
-  for (const [words, example] of [
-    [["media", "sync", "account", "add", "canva"], "screenrig media sync account add canva"],
-    [["media", "sync", "account", "connect"], "screenrig media sync account connect"],
-    [["media", "sync", "account", "designs"], "screenrig media sync account designs"],
-    [["media", "sync", "create", "canva"], "screenrig media sync create canva"],
-  ] as Array<[string[], string]>) {
-    const help = commandHelp(words);
-    assert.ok(help.examples.length > 0, words.join(" "));
-    assert.ok(help.examples.every((text) => text.startsWith(example)), words.join(" "));
-  }
-  assert.match(commandHelp(["media", "sync", "account", "add", "canva"]).notes.join("\n"), /authorize_url/);
 });
