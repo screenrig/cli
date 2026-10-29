@@ -40,6 +40,7 @@ import { registerVersionCommands } from "./version.js";
 import { registerStatusCommands } from "./status.js";
 import { registerRecoveryCommands } from "./recovery.js";
 import { registerMigrateCommands } from "./migrate.js";
+import { registerScheduleImportCommands } from "./schedule-import.js";
 
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
   registerGlobalOptions(root);
@@ -81,5 +82,6 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerStatusCommands(root, bind);
   registerRecoveryCommands(root, bind);
   registerMigrateCommands(root, bind);
+  registerScheduleImportCommands(root, bind);
   registerGuidance(root);
 }
