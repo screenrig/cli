@@ -1,8 +1,7 @@
 import { requireToken } from "./client.js";
 import { flagString, type ParsedArgs } from "./command-input.js";
-import { clientFor, commandHandler, jsonBody, playlistWriteResult, type CommandHandler } from "./commands.js";
+import { clientFor, commandHandler, jsonBody, playlistWriteResult } from "./commands.js";
 import { ExitCode } from "./exit-codes.js";
-import { isResourceID } from "./generated/resource-ids.js";
 import { quotedRevision } from "./if-match.js";
 import { usageError } from "./problems.js";
 import { table } from "./webhooks.js";
@@ -119,24 +118,3 @@ export const handlePlaylistPromote = commandHandler(async (args, runtime, resolv
     ? `Revision ${number} holds the playlist's current content; nothing changed. ${id} stays at revision ${current}.`
     : `Promoted revision ${number} of ${id}: it is now the current revision ${current}. The name is unchanged and every screen showing the playlist updates.`);
 }, true);
-
-/** The two commands that listed and restored a screen's composition history; playlist revisions replaced them. */
-const REMOVED_SCREEN_COMMANDS = {
-  changes: "screen changes was removed: a screen's history is now its playlist's revision history. Read the screen's playlist_id with `screenrig screen show SCREEN_ID`, list the playlist's revisions with `screenrig playlist revisions PLAYLIST_ID` and read one with `screenrig playlist revision show PLAYLIST_ID --revision N`.",
-  revert: "screen revert was removed: list the playlist's revisions with `screenrig playlist revisions PLAYLIST_ID` and make one current with `screenrig playlist promote PLAYLIST_ID --revision N --expect-rev CURRENT`.",
-} as const;
-
-/**
- * Hidden `screen changes` and `screen revert`, kept for one release: they send
- * nothing, need no credential, and fail with the replacement so a caller that
- * still runs them learns what to run instead.
- */
-export const handleScreenCompositionRemoved: CommandHandler = async (args) => {
-  const name = args.command[1] === "revert" ? "revert" : "changes";
-  const screenId = args.positionals.slice(2).find((value) => isResourceID(value, "screen"));
-  throw usageError(REMOVED_SCREEN_COMMANDS[name],
-    screenId
-      ? { command: `screenrig screen show ${screenId}`, argv: ["screen", "show", screenId], reason: "Shows the screen's playlist_id, the playlist whose revisions replace the screen's change history." }
-      : { command: "screenrig playlist revisions --help", argv: ["playlist", "revisions", "--help"], reason: "Lists the arguments of the command that reads a playlist's revision history, with an example." },
-    "Nothing was sent. Run the command named in detail instead.");
-};

@@ -13,7 +13,6 @@ import { playsInstantOption } from "../playback-export.js";
 import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } from "../screen-link.js";
 import { handleScreenFolderCreate, handleScreenFolderDelete, handleScreenFolderList, handleScreenFolderShow, handleScreenFolderUpdate, handleScreenMove, screenFolderIdOption, screenFolderName, screenFolderPlaylistOption, screenListFolderOption } from "../screen-folders.js";
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
-import { handleScreenCompositionRemoved } from "../playlist-revisions.js";
 import { type Command, Option } from "commander";
 
 /** --folder on a fleet command: the same fleet as --tag, chosen by screen folder (with every folder inside it). */
@@ -24,14 +23,6 @@ function folderSelector(verb: "Target" | "Capture" = "Target"): Option {
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
   const screen = root.command("screen").description("Pair, configure, and inspect screens");
-
-  // Removed with per-screen composition history, kept one release as hidden commands that only name their replacement.
-  for (const name of ["changes", "revert"]) {
-    screen.command(name, { hidden: true })
-      .argument("[args...]")
-      .allowUnknownOption()
-      .action(bind(handleScreenCompositionRemoved));
-  }
 
   screen.command("publish").description("Publish a prepared playlist after rendering and inspecting its local preview")
     .argument("<id>", "Screen identifier")
