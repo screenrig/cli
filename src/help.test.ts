@@ -196,6 +196,8 @@ test("root help is compact and every command is discoverable through immediate c
     "triggers list",
     "triggers show",
     "triggers test",
+    "triggers update",
+    "triggers deliveries",
     "triggers clear",
     "triggers rotate-secret",
     "triggers delete",

@@ -2317,6 +2317,9 @@ export function memoryBackend(options: {
   let triggerSequence = 0;
   let triggerPasswordSequence = 0;
   const triggerPassword = () => `srtg_${String(++triggerPasswordSequence).padStart(43, "T")}`;
+  let triggerSigningSequence = 0;
+  const triggerSigningSecret = () => `whsec_${String(++triggerSigningSequence).padStart(43, "W")}`;
+  const triggerDeliveries = new Map<string, Array<Record<string, unknown>>>();
   const triggerReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
     const key = req.headers?.["idempotency-key"];
     const request = JSON.stringify([req.method, req.path, req.body ?? null]);
@@ -2332,27 +2335,75 @@ export function memoryBackend(options: {
     if (!ifMatch || ifMatch === `"${trigger.revision}"`) return undefined;
     return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The trigger revision does not match If-Match.", current_revision: trigger.revision } };
   };
-  const activeAlert = (trigger: Record<string, unknown>): boolean => (trigger.alert as { state?: string } | undefined)?.state === "active";
+  const overlayAlerts = (trigger: Record<string, unknown>): Array<Record<string, unknown>> => ((trigger.overlay as { alerts?: Array<Record<string, unknown>> } | undefined)?.alerts) ?? [];
+  const activeAlert = (trigger: Record<string, unknown>): boolean => (trigger.alert as { state?: string } | undefined)?.state === "active" || overlayAlerts(trigger).length > 0;
   const alertActive = () => problem(409, "resource_conflict", "The trigger has an active alert.");
   const publicTrigger = (trigger: Record<string, unknown>) => ({ ...trigger });
   transport.on("GET", "/api/triggers", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...triggers.values()].map(publicTrigger) } }));
   transport.on("POST", "/api/triggers", (req) => triggerReplay(req, () => {
-    const body = (req.body ?? {}) as { label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number; pull?: Record<string, unknown> };
+    const body = (req.body ?? {}) as {
+      kind?: string; label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number; pull?: Record<string, unknown>;
+      overlay?: { show?: string; edge?: string; style?: Record<string, unknown>; mapping?: Record<string, unknown>; signing?: boolean };
+    };
     if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The project has the maximum of 20 triggers.");
+    if (body.kind === "overlay" && !body.overlay?.show) return problem(400, "invalid_request", "overlay.show is required: bar or takeover.");
     triggerSequence += 1;
     const id = `trg_${String(triggerSequence).padStart(16, "A")}`;
+    const overlay = body.kind === "overlay" && body.overlay
+      ? {
+        show: body.overlay.show, ...(body.overlay.show === "bar" ? { edge: body.overlay.edge ?? "bottom" } : {}), style: body.overlay.style ?? {},
+        ...(body.overlay.mapping ? { mapping: body.overlay.mapping } : {}), enabled: true, signing: body.overlay.signing === true,
+        card_id: `crd_TRIGGER${String(triggerSequence).padStart(12, "A")}`, alerts: [],
+        screens: { targeted: 0, holding: 0, taken_over: 0, removed: 0, edge_taken: 0, skipped: 0, failed: 0 }, pending: false,
+      }
+      : undefined;
     const trigger: Record<string, unknown> = {
-      id, kind: "cap", label: body.label, target: body.target ?? {}, default_for_seconds: body.default_for_seconds ?? 3600,
+      id, kind: overlay ? "overlay" : "cap", label: body.label, target: body.target ?? {}, default_for_seconds: body.default_for_seconds ?? (overlay ? 600 : 3600),
       ...(body.pull ? { pull: body.pull } : {}),
-      url: `https://api.screenrig.ai/api/triggers/${id}/cap`, username: id, revision: 1,
+      ...(overlay ? { overlay } : {}),
+      url: `https://api.screenrig.ai/api/triggers/${id}/${overlay ? "overlay" : "cap"}`, username: id, revision: 1,
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
     triggers.set(id, trigger);
-    return { status: 201, headers: { "cache-control": "no-store", etag: '"1"' }, body: { ...publicTrigger(trigger), password: triggerPassword() } };
+    return {
+      status: 201, headers: { "cache-control": "no-store", etag: '"1"' },
+      body: { ...publicTrigger(trigger), password: triggerPassword(), ...(overlay?.signing ? { signing_secret: triggerSigningSecret() } : {}) },
+    };
   }));
   transport.on("GET", /^\/api\/triggers\/[^/]+$/, (req) => {
     const trigger = triggerFor(req);
     return trigger ? { status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" }, body: publicTrigger(trigger) } : notFound("Resource was not found.");
+  });
+  transport.on("PATCH", /^\/api\/triggers\/[^/]+$/, (req) => triggerReplay(req, () => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    const stale = staleTrigger(req, trigger);
+    if (stale) return stale;
+    const body = (req.body ?? {}) as Record<string, any>;
+    if (Object.keys(body).length === 0) return problem(400, "invalid_request", "body must set at least one member to change.");
+    if (body.overlay && !trigger.overlay) return problem(400, "invalid_request", "overlay is only for an overlay trigger.");
+    for (const key of ["label", "target", "default_for_seconds"]) if (body[key] !== undefined) trigger[key] = body[key];
+    if (body.pull !== undefined) { if (body.pull === null) delete trigger.pull; else trigger.pull = body.pull; }
+    let signingSecret: string | undefined;
+    const overlay = trigger.overlay as Record<string, any> | undefined;
+    if (overlay && body.overlay) {
+      for (const key of ["edge", "enabled"]) if (body.overlay[key] !== undefined) overlay[key] = body.overlay[key];
+      if (body.overlay.style !== undefined) overlay.style = body.overlay.style ?? {};
+      if (body.overlay.mapping !== undefined) { if (body.overlay.mapping === null) delete overlay.mapping; else overlay.mapping = body.overlay.mapping; }
+      if (body.overlay.signing !== undefined) {
+        if (body.overlay.signing && !overlay.signing) signingSecret = triggerSigningSecret();
+        overlay.signing = body.overlay.signing;
+      }
+    }
+    trigger.revision = (trigger.revision as number) + 1;
+    return { status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" }, body: { ...publicTrigger(trigger), ...(signingSecret ? { signing_secret: signingSecret } : {}) } };
+  }));
+  transport.on("GET", /^\/api\/triggers\/[^/]+\/deliveries$/, (req) => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    const limit = Number(req.query?.limit ?? 100);
+    const items = trigger.kind === "overlay" ? (triggerDeliveries.get(trigger.id as string) ?? []) : [];
+    return { status: 200, headers: {}, body: { items: items.slice(0, limit) } };
   });
   transport.on("DELETE", /^\/api\/triggers\/[^/]+$/, (req) => triggerReplay(req, () => {
     const trigger = triggerFor(req);
@@ -2368,13 +2419,24 @@ export function memoryBackend(options: {
     if (!trigger) return notFound("Resource was not found.");
     const stale = staleTrigger(req, trigger);
     if (stale) return stale;
+    const signing = (req.body as { signing?: boolean } | undefined)?.signing === true;
+    if (signing && !(trigger.overlay as { signing?: boolean } | undefined)?.signing) return problem(400, "invalid_request", "This trigger does not sign, so it has no signing secret to rotate.");
     trigger.revision = (trigger.revision as number) + 1;
-    return { status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" }, body: { ...publicTrigger(trigger), password: triggerPassword() } };
+    return {
+      status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" },
+      body: { ...publicTrigger(trigger), ...(signing ? { signing_secret: triggerSigningSecret() } : { password: triggerPassword() }) },
+    };
   }));
   transport.on("POST", /^\/api\/triggers\/[^/]+\/test$/, (req) => triggerReplay(req, () => {
     const trigger = triggerFor(req);
     if (!trigger) return notFound("Resource was not found.");
     if (activeAlert(trigger)) return alertActive();
+    if (trigger.overlay) {
+      const overlay = trigger.overlay as { alerts: Array<Record<string, unknown>> };
+      overlay.alerts = [{ id: "screenrig-test", label: "Test", title: "Test overlay", message: "This tests the overlay on these screens.", until: "2026-08-14T17:01:00.000Z", started_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z", revision: 1 }];
+      trigger.revision = (trigger.revision as number) + 1;
+      return { status: 200, headers: {}, body: { outcome: "shown", trigger_id: trigger.id, alert_id: "screenrig-test", until: "2026-08-14T17:01:00.000Z", active: 1 } };
+    }
     const targeted = (trigger.target as { screen_ids?: string[] }).screen_ids?.length ?? 0;
     trigger.alert = {
       id: `alr_${trigger.revision}`, revision: 1, state: "active", status: "Exercise", msg_type: "Alert", sender: "screenrig", identifier: `test-${trigger.revision}`,
@@ -2389,6 +2451,15 @@ export function memoryBackend(options: {
   transport.on("POST", /^\/api\/triggers\/[^/]+\/clear$/, (req) => {
     const trigger = triggerFor(req);
     if (!trigger) return notFound("Resource was not found.");
+    const alertId = (req.body as { alert_id?: string } | undefined)?.alert_id;
+    if (trigger.overlay) {
+      const overlay = trigger.overlay as { alerts: Array<Record<string, unknown>> };
+      const before = overlay.alerts.length;
+      overlay.alerts = alertId === undefined ? [] : overlay.alerts.filter((alert) => alert.id !== alertId);
+      if (overlay.alerts.length !== before) trigger.revision = (trigger.revision as number) + 1;
+      return { status: 200, headers: { etag: `"${trigger.revision}"` }, body: publicTrigger(trigger) };
+    }
+    if (alertId !== undefined) return problem(400, "invalid_request", "alert_id is only for an overlay trigger.");
     if (activeAlert(trigger)) {
       const alert = trigger.alert as Record<string, unknown>;
       trigger.alert = { ...alert, state: "ended", ended_reason: "cleared", ended_at: "2026-08-14T17:00:30.000Z", screens: { ...(alert.screens as object), pending: true } };

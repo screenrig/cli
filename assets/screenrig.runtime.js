@@ -1450,6 +1450,7 @@
     "log",
     "event.emit",
     "page.advance",
+    "page.skip",
     "viewport.changed",
     "kv.get",
     "kv.list",
@@ -1476,8 +1477,10 @@
   ];
   var MAX_FEATURES = 64;
   var MAX_FEATURE_LENGTH = 64;
+  var MAX_SKIP_REASON_CODE_POINTS = 64;
   var EMPTY_CAPABILITIES = {
     "page.advance": false,
+    "page.skip": false,
     "kv.read": false,
     "kv.write": false
   };
@@ -2014,6 +2017,7 @@
     }
     return {
       "page.advance": value["page.advance"] === true,
+      "page.skip": value["page.skip"] === true,
       "kv.read": value["kv.read"] === true,
       "kv.write": value["kv.write"] === true
     };
@@ -2119,9 +2123,15 @@
   function negotiateCapabilities(offered) {
     return {
       "page.advance": offered["page.advance"] === true,
+      "page.skip": offered["page.skip"] === true,
       "kv.read": offered["kv.read"] === true,
       "kv.write": offered["kv.write"] === true
     };
+  }
+  function sanitizeSkipReason(reason) {
+    const cleaned = reason.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "").replace(/\s+/g, " ").trim();
+    const clipped = Array.from(cleaned).slice(0, MAX_SKIP_REASON_CODE_POINTS).join("").trim();
+    return clipped === "" ? void 0 : clipped;
   }
 
   // src/screenrig.ts
@@ -2184,6 +2194,8 @@
     watchedContext = null;
     unsubscribe;
     advanced = false;
+    /** `ready()` was called for this activation: a skip is no longer a start-time decision. */
+    readied = false;
     reports = 0;
     parentOrigin = null;
     targetOrigin = null;
@@ -2211,6 +2223,7 @@
       this.pending.clear();
       this.kvChangeHandlers.clear();
       this.watchedContext = null;
+      this.readied = false;
       this.readyState = "inert";
       this.context = null;
       this.parentOrigin = null;
@@ -2353,6 +2366,7 @@
       }
       this.activeWaiters.clear();
       this.advanced = false;
+      this.readied = false;
       for (const handler of this.capabilityHandlers) {
         handler(this.capabilities);
       }
@@ -2426,6 +2440,7 @@
     }
     async ready() {
       const context = this.requireActive();
+      this.readied = true;
       await this.post(
         {
           protocol: PROTOCOL,
@@ -2505,6 +2520,21 @@
         this.advanced = false;
         throw err;
       }
+    }
+    async skip(reason) {
+      const context = this.requireActive();
+      if (!this.supports("page.skip")) {
+        throw new SdkValidationError("not_supported", "The Player does not support page.skip");
+      }
+      if (!this.capabilities["page.skip"]) {
+        throw new SdkValidationError("capability_denied", "This primitive cannot skip the page");
+      }
+      if (this.readied) {
+        throw new SdkValidationError("skip_after_ready", "skip() is a start-time decision: call it instead of ready()");
+      }
+      const cleaned = typeof reason === "string" ? sanitizeSkipReason(reason) : void 0;
+      const payload = { generation: context.generation, nonce: context.nonce, ...cleaned === void 0 ? {} : { reason: cleaned } };
+      await this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "page.skip", primitive_id: context.primitive_id, payload: { ...payload } }, true);
     }
     requireKey(key) {
       const bytes = new TextEncoder().encode(key);
