@@ -44,6 +44,9 @@ async function main() {
   const runtimeLock = await loadRuntimeDependencyLock(root);
   await rm(path.join(destination, "dist"), { recursive: true, force: true });
   const result = await build({
+    // Chunk names hash input paths relative to the working directory: pin it
+    // to this checkout so every machine and CI produce the same files.
+    absWorkingDir: root,
     entryPoints: [path.join(root, "dist", "bin.js")],
     outdir: path.join(destination, "dist"),
     // Chunks sit beside bin.js, so ../assets/ resolves from every one of them.
