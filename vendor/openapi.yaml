@@ -3287,6 +3287,102 @@ paths:
                 $ref: '#/components/schemas/Screen'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/link:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenLink
+      description: >-
+        The screen's link, the Player URL that opens this screen in a browser that keeps no storage, such as a vMix or OBS browser source. The url is a credential: below effective Manage it is empty and url_redacted is true. Needs the screens capability itself. screen_link_not_found when the screen has none.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The screen's link.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenLink'
+        '404':
+          description: not_found for a screen outside the project; screen_link_not_found for a screen without a link.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createScreenLink
+      description: >-
+        Issues the screen's link and returns its url, replacing any link the screen has (replaced says which). The screen must be active, paired once with its code (resource_conflict while it has no paired Player, screen_archived when archived). A replacement bumps the screen's content_access_generation and reissues its live grants, as a public ID rotation does, so every session the old link opened ends at once; key-bound Players of the screen re-mint on their own. The first link bumps nothing. A link is not a device binding: the screen's keys are untouched. Appends screen.link_changed (details.action created or replaced). If-Match is optional. The url is a credential: open it in one place.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The screen's new link.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenLink'
+        '409':
+          description: resource_conflict (no paired Player yet) or screen_archived.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteScreenLink
+      description: >-
+        Turns the screen's link off. The old url stops working at once and every session it opened ends, as in a replacement. Succeeds, changing nothing, when the screen has no link. Appends screen.link_changed (details.action deleted) when a link existed. If-Match is optional.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted, or there was none.
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/recovery/confirm:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -13235,6 +13331,63 @@ paths:
         '403':
           $ref: '#/components/responses/RuntimeProblem'
         '404':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/RuntimeProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/link-sessions:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: createScreenLinkRuntimeSession
+      x-rate-limit-policies:
+        - name: screen-link-session
+          quota: 60
+          windowSeconds: 60
+        - name: screen-link-session-ip
+          quota: 600
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Mints a seven-day ScreenRig-Session from the screen link secret in the Player's address (the srsl_ value after #screen= in https://play.<domain>/player/#screen=…), for a browser that keeps no storage. The Player sends the secret on every load and again to renew; it holds no key and no pairing. The session's device-key claim carries the link's id, so replacing or deleting the link ends it at the API and at the edge at once. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints so the Player can show the archived glass. A replaced, deleted or unknown link is screen_link_invalid (401, action clear_lkg). A present host replaces the stored host hint; player replaces the stored player.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenLinkSessionRequest'
+      responses:
+        '201':
+          description: Paired native runtime session; no Set-Cookie.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeRuntimeSession'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
           $ref: '#/components/responses/RuntimeProblem'
         '409':
           $ref: '#/components/responses/RuntimeProblem'
@@ -25006,6 +25159,7 @@ components:
         location: {$ref: "#/components/schemas/ScreenLocation", description: "Where the screen is. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token. Never authorization."}
         overlay_strips: {type: array, maxItems: 2, items: {type: object, additionalProperties: false, required: [trigger_id, edge], properties: {trigger_id: {type: string}, edge: {type: string, enum: [top, bottom]}}}, description: "The bars overlay triggers hold on the screen, at most one per edge: the trigger and the edge. Absent when none. An overlay trigger sets and removes them; a change remints the manifest revision of a screen that shows a playlist. Never authorization."}
         fleet_link_id: {type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted."}
+        link: {$ref: "#/components/schemas/ScreenLinkSummary"}
         observation: {$ref: "#/components/schemas/ScreenObservation"}
         status: {$ref: "#/components/schemas/ScreenStatus"}
         glass: {$ref: "#/components/schemas/ScreenGlass"}
@@ -27713,6 +27867,38 @@ components:
         host: {$ref: "#/components/schemas/RuntimeHostHint"}
         playback: {$ref: "#/components/schemas/PlaybackHandshake"}
         player: {$ref: "#/components/schemas/PlayerIdentity"}
+    ScreenLinkSummary:
+      type: object
+      additionalProperties: false
+      required: [hint, created_at]
+      description: The screen's link, without its url. Present only while the screen has a link. Read-only; POST and DELETE /api/screens/{id}/link change it.
+      properties:
+        hint: {type: string, minLength: 4, maxLength: 4, description: "The last four characters of the link's secret."}
+        created_at: {type: string, format: date-time}
+        last_used_at: {type: string, format: date-time, description: Last time a Player opened a session from the link. Absent until one has.}
+    ScreenLink:
+      type: object
+      additionalProperties: false
+      required: [hint, created_at]
+      description: A Player URL that opens one screen in a browser that keeps no storage, such as a vMix or OBS browser source.
+      properties:
+        url: {type: string, maxLength: 512, description: "https://play.<domain>/player/#screen=<secret>. Empty, with url_redacted true, below effective Manage. It is a credential that opens this screen: paste it into one browser source. It sits in the address fragment, which no server or log receives."}
+        url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage."}
+        hint: {type: string, minLength: 4, maxLength: 4, description: "The last four characters of the link's secret."}
+        created_at: {type: string, format: date-time}
+        last_used_at: {type: string, format: date-time, description: Last time a Player opened a session from the link. Absent until one has.}
+        replaced: {type: boolean, description: "Only on the answer to POST: true when the new link replaced an earlier one, whose url no longer works."}
+    ScreenLinkSessionRequest:
+      type: object
+      additionalProperties: true
+      required: [screen_link]
+      description: >-
+        The screen link secret plus the optional host, playback and player hints. Unknown members are ignored, and host, playback and player are read tolerantly (docs/player-compatibility.md §1.1). The secret is a credential: it is never logged or echoed.
+      properties:
+        screen_link: {type: string, pattern: "^srsl_[A-Za-z0-9_-]{43}$"}
+        host: {$ref: "#/components/schemas/RuntimeHostHint"}
+        playback: {$ref: "#/components/schemas/PlaybackHandshake"}
+        player: {$ref: "#/components/schemas/PlayerIdentity"}
     NativePairingCompletion: {type: object, additionalProperties: true, required: [screen, public_url], properties: {screen: {$ref: "#/components/schemas/RuntimePairingScreen"}, public_url: {type: string, format: uri}}}
     BrowserProvisioningExchange: {type: object, additionalProperties: true, required: [provisioning_token, exchange_id], properties: {provisioning_token: {type: string, pattern: "^[A-Za-z0-9_-]{43}$"}, exchange_id: {type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$"}}}
     BrowserProvisioningCompletion: {type: object, additionalProperties: true, required: [screen, public_url], properties: {screen: {$ref: "#/components/schemas/RuntimePairingScreen"}, public_url: {type: string, format: uri}}}
@@ -29237,6 +29423,8 @@ x-problem-codes:
   - user_binding_stale
   - session_expired
   - credential_revoked
+  - screen_link_invalid
+  - screen_link_not_found
   - proof_clock_skew
   - key_retired
   - assignment_not_found
