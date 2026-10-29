@@ -126,6 +126,8 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (
 
 /** How many requests of one section run at once. */
 const CONCURRENCY = 8;
+/** Playlists are many small requests (the playlist, its revision list, each revision): more run at once. */
+const PLAYLIST_CONCURRENCY = 24;
 
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
@@ -223,7 +225,7 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
   await section("playlists", async () => {
     const playlists = asArray(await api.list("/api/playlists"));
     await json("playlists/playlists.json", playlists);
-    const counts = await mapLimit(playlists, CONCURRENCY, async (playlist) => {
+    const counts = await mapLimit(playlists, PLAYLIST_CONCURRENCY, async (playlist) => {
       const id = String(playlist.id);
       await json(`playlists/${id}/playlist.json`, await api.get(`/api/playlists/${id}`));
       const revisions = asArray(await api.list(`/api/playlists/${id}/revisions`));
