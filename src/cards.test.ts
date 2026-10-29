@@ -358,7 +358,7 @@ test("playlist show --output keeps card instance placements, so show, edit and u
   assert.deepEqual(exported.pages[0].primitives, [placement]);
   exported.pages[0].primitives[0].anchor = "bottom-right";
   await writeFile(file, JSON.stringify(exported));
-  const updated = await f.invoke(["playlist", "update", "pl_MENU", file, "--if-match", "4"]);
+  const updated = await f.invoke(["playlist", "update", "pl_MENU", file, "--expect-rev", "4"]);
   assert.equal(updated.code, 0, updated.stdout);
   assert.deepEqual(put.pages[0].primitives, [{ ...placement, anchor: "bottom-right" }]);
   assert.deepEqual(updated.body.warnings ?? [], []);

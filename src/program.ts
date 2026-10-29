@@ -1,4 +1,3 @@
-import { normalizeRevisionArgs } from "./command-input.js";
 import { type Command, CommanderError } from "commander";
 import { commandFromArgv, commandPath, createCommandTree } from "./command-tree.js";
 import { CliError } from "./problems.js";
@@ -28,7 +27,6 @@ function withUsageHelp(error: unknown, command: Command): unknown {
 /** Run one native Commander action and return its result to the output boundary. */
 export async function executeCommand(argv: string[], runtime: CliRuntime): Promise<CommandResult> {
   let result: CommandResult | undefined;
-  argv = normalizeRevisionArgs(argv);
   const tree = createCommandTree(argv, async (handler, args) => {
     result = await handler(args, runtime);
   });

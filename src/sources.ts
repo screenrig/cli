@@ -415,7 +415,7 @@ export const handleSourceUpdate = commandHandler(async (args, runtime, resolved)
   const name = flagString(args.flags, "name");
   const card = flagString(args.flags, "card");
   const refresh = flagString(args.flags, "refresh");
-  const expect = flagString(args.flags, "if-match");
+  const expect = flagString(args.flags, "expect-rev");
   // --set edits the saved config: the whole config is read, merged and sent,
   // guarded by the revision read unless --expect-rev names another.
   let readRevision: number | undefined;
@@ -505,7 +505,7 @@ export const handleSourceDelete = commandHandler(async (args, runtime, resolved)
   const id = sourceId(args.positionals[2], "delete");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await sourceCall(client, {
-    method: "DELETE", path: `${SOURCES_PATH}/${id}`, idempotent: true, headers: revisionHeaders(flagString(args.flags, "if-match")),
+    method: "DELETE", path: `${SOURCES_PATH}/${id}`, idempotent: true, headers: revisionHeaders(flagString(args.flags, "expect-rev")),
   }, id);
   return {
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),

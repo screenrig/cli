@@ -513,30 +513,42 @@ test("declared relationships and choices reject invalid commands before authenti
   }
 });
 
-test("canonical vocabulary keeps legacy invocations equivalent without rewriting values", async () => {
+test("the canonical vocabulary is the only vocabulary", async () => {
   const { parseArgv } = await import("./argv.js");
-  for (const [prefix, canonical, legacy, value, suffix] of [
-    [["playlist", "init", "med_TEST"], "--screen-id", "--screen", "scr_TEST", ["--name", "Lobby", "--output", "out.json"]],
-    [["screen", "pair", "234567"], "--name", "--label", "--screen", []],
-    [["screen", "provision"], "--name", "--label", "Lobby", ["--print-url"]],
-    [["kv", "get", "greeting"], "--app-id", "--application-id", "app_TEST", []],
-    [["kv", "webhook", "create", "greeting"], "--app-id", "--application-id", "app_TEST", []],
+  for (const [argv, flag, value] of [
+    [["playlist", "init", "med_TEST", "--name", "Lobby", "--output", "out.json"], "screen-id", "scr_TEST"],
+    [["screen", "pair", "234567"], "name", "Lobby"],
+    [["screen", "provision", "--print-url"], "name", "Lobby"],
+    [["kv", "get", "greeting"], "app-id", "app_TEST"],
+    [["kv", "webhook", "create", "greeting"], "app-id", "app_TEST"],
   ] as const) {
-    assert.deepEqual(parseArgv([...prefix, `${canonical}=${value}`, ...suffix]), parseArgv([...prefix, `${legacy}=${value}`, ...suffix]));
-    assert.throws(() => parseArgv([...prefix, `${canonical}=${value}`, `${legacy}=${value}`, ...suffix]), /only once/);
+    assert.equal(parseArgv([...argv, `--${flag}=${value}`]).flags[flag], value, argv.join(" "));
+    assert.throws(() => parseArgv([...argv, `--${flag}=${value}`, `--${flag}=${value}`]), /only once/);
+  }
+  // The retired spellings are unknown options.
+  for (const [argv, spelling] of [
+    [["playlist", "init", "med_TEST", "--name", "Lobby", "--output", "out.json"], "--screen"],
+    [["screen", "pair", "234567"], "--label"],
+    [["screen", "provision", "--print-url"], "--label"],
+    [["kv", "get", "greeting", "--app-id", "app_TEST"], "--application-id"],
+    [["kv", "webhook", "create", "greeting"], "--application-id"],
+    [["events", "list"], "--application-id"],
+    [["events", "list"], "--cursor"],
+    [["events", "follow"], "--cursor"],
+    [["screen", "update", "scr_TEST", "--name", "Lobby"], "--if-match"],
+  ] as const) {
+    assert.throws(() => parseArgv([...argv, spelling, "x"]), /does not accept|requires/, `${argv.join(" ")} ${spelling}`);
   }
   assert.throws(() => parseArgv(["operations", "get", "op_TEST"]), /operations has no command get/);
   assert.throws(() => parseArgv(["playlist", "get", "pl_TEST"]), /playlist has no command get/);
   const selector = commandHelp(["kv", "get"]).options.find(option => option.name === "--app-id");
   assert.equal(selector?.required, true);
-  assert.deepEqual(selector?.aliases, ["--application-id"]);
   assert.equal(commandHelp(["kv", "get"]).options.some(option => option.name === "--application-id"), false);
   // A webhook writes an application key or a card's document: exactly one of --app-id and --card.
   for (const action of ["create", "list", "rotate-secret", "delete"]) {
     const help = commandHelp(["kv", "webhook", action]);
     const webhookSelector = help.options.find(option => option.name === "--app-id");
     assert.equal(webhookSelector?.required, false, action);
-    assert.deepEqual(webhookSelector?.aliases, ["--application-id"], action);
     assert.equal(help.options.some(option => option.name === "--card"), true, action);
     assert.deepEqual(help.relationships?.map(({ kind, options }) => ({ kind, options })), [{ kind: "exactlyOne", options: ["--app-id", "--card"] }], action);
   }

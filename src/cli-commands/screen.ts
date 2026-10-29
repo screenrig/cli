@@ -1,4 +1,3 @@
-import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
@@ -36,11 +35,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   screen.command("pair").description("Claim a Player pairing code")
     .argument("<code...>", "Player pairing code as shown; spaces and dashes are ignored")
+    .option("--name <NAME>", "Set the screen name")
     .action(bind(handleScreenPair));
 
   screen.command("provision").description("Create a screen and browser handoff")
     .addOption(new Option("--open", "Open the browser Player handoff").conflicts(["printUrl"]))
     .option("--print-url", "Return the browser handoff URL")
+    .option("--name <NAME>", "Set the screen name")
     .action(bind(handleScreenProvision));
 
   screen.command("update").description("Update a screen")
@@ -400,7 +401,6 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "clear")!,
     "screenrig screen display-schedule clear scr_LOBBY", "screenrig screen display-schedule clear --tag Cafe");
-  for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
   const update = screen.commands.find(command => command.name() === "update")!;
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);

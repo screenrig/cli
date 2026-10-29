@@ -75,7 +75,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
 
   media.command("restore").description("Put a past version back in service, as a new version")
     .argument("<id>", "Media identifier (med_...)")
-    .requiredOption("--number <N>", "Version number to put back, as media versions lists it (required; --version N means the same)", positiveInteger("number"))
+    .requiredOption("--number <N>", "Version number to put back, as media versions lists it (required)", positiveInteger("number"))
     .option("--expect-rev <REVISION>", "Optionally require this media revision", revision)
     .option("--note <TEXT>", REPLACE_NOTE_HELP, reviewNoteOption)
     .action(bind(handleMediaRestore));
@@ -83,7 +83,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
   const version = media.command("version").description("Manage one stored version of a media item");
   version.command("delete").description("Delete a past version and its stored bytes")
     .argument("<id>", "Media identifier (med_...)")
-    .requiredOption("--number <N>", "Version number to delete, as media versions lists it (required; --version N means the same)", positiveInteger("number"))
+    .requiredOption("--number <N>", "Version number to delete, as media versions lists it (required)", positiveInteger("number"))
     .action(bind(handleMediaVersionDelete));
 
   media.command("upload-batch").description("Upload a manifest with resumable state")

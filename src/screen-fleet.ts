@@ -85,7 +85,7 @@ export function selectorFlags(selector: ScreenActionSelector): string {
 
 /** Revision guards are per screen; the fleet route has none. */
 export function rejectFleetRevision(args: ParsedArgs, command: string): void {
-  if (args.flags["if-match"] !== undefined) {
+  if (args.flags["expect-rev"] !== undefined) {
     throw usageError(`${command} with several screens or --tag does not take --expect-rev: revision guards are per screen. Target one screen id to use --expect-rev.`);
   }
 }

@@ -113,7 +113,7 @@ export const handlePlaylistFields = commandHandler(async (args, runtime, resolve
   const changing = Object.keys(sets).length > 0 || clears.length > 0 || flagBool(args.flags, "refresh");
   for (const name of clears) if (Object.hasOwn(sets, name)) throw usageError(`${name} is both --set and --clear.`);
   if (changing) {
-    const expected = flagString(args.flags, "if-match");
+    const expected = flagString(args.flags, "expect-rev");
     const response = await client.call({
       method: "PATCH", path: `${playlistPath(id)}/values`, idempotent: true,
       body: { values: { ...sets, ...Object.fromEntries(clears.map((name) => [name, null])) } },

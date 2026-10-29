@@ -1,4 +1,3 @@
-import { addValueAlias } from "./aliases.js";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
@@ -34,7 +33,7 @@ export function registerKvCommands(root: Command, bind: CommandActionBinder): vo
 
   kv.command("list").description("List application keys")
     .action(bind(handleKvList));
-  for (const command of kv.commands) addValueAlias(command, "--app-id", "--application-id", "Select the application's K/V namespace", true);
+  for (const command of kv.commands) command.requiredOption("--app-id <ID>", "Select the application's K/V namespace");
   const set = kv.commands.find(command => command.name() === "set")!;
   requireOptionGroup(set, "exactlyOne", ["--json-value", "--file", "--value-base64"]);
 
@@ -60,7 +59,7 @@ export function registerKvCommands(root: Command, bind: CommandActionBinder): vo
     .argument("<webhook_id>", "K/V webhook identifier")
     .action(bind(handleKvWebhookDelete));
   for (const command of webhook.commands) {
-    addValueAlias(command, "--app-id", "--application-id", "Select the application whose key the webhook writes", false);
+    command.option("--app-id <ID>", "Select the application whose key the webhook writes");
     command.option("--card <CARD_ID>", "Select the card whose data document the webhook writes");
     requireOptionGroup(command, "exactlyOne", ["--app-id", "--card"]);
   }

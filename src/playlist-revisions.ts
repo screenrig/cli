@@ -99,7 +99,7 @@ export const handlePlaylistRevisionShow = commandHandler(async (args, runtime, r
 
 export const handlePlaylistPromote = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
-  const expected = flagString(args.flags, "if-match");
+  const expected = flagString(args.flags, "expect-rev");
   if (!id) throw usageError("playlist promote requires <id>, --revision N and --expect-rev CURRENT.");
   const number = revisionNumber(args, "playlist promote");
   if (expected === undefined) throw usageError("playlist promote requires --expect-rev, the playlist's current revision.", {

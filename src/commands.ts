@@ -1150,7 +1150,7 @@ export const handleAppRename = commandHandler(async (args, runtime, resolved) =>
   const id = args.positionals[2];
   const name = normalizeApplicationName(flagString(args.flags, "name") ?? "");
   if (!id || !name) throw usageError("app rename requires <id> and a nonempty --name.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
     method: "PATCH", path: `/api/applications/${encodeURIComponent(id)}`,
@@ -1167,7 +1167,7 @@ export const handleAppRename = commandHandler(async (args, runtime, resolved) =>
 export const handleAppDelete = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
   if (!id) throw usageError("app delete requires <id>.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
     method: "DELETE", path: `/api/applications/${encodeURIComponent(id)}`, idempotent: true,
@@ -2352,7 +2352,7 @@ export const handleAdsNetworkRate = commandHandler((args, runtime, resolved) =>
     method: "POST",
     path: "/api/advertising/network/rate",
     body: adsNetworkRateBody(args),
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: "Default rate updated. Affected campaigns are paused until each buyer accepts a fresh quote.",
   }));
 
@@ -2368,7 +2368,7 @@ export const handleAdsInventoryList = commandHandler((args, runtime, resolved) =
 export const handleAdsInventoryUpdate = commandHandler(async (args, runtime, resolved) => {
   const screenId = args.positionals[3];
   if (!screenId) throw usageError("ads inventory update requires <screen-id>.");
-  const requested = flagString(args.flags, "if-match");
+  const requested = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const current = await adsExistingRow(client, "/api/advertising/inventory", "inventory", "screen_id", screenId);
   if (!current && requested) {
@@ -2424,7 +2424,7 @@ export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolve
     method: "POST",
     path: `/api/advertising/slots/${encodeURIComponent(slotId)}`,
     body: adsSlotWriteBody(current, args),
-    ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
+    ifMatch: flagString(args.flags, "expect-rev") ?? currentRevision,
     human: "Slot updated. A changed effective rate pauses affected campaigns until each buyer accepts a fresh quote.",
   });
 });
@@ -2540,7 +2540,7 @@ export const handleAdsMembershipsUpdate = commandHandler(async (args, runtime, r
     method: "POST",
     path: `/api/advertising/memberships/${encodeURIComponent(id)}`,
     body: adsMembershipWriteBody(current, args),
-    ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
+    ifMatch: flagString(args.flags, "expect-rev") ?? currentRevision,
     human: `Updated membership ${id}. Scope changes stop new selections and invalidate unstarted decisions.`,
   });
 });
@@ -2608,7 +2608,7 @@ export const handleAdsCampaignsShow = commandHandler(async (args, runtime, resol
 export const handleAdsCampaignsPreview = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads campaigns preview requires <campaign-id>.");
-  let ifMatch = flagString(args.flags, "if-match");
+  let ifMatch = flagString(args.flags, "expect-rev");
   if (ifMatch === undefined) {
     const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
     const campaign = (await client.call({ method: "GET", path: `/api/advertising/campaigns/${encodeURIComponent(id)}` })).body;
@@ -2634,7 +2634,7 @@ export const handleAdsCampaignsUpdate = commandHandler(async (args, runtime, res
     method: "POST",
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}`,
     body: await campaignDraft(args.positionals[4], runtime),
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: `Campaign ${id} draft replaced. Changing accepted scope requires a fresh quote and explicit acceptance.`,
   });
 });
@@ -2646,7 +2646,7 @@ export const handleAdsCampaignsActivate = commandHandler(async (args, runtime, r
     method: "POST",
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/activate`,
     body: { quote_id: flagString(args.flags, "quote-id") },
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: "Campaign activation accepted the quote. No wallet debit happens here: a per-occurrence hold is placed when the runtime resolves a play and it settles only on the verified completion. Activation is not proof that a screen displayed anything.",
   });
 });
@@ -2657,7 +2657,7 @@ export const handleAdsCampaignsPause = commandHandler(async (args, runtime, reso
   return adsMutation(args, runtime, resolved, {
     method: "POST",
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/pause`,
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: `Paused campaign ${id}. New reservations stop; already-started valid plays settle at their reserved price.`,
   });
 });
@@ -2668,7 +2668,7 @@ export const handleAdsCampaignsResume = commandHandler(async (args, runtime, res
   return adsMutation(args, runtime, resolved, {
     method: "POST",
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/resume`,
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: `Resumed campaign ${id} after a manual pause. Resume cannot clear a price-change pause; that needs a fresh quote accepted with campaigns accept-rates.`,
   });
 });
@@ -2680,7 +2680,7 @@ export const handleAdsCampaignsAcceptRates = commandHandler(async (args, runtime
     method: "POST",
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/accept-rates`,
     body: { quote_id: flagString(args.flags, "quote-id") },
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: `Accepted the fresh quote for campaign ${id}. Delivery resumes only if every other blocker, such as review or funds, is also clear.`,
   });
 });
@@ -2931,7 +2931,7 @@ export const handleAdsDirectUpdate = commandHandler(async (args, runtime, resolv
     method: "POST",
     path: target,
     body: await directDraft(args.positionals[4], runtime),
-    ifMatch: flagString(args.flags, "if-match"),
+    ifMatch: flagString(args.flags, "expect-rev"),
     human: `Direct campaign ${args.positionals[3]} replaced from the draft. Every writable field now holds the draft's value.`,
   });
 });
@@ -2942,7 +2942,7 @@ const directTransition = (verb: "pause" | "resume" | "end", human: (id: string) 
     return adsMutation(args, runtime, resolved, {
       method: "POST",
       path: `${target}/${verb}`,
-      ifMatch: flagString(args.flags, "if-match"),
+      ifMatch: flagString(args.flags, "expect-rev"),
       human: human(args.positionals[3]!),
     });
   });
@@ -3255,8 +3255,8 @@ async function requireAppDirectory(runtime: CliRuntime, dir: string, usage: stri
 async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>, update: boolean): Promise<CommandResult> {
   const id = update ? args.positionals[2] : undefined;
   const dir = args.positionals[update ? 3 : 2];
-  requireFlagValue(args, "if-match", "1");
-  const revision = flagString(args.flags, "if-match");
+  requireFlagValue(args, "expect-rev", "1");
+  const revision = flagString(args.flags, "expect-rev");
   if (!dir || (update && !id)) {
     throw usageError(update ? "app update requires <id> <directory>." : "app upload requires one directory.");
   }
@@ -3558,7 +3558,7 @@ export const handleMediaDelete = commandHandler(async (args, runtime, resolved) 
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   if (!id) throw usageError("media delete requires <id>.");
   const response = await client.call({
     method: "DELETE",
@@ -3607,7 +3607,7 @@ export const handleMediaFolderUpdate = commandHandler(async (args, runtime, reso
   const name = flagString(args.flags, "name");
   const parent = flagString(args.flags, "parent");
   const root = flagBool(args.flags, "root");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   if (name === undefined && parent === undefined && !root) {
     throw usageError("media folder update requires --name NAME, --parent ID, or --root.");
   }
@@ -3625,7 +3625,7 @@ export const handleMediaFolderUpdate = commandHandler(async (args, runtime, reso
 
 export const handleMediaFolderDelete = commandHandler(async (args, runtime, resolved) => {
   const id = mediaFolderId(args.positionals[3], "media folder delete <id>");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
     method: "DELETE", path: `/api/media-folders/${id}`, idempotent: true,
@@ -3969,7 +3969,7 @@ function waitingForGeneration(error: unknown, operationId: string | undefined): 
 
 async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
   const id = args.positionals[2];
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const clearTag = flagBool(args.flags, "clear-tag");
   const tag = mediaTagFromArgs(args);
   if (!id) {
@@ -4032,7 +4032,7 @@ export const handleMediaAvailability = commandHandler(async (args, runtime, reso
   const rule = file === undefined ? null : mediaAvailabilityRule(await readAuthoringJson(file, runtime), file);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   // The route requires the media revision: read it unless --expect-rev names it.
-  let revision = flagString(args.flags, "if-match");
+  let revision = flagString(args.flags, "expect-rev");
   if (revision === undefined) {
     const current = await client.call({ method: "GET", path: `/api/media/${id}` });
     const value = (current.body as { revision?: unknown } | undefined)?.revision;
@@ -5209,12 +5209,12 @@ export const handlePlaylistImport = commandHandler(async (args, runtime, resolve
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   requireFlagValue(args, "update", "pl_01");
-  requireFlagValue(args, "if-match", "1");
+  requireFlagValue(args, "expect-rev", "1");
   requireFlagValue(args, "name", "Lobby loop (copy)");
   const directory = args.positionals[2];
   if (!directory) throw usageError("playlist import requires one <directory>.");
   const updateId = flagString(args.flags, "update");
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   const name = flagString(args.flags, "name");
   const result = await importPlaylistBundle({
     directory: path.resolve(runtime.cwd(), directory),
@@ -5269,7 +5269,7 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
 
   const id = action === "update" ? args.positionals[2] : undefined;
   const file = action === "update" ? args.positionals[3] : args.positionals[2];
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   if (!file || (action === "update" && !id)) {
     throw usageError(`playlist ${action} requires ${action === "update" ? "<id> <file>" : "<file>"}.`);
   }
@@ -5373,7 +5373,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
     await validatePlaylistCards(client, { pages: body.pages });
     await assertAssignedScreensHaveZone(client, id, body.pages);
   }
-  const expected = flagString(args.flags, "if-match");
+  const expected = flagString(args.flags, "expect-rev");
   const response = await callPlaylist(client, { method: "PATCH", id, body,
     headers: { ...reviewNoteFrom(args), ...(expected ? { "if-match": quotedRevision(expected) } : {}) },
   });
@@ -5387,7 +5387,7 @@ export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime,
   const result = await replacePlaylistRelease({ client, apiUrl: resolved.apiUrl,
     playlistId: args.positionals[2]!, pageId: flagString(args.flags, "page")!,
     primitiveId: flagString(args.flags, "primitive")!, releaseId: flagString(args.flags, "release-id")!,
-    apply: flagBool(args.flags, "apply"), revision: flagString(args.flags, "if-match"),
+    apply: flagBool(args.flags, "apply"), revision: flagString(args.flags, "expect-rev"),
     impact: flagString(args.flags, "expect-impact"), note: flagString(args.flags, "note"),
   });
   const answer = result as { warnings?: unknown; playlist?: unknown };
@@ -5410,7 +5410,7 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   if (!id) throw usageError("playlist delete requires <id>.");
   let response;
   try {
@@ -5688,7 +5688,7 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
   if (openMode === printMode) {
     throw usageError("screen provision requires exactly one of --open or --print-url.");
   }
-  const label = flagString(args.flags, "label");
+  const label = flagString(args.flags, "name");
   const enrollmentRuntime = {
     fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
     now: runtime.now,
@@ -5789,7 +5789,7 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   const rawCode = args.positionals.slice(2).join(" ");
   if (!rawCode) throw usageError("screen pair requires CODE.");
   const code = canonicalPairingCode(rawCode, "screen pair CODE");
-  const label = flagString(args.flags, "label");
+  const label = flagString(args.flags, "name");
   const request: PairScreen = { code, ...(label ? { label } : {}) };
   const response = await client.call({
     method: "POST",
@@ -5927,7 +5927,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   const name = flagString(args.flags, "name");
   const playlistId = flagString(args.flags, "playlist-id");
   const timezone = flagString(args.flags, "timezone");
@@ -5978,7 +5978,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const playlistId = flagString(args.flags, "playlist-id");
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   if (!playlistId) throw usageError("screen assign requires <id> --playlist-id.");
   const target = screenTarget(args, "screen assign");
   if (target.kind === "fleet") {
@@ -6016,7 +6016,7 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
 
   const id = args.positionals[2];
   const timezone = flagString(args.flags, "timezone");
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   if (!id || !timezone) throw usageError("screen set-timezone requires <id> --timezone.");
   // The zone database belongs to the server, which validates the identifier
   // against it. Sending the value unchanged keeps one authority for what a
@@ -6035,7 +6035,7 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
 /** screen wall set|clear: one ScreenPatch carrying only wall; null clears it. */
 async function screenWallPatch(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, id: string, wall: ScreenPatch["wall"]) {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   const body: ScreenPatch = { wall };
   let response;
   try {
@@ -6087,7 +6087,7 @@ async function screenArchiveUnarchiveAction(args: ParsedArgs, runtime: CliRuntim
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   if (!id) throw usageError(`screen ${action} requires <id>.`);
   const response = await client.call({
     method: "POST",
@@ -6116,7 +6116,7 @@ export const handleScreenDelete = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   if (!id) throw usageError("screen delete requires <id>.");
   const response = await client.call({
     method: "DELETE",
@@ -6132,7 +6132,7 @@ export const handleScreenRotatePublicId = commandHandler(async (args, runtime, r
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   if (!id) throw usageError("screen rotate-public-id requires <id>.");
   const response = await client.call({
     method: "POST",
@@ -6168,7 +6168,7 @@ export const handleScreenRecover = commandHandler(async (args, runtime, resolved
 
   const id = args.positionals[2];
   if (!id) throw usageError("screen recover requires <id>.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     // A fresh Idempotency-Key per invocation: the client mints one when the
@@ -6214,7 +6214,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
     return screenFleetAction(client, runtime, "Fleet reload", target.selector, { type: "reload", ...lifetime });
   }
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     response = await client.call({
@@ -6386,7 +6386,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
     return screenFleetAction(client, runtime, "Fleet tag", target.selector, action);
   }
   const id = target.id;
-  let ifMatch = flagString(args.flags, "if-match");
+  let ifMatch = flagString(args.flags, "expect-rev");
   let next = tags;
   if (add !== undefined || remove !== undefined) {
     const current = (await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined;
@@ -6410,7 +6410,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
     body,
     // The body and guard derive from the read, so a rerun after an ambiguous
     // failure fingerprints differently; it supersedes the obsolete entry.
-    ...(derived ? { recoverySupersede: JSON.stringify(["screen tag", id, add !== undefined ? "add" : "remove", tags, flagString(args.flags, "if-match") ?? null]) } : {}),
+    ...(derived ? { recoverySupersede: JSON.stringify(["screen tag", id, add !== undefined ? "add" : "remove", tags, flagString(args.flags, "expect-rev") ?? null]) } : {}),
   });
   const screen = response.body as Screen | undefined;
   return {
@@ -7159,7 +7159,7 @@ export const handleCardInstanceDataGet = commandHandler(async (args, runtime, re
 export const handleCardInstanceDataPut = commandHandler(async (args, runtime, resolved) => {
   const id = cardInstanceId(args, 3);
   const document = await cardObjectFile(args, runtime);
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({ method: "PUT", path: `/api/cards/${id}/data`, body: { document, ...cardExpiry(args.flags) }, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
@@ -7187,7 +7187,7 @@ export const handleFeedsGet = commandHandler(async (args, runtime, resolved) => 
 });
 
 export const handleKvList = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
@@ -7195,7 +7195,7 @@ export const handleKvList = commandHandler(async (args, runtime, resolved) => {
 }, true);
 
 export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
@@ -7204,7 +7204,7 @@ export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
 }, true);
 
 export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -7212,7 +7212,7 @@ export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
 
   if (!key) throw usageError("kv set requires a key.");
   const body = await kvWriteFromArgs(args, runtime.cwd(), runtime);
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await client.call({
     method: "PUT",
     path: `/api/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
@@ -7235,14 +7235,14 @@ export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
 }, true);
 
 export const handleKvDelete = commandHandler(async (args, runtime, resolved) => {
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const key = args.positionals[2];
 
   if (!key) throw usageError("kv delete requires a key.");
-  const ifMatch = flagString(args.flags, "if-match");
+  const ifMatch = flagString(args.flags, "expect-rev");
   const response = await client.call({
     method: "DELETE",
     path: `/api/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
@@ -7258,7 +7258,7 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
 // update that turns signing on, printed once, and kept out of the operation log
 // (client.ts privateBodies).
 function kvWebhookTarget(args: ParsedArgs, command: string): KvWebhookTarget {
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   const card = flagString(args.flags, "card");
   if (applicationId && card) throw usageError("Pass --app-id or --card, not both.");
   if (card) return { kind: "card", id: cardUid(card) };
@@ -7474,7 +7474,7 @@ function commentTarget(args: ParsedArgs, target: "screen" | "playlist") {
     throw usageError(`comment ${target} requires <id>.`);
   }
 
-  if (Object.hasOwn(args.flags, "if-match")) {
+  if (Object.hasOwn(args.flags, "expect-rev")) {
     throw usageError("comment commands do not take --expect-rev; last write wins and does not bump revision.");
   }
   requireFlagValue(args, "page", "poster");
@@ -7807,11 +7807,11 @@ function eventsListFilters(args: ParsedArgs): { source?: string; screen_id?: str
   requireFlagValue(args, "source", "log");
   requireFlagValue(args, "screen-id", "scr_01");
   requireFlagValue(args, "playlist-id", "pl_01");
-  requireFlagValue(args, "application-id", "app_01");
+  requireFlagValue(args, "app-id", "app_01");
   const source = flagString(args.flags, "source");
   const screenId = flagString(args.flags, "screen-id");
   const playlistId = flagString(args.flags, "playlist-id");
-  const applicationId = flagString(args.flags, "application-id");
+  const applicationId = flagString(args.flags, "app-id");
   if (source !== undefined && source !== "project" && source !== "log") throw usageError("--source must be project or log.");
   if (screenId !== undefined && !isResourceID(screenId, "screen")) throw usageError("--screen-id must be a screen identifier (scr_...).");
   if (playlistId !== undefined && !isResourceID(playlistId, "playlist")) throw usageError("--playlist-id must be a playlist identifier (pl_...).");
@@ -7841,7 +7841,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
     method: "GET",
     path: "/api/events",
     query: {
-      after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor"),
+      after: flagString(args.flags, "after"),
       limit: flagString(args.flags, "limit"),
       type: flagString(args.flags, "type"),
       ...filters,
@@ -7922,7 +7922,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   const transport = transportFor(runtime, resolved.apiUrl, token);
   const json = !flagBool(args.flags, "human");
   let printed = 0;
-  let after = flagString(args.flags, "after") ?? flagString(args.flags, "cursor");
+  let after = flagString(args.flags, "after");
   let delayMs = EVENT_STREAM_BACKOFF_MS;
   const controller = new AbortController();
   const timeoutMs = flagNumber(args.flags, "timeout");
@@ -8351,7 +8351,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     resolved = await resolveProjectContext(args, runtime, resolved);
     return existingClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
   })();
-  const screenId = flagString(args.flags, "screen");
+  const screenId = flagString(args.flags, "screen-id");
   const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
   const screen = screenId ? (await (await remote()).call({ method: "GET", path: `/api/screens/${encodeURIComponent(screenId)}` })).body : undefined;
   const dimensions = targetDimensions(screen, width, height);
@@ -8448,7 +8448,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
   const progress = flagBool(args.flags, "no-progress") ? undefined : (stage: string, state?: string) =>
     runtime.stderr.write(json ? `${JSON.stringify({ event: "publish_stage", stage, ...(state ? { state } : {}) })}\n` : `screenrig: ${stage}${state ? ` (${state})` : ""}\n`);
   const shortApplication = shortApplicationPageWarning(document);
-  const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key"),
+  const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "expect-rev")!, document, requestedKey: flagString(args.flags, "idempotency-key"),
     note: flagString(args.flags, "note"),
     wait: flagBool(args.flags, "no-wait") ? undefined : { timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 2000 },
     progress });
@@ -8536,7 +8536,7 @@ async function webhookCall(
 }
 
 function webhookRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
@@ -9108,7 +9108,7 @@ async function fleetLinkCall(
 }
 
 function fleetLinkRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
@@ -9283,7 +9283,7 @@ async function triggerCall(
 }
 
 function triggerRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
@@ -9587,7 +9587,7 @@ async function campaignCall(
 }
 
 function campaignRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
@@ -9873,7 +9873,7 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
   }
   const id = target.id;
   const body: ScreenPlaylistScheduleWrite = { entries };
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await screenControlCall(client, id, {
     method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true, body,
     headers: screenControlHeaders(args, revision),
@@ -9895,7 +9895,7 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
     return screenFleetAction(client, runtime, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await screenControlCall(client, id, {
     method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true,
     headers: screenControlHeaders(args, revision),
@@ -9935,7 +9935,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
     }
   }
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     response = await screenControlCall(client, id, {
@@ -9963,7 +9963,7 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
     return screenFleetAction(client, runtime, "Fleet takeover clear", target.selector, { type: "takeover_clear" }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await screenControlCall(client, id, {
     method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/takeover`, idempotent: true,
     headers: screenControlHeaders(args, revision),
@@ -9996,7 +9996,7 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot", target.selector, { type: "reboot", ...lifetime });
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     response = await client.call({
@@ -10180,7 +10180,7 @@ export const handleScreenSuspend = commandHandler(async (args, runtime, resolved
   const message = flagString(args.flags, "message");
   if (!id || message === undefined) throw usageError("screen suspend requires <id> and --message TEXT.");
   const body: ScreenSuspendWrite = { message: suspendMessage(message) };
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let response;
   try {
@@ -10209,7 +10209,7 @@ export const handleScreenSuspend = commandHandler(async (args, runtime, resolved
 export const handleScreenResume = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
   if (!id) throw usageError("screen resume requires <id>.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let response;
   try {
@@ -10239,7 +10239,7 @@ export const handleScreenReplace = commandHandler(async (args, runtime, resolved
   if (!id || !withId) throw usageError("screen replace requires <id> and --with ID.");
   if (withId === id) throw usageError("--with must name another screen than <id>: the screen whose paired device takes over.");
   const body: ScreenReplaceWrite = { with: withId };
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let response;
   try {
@@ -10269,7 +10269,7 @@ export const handleScreenCommandCancel = commandHandler(async (args, runtime, re
   const id = args.positionals[3];
   const commandId = args.positionals[4];
   if (!id || !commandId) throw usageError("screen command cancel requires <id> and <command_id>.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let response;
   try {
@@ -10307,7 +10307,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, `Fleet display ${power}`, target.selector, { type: "display", ...write });
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     response = await client.call({
@@ -10356,7 +10356,7 @@ export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtim
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display schedule set", target.selector, { type: "set_display_schedule", ...write });
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await screenControlCall(client, id, {
     method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true, body: write,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
@@ -10374,7 +10374,7 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display schedule clear", target.selector, { type: "clear_display_schedule" });
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const response = await screenControlCall(client, id, {
     method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
@@ -10392,7 +10392,7 @@ export const handleScreenDisplayClear = commandHandler(async (args, runtime, res
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display clear", target.selector, { type: "display_clear" });
   const id = target.id;
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   let response;
   try {
     response = await client.call({
@@ -10625,7 +10625,7 @@ export const handleReportSubscriptionsUpdate = commandHandler(async (args, runti
   const id = reportSubscriptionId(args.positionals[3], "update");
   const body = reportSubscriptionBody(args);
   if (Object.keys(body).length === 0) throw usageError("reports subscriptions update needs at least one change: --name, --cadence, --format, --recipients, --filter, --pause or --resume.");
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
     method: "PATCH", path: `${REPORT_SUBSCRIPTIONS_PATH}/${id}`, body, idempotent: true,

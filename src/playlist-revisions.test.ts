@@ -123,7 +123,7 @@ test("playlist promote copies a revision forward with the revision guard and a s
   assert.equal(seen[0]?.match, '"9"');
   assert.ok(seen[0]?.key);
   assert.equal(JSON.parse(json.output).data.revision, 10);
-  const human = await invoke(["--human", "playlist", "promote", PLAYLIST, "--revision", "3", "--if-match", "9"]);
+  const human = await invoke(["--human", "playlist", "promote", PLAYLIST, "--revision", "3", "--expect-rev", "9"]);
   assert.equal(human.code, 0, human.output);
   assert.match(human.output, new RegExp(`^Promoted revision 3 of ${PLAYLIST}: it is now the current revision 10\\. The name is unchanged and every screen showing the playlist updates\\.$`, "m"));
 });

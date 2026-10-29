@@ -849,7 +849,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
   assert.deepEqual(update.options.find((option) => option.name === "--window")!.conflicts, ["--clear-windows"]);
   for (const action of ["update", "pause", "resume", "delete"]) {
     const option = commandHelp(["campaign", action]).options.find((item) => item.name === "--expect-rev");
-    assert.deepEqual(option?.aliases, ["--if-match"], action);
+    assert.equal(option?.type, "value", action);
   }
   assert.match(commandHelp(["campaign", "screens"]).usage, /pass data\.next_cursor back as --cursor/);
   assert.match(commandHelp(["campaign", "explain"]).usage, /Read only\./);

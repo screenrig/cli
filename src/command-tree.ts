@@ -1,10 +1,9 @@
-import { handlerOptionName } from "./cli-commands/aliases.js";
 import { FEED_REPEATABLE_FLAGS } from "./cards.js";
 import { Command, Option } from "commander";
 import type { ParsedArgs } from "./command-input.js";
 import type { CommandHandler } from "./commands.js";
 import { commandError } from "./cli-errors.js";
-import { commandPath, findCommand, invocationFlags } from "./command-path.js";
+import { commandPath, findCommand, flagName, invocationFlags } from "./command-path.js";
 import { registerCommands } from "./cli-commands/index.js";
 import { usageError } from "./problems.js";
 import { CLI_VERSION } from "./version.js";
@@ -54,8 +53,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
       || (["tag", "any-tag", "screen-id", "window", "monthly", "date", "except"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
-    if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
-    seen.add(handlerOptionName(option));
+    if (seen.has(flagName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
+    seen.add(flagName(option));
   });
 }
 
@@ -109,7 +108,6 @@ export function createCommandTree(
         throw error;
       });
     for (const option of command.options) {
-      if (option.long === "--expect-rev") option.description += " (--if-match alias)";
       // Commander handles the built-in version option before emitting option events.
       if (option.long !== "--version") protectOption(command, option, tokens, seen);
     }

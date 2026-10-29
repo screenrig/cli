@@ -320,11 +320,9 @@ test("events list accepts --screen-id, --playlist-id and --app-id for project ev
   assert.equal((await invoke(["events", "list", "--playlist-id", pl], playlist)).code, 0);
   assert.equal(playlist.calls[0]!.query?.playlist_id, pl);
 
-  for (const flag of ["--app-id", "--application-id"]) {
-    const application = page();
-    assert.equal((await invoke(["events", "list", flag, app], application)).code, 0, flag);
-    assert.equal(application.calls[0]!.query?.application_id, app);
-  }
+  const application = page();
+  assert.equal((await invoke(["events", "list", "--app-id", app], application)).code, 0);
+  assert.equal(application.calls[0]!.query?.application_id, app);
 
   const all = page();
   assert.equal((await invoke(["events", "list", "--screen-id", scr, "--playlist-id", pl, "--app-id", app], all)).code, 0);
@@ -335,7 +333,7 @@ test("events list accepts --screen-id, --playlist-id and --app-id for project ev
   assert.deepEqual([log.calls[0]!.query?.source, log.calls[0]!.query?.screen_id], ["log", scr]);
 
   for (const argv of [
-    ["--screen-id", pl], ["--screen-id", "scr_"], ["--playlist-id", scr], ["--app-id", pl], ["--application-id", "weather"],
+    ["--screen-id", pl], ["--screen-id", "scr_"], ["--playlist-id", scr], ["--app-id", pl],
     ["--screen-id"], ["--playlist-id"], ["--app-id"], ["--source", "audit"],
   ]) {
     const refused = page();

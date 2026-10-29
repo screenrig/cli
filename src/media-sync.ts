@@ -285,7 +285,7 @@ async function allPages<T>(client: ApiClient, path: string, query?: Record<strin
 }
 
 function revisionHeader(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 

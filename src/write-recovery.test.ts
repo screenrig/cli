@@ -8,7 +8,7 @@ import { run, processRuntime } from "./main.js";
 import { FakeTransport } from "./transport/fake.js";
 import { networkError } from "./problems.js";
 
-const command = ["screen", "update", "scr_TEST", "--name", "Private lobby name", "--if-match", "1"];
+const command = ["screen", "update", "scr_TEST", "--name", "Private lobby name", "--expect-rev", "1"];
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const directory = await mkdtemp(path.join(tmpdir(), "screenrig-write-recovery-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

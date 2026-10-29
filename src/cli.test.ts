@@ -130,7 +130,7 @@ test("--request-id goes on the first HTTP request of the invocation and every re
   assert.ok(sent.length > 1, JSON.stringify(sent));
   assert.equal(sent[0], requested);
   assert.equal(new Set(sent).size, sent.length);
-  const tooLong = await withRuntime(["--json", "--request-id", `req_${"a".repeat(65)}`, "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const tooLong = await withRuntime(["--json", "--request-id", `req_${"a".repeat(65)}`, "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal((JSON.parse(tooLong.stdout) as { error: { code: string } }).error.code, "usage_error");
 });
 
@@ -138,7 +138,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   const transport = memoryBackend();
   const configDir = await testTemp("explicit-enrollment-pair-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(missing.code, ExitCode.Auth);
   const blocked = JSON.parse(missing.stdout) as { error: { code: string; next: { command: string } } };
   assert.equal(blocked.error.code, "not_enrolled");
@@ -151,7 +151,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
     { fs: fsLike },
   );
   assert.equal(enrolled.code, 0, enrolled.stdout);
-  const paired = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  const paired = await withRuntime(["--json", "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(paired.code, 0, paired.stdout);
   const envelope = JSON.parse(paired.stdout) as {
     ok: boolean;
@@ -1101,7 +1101,7 @@ test("agent disconnect shares the last-agent guard and explicit allow-lockout ov
 
 test("screen pair normalizes safe lowercase input and reports canonical uppercase", async () => {
   const transport = memoryBackend();
-  const result = await withAuthenticatedRuntime(["--human", "screen", "pair", "abc234", "--label", "Lobby"], transport);
+  const result = await withAuthenticatedRuntime(["--human", "screen", "pair", "abc234", "--name", "Lobby"], transport);
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /Screen paired/);
   assert.match(result.stdout, /code: ABC234/);
@@ -1209,7 +1209,7 @@ test("screen provision --open launches by argv and returns only safe fields", as
   const transport = memoryBackend();
   const opened: string[] = [];
   const result = await withAuthenticatedRuntime(
-    ["--json", "screen", "provision", "--open", "--label", "Demo"],
+    ["--json", "screen", "provision", "--open", "--name", "Demo"],
     transport,
     { openUrl: async (url) => { opened.push(url); return true; } },
   );
@@ -1248,7 +1248,7 @@ test("failed browser launch retains only the exact retry key and label", async (
   const transport = memoryBackend();
   const configDir = await testTemp("provision-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const argv = ["--json", "screen", "provision", "--open", "--label", "Retry demo"];
+  const argv = ["--json", "screen", "provision", "--open", "--name", "Retry demo"];
   const first = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   const second = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   assert.equal(first.code, 0);
@@ -2070,7 +2070,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
     fsLike,
   );
   const { code, stdout } = await withRuntime(
-    ["--json", "events", "follow", "--cursor", "ev1_0", "--timeout", "50"],
+    ["--json", "events", "follow", "--after", "ev1_0", "--timeout", "50"],
     transport,
     { fs: fsLike },
   );
@@ -2877,7 +2877,7 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
   assert.equal(uploadEnvelope.data.id, "app_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(uploadEnvelope.data.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
 
-  result = await withRuntime(["--json", "screen", "pair", "ABC234", "--label", "Lobby"], transport, { fs: fsLike });
+  result = await withRuntime(["--json", "screen", "pair", "ABC234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   const pairingCall = transport.calls.at(-1);
   assert.equal(pairingCall?.path, "/api/screens/pair");
@@ -4300,7 +4300,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   await writeFile(file, Buffer.from([0, 255, 1]));
   try {
     let result = await withRuntime(
-      ["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"z":1,"a":{"z":2,"a":3}}'],
+      ["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"z":1,"a":{"z":2,"a":3}}'],
       transport,
       { fs: fsLike },
     );
@@ -4317,7 +4317,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
     assert.match(envelope.data.sha256, /^[a-f0-9]{64}$/);
 
     result = await withRuntime(
-      ["--json", "kv", "set", "binary", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--file", file, "--content-type", "application/x.custom; Version=1"],
+      ["--json", "kv", "set", "binary", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--file", file, "--content-type", "application/x.custom; Version=1"],
       transport,
       { fs: fsLike },
     );
@@ -4326,20 +4326,20 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
     assert.deepEqual(call?.body, { value_base64: "AP8B", content_type: "application/x.custom; Version=1" });
 
     result = await withRuntime(
-      ["--json", "kv", "set", "encoded", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value-base64", "AP8B", "--content-type", "application/octet-stream"],
+      ["--json", "kv", "set", "encoded", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value-base64", "AP8B", "--content-type", "application/octet-stream"],
       transport,
       { fs: fsLike },
     );
     assert.equal(result.code, 0, result.stdout);
     assert.deepEqual(transport.calls.at(-1)?.body, { value_base64: "AP8B", content_type: "application/octet-stream" });
 
-    result = await withRuntime(["--json", "kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    result = await withRuntime(["--json", "kv", "list", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     envelope = JSON.parse(result.stdout) as typeof envelope;
     const listData = (envelope as unknown as { data: { items: Array<Record<string, unknown>> } }).data.items;
     assert.equal(Object.hasOwn(listData[0] ?? {}, "value_base64"), false);
 
     result = await withRuntime(
-      ["--json", "kv", "set", "bad", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value", "stale"],
+      ["--json", "kv", "set", "bad", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--value", "stale"],
       transport,
       { fs: fsLike },
     );
@@ -4739,12 +4739,12 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     assert.equal(transport.calls.at(-1)?.path, `/api/screens/${paired.id}/toast`);
     assert.ok(transport.calls.at(-1)?.headers?.["idempotency-key"]);
 
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--expect-rev", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["if-match"], '"1"');
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--expect-rev", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--app-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, ExitCode.Precondition);
     assert.equal((JSON.parse(result.stdout) as { error: { current_revision: number } }).error.current_revision, 2);
   } finally {
@@ -6718,7 +6718,7 @@ for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pai
     const enrolled = await withRuntime(["agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(enrolled.code, 0, enrolled.stdout);
     assert.equal(JSON.parse(enrolled.stdout).data.agent.id, prefix + TEST_AGENT.id);
-    const paired = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+    const paired = await withRuntime(["screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
     assert.equal(paired.code, 0, paired.stdout);
     assert.ok(JSON.parse(paired.stdout).data.screen.id.startsWith(prefix + "scr_"));
     assert.doesNotMatch(enrolled.stdout + paired.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);

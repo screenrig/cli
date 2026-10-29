@@ -1,5 +1,9 @@
-import { handlerOptionName } from "./cli-commands/aliases.js";
-import type { Command } from "commander";
+import type { Command, Option } from "commander";
+
+/** The key an option's value is stored under in the parsed flags. */
+export function flagName(option: Option): string {
+  return option.long!.slice(2);
+}
 
 /** Canonical command names, excluding the executable and any supplied values. */
 export function commandPath(command: Command): string[] {
@@ -56,7 +60,7 @@ export function invocationFlags(command: Command): Record<string, string | boole
       const value = current.getOptionValue(option.attributeName());
       if (option.negate && value !== false) continue;
       if (!option.negate && option.isBoolean() && value === false) continue;
-      flags[handlerOptionName(option)] = option.negate ? true : current.getOptionValue(option.attributeName());
+      flags[flagName(option)] = option.negate ? true : current.getOptionValue(option.attributeName());
     }
   }
   return flags;
