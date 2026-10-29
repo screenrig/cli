@@ -242,6 +242,8 @@ export function memoryBackend(options: {
   agentidClaims?: Record<string, "invalid" | "already_enrolled">;
   /** Extra capabilities features, such as application_direct_uploads. */
   features?: Record<string, boolean>;
+  /** The project's plan video limit, as `GET /api/project/capabilities` states it; Standard's 500 MB by default. */
+  videoBytes?: number;
 } = {}): FakeTransport {
   const clock = options.now ?? (() => new Date());
   const pageSize = (serverSize: number) => options.listPageSize ?? serverSize;
@@ -519,6 +521,7 @@ export function memoryBackend(options: {
       plan_id: "default",
       features: project.features,
       feature_revision: project.feature_revision,
+      media_video_bytes: options.videoBytes ?? 500_000_000,
       capabilities: [
         "media", "credits",
         ...(project.features?.screens ? ["signage.pairing", "signage.playlists", "signage.publish"] : []),

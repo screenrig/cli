@@ -1,13 +1,6 @@
 import { usageError } from "../problems.js";
 import type { MediaProbe } from "./ffmpeg.js";
 
-/**
- * The most bytes the server takes for one video upload: decimal 500,000,000,
- * the backend's `MaxVideoBytes`, published as `media_video_bytes`. An upload
- * over it is refused, so a source over it is never passed through unchanged.
- */
-export const MAX_VIDEO_UPLOAD_BYTES = 500_000_000;
-
 export type SignagePreset = "signage-1080p30" | "signage-4k30";
 export interface VideoOptions {
   codec: "h264" | "hevc";

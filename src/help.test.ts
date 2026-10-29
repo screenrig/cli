@@ -675,7 +675,9 @@ test("alerts help, JSON help and preflight agree on option relationships, choice
   assert.match(commandHelp(["webhooks"]).usage, /content stuck, not playing, crashing\) are screenrig notifications/);
 });
 
-test("media upload help states the 500,000,000-byte video limit", () => {
+test("media upload help states the video limit of each plan", () => {
   const help = JSON.stringify(commandHelp(["media", "upload"]));
-  assert.match(help, /500,000,000 bytes \(500 MB\)/);
+  assert.match(help, /500,000,000 bytes \(500 MB\) on Standard/);
+  assert.match(help, /1,000,000,000 bytes \(1 GB\) on every other plan/);
+  assert.match(help, /media_video_bytes/);
 });

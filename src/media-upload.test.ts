@@ -16,10 +16,14 @@ import {
   prepareMediaUpload,
   validateMediaUploadSession,
 } from "./media-upload.js";
+import { projectVideoBytes } from "./media/video-limit.js";
 import { CliError } from "./problems.js";
 import type { SignedRawPut } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
+
+/** The Standard plan's video limit (`media_video_bytes`). */
+const STANDARD_VIDEO_BYTES = 500_000_000;
 
 /** Retries without waiting, so a test does not sleep between attempts. */
 const noWait = { sleep: async () => undefined };
@@ -67,11 +71,11 @@ test("verified video hash binds the exact buffered upload bytes", async () => {
   const file = path.join(dir, "clip.mp4");
   try {
     await writeFile(file, Buffer.from("verified video bytes"));
-    const original = await prepareMediaUpload(file);
-    const prepared = await prepareMediaUpload(file, "video/mp4", original.declaration.sha256);
+    const original = await prepareMediaUpload(file, undefined, undefined, STANDARD_VIDEO_BYTES);
+    const prepared = await prepareMediaUpload(file, "video/mp4", original.declaration.sha256, STANDARD_VIDEO_BYTES);
     await writeFile(file, Buffer.from("changed after verification"));
     assert.deepEqual(prepared.bytes, original.bytes, "the signed PUT retains the verified Buffer despite later path changes");
-    await assert.rejects(() => prepareMediaUpload(file, "video/mp4", original.declaration.sha256), /changed after delivery verification/);
+    await assert.rejects(() => prepareMediaUpload(file, "video/mp4", original.declaration.sha256, STANDARD_VIDEO_BYTES), /changed after delivery verification/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -94,7 +98,7 @@ test("prepares supported media with inferred or explicit content type", async ()
       bytes: prepared.declaration.bytes,
       sha256: prepared.declaration.sha256,
     });
-    assert.equal((await prepareMediaUpload(file, "video/webm")).declaration.content_type, "video/webm");
+    assert.equal((await prepareMediaUpload(file, "video/webm", undefined, STANDARD_VIDEO_BYTES)).declaration.content_type, "video/webm");
     await assert.rejects(() => prepareMediaUpload(file, "text/plain"), CliError);
 
     const lossyPath = path.join(dir, "lossy.webp");
@@ -410,6 +414,37 @@ test("media upload cancels the declared upload whose bytes could not be sent, so
 });
 
 
+test("media upload holds a video to the limit its project's plan states and asks for it only for a video", async (t) => {
+  const dir = await testTemp("media-plan-limit-");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+  }, fs);
+  const video = path.join(dir, "clip.mp4");
+  const handle = await open(video, "w");
+  await handle.truncate(1_000_001);
+  await handle.close();
+  const picture = path.join(dir, "pixel.png");
+  await writeFile(picture, Buffer.from([0, 255, 1, 2]));
+
+  const transport = memoryBackend({ videoBytes: 1_000_000 });
+  const refused = await runCli(dir, ["media", "upload", video, "--no-transcode"], transport, async () => ({ status: 200 }));
+  assert.equal(refused.code, ExitCode.Usage, JSON.stringify(refused.envelope));
+  assert.equal(
+    refused.envelope.error.detail,
+    "Video exceeds the 1,000,000-byte (1 MB) limit for one video upload on this project's plan. Trim the video to a shorter clip, then run the upload again.",
+  );
+  assert.equal(transport.calls.filter((call) => call.path === "/api/project/capabilities").length, 1);
+  assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false, "nothing was declared");
+
+  const still = memoryBackend({ videoBytes: 1_000_000 });
+  await runCli(dir, ["media", "upload", picture, "--no-transcode"], still, async () => ({ status: 200 }));
+  assert.equal(still.calls.some((call) => call.path === "/api/project/capabilities"), false, "an image never asks for the video limit");
+});
+
 test("media admission rejects oversized files before reading or allocating their payload", async (t) => {
   const dir = await testTemp("media-limit-");
   const file = path.join(dir, "oversized.png");
@@ -421,7 +456,7 @@ test("media admission rejects oversized files before reading or allocating their
   try {
     await assert.rejects(prepareMediaUpload(file), /1 GiB per-upload transport ceiling/);
     assert.equal(reads.mock.callCount(), 0);
-    await assert.rejects(prepareMediaUpload(dir, "video/mp4"), /regular file/);
+    await assert.rejects(prepareMediaUpload(dir, "video/mp4", undefined, STANDARD_VIDEO_BYTES), /regular file/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -434,45 +469,52 @@ async function fileHandlePrototype(dir: string): Promise<FileHandle> {
   return Object.getPrototypeOf(handle);
 }
 
-test("a video over the server's 500,000,000-byte cap is rejected before its payload is read", async (t) => {
+test("a video over the project's plan limit is rejected before its payload is read", async (t) => {
   const dir = await testTemp("media-video-limit-");
   const prototype = await fileHandlePrototype(dir);
   try {
-    for (const [name, contentType] of [["clip.mp4", undefined], ["clip.webm", undefined], ["clip.bin", "video/mp4"]] as const) {
-      const file = path.join(dir, name);
-      const handle = await open(file, "w");
-      await handle.truncate(500_000_001);
-      await handle.close();
-      const reads = t.mock.method(prototype, "read", () => { throw new Error("oversized payload must not be read"); });
-      await assert.rejects(prepareMediaUpload(file, contentType), (error: unknown) => {
-        assert.ok(error instanceof CliError);
-        assert.equal(
-          error.problem.detail,
-          "Video exceeds the 500,000,000-byte (500 MB) limit for one video upload. Trim the video to a shorter clip, then run the upload again.",
-        );
-        return true;
-      });
-      assert.equal(reads.mock.callCount(), 0);
-      reads.mock.restore();
+    for (const [limit, words] of [[500_000_000, "500,000,000-byte (500 MB)"], [1_000_000_000, "1,000,000,000-byte (1 GB)"]] as const) {
+      for (const [name, contentType] of [["clip.mp4", undefined], ["clip.webm", undefined], ["clip.bin", "video/mp4"]] as const) {
+        const file = path.join(dir, name);
+        const handle = await open(file, "w");
+        await handle.truncate(limit + 1);
+        await handle.close();
+        const reads = t.mock.method(prototype, "read", () => { throw new Error("oversized payload must not be read"); });
+        await assert.rejects(prepareMediaUpload(file, contentType, undefined, limit), (error: unknown) => {
+          assert.ok(error instanceof CliError);
+          assert.equal(
+            error.problem.detail,
+            `Video exceeds the ${words} limit for one video upload on this project's plan. Trim the video to a shorter clip, then run the upload again.`,
+          );
+          assert.doesNotMatch(error.problem.detail, /upgrade|premium|enterprise/i);
+          return true;
+        });
+        assert.equal(reads.mock.callCount(), 0);
+        reads.mock.restore();
+      }
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("a video of exactly 500,000,000 bytes is within the cap, and other types keep the 1 GiB transport bound", async (t) => {
+test("a video of exactly the plan limit is within it, and other types keep the 1 GiB transport bound", async (t) => {
   const dir = await testTemp("media-video-boundary-");
   const prototype = await fileHandlePrototype(dir);
-  // The payload's content is not under test, only its admission; skip the 500 MB of real reads.
+  // The payload's content is not under test, only its admission; skip the gigabyte of real reads.
   t.mock.method(prototype, "read", async (...args: unknown[]) => ({ bytesRead: args[2] as number, buffer: args[0] }));
   try {
-    const video = path.join(dir, "exact.mp4");
-    const videoHandle = await open(video, "w");
-    await videoHandle.truncate(500_000_000);
-    await videoHandle.close();
-    const prepared = await prepareMediaUpload(video);
-    assert.equal(prepared.declaration.bytes, 500_000_000);
-    assert.equal(prepared.declaration.content_type, "video/mp4");
+    for (const limit of [500_000_000, 1_000_000_000]) {
+      const video = path.join(dir, `exact-${limit}.mp4`);
+      const videoHandle = await open(video, "w");
+      await videoHandle.truncate(limit);
+      await videoHandle.close();
+      const prepared = await prepareMediaUpload(video, undefined, undefined, limit);
+      assert.equal(prepared.declaration.bytes, limit);
+      assert.equal(prepared.declaration.content_type, "video/mp4");
+    }
+    // A video the large limit takes is over the Standard one.
+    await assert.rejects(prepareMediaUpload(path.join(dir, "exact-1000000000.mp4"), undefined, undefined, 500_000_000), /500,000,000-byte \(500 MB\)/);
 
     // Audio and images stay under the transport bound as before; the server holds them to their own limits.
     const audio = path.join(dir, "long.mp3");
@@ -483,6 +525,16 @@ test("a video of exactly 500,000,000 bytes is within the cap, and other types ke
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("the project's video limit is read from its capabilities once per client", async () => {
+  const calls: string[] = [];
+  const client = { call: async (request: { path: string }) => { calls.push(request.path); return { body: { media_video_bytes: 1_000_000_000 } }; } } as unknown as ApiClient;
+  assert.equal(await projectVideoBytes(client), 1_000_000_000);
+  assert.equal(await projectVideoBytes(client), 1_000_000_000);
+  assert.deepEqual(calls, ["/api/project/capabilities"]);
+  const silent = { call: async () => ({ body: { project_id: "prj_1" } }) } as unknown as ApiClient;
+  await assert.rejects(projectVideoBytes(silent), /media_video_bytes/);
 });
 
 test("media snapshot rejects growth during a bounded descriptor read", async (t) => {
@@ -504,7 +556,7 @@ test("media snapshot rejects growth during a bounded descriptor read", async (t)
     return result;
   });
   try {
-    await assert.rejects(prepareMediaUpload(file), /changed while reading/);
+    await assert.rejects(prepareMediaUpload(file, undefined, undefined, STANDARD_VIDEO_BYTES), /changed while reading/);
     assert.equal(requested, 300_000, "file growth cannot enlarge the admitted allocation/read budget");
   } finally {
     await handle.close();
@@ -526,7 +578,7 @@ test("media read errors preserve the usage envelope and close the descriptor", a
     throw new Error("untrusted read diagnostic");
   });
   try {
-    await assert.rejects(prepareMediaUpload(file), (error: unknown) => {
+    await assert.rejects(prepareMediaUpload(file, undefined, undefined, STANDARD_VIDEO_BYTES), (error: unknown) => {
       assert.ok(error instanceof CliError);
       assert.equal(error.problem.code, "usage_error");
       assert.doesNotMatch(error.message, /untrusted/);
