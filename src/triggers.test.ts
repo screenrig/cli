@@ -387,6 +387,11 @@ test("triggers update sends only what is passed, prints a new signing secret onc
   assert.equal(cleared.code, 0, cleared.stdout);
   assert.deepEqual(triggerCalls(transport).at(-1)!.body, { overlay: { style: null, mapping: null, enabled: true, signing: false } });
 
+  // Screen ids repeat on update as they do on create, or come comma-separated.
+  const screens = await cli(["--json", "triggers", "update", id, "--screen-id", "scr_AAAAAAAAAAAAAAAA", "--screen-id", "scr_BBBBBBBBBBBBBBBB,scr_CCCCCCCCCCCCCCCC"], transport, env);
+  assert.equal(screens.code, 0, screens.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { target: { screen_ids: ["scr_AAAAAAAAAAAAAAAA", "scr_BBBBBBBBBBBBBBBB", "scr_CCCCCCCCCCCCCCCC"] } });
+
   const cap = await create(transport, env);
   const wrong = await cli(["--json", "triggers", "update", cap.id, "--edge", "top"], transport, env);
   assert.equal(wrong.code, ExitCode.Client);
