@@ -109,6 +109,24 @@ function absent(error: unknown): null {
   throw error;
 }
 
+/** Run `work` over every item, a few at a time, results in order; the first failure ends it. */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await work(items[index]!, index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+/** How many requests of one section run at once. */
+const CONCURRENCY = 8;
+
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
 /** The file extension of a media content type; the media id alone names the file otherwise. */
@@ -186,13 +204,12 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
   });
 
   await section("screen schedules", async () => {
-    const schedules: Array<Record<string, unknown>> = [];
-    for (const screen of screens) {
+    const schedules = await mapLimit(screens, CONCURRENCY, async (screen) => {
       const id = String(screen.id);
       const playlist = await api.get(`/api/screens/${id}/playlist-schedule`).catch(absent);
       const display = await api.get(`/api/screens/${id}/display-schedule`).catch(absent);
-      schedules.push({ screen_id: id, playlist_schedule: playlist, display_schedule: display, takeover: screen.takeover ?? null, effective_playlist: screen.effective_playlist ?? null });
-    }
+      return { screen_id: id, playlist_schedule: playlist, display_schedule: display, takeover: screen.takeover ?? null, effective_playlist: screen.effective_playlist ?? null };
+    });
     await json("screens/schedules.json", schedules);
     return 1;
   });
@@ -206,20 +223,18 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
   await section("playlists", async () => {
     const playlists = asArray(await api.list("/api/playlists"));
     await json("playlists/playlists.json", playlists);
-    let files = 1;
-    for (const playlist of playlists) {
+    const counts = await mapLimit(playlists, CONCURRENCY, async (playlist) => {
       const id = String(playlist.id);
       await json(`playlists/${id}/playlist.json`, await api.get(`/api/playlists/${id}`));
       const revisions = asArray(await api.list(`/api/playlists/${id}/revisions`));
       await json(`playlists/${id}/revisions.json`, revisions);
-      for (const revision of revisions) {
+      await mapLimit(revisions, CONCURRENCY, async (revision) => {
         const number = String(revision.revision ?? revision.number);
         await json(`playlists/${id}/revisions/${number}.json`, await api.get(`/api/playlists/${id}/revisions/${number}`));
-        files += 1;
-      }
-      files += 2;
-    }
-    return files;
+      });
+      return revisions.length + 2;
+    });
+    return 1 + counts.reduce((sum, count) => sum + count, 0);
   });
 
   await section("campaigns", async () => {

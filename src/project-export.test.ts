@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { makeProblem } from "./problems.js";
 import { CliError } from "./problems.js";
-import { runProjectExport, stripSecrets, type ExportApi } from "./project-export.js";
+import { mapLimit, runProjectExport, stripSecrets, type ExportApi } from "./project-export.js";
 
 const sha = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 const IMAGE = Buffer.from("not really a jpeg, but bytes all the same".repeat(50));
@@ -195,4 +195,19 @@ test("a section the credential cannot read is skipped, and a failure is reported
 
 test("stripSecrets keeps what a reader needs and drops what could be a credential", () => {
   assert.deepEqual(stripSecrets({ id: "x", url: "https://a.invalid:8443/p?k=1", secret: "s", secrets: { b: "1", a: "2" } }), { id: "x", url_origin: "https://a.invalid:8443", secret_names: ["a", "b"] });
+});
+
+test("mapLimit runs a few at a time and keeps the order of the results", async () => {
+  let running = 0;
+  let peak = 0;
+  const out = await mapLimit([5, 1, 4, 2, 3, 6], 2, async (value) => {
+    running += 1;
+    peak = Math.max(peak, running);
+    await new Promise((resolve) => setTimeout(resolve, value));
+    running -= 1;
+    return value * 10;
+  });
+  assert.deepEqual(out, [50, 10, 40, 20, 30, 60]);
+  assert.equal(peak, 2);
+  await assert.rejects(mapLimit([1, 2, 3], 2, async (value) => { if (value === 2) throw new Error("boom"); return value; }), /boom/);
 });
