@@ -34,6 +34,8 @@ export function editablePlaylist(value: unknown): RecordValue {
     ...(resource.audio !== undefined && resource.audio !== null ? { audio: resource.audio } : {}),
     // Omitting the format on a PUT would turn a wall playlist into an ordinary one.
     ...(resource.format !== undefined && resource.format !== null ? { format: resource.format } : {}),
+    // A template's fields travel with its pages: they are what its tokens name.
+    ...(Array.isArray(resource.fields) && resource.fields.length > 0 ? { fields: resource.fields } : {}),
     pages: resource.pages,
   });
   if (!Array.isArray(document.pages)) throw usageError("Playlist pages are missing.");

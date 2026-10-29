@@ -173,6 +173,8 @@ test("root help is compact and every command is discoverable through immediate c
     "playlist import",
     "playlist show",
     "playlist list",
+    "playlist fields",
+    "playlist instances",
     "playlist page add",
     "playlist page remove",
     "playlist page replace",

@@ -2160,7 +2160,7 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A dashboard session (the page editor) creates the playlist live, never as a proposal, attributed to the person, and needs the project owner or a member who can approve (approver_required otherwise); media it names that waits for its review is media_pending_review (409), where an agent's live write approves it. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src and whose detail names the sharing setting to change.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A dashboard session (the page editor) creates the playlist live, never as a proposal, attributed to the person, and needs the project owner or a member who can approve (approver_required otherwise); media it names that waits for its review is media_pending_review (409), where an agent's live write approves it. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2210,7 +2210,7 @@ paths:
     put:
       x-screenrig-access: review
       operationId: updatePlaylistV2
-      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision. A dashboard session (the page editor) replaces the playlist live, never as a proposal, attributed to the person; it needs the project owner or a member who can approve (approver_required otherwise) and If-Match (invalid_request when absent); a playlist no person approved yet is playlist_not_approved (409), as for patchPlaylistStructure, and media a page names that waits for its review is media_pending_review (409). A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src and whose detail names the sharing setting to change.
+      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision. A dashboard session (the page editor) replaces the playlist live, never as a proposal, attributed to the person; it needs the project owner or a member who can approve (approver_required otherwise) and If-Match (invalid_request when absent); a playlist no person approved yet is playlist_not_approved (409), as for patchPlaylistStructure, and media a page names that waits for its review is media_pending_review (409). A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2240,7 +2240,7 @@ paths:
       x-screenrig-access: review
       operationId: patchPlaylist
       description: >-
-        Change only supplied top-level fields: name, pages, audio or format. Omitted fields are preserved from the same transaction snapshot. Supplied pages, audio and format replace the complete value; audio null removes the soundtrack and format null removes the format. Nested array elements are not merged. A name-only edit of an approved playlist does not revalidate or re-resolve its unchanged content, including older stored page formats. Supplied content and audio/page cue relationships are validated. If-Match optionally guards the revision; identical patches are no-ops and idempotent retries replay the original answer. Propose access and review policy behave as for PUT, including the warnings a supplied pages value earns for an iframe page the Player web app cannot frame. PUT remains a complete document replacement.
+        Change only supplied top-level fields: name, pages, audio, format or fields. Omitted fields are preserved from the same transaction snapshot. Supplied pages, audio and format replace the complete value; audio null removes the soundtrack and format null removes the format. Nested array elements are not merged. A name-only edit of an approved playlist does not revalidate or re-resolve its unchanged content, including older stored page formats. Supplied content and audio/page cue relationships are validated. If-Match optionally guards the revision; identical patches are no-ops and idempotent retries replay the original answer. Propose access and review policy behave as for PUT, including the warnings a supplied pages value earns for an iframe page the Player web app cannot frame. PUT remains a complete document replacement.
       security:
         - projectBearer: []
       parameters:
@@ -2463,6 +2463,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/values:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    patch:
+      x-screenrig-access: review
+      operationId: updatePlaylistValues
+      description: >-
+        Sets, or with null clears, field values of a playlist made from a template, and builds its pages again from the template's current revision: the values are checked like a create checks them, and brand changes made to the template since reach this copy. Send no values to only bring the copy up to date. Review class like any playlist write: the owner or a member who can approve (dashboard session) and a Manage credential write live, an uploader only for its playlists and folders, and Propose turns the change into a review (202). A playlist that was not made from a template is invalid_request. If-Match is optional.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistValuesChange'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/instances:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listPlaylistInstances
+      description: The playlists made from a template (at most 1000, by name), each with the template revision its pages were built from and whether the template has a newer one.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: The instances.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistInstanceList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/expand:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: read
+      operationId: expandPlaylistTemplate
+      description: The pages a playlist made from the template with these values would hold, checked by every playlist rule. Computes only; nothing is stored.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistExpandRequest'
+      responses:
+        '200':
+          description: The pages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistExpanded'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -2857,6 +2947,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScreenMoveResult'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/schedule/calendar:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleCalendar
+      description: >-
+        Answers what a subject's screens play over [from, to) and why, for the dashboard's Schedule calendar: exactly one of screen_id, folder_id (the screens in the folder and every folder inside it), tag, or campaign_id (the screens in its audience). Screens whose stacks have identical inputs (the same levels, default, timezone and display count) share one group with one timeline, so a large subject costs tens of timelines; a group lists up to 500 of its screens and an answer at most 200 groups (truncated). Each group carries its stack, highest first (takeover, campaigns that reach the screens, their own schedule entries, then the default playlist or the nearest folder's), each level's spans (plays on every display it targets, partial with the displays it plays on, outranked, or conditional while it waits on interaction or a data condition only a Player observes), what each display shows (on_screen; the main region of a full page), and conflicts (two campaigns of one priority holding at once; a level that holds yet never plays). from and to are RFC 3339 instants, to after from, at most 93 days apart; they are truncated to the minute. Rules are read in each group's timezone as the sweep and every Player read them; every level is judged playable.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: screen_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+        - {name: folder_id, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}}
+        - {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}
+        - {name: campaign_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200':
+          description: The subject's calendar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleCalendar'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -10127,6 +10247,130 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/media/{id}/replace:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: contribute
+      operationId: replaceMedia
+      description: >-
+        Replaces a ready media item's file in place with an upload that was declared (createMediaUpload) and whose bytes were written, instead of committing it as new media. The media keeps its id, so every playlist and schedule that names it plays the new file without being rescheduled, and the folder, tag and all-media selectors that pick it play it at their next resolve. The replacement must be the same kind of file (image for image, video for video, audio for audio); another kind is invalid_request. A changed aspect ratio is allowed: the operation's result carries a warnings entry aspect_ratio_changed naming the playlists that use the item. Every upload rule applies (the plan's video byte limit, the dimension limits, the storage allowance). The file in service stays in the media's version history (listMediaVersions) and counts toward stored bytes until its version is deleted. If-Match, when sent, is the media revision the caller read (revision_conflict when stale). The answer is the upload's operation, like commitMediaUpload: poll getOperation; a succeeded operation's result is {media_id, id, version, warnings}. Bytes identical to the file in service replace nothing and fail the operation with resource_conflict. Under effective Propose the replacement waits for review instead: the operation succeeds with result.status pending_review and result.review_id, the media keeps playing its file until a person approves, and a newer replacement of the same media supersedes the waiting one.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: false, schema: {type: string}, description: "The media item's current revision, quoted or bare. Omitted means any."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaReplace'
+      responses:
+        '202':
+          description: The replacement was recorded; the upload's operation carries its outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaVersions
+      description: >-
+        Lists the versions of a media item, newest first, the version in service first (current: true). A version is a file the item had: number is its content epoch plus one (1 for the upload, one more for each replacement, restore or media sync change), and its bytes are kept until the version is deleted. Read a version's bytes with GET /api/media/{id}/content?version=N.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaVersionPage'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions/{version}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/MediaVersionNumber'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteMediaVersion
+      description: >-
+        Drops a past version: its record goes, its bytes leave the project's stored bytes at once, and its object is removed after 24 hours unless another version or the version in service holds the same file. The version in service cannot be deleted (resource_conflict), and no version can be deleted while a replacement of the media waits for review. A deleted version cannot be restored.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The version was dropped.
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions/{version}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/MediaVersionNumber'
+    post:
+      x-screenrig-access: review
+      operationId: restoreMediaVersion
+      description: >-
+        Puts a past version back in service as a new version, in the media's next content epoch: the media keeps its id and revision moves by one, so every playlist and schedule that names it plays that file again without being rescheduled. The version it copies stays in the history and shares its bytes; the new version counts toward stored bytes like any other. The version in service cannot be restored (resource_conflict). If-Match, when sent, is the media revision the caller read. The body may carry a note. Under effective Propose the restore becomes a review: 202 pending_review, and the media keeps its file until a person approves.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: false, schema: {type: string}, description: "The media item's current revision, quoted or bare. Omitted means any."}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRestore'
+      responses:
+        '200':
+          description: The media as it is now, and warnings about the file put back.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRestored'
+        '202':
+          description: The restore waits for a person's review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRestorePending'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/media/{id}/content:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10138,6 +10382,13 @@ paths:
         schema:
           type: string
         description: Exact strong media SHA-256 ETag returned by this route.
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: Read this version of the media (listMediaVersions) instead of the one in service.
     get:
       x-screenrig-access: read
       operationId: exportMediaContent
@@ -17995,7 +18246,7 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2InProject
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src and whose detail names the sharing setting to change.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
       parameters:
@@ -18129,6 +18380,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScreenMoveResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/calendar:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleCalendarInProject
+      description: >-
+        Answers what a subject's screens play over [from, to) and why, for the dashboard's Schedule calendar: exactly one of screen_id, folder_id (the screens in the folder and every folder inside it), tag, or campaign_id (the screens in its audience). Screens whose stacks have identical inputs (the same levels, default, timezone and display count) share one group with one timeline, so a large subject costs tens of timelines; a group lists up to 500 of its screens and an answer at most 200 groups (truncated). Each group carries its stack, highest first (takeover, campaigns that reach the screens, their own schedule entries, then the default playlist or the nearest folder's), each level's spans (plays on every display it targets, partial with the displays it plays on, outranked, or conditional while it waits on interaction or a data condition only a Player observes), what each display shows (on_screen; the main region of a full page), and conflicts (two campaigns of one priority holding at once; a level that holds yet never plays). from and to are RFC 3339 instants, to after from, at most 93 days apart; they are truncated to the minute. Rules are read in each group's timezone as the sweep and every Player read them; every level is judged playable.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: screen_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+        - {name: folder_id, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}}
+        - {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}
+        - {name: campaign_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200':
+          description: The subject's calendar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleCalendar'
         default:
           $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/project/browser-links/claim:
@@ -20971,6 +21252,7 @@ components:
     ReviewNote: {name: Screenrig-Review-Note, in: header, required: false, schema: {type: string, maxLength: 280}, description: "Optional proposer note on a review-class write, sent as percent-encoded UTF-8 (what JavaScript's encodeURIComponent writes). The server percent-decodes it (an invalid escape is 400 invalid_request); the decoded note is plain text, at most 280 characters after trimming, no control characters (else 400 invalid_request). Stored on the review when the write becomes one; ignored when it applies live."}
     ProjectTarget: {name: ScreenRig-Project, in: header, required: false, deprecated: true, schema: {type: string}, description: "Deprecated for one release. Must be consistent with the JWT projects grants; adds Deprecation and Warning headers. No token exchange."}
     ResourceID: {name: id, in: path, required: true, schema: {type: string}}
+    MediaVersionNumber: {name: version, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A version number of the media item (listMediaVersions)."}
     NoteID: {name: note_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}, description: The id of one of the agent's notes.}
     WebhookDeliveryID: {name: delivery_id, in: path, required: true, schema: {type: string}, description: The id of one of the webhook's deliveries.}
     NotificationUnsubscribedUserID: {name: user_id, in: path, required: true, schema: {type: string, maxLength: 200}, description: The user_id of a person in the notification's unsubscribed list.}
@@ -21157,12 +21439,12 @@ components:
       additionalProperties: false
       required: [code, message, page_id, primitive_id, src, reason]
       description: >-
-        Something the author of a successful playlist write should act on. The write stored what it carried; a warning never fails it. The one code is iframe_framing_refused: a public https page named by an iframe primitive sends X-Frame-Options (DENY, SAMEORIGIN or the obsolete ALLOW-FROM) or a Content-Security-Policy frame-ancestors list that does not admit the Player web app's origin. The Player web app and the macOS, Samsung Tizen and BrightSign Players frame the page, so they cannot show it; Android, Linux and Windows Players open an iframe page as a whole page and are not affected. The backend reads the page's response headers once the write commits, for at most 8 distinct pages per write; a page it cannot reach in time, or that answers an error, is not reported. Each distinct page appears once, naming the first primitive that uses it, and appends one playlist.iframe_framing_refused event (warning) to the project's event log.
+        Something the author of a successful playlist write should act on. The write stored what it carried; a warning never fails it. The one code is iframe_framing_refused: a public https page named by an iframe primitive (its src or its fallback_src) sends X-Frame-Options (DENY, SAMEORIGIN or the obsolete ALLOW-FROM) or a Content-Security-Policy frame-ancestors list that does not admit the Player web app's origin. The Player web app and the macOS, Samsung Tizen and BrightSign Players frame the page, so they cannot show it; Android, Linux and Windows Players open an iframe page as a whole page and are not affected. The backend reads the page's response headers once the write commits, for at most 8 distinct pages per write; a page it cannot reach in time, or that answers an error, is not reported. Each distinct page appears once, naming the first primitive that uses it, and appends one playlist.iframe_framing_refused event (warning) to the project's event log.
       properties:
         code: {type: string, enum: [iframe_framing_refused]}
         message: {type: string, description: "What is refused and by which header, which Players it affects, and the next step: use a page that allows framing from the Player origin, or ask its owner to allow that origin."}
-        page_id: {type: string, description: "The page of the first iframe primitive that uses src."}
-        primitive_id: {type: string, description: "The first iframe primitive that uses src."}
+        page_id: {type: string, description: "The page of the first iframe primitive that names src."}
+        primitive_id: {type: string, description: "The first iframe primitive that names src, as its src or its fallback_src."}
         src: {type: string, description: "The iframe page as authored."}
         reason: {type: string, enum: [x_frame_options, frame_ancestors], description: "Which header refused: X-Frame-Options, or the Content-Security-Policy frame-ancestors directive."}
     ReviewPolicy:
@@ -21268,7 +21550,7 @@ components:
       additionalProperties: false
       required: [operation, base_revision, proposed, diff]
       properties:
-        operation: {type: string, enum: [create, update, selector_refresh]}
+        operation: {type: string, enum: [create, update, selector_refresh, media_replace]}
         base_revision: {type: integer, minimum: 0, description: "The live revision when proposed; 0 for a create."}
         applied_revision: {type: integer, minimum: 1}
         proposed:
@@ -21285,6 +21567,7 @@ components:
         diff: {$ref: "#/components/schemas/ReviewPlaylistDiff"}
         media_playlists: {type: array, items: {$ref: "#/components/schemas/ReviewMediaPlaylist"}, description: "The playlists whose tag, folder or all selectors approving this review's pending media would make start or stop playing it: for a selector_refresh (a media review) every playlist with an approved version, plus every playlist with an open create or update review whose proposed selectors would, one entry per playlist; for a create or update the approved playlists beside its subject. impact.screens includes their screens."}
         media_change: {$ref: "#/components/schemas/ReviewMediaChange"}
+        media_replace: {$ref: "#/components/schemas/ReviewMediaReplace"}
         previously_rejected_media: {type: array, items: {type: string}, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media."}
     ReviewPageEdit:
       type: object
@@ -21295,6 +21578,111 @@ components:
         page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
         page: {$ref: "#/components/schemas/PlaylistPageWriteV2", description: "The page an add or replace writes, as the proposer sent it."}
         before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "An add's neighbour: the page it goes in front of."}
+    MediaReplace:
+      type: object
+      additionalProperties: false
+      required: [upload_id]
+      properties:
+        upload_id: {type: string, minLength: 1, description: "The id of an upload declared with createMediaUpload and written to its upload_url, not committed."}
+        note: {type: string, maxLength: 280, description: "A note kept with the new version."}
+    MediaRestore:
+      type: object
+      additionalProperties: false
+      properties:
+        note: {type: string, maxLength: 280, description: "A note kept with the new version."}
+    MediaVersionActor:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [person, agent, client, sync]}
+        id: {type: string}
+        name: {type: string}
+    MediaVersion:
+      type: object
+      additionalProperties: false
+      required: [number, current, filename, content_type, sha256, bytes, source, created_at]
+      properties:
+        number: {type: integer, minimum: 1}
+        current: {type: boolean, description: "True for the version in service."}
+        filename: {type: string}
+        source_filename: {type: string}
+        content_type: {type: string}
+        sha256: {type: string}
+        bytes: {type: integer, minimum: 0}
+        width: {type: integer, minimum: 0}
+        height: {type: integer, minimum: 0}
+        duration_ms: {type: integer, minimum: 0}
+        codecs: {type: string}
+        source: {type: string, enum: [upload, replace, sync, restore], description: "How it came to be: the first upload, a replacement, a media sync's changed file, or a restore of an older version."}
+        note: {type: string}
+        by: {$ref: "#/components/schemas/MediaVersionActor", description: "Who or which agent put the version in service; absent for the first upload."}
+        restored_from: {type: integer, minimum: 1, description: "The version number a restore copied."}
+        created_at: {type: string, format: date-time, description: "When the version went into service."}
+    MediaVersionPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/MediaVersion"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
+    MediaWarning:
+      type: object
+      additionalProperties: false
+      required: [code, detail, playlists]
+      properties:
+        code: {type: string, enum: [aspect_ratio_changed]}
+        detail: {type: string}
+        playlists: {type: array, items: {$ref: "#/components/schemas/MediaWarningPlaylist"}, description: "The playlists that use the media."}
+    MediaWarningPlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+    MediaRestored:
+      type: object
+      additionalProperties: false
+      required: [media, warnings]
+      properties:
+        media: {$ref: "#/components/schemas/Media"}
+        warnings: {type: array, items: {$ref: "#/components/schemas/MediaWarning"}}
+    MediaRestorePending:
+      type: object
+      additionalProperties: false
+      required: [status, review, warnings]
+      properties:
+        status: {type: string, enum: [pending_review]}
+        review: {$ref: "#/components/schemas/ReviewSummary"}
+        warnings: {type: array, items: {$ref: "#/components/schemas/MediaWarning"}}
+    ReviewMediaReplace:
+      type: object
+      additionalProperties: false
+      description: "The replacement of one media item's file a media_replace review asks about. The media keeps its file until approval."
+      required: [media_id, filename, source, version, before, after, aspect_changed, playlists]
+      properties:
+        media_id: {type: string}
+        filename: {type: string}
+        source: {type: string, enum: [replace, restore]}
+        restored_from: {type: integer, minimum: 1}
+        note: {type: string}
+        version: {type: integer, minimum: 2, description: "The version number the file gets on approval."}
+        before: {$ref: "#/components/schemas/ReviewMediaFile"}
+        after: {$ref: "#/components/schemas/ReviewMediaFile"}
+        aspect_changed: {type: boolean}
+        playlists: {type: array, items: {$ref: "#/components/schemas/MediaWarningPlaylist"}, description: "The playlists that use the media; impact.screens counts their screens."}
+    ReviewMediaFile:
+      type: object
+      additionalProperties: false
+      required: [sha256, bytes, content_type]
+      properties:
+        sha256: {type: string}
+        bytes: {type: integer, minimum: 0}
+        content_type: {type: string}
+        width: {type: integer, minimum: 0}
+        height: {type: integer, minimum: 0}
+        duration_ms: {type: integer, minimum: 0}
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
@@ -23779,7 +24167,7 @@ components:
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, name: {type: string}, revision: {type: integer}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
     ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
-    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
+    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
       type: object
       additionalProperties: false
@@ -23850,9 +24238,13 @@ components:
     PlaylistWriteV2:
       type: object
       additionalProperties: false
-      required: [name, pages]
+      required: [name]
+      description: "pages is required unless from_template or starter makes the playlist (then send only name and that member; starter alone names it). fields, from_template and starter belong to a create; a replacement takes fields."
       properties:
         name: {type: string, minLength: 1, maxLength: 120}
+        fields: {$ref: "#/components/schemas/PlaylistTemplateFields"}
+        from_template: {$ref: "#/components/schemas/PlaylistFromTemplate"}
+        starter: {type: string, enum: [urgent-notice], description: "Creates the built-in Urgent notice template (a headline and a message): send only starter, and optionally name."}
         pages: {type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all, by:tag or by:folder definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: {$ref: "#/components/schemas/PlaylistPageWriteV2"}}
         audio: {$ref: "#/components/schemas/PlaylistAudioWrite"}
         format: {$ref: "#/components/schemas/PlaylistFormat", description: "Omitted means none: an ordinary playlist."}
@@ -23865,6 +24257,10 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 120}
         pages: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/PlaylistPageWriteV2"}}
+        fields:
+          anyOf:
+            - {$ref: "#/components/schemas/PlaylistTemplateFields"}
+            - {type: "null"}
         audio:
           anyOf:
             - {$ref: "#/components/schemas/PlaylistAudioWrite"}
@@ -24248,6 +24644,7 @@ components:
       additionalProperties: false
       required: [ads_enabled]
       properties:
+        impressions_per_hour: {anyOf: [{type: number, minimum: 0}, {type: "null"}], description: "The seller's estimate of the impressions this screen delivers in an hour. Each completed play counts this times its seconds over 3600 as estimated impressions in reports. Null or absent means no estimate."}
         ads_enabled: {type: boolean}
         site_name: {type: string, maxLength: 120}
         city: {type: string, maxLength: 120}
@@ -24272,6 +24669,7 @@ components:
         audience_tags: {type: array, items: {type: string}}
         placement: {type: string}
         public_description: {type: string}
+        impressions_per_hour: {type: number, minimum: 0, description: "The seller's estimate of the impressions this screen delivers in an hour. Absent when the seller set none."}
         rate_override_mcr_per_15s: {anyOf: [{$ref: "#/components/schemas/McrString"}, {type: "null"}]}
         rate_revision: {type: integer}
         timezone: {type: string}
@@ -24532,6 +24930,7 @@ components:
         completed: {type: integer}
         unbillable: {type: integer}
         pending: {type: integer}
+        estimated_impressions: {type: number, minimum: 0, description: "Estimated impressions: each completed play counts the screen's impressions_per_hour, fixed when the ad was issued, times the seconds played over 3600. Absent when no play in scope had an estimate."}
     AdvertisingDeliveryRow:
       type: object
       additionalProperties: false
@@ -24543,6 +24942,7 @@ components:
         gross_mcr: {$ref: "#/components/schemas/McrString"}
         fee_mcr: {$ref: "#/components/schemas/McrString"}
         net_mcr: {$ref: "#/components/schemas/McrString"}
+        estimated_impressions: {type: number, minimum: 0, description: "This play's estimated impressions. Absent when the screen had no estimate when the ad was issued."}
         completed_at: {type: string, format: date-time}
     AdvertisingDeliveryReport:
       type: object
@@ -24556,6 +24956,7 @@ components:
         completed: {type: integer}
         interrupted: {type: integer}
         unbillable: {type: integer}
+        estimated_impressions: {type: number, minimum: 0, description: "Estimated impressions: each completed play counts the screen's impressions_per_hour, fixed when the ad was issued, times the seconds played over 3600. Absent when no play in scope had an estimate."}
         rows: {type: array, items: {$ref: "#/components/schemas/AdvertisingDeliveryRow"}}
         truncated: {type: boolean, description: "Set when the window holds more than 5000 settlements. Totals and counts still cover every settlement; rows lists only the earliest 5000."}
     AdvertisingCategory:
@@ -24652,6 +25053,7 @@ components:
         media_id: {type: string}
         plays: {type: integer, minimum: 0}
         played_ms: {type: integer, minimum: 0}
+        estimated_impressions: {type: number, minimum: 0, description: "Estimated impressions: each completed play counts the screen's impressions_per_hour, fixed when the ad was issued, times the seconds played over 3600. Absent when no play in scope had an estimate."}
     AdvertisingDirectReport:
       type: object
       additionalProperties: false
@@ -24670,6 +25072,7 @@ components:
         plays: {type: integer, minimum: 0, description: "Plays completed in the window."}
         played_ms: {type: integer, minimum: 0, description: "Milliseconds played in the window."}
         not_played: {type: integer, minimum: 0, description: "Plays issued in the window that did not play."}
+        estimated_impressions: {type: number, minimum: 0, description: "Estimated impressions: each completed play counts the screen's impressions_per_hour, fixed when the ad was issued, times the seconds played over 3600. Absent when no play in scope had an estimate."}
         value: {$ref: "#/components/schemas/AdvertisingDirectValue"}
         rows: {type: array, maxItems: 5000, items: {$ref: "#/components/schemas/AdvertisingDirectReportRow"}, description: "Completed plays by UTC day, screen, slot and media, in that order, at most 5000 rows."}
         truncated: {type: boolean, description: "Set when the window holds more than 5000 rows. The totals still cover every play."}
@@ -24883,6 +25286,10 @@ components:
         pages: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/PlaylistPageV2"}}
         audio: {$ref: "#/components/schemas/PlaylistAudio"}
         format: {$ref: "#/components/schemas/PlaylistFormat"}
+        fields: {$ref: "#/components/schemas/PlaylistTemplateFields", description: "Present on a template."}
+        template_id: {type: string, description: "Present on a playlist made from a template: the template."}
+        template_revision: {type: integer, description: "The template revision the pages were built from."}
+        values: {type: object, additionalProperties: {type: string}, description: "The field values of a playlist made from a template."}
         approved_revision: {type: integer, minimum: 0, description: "The revision a person approved; it equals revision for every playlist that can reach a screen. 0: proposed by a Propose credential and never approved, so no screen can use it (playlist_not_approved) and the runtime treats it as missing."}
         approval: {$ref: "#/components/schemas/PlaylistApproval"}
         created_at: {type: string, format: date-time, description: "When the playlist was created. Read-only."}
@@ -25120,6 +25527,46 @@ components:
     PlaylistMediaEndAdvance: {type: object, additionalProperties: false, required: [mode, max_ms], properties: {mode: {type: string, enum: [media_end]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000}}}
     PlaylistAudioEndAdvanceWrite: {type: object, additionalProperties: false, required: [mode], description: "The page ends when the soundtrack track its audio_cue names ends. The page must carry an audio_cue and the playlist an audio soundtrack (docs/playlist-audio.md).", properties: {mode: {type: string, enum: [audio_end]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from the cued track's verified duration.}}}
     PlaylistAudioEndAdvance: {type: object, additionalProperties: false, required: [mode, max_ms], properties: {mode: {type: string, enum: [audio_end]}, max_ms: {type: integer, minimum: 1000, maximum: 86400000}}}
+    PlaylistPrimitiveLocked: {type: boolean, description: "A locked primitive is fixed brand content of a template (logo, background, layout, theme): only the project owner or a member who can approve adds, removes, moves or edits it, or clears its lock, and a playlist made from the template keeps it locked. Omitted means unlocked. A locked primitive cannot read a field. A write by anyone else is primitive_locked (403), or a review under Propose."}
+    PlaylistTemplateField:
+      type: object
+      additionalProperties: false
+      required: [name, label, type]
+      description: "One value a template takes. Pages read it as {field.NAME}: in a card's params (text and url fields), as an image or video selector media_id (media field) or as the whole src of an iframe (url field)."
+      properties:
+        name: {type: string, pattern: "^[a-z0-9_]{1,32}$"}
+        label: {type: string, minLength: 1, maxLength: 60, description: "What a person filling the field sees."}
+        type: {type: string, enum: [text, media, url]}
+        required: {type: boolean, default: false, description: "A required field needs a value. An optional media or url field without one leaves out the primitive that reads it; an optional text field reads as empty."}
+        max_length: {type: integer, minimum: 1, maximum: 2000, description: "Text fields only: the longest value in characters (default 200). The card that reads the field must accept a value that long."}
+    PlaylistTemplateFields: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/PlaylistTemplateField"}, description: "Declaring fields makes the playlist a template. Every token a page reads must name a declared field of the right type and every field must be read; a playlist without fields reads no tokens. A template is never shown on a screen (playlist_is_template). PUT without fields keeps them; null or an empty array removes them."}
+    PlaylistFromTemplate:
+      type: object
+      additionalProperties: false
+      required: [playlist_id]
+      description: "Creates a playlist from a template: its current pages with the values filled in, validated by every playlist rule. A media value must be a ready media item of the right kind, a url value an http or https address."
+      properties:
+        playlist_id: {type: string}
+        values: {type: object, additionalProperties: {type: string}, description: "Field name to value."}
+    PlaylistValuesChange:
+      type: object
+      additionalProperties: false
+      required: [values]
+      properties:
+        values: {type: object, additionalProperties: {anyOf: [{type: string}, {type: "null"}]}, description: "Field name to value; null clears an optional field. Fields not named keep their value."}
+    PlaylistInstance:
+      type: object
+      additionalProperties: false
+      required: [id, name, revision, template_revision, outdated]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        revision: {type: integer}
+        template_revision: {type: integer, description: "The template revision its pages were built from."}
+        outdated: {type: boolean, description: "The template has a newer revision. Changing the values (even none) rebuilds the pages from it."}
+    PlaylistInstanceList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/PlaylistInstance"}}}}
+    PlaylistExpandRequest: {type: object, additionalProperties: false, properties: {values: {type: object, additionalProperties: {type: string}}}}
+    PlaylistExpanded: {type: object, additionalProperties: false, required: [pages], properties: {pages: {type: array, items: {$ref: "#/components/schemas/PlaylistPageV2"}}}}
     PlaylistPrimitiveWrite:
       oneOf:
         - {$ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite"}
@@ -25138,14 +25585,14 @@ components:
         - {$ref: "#/components/schemas/PlaylistStreamPrimitive"}
         - {$ref: "#/components/schemas/PlaylistCardPrimitive"}
       discriminator: {propertyName: primitive}
-    PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages.}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages.}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 0, maximum: 86400, description: "Seconds between reloads of the page while it is on glass: 0 (no reload, the default) or 60 to 86400. Each reload loads src again, so a recovered src replaces the fallback. A write of 0 stores nothing."}, fallback_src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "The page a screen shows in src's place when src does not load: a network, DNS, TLS or connection error, an HTTP status of 400 or above, or no completed load within 30 seconds. Takes the forms and rules of src (a pasted iframe embed code, a YouTube link stored as its canonical embed, a Google or Microsoft document link stored rebuilt for the screen, with the document_not_shared refusal). Omit it for none; an empty string is refused."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as 1 to 64 entries. Each entry is [scheme://]host[:port][path], a CSP host-source: the scheme is http or https (an http entry also matches https; no scheme matches both); host is a name, an IPv4 address, an IPv6 address in brackets, *.name (any subdomain of name, not name itself) or *, with no other wildcard; port is a number or * (absent: the scheme's default port); a path ending in / or /* covers everything under it, any other path only itself. No credentials, query, fragment, spaces or ; , ' \" characters. With a list, the page's own links, scripted navigations, forms and redirects reach only src, fallback_src and addresses an entry matches; a refused navigation leaves the page where it was. Query and fragment never count, and a redirect is matched without its path. Frames inside the page and YouTube embeds are not restricted. Entries are stored with the scheme and host lowercased and /* written as /, repeats removed. An empty array is refused: omit the key for no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between reloads of the page while it is on glass. Present only when above 0; absent means the page never reloads."}, fallback_src: {type: string, format: uri, pattern: "^https?://", description: "The page a screen shows in src's place when src does not load, stored by the rules of src. Absent means no fallback."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as stored entries ([scheme://]host[:port][path], CSP host-sources; the write schema has the rules). Absent means no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}}
     MediaSelectorWeights:
       type: object
@@ -25306,25 +25753,68 @@ components:
     ScreenScheduleEntryWrite:
       type: object
       additionalProperties: false
-      required: [playlist_id, windows]
+      required: [playlist_id]
       description: >-
-        One playlist schedule entry. id is optional (entry_N is assigned in order when omitted) and unique in the schedule. from (inclusive) and until (exclusive) are optional civil minute-precision bounds with no offset, from before until.
+        One playlist schedule entry, a level of the screen's own stack (packages/schedule-contract SEMANTICS.md, Levels and the stack). id is optional (entry_N is assigned in order when omitted) and unique in the schedule. It holds while all its rule members hold: from (inclusive) and until (exclusive), civil minute-precision bounds with no offset; an occurrence of windows, monthly or dates (none of the three recurs every day) whose date is not in except; data, a card-data condition; interaction, while someone is using the screen. An entry sets at least one rule member. data, interaction, covers and a displays lock that leaves outputs out are honored by a Player that resolves its own stack; the server's resolution for other Players skips such an entry (stack_only).
       properties:
         id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$"}
         playlist_id: {type: string, minLength: 1}
         from: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
     ScreenScheduleEntry:
       type: object
       additionalProperties: false
-      required: [id, playlist_id, windows]
+      required: [id, playlist_id]
       properties:
         id: {type: string}
         playlist_id: {type: string}
         from: {type: string}
         until: {type: string}
         windows: {type: array, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
+    LevelMonthly:
+      type: object
+      additionalProperties: false
+      description: >-
+        A monthly occurrence in the screen timezone: day (1 to 31; a month without that day skips it), or nth (1 to 4, -1 the last) and weekday. start and end as a window's; the date the occurrence starts owns it.
+      properties:
+        day: {type: integer, minimum: 1, maximum: 31}
+        nth: {type: integer, enum: [1, 2, 3, 4, -1]}
+        weekday: {type: string, enum: [mon, tue, wed, thu, fri, sat, sun]}
+        start: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+        end: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+    LevelDate:
+      type: object
+      additionalProperties: false
+      required: [date]
+      description: One specific civil date, the whole day or between start and end as a window's. It starts between from and until and is not an exception date.
+      properties:
+        date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+        start: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+        end: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+    LevelInteraction:
+      type: object
+      additionalProperties: false
+      description: >-
+        The level holds while someone is using the screen: from a touch, click or key until idle_s seconds pass with no input. Typical use: an interactive page above an attract loop. idle_s is stored and returned (60 when omitted).
+      properties:
+        idle_s: {type: integer, minimum: 5, maximum: 3600}
     ScreenPlaylistScheduleWrite:
       type: object
       additionalProperties: false
@@ -25435,6 +25925,90 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+    StackLevel:
+      type: object
+      additionalProperties: false
+      required: [id, source, playlist_id]
+      description: >-
+        One level of a screen's stack (packages/schedule-contract SEMANTICS.md, Levels and the stack). id is takeover, campaign:ID, schedule:ENTRY_ID, default, or folder:FOLDER_ID; record_id names the campaign, entry or folder, name the campaign's or folder's name. rule absent always holds.
+      properties:
+        id: {type: string}
+        source: {type: string, enum: [takeover, campaign, schedule, default, folder]}
+        playlist_id: {type: string}
+        rule: {$ref: "#/components/schemas/StackLevelRule"}
+        covers: {type: string, enum: [main, header, footer, side]}
+        displays: {type: array, items: {type: integer, minimum: 1, maximum: 12}}
+        start: {type: string, enum: [on_time]}
+        name: {type: string}
+        record_id: {type: string}
+        priority: {type: integer, description: A campaign's priority.}
+    StackLevelRule:
+      type: object
+      additionalProperties: false
+      properties:
+        ends_at: {type: string, format: date-time, description: "The level holds before this instant (a takeover's end)."}
+        from: {type: string}
+        until: {type: string}
+        windows: {type: array, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, items: {type: string}}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+    ScheduleCalendar:
+      type: object
+      additionalProperties: false
+      required: [subject, from, to, screens, groups]
+      properties:
+        subject: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string, enum: [screen, folder, tag, campaign]}, id: {type: string}}}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        screens: {type: integer, minimum: 0, description: Live screens in the subject.}
+        groups: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScheduleCalendarGroup"}, description: Largest group first.}
+        truncated: {type: boolean, description: More groups exist than the answer lists.}
+    ScheduleCalendarGroup:
+      type: object
+      additionalProperties: false
+      required: [key, screens, screen_ids, displays, levels, spans, on_screen, conflicts]
+      properties:
+        key: {type: string, description: The identity of the group's inputs.}
+        screens: {type: integer, minimum: 1}
+        screen_ids: {type: array, maxItems: 500, items: {type: string}}
+        timezone: {type: string}
+        displays: {type: integer, minimum: 1}
+        levels: {type: array, items: {$ref: "#/components/schemas/StackLevel"}, description: Highest first.}
+        spans: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarSpan"}}
+        on_screen: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarOnScreen"}}
+        conflicts: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarConflict"}}
+    ScheduleCalendarSpan:
+      type: object
+      additionalProperties: false
+      required: [level_id, from, to, state]
+      properties:
+        level_id: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        state: {type: string, enum: [plays, partial, outranked, conditional]}
+        displays: {type: array, items: {type: integer}, description: The displays a partial level plays on.}
+        reason: {type: string, enum: [interaction, data], description: What a conditional level waits on.}
+    ScheduleCalendarOnScreen:
+      type: object
+      additionalProperties: false
+      required: [display, from, to]
+      properties:
+        display: {type: integer, minimum: 1}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        level_id: {type: string, description: Absent when nothing plays.}
+    ScheduleCalendarConflict:
+      type: object
+      additionalProperties: false
+      required: [kind, level_ids]
+      properties:
+        kind: {type: string, enum: [same_priority, never_plays]}
+        level_ids: {type: array, items: {type: string}}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
     ScreenEffectivePlaylist:
       type: object
       additionalProperties: false
@@ -27562,6 +28136,14 @@ components:
         from: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, inclusive."}
         until: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, exclusive."}
         windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
         paused: {type: boolean}
         revision: {type: integer, minimum: 1}
@@ -27579,6 +28161,14 @@ components:
         from: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$", description: Later than from.}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, default: 0}
         paused: {type: boolean, default: false}
     CampaignPatch:
@@ -27592,6 +28182,14 @@ components:
         from: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
         until: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
         windows: {anyOf: [{type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}, {type: "null"}], description: null clears them.}
+        monthly: {anyOf: [{type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}, {type: "null"}], description: null clears them.}
+        dates: {anyOf: [{type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}, {type: "null"}], description: null clears them.}
+        except: {anyOf: [{type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}, {type: "null"}], description: null clears them.}
+        data: {anyOf: [{$ref: "#/components/schemas/PageDataCondition"}, {type: "null"}], description: null clears it.}
+        interaction: {anyOf: [{$ref: "#/components/schemas/LevelInteraction"}, {type: "null"}], description: null clears it.}
+        covers: {anyOf: [{type: string, enum: [full, main, header, footer, side]}, {type: "null"}], description: null is the full page.}
+        displays: {anyOf: [{type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}}, {type: "null"}], description: null plays on every output.}
+        start: {anyOf: [{type: string, enum: [next_item, on_time]}, {type: "null"}], description: null is next_item.}
         priority: {type: integer, minimum: 0, maximum: 100}
         paused: {type: boolean}
     CampaignStatus:
@@ -27599,13 +28197,13 @@ components:
       additionalProperties: false
       required: [campaign_id, screen_id, status]
       description: >-
-        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen). not_in_audience.
+        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, or stack_only: only a Player that resolves its own stack honors it). not_in_audience.
       properties:
         campaign_id: {type: string}
         screen_id: {type: string}
         screen_name: {type: string}
         status: {type: string, enum: [playing, pending, waiting, ended, outranked, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable]}
+        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable, stack_only]}
         by: {type: string, description: The campaign that outranks this one.}
         next_start: {type: string, format: date-time}
     CampaignScreens:
@@ -27652,7 +28250,7 @@ components:
         id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
         playlist_id: {type: string}
         verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, off]}
-        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable], description: "Why an off candidate does not apply."}
+        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, stack_only], description: "Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition)."}
         by:
           type: object
           additionalProperties: false
@@ -28563,7 +29161,7 @@ components:
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
         level: {type: string, description: "Always warning today. A reader treats a level it does not know as warning."}
-        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it), or selector_order_downgraded (a selector with order weighted reaches a Player that did not declare the selector.weighted host capability as order random)."}
+        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_iframe_reload, invalid_iframe_fallback, invalid_iframe_navigation_entry, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it), or selector_order_downgraded (a selector with order weighted reaches a Player that did not declare the selector.weighted host capability as order random)."}
         pageId: {type: string}
         primitiveId: {type: string}
         detail: {type: string}
@@ -28720,6 +29318,7 @@ components:
         data: {type: string, pattern: '^(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]+\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]+\}){0,255}$', description: "Card data key holding the dynamic properties. May not start with feed:. {screen.field.NAME} in the key reads a per-screen document, for example menu-{screen.field.store_number}: the backend fills in each screen's own field."}
         displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
         rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required for layout free. For every other layout omit it or send the rect the server derives; left and right strips are the band on that edge (120 units wide, canvas high), which the Player draws as a horizontal strip turned 90 degrees."}
+        locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}
         layer: {type: integer, minimum: 0, maximum: 1024, description: "Required for layout free. Fixed for every other layout (full 10, center and wide 20, strip, header and footer 30, corner 40, chip 50): omit it or send that value."}
         content_fit: {type: string, enum: [fill]}
         enter: {$ref: "#/components/schemas/PrimitiveEnter"}
@@ -28740,12 +29339,13 @@ components:
         anchor: {type: string, enum: [top-left, top-right, bottom-left, bottom-right, top, bottom, left, right]}
         displays: {$ref: "#/components/schemas/PlaylistDisplays"}
         rect: {$ref: "#/components/schemas/PlaylistRect"}
+        locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}
         layer: {type: integer, minimum: 0, maximum: 1024}
         content_fit: {type: string, enum: [fill]}
         controller: {type: boolean, enum: [false]}
         enter: {$ref: "#/components/schemas/PrimitiveEnter"}
-    PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "layer", "content_fit"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSourceWrite"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect", "description": "Required unless displays is set. With displays, omit it or send the rect derived from them."}, "displays": {"$ref": "#/components/schemas/PlaylistDisplays"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "displays": {"$ref": "#/components/schemas/PlaylistDisplays"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
+    PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "layer", "content_fit"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSourceWrite"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect", "description": "Required unless displays is set. With displays, omit it or send the rect derived from them."}, "displays": {"$ref": "#/components/schemas/PlaylistDisplays"}, "locked": {"$ref": "#/components/schemas/PlaylistPrimitiveLocked"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "displays": {"$ref": "#/components/schemas/PlaylistDisplays"}, "locked": {"$ref": "#/components/schemas/PlaylistPrimitiveLocked"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
     RuntimeStreamPrimitive: {"type": "object", "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     RuntimeCardPrimitive:
       type: object
@@ -28780,6 +29380,9 @@ components:
         primitive: {type: string, enum: [iframe]}
         src: {type: string}
         title: {type: string}
+        reloadMs: {type: integer, minimum: 60000, maximum: 86400000, description: "Milliseconds between reloads while the page is on glass, each from src again (a recovered src replaces the fallback). Absent means the page never reloads."}
+        fallbackSrc: {type: string, minLength: 1, description: "The page to load in src's place when src does not load (docs/player-compatibility.md, iframe pages). Absent means no fallback. A BI view of the screen's project carries the screen's ticket here as in src."}
+        navigationAllowlist: {type: array, minItems: 1, items: {type: string}, description: "Present when the page's navigation is restricted: the authored entries, then src and fallbackSrc as entries of their own (scheme://host[:port]/path, without credentials, query or fragment, the default port left out), without repeats. A Player uses it as the whole list: the page's own document may navigate only to an address that matches an entry as a CSP host-source (docs/player-compatibility.md, Iframe navigation allowlist). Absent means no restriction."}
         rect: {$ref: "#/components/schemas/RuntimeRect"}
         layer: {type: integer, minimum: 0, maximum: 1024}
         contentFit: {type: string, enum: [fill]}
@@ -29778,6 +30381,8 @@ x-problem-codes:
   - live_session_ended
   - wall_unsupported
   - playlist_format_mismatch
+  - playlist_is_template
+  - primitive_locked
   - webhook_limit_reached
   - notification_limit_reached
   - alert_not_open

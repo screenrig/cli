@@ -7,6 +7,7 @@ import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
 import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
+import { handlePlaylistFields, handlePlaylistInstances, templateClearOption, templateSetOption } from "../playlist-fields.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
@@ -45,10 +46,32 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistPreview)), LOOK_AT_THE_CONTACT_SHEET);
 
-  playlist.command("create").description("Create a playlist from a file")
-    .argument("<file>", "Playlist JSON file, or - for stdin")
+  const create = playlist.command("create").description("Create a playlist from a file, from a template, or the built-in Urgent notice template")
+    .argument("[file]", "Playlist JSON file, or - for stdin")
+    .option("--from-template <ID>", "Make the playlist from this template: its current pages with the --set values filled in")
+    .option("--starter <KEY>", "Add a built-in template: urgent-notice (a headline and a message)")
+    .option("--name <NAME>", "The new playlist's name (required with --from-template)")
+    .option("--set <NAME=VALUE>", "With --from-template: a field's value, a media ID for a media field (repeatable)", templateSetOption)
+    .option("--dry-run", "With --from-template: check the values and print the page count without creating anything")
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistCreate));
+  requireOptionGroup(create, "atMostOne", ["--from-template", "--starter"]);
+  requireOptionGroup(create, "requires", ["--set", "--from-template"]);
+  requireOptionGroup(create, "requires", ["--dry-run", "--from-template"]);
+
+  const fields = playlist.command("fields").description("Show a template's fields or a copy's values, or change the values and bring the copy up to date")
+    .argument("<id>", "Playlist identifier: a template, or a playlist made from one")
+    .option("--set <NAME=VALUE>", "Set a field's value (repeatable)", templateSetOption)
+    .option("--clear <NAME>", "Clear an optional field's value (repeatable)", templateClearOption)
+    .option("--refresh", "Build the pages again from the template's current revision, whatever the values")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistFields));
+  addCommandExamples(fields, "screenrig playlist fields pl_TEMPLATE", 'screenrig playlist fields pl_COPY --set headline=Closed');
+
+  playlist.command("instances").description("List the playlists made from a template and the template revision each was built from")
+    .argument("<id>", "Template playlist identifier")
+    .action(bind(handlePlaylistInstances));
 
   playlist.command("update").description("Update a playlist")
     .argument("<id>", "Playlist identifier")
@@ -121,6 +144,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     'screenrig playlist show pl_PLAYLIST --editable');
 
   playlist.command("list").description("List playlists")
+    .option("--templates", "Only templates: playlists that declare fields")
     .action(bind(handlePlaylistList));
 
   playlist.command("revisions").description("List a playlist's revisions, newest first, one page at a time")

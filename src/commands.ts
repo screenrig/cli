@@ -5397,7 +5397,10 @@ export const handlePlaylistList = commandHandler(async (args, runtime, resolved)
 
   const result = await simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
   if (result.envelope.ok) {
-    const data = result.envelope.data as { items?: Array<{ id: string; name: string; revision: number; updated_at?: string }> };
+    const data = result.envelope.data as { items?: Array<{ id: string; name: string; revision: number; updated_at?: string; fields?: unknown[] }> };
+    if (Array.isArray(data.items) && flagBool(args.flags, "templates")) {
+      data.items = data.items.filter((item) => Array.isArray(item.fields) && item.fields.length > 0);
+    }
     if (Array.isArray(data.items)) {
       result.human = ["Playlists", "ID\tRevision\tUpdated\tName",
         ...data.items.map((item) => `${item.id}\t${item.revision}\t${item.updated_at ?? "—"}\t${item.name}`),
@@ -5536,13 +5539,13 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }
-  const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "audio" && key !== "format" && key !== "pages");
+  const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "audio" && key !== "format" && key !== "fields" && key !== "pages");
   if (extra.length > 0) {
     throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
   }
   const pages = parsed.pages;
   assertWirePages(pages);
-  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), pages };
+  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), ...(parsed.fields !== undefined ? { fields: parsed.fields } : {}), pages };
   assertPlaylistValid(body);
   await validatePlaylistCards(client, body);
   // Only a signage-capable project may place adslot pages.
@@ -5573,6 +5576,10 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
 }
 
 export const handlePlaylistCreate = commandHandler(async (args, runtime, resolved) => {
+  if (flagString(args.flags, "from-template") !== undefined || flagString(args.flags, "starter") !== undefined) {
+    // Loaded here: the module imports this one, so a static import would cycle.
+    return (await import("./playlist-fields.js")).playlistCreateFromTemplate(args, runtime, resolved);
+  }
   return playlistCreateUpdateAction(args, runtime, resolved, "create");
 }, true);
 
@@ -5590,7 +5597,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw usageError("Playlist patch JSON must be an object.");
     body = parsed as Record<string, unknown>;
   }
-  const unknown = Object.keys(body).filter((key) => !["name", "pages", "audio", "format"].includes(key));
+  const unknown = Object.keys(body).filter((key) => !["name", "pages", "audio", "format", "fields"].includes(key));
   if (unknown.length) throw usageError(`Playlist patch contains unsupported fields: ${unknown.join(", ")}.`);
   const name = flagString(args.flags, "name");
   if (name !== undefined) {

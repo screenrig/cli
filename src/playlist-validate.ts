@@ -7,6 +7,7 @@ import { ExitCode } from "./exit-codes.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";
 import { playlistTransitionIssue } from "./playlist-write-validation.js";
+import { declaresFields, templateIssues, withFieldStandIns } from "./playlist-template-check.js";
 
 /**
  * Local validation compiles the canonical generated playlist write schema.
@@ -76,6 +77,15 @@ function adslotPageIssues(pages: unknown[]): Array<{ path: string; message: stri
 }
 
 export function playlistIssues(value: unknown): Array<{ path: string; message: string }> {
+  // A template's tokens stand for values the schema would refuse: check the rest
+  // with stand-ins, then the token rules.
+  if (declaresFields(value)) {
+    const issues = playlistDocumentIssues(withFieldStandIns(value));
+    return issues.length ? issues : templateIssues(value);
+  }
+  return playlistDocumentIssues(value);
+}
+function playlistDocumentIssues(value: unknown): Array<{ path: string; message: string }> {
   const pages = value !== null && typeof value === "object" && !Array.isArray(value)
     && "pages" in value && Array.isArray(value.pages) ? value.pages : undefined;
   const adslot = pages?.some(isAdSlotPage) === true;
