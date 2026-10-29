@@ -491,18 +491,16 @@ test("--expires-in is expires_in_s on the single route and in the fleet action; 
   assert.equal(transport.calls.length, sent, "invalid lifetimes must not reach the server");
 });
 
-test("an answer without state, from a server that predates queueing, still succeeds; a state outside queued or sent is refused", async () => {
+test("an answer without state, or with a state outside queued or sent, is refused", async () => {
   const env = await enrolled();
   const transport = new FakeTransport()
-    .on("POST", `/api/screens/${OLD}/reload`, () => ({ status: 202, headers: {}, body: { reload_id: "rld_LEGACY001", expires_at: "2026-08-14T17:10:00.000Z" } }))
+    .on("POST", `/api/screens/${OLD}/reload`, () => ({ status: 202, headers: {}, body: { reload_id: "rld_NOSTATE001", expires_at: "2026-08-14T17:10:00.000Z" } }))
     .on("POST", `/api/screens/${NEW}/reload`, () => ({ status: 202, headers: {}, body: { reload_id: "rld_ODDSTATE01", expires_at: "2026-08-14T17:10:00.000Z", state: "later" } }));
-  const legacy = await cli(["--human", "screen", "reload", OLD], transport, env);
-  assert.equal(legacy.code, ExitCode.Success, legacy.stdout);
-  assert.match(legacy.stdout, /^Reload accepted\nscreen_id: scr_OLDAAAAAAAAAAAAAAAAAAAAA\nreload_id: rld_LEGACY001\nexpires_at: 2026-08-14T17:10:00\.000Z\nThe Player reloads once/m);
-  assert.doesNotMatch(legacy.stdout, /^state:/m);
-  const odd = await cli(["--json", "screen", "reload", NEW], transport, env);
-  assert.notEqual(odd.code, ExitCode.Success, odd.stdout);
-  assert.match(odd.envelope.error!.detail, /ScreenReloadAccepted/);
+  for (const id of [OLD, NEW]) {
+    const refused = await cli(["--json", "screen", "reload", id], transport, env);
+    assert.notEqual(refused.code, ExitCode.Success, refused.stdout);
+    assert.match(refused.envelope.error!.detail, /ScreenReloadAccepted/);
+  }
 });
 
 test("commandLines, suspensionLines and replacedByLines print only well-formed server values", () => {

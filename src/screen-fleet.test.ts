@@ -365,7 +365,7 @@ test("fleet assign and toast send one typed action; toast text rules still apply
   assert.equal(transport.calls.length, before);
 });
 
-test("fleet actions: no match warns, a malformed answer is refused, and an older server is explained", async () => {
+test("fleet actions: no match warns and a malformed answer is refused", async () => {
   const env = await enrolled();
   const { transport } = fleetBackend();
   const none = await cli(["--json", "screen", "reload", "--tag", "Nowhere"], transport, env);
@@ -379,11 +379,6 @@ test("fleet actions: no match warns, a malformed answer is refused, and an older
   const refused = await cli(["--json", "screen", "reload", A, B], malformed, env);
   assert.equal(refused.code, ExitCode.Unexpected);
   assert.match(refused.envelope.error!.detail, /ScreenActionResult contract/);
-
-  const older = new FakeTransport().on("POST", "/api/screens/actions", () => ({ status: 405, headers: {}, body: "" }));
-  const unsupported = await cli(["--json", "screen", "reload", A, B], older, env);
-  assert.equal(unsupported.envelope.ok, false);
-  assert.match(unsupported.envelope.error!.detail, /does not offer fleet screen actions/);
 });
 
 function screenshotBackend(failing: string, inFlight: { now: number; max: number }): FakeTransport {

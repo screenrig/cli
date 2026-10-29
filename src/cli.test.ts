@@ -6114,6 +6114,11 @@ test("screen reload validates its id and revision before calling the server and 
     assert.match((JSON.parse(badId.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
 
     body = { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" };
+    const stateless = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.notEqual(stateless.code, ExitCode.Success, stateless.stdout);
+    assert.match((JSON.parse(stateless.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
+
+    body = { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z", state: "sent" };
     const ok = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
     assert.equal(ok.code, ExitCode.Success, ok.stdout);
   } finally {
@@ -6121,31 +6126,18 @@ test("screen reload validates its id and revision before calling the server and 
   }
 });
 
-test("screen reload explains a server that predates the route and encodes the id", async () => {
+test("screen reload encodes the id and keeps the server's problems", async () => {
   const transport = new FakeTransport();
-  let answer: TransportResponse = { status: 404, headers: { "content-type": "text/plain; charset=utf-8" }, body: "404 page not found\n" };
+  let answer: TransportResponse = { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Resource was not found." } };
   transport.on("POST", /^\/api\/screens\/[^/]+\/reload$/, () => answer);
-  const { configDir, fsLike } = await hostConfigFs("screen-reload-old-server-");
+  const { configDir, fsLike } = await hostConfigFs("screen-reload-ids-");
   try {
-    const old = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
-    assert.notEqual(old.code, ExitCode.Success, old.stdout);
-    const oldError = (JSON.parse(old.stdout) as { error: { status: number; detail: string; next?: { command?: string } } }).error;
-    assert.equal(oldError.status, 404);
-    assert.match(oldError.detail, /does not offer screen reload/);
-    assert.equal(oldError.next?.command, "screenrig screen show scr_TEST");
-
-    answer = { status: 405, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Method Not Allowed\n" };
-    const notAllowed = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
-    assert.match((JSON.parse(notAllowed.stdout) as { error: { detail: string } }).error.detail, /does not offer screen reload/);
-
-    // A real missing screen keeps the server's not_found problem.
-    answer = { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Resource was not found." } };
     const missing = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
     const missingError = (JSON.parse(missing.stdout) as { error: { code: string; detail: string } }).error;
     assert.equal(missingError.code, "not_found");
     assert.equal(missingError.detail, "Resource was not found.");
 
-    answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" } };
+    answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z", state: "sent" } };
     const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../project"], transport, { fs: fsLike });
     assert.equal(traversal.code, ExitCode.Success, traversal.stdout);
     assert.equal(transport.calls.at(-1)?.path, "/api/screens/scr_TEST%2F..%2F..%2Fproject/reload");

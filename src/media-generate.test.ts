@@ -97,7 +97,7 @@ function generationOperation(state: string, extra: Record<string, unknown> = {})
 }
 
 /**
- * The server as `Prefer: respond-async` meets it: the POST answers 202 with the
+ * The server as it answers: the POST answers 202 with the
  * operation at once, the operation is polled until it succeeds, and the stored
  * still is read for the envelope. `running` is how many polls see it unfinished.
  */
@@ -108,7 +108,7 @@ function generateTransport(options: { running?: number } = {}): FakeTransport {
     .on("POST", "/api/media/generations", (req) => {
       const body = (req.body ?? {}) as { quality?: string };
       quality = body.quality === "low" || body.quality === "high" ? body.quality : "medium";
-      return { status: 202, headers: { "content-type": "application/json", "preference-applied": "respond-async" }, body: generationOperation("queued") };
+      return { status: 202, headers: { "content-type": "application/json" }, body: generationOperation("queued") };
     })
     .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => {
       polls += 1;
@@ -125,15 +125,6 @@ function generateTransport(options: { running?: number } = {}): FakeTransport {
       };
     })
     .on("GET", `/api/media/${GENERATED_MEDIA.id}`, () => ({ status: 200, headers: { "content-type": "application/json" }, body: GENERATED_MEDIA }));
-}
-
-/** A server that predates the operation and answers the POST with the finished still. */
-function legacyGenerateTransport(): FakeTransport {
-  return new FakeTransport().on("POST", "/api/media/generations", () => ({
-    status: 201,
-    headers: { "content-type": "application/json", etag: '"1"' },
-    body: { media: GENERATED_MEDIA, usage: { quality: "medium", credits: 1200, usd: "0.12" } },
-  }));
 }
 
 function operationCalls(transport: FakeTransport) {
@@ -192,7 +183,7 @@ test("media generate stores the still and returns med_… plus usage", async () 
       tag: "LobbyDusk",
     });
     assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
-    assert.equal(transport.calls[0]?.headers?.prefer, "respond-async", "the POST asks for the operation, not a held-open request");
+    assert.equal(transport.calls[0]?.headers?.prefer, undefined, "the server answers the POST with the operation whatever the request says");
     assert.equal(transport.calls[0]?.timeout_ms, 30_000, "the POST is an ordinary short request");
     assert.equal(operationCalls(transport).length, 1);
     assert.equal(operationCalls(transport)[0]?.path, `/api/operations/${GENERATE_OPERATION}`);
@@ -441,16 +432,20 @@ test("media generate follows an operation whose id carries the environment marke
   }
 });
 
-test("media generate still accepts a server that answers the POST with the finished still", async () => {
-  const transport = legacyGenerateTransport();
-  const configDir = await testTemp("media-generate-legacy-");
+test("a finished-still 201 answer is not an operation and leaves the outcome unknown", async () => {
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
+    status: 201,
+    headers: { "content-type": "application/json", etag: '"1"' },
+    body: { media: GENERATED_MEDIA, usage: { quality: "medium", credits: 1200, usd: "0.12" } },
+  }));
+  const configDir = await testTemp("media-generate-201-");
   const fsLike = await enrolled(configDir);
   try {
     const result = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT], transport, { configDir, fs: fsLike });
-    assert.equal(result.code, ExitCode.Success, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { data: { media_id: string; usage: { credits: number } } };
-    assert.equal(envelope.data.media_id, GENERATED_MEDIA.id);
-    assert.equal(envelope.data.usage.credits, 1200);
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.detail, /expected HTTP 202 with an operation and got HTTP 201/);
     assert.equal(operationCalls(transport).length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });

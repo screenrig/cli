@@ -3727,10 +3727,10 @@ const GENERATE_QUALITIES = ["low", "medium", "high"] as const;
 const GENERATE_PROMPT_MAX = 4000;
 
 /**
- * `media generate` asks the server to answer with the generation's operation
- * (`Prefer: respond-async`) and then waits on that operation. One request that
- * stays open while the image vendor works would be cut off by the proxy in front
- * of the API after 100 s without a byte. The server's own budget for the vendor,
+ * `media generate` is answered with the generation's operation (HTTP 202) and
+ * then waits on that operation. One request that stays open while the image
+ * vendor works would be cut off by the proxy in front of the API after 100 s
+ * without a byte. The server's own budget for the vendor,
  * the render, the store and the debit is 165 s, so the wait sits above it and the
  * CLI never abandons a still the project has already been billed for. `--timeout`
  * sets the wait, as it does for the other operations.
@@ -3900,7 +3900,6 @@ async function mediaGenerate(
       path: "/api/media/generations",
       idempotent: true,
       idempotencyKey: retry.state.idempotency_key,
-      headers: { prefer: "respond-async" },
       body,
     });
   } catch (error) {
@@ -3927,9 +3926,6 @@ async function mediaGenerate(
       });
       generated = mediaGenerationFromBody({ media: { id: operation.result?.media_id }, usage: operation.result?.usage });
       generated = { ...generated, media: await generatedMedia(client, generated.media.id) };
-    } else if (response.status === 201) {
-      // A server that predates the operation answers with the finished still.
-      generated = mediaGenerationFromBody(response.body);
     } else {
       throw unexpectedResponseError(
         `media generate expected HTTP 202 with an operation and got HTTP ${response.status}.`,
@@ -6277,15 +6273,6 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
         next: { command: `screenrig screen show ${id}`, reason: "A screen still waiting to pair has no Player to reload. Pair it first." },
       }, error.exitCode, error.warnings);
     }
-    // A server that predates the reload route answers a bare 404 or a 405
-    // rather than a not_found problem for the screen.
-    if ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405) {
-      throw new CliError({
-        ...error.problem,
-        detail: "This API server does not offer screen reload. Nothing was sent to the screen's player.",
-        next: { command: `screenrig screen show ${id}`, reason: "Confirm the screen exists; if it does, the server predates screen reload." },
-      }, error.exitCode, error.warnings);
-    }
     throw error;
   }
   const accepted = (response.body ?? {}) as Partial<ScreenReloadAccepted>;
@@ -6316,9 +6303,9 @@ function commandLifetime(args: ParsedArgs): ScreenCommandWrite {
   return value === undefined ? {} : { expires_in_s: expiresInSeconds(value) };
 }
 
-/** The state of a reboot or reload answer: absent from a server that predates queueing, else queued or sent. */
+/** The state of a reboot or reload answer: queued or sent. */
 function validDelivery(state: unknown): boolean {
-  return state === undefined || state === "queued" || state === "sent";
+  return state === "queued" || state === "sent";
 }
 
 /**
@@ -6347,13 +6334,6 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
       if (error instanceof CliError && error.problem.status === 429 && error.problem.retry_after_seconds) {
         await runtime.sleep(error.problem.retry_after_seconds * 1000);
         continue;
-      }
-      if (error instanceof CliError && !error.problem.next
-        && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
-        throw new CliError({ ...error.problem,
-          detail: "This API server does not offer fleet screen actions. No screen was changed.",
-          next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/screens/actions." },
-        }, error.exitCode, error.warnings);
       }
       throw error;
     }
