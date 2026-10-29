@@ -2982,6 +2982,101 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/schedule/imports/template:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleImportTemplate
+      description: >-
+        Answers a sheet with the columns a schedule import reads and three example rows (a screen code, a screen folder and a tag), as CSV or, with format=xlsx, an XLSX workbook.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, xlsx]}}
+      responses:
+        '200':
+          description: The template sheet.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/schedule/imports/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: read
+      operationId: previewScheduleImport
+      description: >-
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: The preview. valid is false while any row has an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/schedule/imports:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: commitScheduleImport
+      description: >-
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - {name: fingerprint, in: query, required: false, schema: {type: string}, description: "The preview's fingerprint, for a CSV or XLSX body; a JSON body carries it as a member."}
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: What the commit applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportCommitted'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/project/browser-links/claim:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -4444,6 +4539,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/commands:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenCommands
+      description: >-
+        Lists every reboot and reload asked of an active or archived screen, newest first: the commands Screen.commands holds (its newest 10) and every older one, with the state each reached. A queued command past expires_at reads expired. A command that was still queued when the screen's device was replaced reads cancelled. Cancel one still queued with POST /api/screens/{id}/commands/{command_id}/cancel.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of the screen's commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenCommandPage'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -18459,6 +18581,110 @@ paths:
                 $ref: '#/components/schemas/ScheduleCalendar'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports/template:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleImportTemplateInProject
+      description: >-
+        Answers a sheet with the columns a schedule import reads and three example rows (a screen code, a screen folder and a tag), as CSV or, with format=xlsx, an XLSX workbook.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, xlsx]}}
+      responses:
+        '200':
+          description: The template sheet.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports/preview:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: read
+      operationId: previewScheduleImportInProject
+      description: >-
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: The preview. valid is false while any row has an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: write
+      operationId: commitScheduleImportInProject
+      description: >-
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - {name: fingerprint, in: query, required: false, schema: {type: string}, description: "The preview's fingerprint, for a CSV or XLSX body; a JSON body carries it as a member."}
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: What the commit applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportCommitted'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/project/browser-links/claim:
     parameters:
       - name: project_id
@@ -25991,6 +26217,35 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+    ScreenStackStatus:
+      type: object
+      additionalProperties: false
+      required: [manifest_revision, levels, playing, reported_at]
+      description: >-
+        What the screen's Player last reported of its stack (docs/player-compatibility.md §6.11): each level's readiness and the level each display shows. Present only for a Player that resolves its own stack, while that stack is current.
+      properties:
+        manifest_revision: {type: string}
+        levels:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, state]
+            properties:
+              id: {type: string}
+              state: {type: string, enum: [ready, preparing, failed]}
+        playing:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [display, level_id]
+            properties:
+              display: {type: integer, minimum: 1, maximum: 12}
+              level_id: {type: string}
+        reported_at: {type: string, format: date-time}
     StackLevel:
       type: object
       additionalProperties: false
@@ -26021,6 +26276,123 @@ components:
         except: {type: array, items: {type: string}}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
+    ScheduleImportRequest:
+      type: object
+      additionalProperties: false
+      required: [rows]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80, description: "Identifies the import; the same name updates the levels it made (default import)."}
+        source: {type: string, maxLength: 200, description: The file the rows came from.}
+        timezone: {type: string, description: The IANA zone the times are written in when a row has no timezone.}
+        code_field: {type: string, description: Read a screen code only from this screen field.}
+        fingerprint: {type: string, description: The preview's fingerprint; required by the commit.}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: object
+            additionalProperties: {oneOf: [{type: string}, {type: number}, {type: boolean}, {type: 'null'}]}
+            description: One row keyed by column name (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); a header spelled screen, file, from, until and the like is read as its column. Rows are numbered from 2 in order, as a sheet numbers them under its header, unless a row carries its own number in row.
+    ScheduleImportRowError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        column: {type: string, description: The column of the cell; absent for a problem of the whole row.}
+        code: {type: string, description: "required, unknown_screen, ambiguous_screen, unknown_folder, ambiguous_folder, unknown_tag, unknown_file, ambiguous_file, not_playable, invalid_time, reversed_times, past_end, no_timing, invalid_value, timezone, screen_not_ready, overlap or limit; outranked and open_end are warnings."}
+        message: {type: string}
+    ScheduleImportResolved:
+      type: object
+      additionalProperties: false
+      required: [kind, id, name]
+      properties:
+        kind: {type: string, description: "screen, folder, tag or list for a target; file or playlist for content."}
+        id: {type: string}
+        name: {type: string}
+        screens: {type: integer, minimum: 0, description: The screens a target reaches.}
+    ScheduleImportRow:
+      type: object
+      additionalProperties: false
+      required: [row, status]
+      properties:
+        row: {type: integer, minimum: 2, description: The row's place in the file; the header is row 1.}
+        status: {type: string, enum: [ok, error]}
+        cells: {type: object, additionalProperties: {type: string}, description: "The row's cells by column as the sheet gave them (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); send them again, with corrections, as rows."}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
+        target: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        content: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        from: {type: string, description: The start as written, 'YYYY-MM-DDTHH:MM.': ''}
+        until: {type: string, description: The end as written, exclusive: '', 'YYYY-MM-DDTHH:MM.': ''}
+        level: {type: string, description: The key of the level the row feeds.}
+    ScheduleImportLevel:
+      type: object
+      additionalProperties: false
+      required: [key, action, home, content, screens, priority, rows]
+      properties:
+        key: {type: string}
+        action: {type: string, enum: [create, update, unchanged]}
+        home: {type: string, enum: [screen, shared], description: "screen is an entry of one screen's own schedule; shared is a campaign over an audience."}
+        screen_id: {type: string}
+        entry_id: {type: string, description: The entry (imp_ then the import and level keys) the level is or will be.}
+        campaign_id: {type: string, description: The campaign a stored shared level already is.}
+        name: {type: string, description: The shared level's campaign name.}
+        content: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        screens: {type: integer, minimum: 0}
+        priority: {type: integer, minimum: 0, maximum: 100}
+        from: {type: string}
+        until: {type: string}
+        rows: {type: array, items: {type: integer}}
+    ScheduleImportRemoval:
+      type: object
+      additionalProperties: false
+      required: [home]
+      properties:
+        home: {type: string, enum: [screen, shared]}
+        screen_id: {type: string}
+        entry_id: {type: string}
+        campaign_id: {type: string}
+        name: {type: string}
+    ScheduleImportSummary:
+      type: object
+      additionalProperties: false
+      required: [rows, rows_with_errors, levels, creates, updates, unchanged, removes, screens, playlists]
+      properties:
+        rows: {type: integer}
+        rows_with_errors: {type: integer}
+        levels: {type: integer}
+        creates: {type: integer}
+        updates: {type: integer}
+        unchanged: {type: integer}
+        removes: {type: integer}
+        screens: {type: integer, description: The screens whose own schedules a commit writes.}
+        playlists: {type: integer, description: The one-file playlists a commit makes for the files the sheet names.}
+    ScheduleImportPreview:
+      type: object
+      additionalProperties: false
+      required: [name, columns, valid, fingerprint, summary, rows, levels, removals]
+      properties:
+        name: {type: string}
+        source: {type: string}
+        timezone: {type: string}
+        columns: {type: array, items: {type: string}, description: The columns the sheet had.}
+        ignored_columns: {type: array, items: {type: string}, description: Headers nothing reads.}
+        valid: {type: boolean, description: No row has an error; only then can the import commit.}
+        fingerprint: {type: string}
+        summary: {$ref: "#/components/schemas/ScheduleImportSummary"}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: Problems of the whole file.}
+        rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}}
+        levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}}
+        removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}}
+        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: The stacks of the screens the import changes, as they would be after a commit.: ''}
+    ScheduleImportCommitted:
+      type: object
+      additionalProperties: false
+      required: [preview, applied]
+      properties:
+        preview: {$ref: "#/components/schemas/ScheduleImportPreview"}
+        applied: {$ref: "#/components/schemas/ScheduleImportSummary"}
     ScheduleCalendar:
       type: object
       additionalProperties: false
@@ -26113,8 +26485,9 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
-        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
+        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first; GET /api/screens/{id}/commands lists every one). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
         suspension: {$ref: "#/components/schemas/ScreenSuspension"}
+        stack_status: {$ref: "#/components/schemas/ScreenStackStatus"}
         timezone: {type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone."}
         effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
         timezone_source: {type: string, enum: [screen, device, unknown]}
@@ -26788,6 +27161,13 @@ components:
         expires_at: {type: string, format: date-time}
         sent_at: {type: string, format: date-time, description: "When the runtime event was appended. Absent while the command is queued, and on one cancelled, expired or superseded before it was sent."}
         done_at: {type: string, format: date-time, description: "The boot time a health report proved. Present only on a done reboot."}
+    ScreenCommandPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ScreenCommand"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
     ScreenPlayPageWrite:
       type: object
       additionalProperties: false
@@ -28226,6 +28606,7 @@ components:
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
         paused: {type: boolean}
+        import: {type: string, description: "Present on a campaign a schedule import made: the import's mark and the level's key. Importing the same sheet again under the same name updates it."}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -29214,7 +29595,30 @@ components:
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
         suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
+        stack: {$ref: "#/components/schemas/RuntimeStack"}
         diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. A playlist format that is not the shape of the screen's wall (or a screen with no wall) projects pages [] plus a wall_format_mismatch diagnostic. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content."}
+    RuntimeStack:
+      type: object
+      additionalProperties: true
+      required: [levels, playlists]
+      description: >-
+        Every level of the screen's stack, sent only to a Player that declared the schedule.stack host capability and only when the stack has more than one level (docs/player-compatibility.md §6.11). The manifest's root members are the bottom level's playlist; the Player resolves the levels itself with the schedule contract.
+      properties:
+        levels: {type: array, maxItems: 64, items: {$ref: "#/components/schemas/StackLevel"}, description: "Highest first; the last is the default and always holds."}
+        playlists:
+          type: object
+          description: Every level playlist other than the root's, by playlist id.
+          additionalProperties: {$ref: "#/components/schemas/RuntimeStackPlaylist"}
+    RuntimeStackPlaylist:
+      type: object
+      additionalProperties: true
+      required: [playlistRevision, pages]
+      properties:
+        playlistName: {type: string}
+        playlistRevision: {type: integer}
+        pages: {type: array, items: {oneOf: [{$ref: "#/components/schemas/RuntimePage"}, {$ref: "#/components/schemas/RuntimeAdslotPage"}]}}
+        audio: {$ref: "#/components/schemas/RuntimeAudio"}
+        diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}}
     RuntimeSuspension:
       type: object
       additionalProperties: true
@@ -30424,6 +30828,8 @@ x-problem-codes:
   - trigger_limit_reached
   - bi_upstream_refused
   - bi_upstream_unavailable
+  - schedule_import_invalid
+  - schedule_import_stale
   - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit
