@@ -2398,6 +2398,7 @@ function adsInventoryBody(args: ParsedArgs): Record<string, unknown> {
   const enabled = flagBool(args.flags, "enabled") ? true : flagBool(args.flags, "disabled") ? false : undefined;
   const rate = flagString(args.flags, "rate-mcr-per-15s");
   const tags = flagString(args.flags, "audience-tags");
+  const impressions = flagNumber(args.flags, "impressions-per-hour");
   return {
     ...(enabled === undefined ? {} : { ads_enabled: enabled }),
     ...plugged("site_name", flagString(args.flags, "site-name")),
@@ -2409,6 +2410,8 @@ function adsInventoryBody(args: ParsedArgs): Record<string, unknown> {
     ...plugged("public_description", flagString(args.flags, "public-description")),
     ...(rate === undefined ? {} : { rate_override_mcr_per_15s: rate }),
     ...(flagBool(args.flags, "clear-rate") ? { rate_override_mcr_per_15s: null } : {}),
+    ...plugged("impressions_per_hour", impressions),
+    ...(flagBool(args.flags, "clear-impressions-per-hour") ? { impressions_per_hour: null } : {}),
   };
 }
 
@@ -2486,6 +2489,8 @@ function adsInventoryWriteBody(current: Record<string, unknown> | undefined, arg
     placement: current.placement,
     public_description: current.public_description,
     rate_override_mcr_per_15s: current.rate_override_mcr_per_15s ?? null,
+    // An absent estimate clears it, so the stored one is sent back.
+    ...(typeof current.impressions_per_hour === "number" ? { impressions_per_hour: current.impressions_per_hour } : {}),
     ...supplied,
   };
 }
@@ -3077,7 +3082,7 @@ export const handleAdsReportsSpend = commandHandler(async (args, runtime, resolv
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: reportLines("Ad spend", response.body, ["campaign_id", "spent_mcr", "reserved_mcr", "completed", "unbillable", "pending"]),
+    human: reportLines("Ad spend", response.body, ["campaign_id", "spent_mcr", "reserved_mcr", "completed", "unbillable", "pending", "estimated_impressions"]),
   };
 });
 
@@ -3094,8 +3099,8 @@ export const handleAdsReportsDelivery = commandHandler(async (args, runtime, res
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: reportLines("Delivery statement", response.body,
-      ["gross_mcr", "fee_mcr", "net_mcr", "completed", "interrupted", "unbillable"],
-      ["screen_id", "slot_id", "reservation_id", "gross_mcr", "fee_mcr", "net_mcr", "completed_at"]),
+      ["gross_mcr", "fee_mcr", "net_mcr", "completed", "interrupted", "unbillable", "estimated_impressions"],
+      ["screen_id", "slot_id", "reservation_id", "gross_mcr", "fee_mcr", "net_mcr", "estimated_impressions", "completed_at"]),
   };
 });
 
@@ -3222,7 +3227,7 @@ export const handleAdsDirectAvailability = commandHandler(async (args, runtime, 
   };
 });
 
-const DIRECT_REPORT_ROW_FIELDS = ["day", "screen_id", "slot_id", "media_id", "plays", "played_ms"] as const;
+const DIRECT_REPORT_ROW_FIELDS = ["day", "screen_id", "slot_id", "media_id", "plays", "played_ms", "estimated_impressions"] as const;
 
 /** The money value of a report, `12.50 USD (cpm)`, or undefined when the campaign records no price. */
 function directValueLine(value: unknown): string | undefined {
@@ -3256,7 +3261,7 @@ export const handleAdsDirectReport = commandHandler(async (args, runtime, resolv
       ["name", typeof report.name === "string" ? report.name : undefined],
       ["advertiser", typeof report.advertiser === "string" ? report.advertiser : undefined],
       ["period", typeof report.from === "string" && typeof report.to === "string" ? `${report.from} to ${report.to}` : undefined],
-      ...(["goal_plays", "delivered_plays", "plays", "played_ms", "not_played"] as const).map((field): [string, string | undefined] =>
+      ...(["goal_plays", "delivered_plays", "plays", "played_ms", "not_played", "estimated_impressions"] as const).map((field): [string, string | undefined] =>
         [field, typeof report[field] === "number" ? String(report[field]) : undefined]),
       ["value", directValueLine(report.value)],
     ]).split("\n");

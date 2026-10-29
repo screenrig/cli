@@ -23,6 +23,16 @@ export function positiveInteger(name: string): (value: string) => string {
   };
 }
 
+export function nonnegativeNumber(name: string): (value: string) => string {
+  return (value) => {
+    const number = Number(value);
+    if (!value.trim() || !Number.isFinite(number) || number < 0) {
+      throw usageError(`--${name} requires a nonnegative number.`);
+    }
+    return value;
+  };
+}
+
 export function positiveNumber(name: string): (value: string) => string {
   return (value) => {
     const number = Number(value);

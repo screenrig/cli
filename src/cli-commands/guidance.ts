@@ -74,7 +74,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "ads network create": ['--name "Main Street Centre"'],
     "ads network rate": ["--rate-mcr-per-15s 150000 --expect-rev 3"],
     "ads inventory list": [""],
-    "ads inventory update": ["scr_LOBBY --enabled --audience-tags families,recreation"],
+    "ads inventory update": ["scr_LOBBY --enabled --audience-tags families,recreation", "scr_LOBBY --impressions-per-hour 120"],
     "ads slots list": [""],
     "ads slots create": ['--name "Lobby break" --accepted-media image,video', '--name "Lobby video" --accepted-media video --vast-tag-url https://ads.example.com/vast.xml'],
     "ads slots update": ["ads_LOBBY --max-video-duration-ms 60000 --expect-rev 2", "ads_LOBBY --vast-tag-url https://ads.example.com/vast.xml --expect-rev 2", "ads_LOBBY --clear-vast-tag-url --expect-rev 2"],

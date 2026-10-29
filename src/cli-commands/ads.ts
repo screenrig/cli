@@ -45,7 +45,7 @@ import {
 } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
-import { decisionNoteOption, positiveInteger, revision, vastTagUrl } from "./options.js";
+import { decisionNoteOption, nonnegativeNumber, positiveInteger, revision, vastTagUrl } from "./options.js";
 import { playsInstantOption } from "../playback-export.js";
 
 /**
@@ -93,12 +93,15 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--public-description <TEXT>", "Public description shown to invited buyers")
     .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override per 15 seconds").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
     .addOption(new Option("--clear-rate", "Remove this screen's rate override and inherit the project default").conflicts("rateMcrPer15s"))
+    .addOption(new Option("--impressions-per-hour <N>", "Estimated impressions this screen delivers per hour (0 or more)").argParser(nonnegativeNumber("impressions-per-hour")).conflicts("clearImpressionsPerHour"))
+    .addOption(new Option("--clear-impressions-per-hour", "Remove this screen's impressions estimate").conflicts("impressionsPerHour"))
     .action(bind(handleAdsInventoryUpdate));
   requireOptionGroup(inventoryUpdate, "atLeastOne", [
     "--enabled", "--disabled", "--site-name", "--city", "--region", "--venue-type",
     "--audience-tags", "--placement", "--public-description", "--rate-mcr-per-15s", "--clear-rate",
+    "--impressions-per-hour", "--clear-impressions-per-hour",
   ]);
-  addCommandNotes(inventoryUpdate, "The stored row is read first, then written as a whole record: flags you omit keep the current opt-in flag, price override, and public metadata, and the row's current revision is sent as the precondition. When no row exists yet the supplied fields create it (a new row requires --enabled or --disabled) and --expect-rev has nothing to check.");
+  addCommandNotes(inventoryUpdate, "The stored row is read first, then written as a whole record: flags you omit keep the current opt-in flag, price override, impressions estimate, and public metadata, and the row's current revision is sent as the precondition. When no row exists yet the supplied fields create it (a new row requires --enabled or --disabled) and --expect-rev has nothing to check. --impressions-per-hour sets the screen's estimate of impressions per hour; reports count each completed play as that estimate times the seconds played over 3600 in estimated_impressions, and --clear-impressions-per-hour removes the estimate.");
 
   const slots = ads.command("slots").description("Manage the reusable ad slots this seller offers");
   slots.command("list").description("List this seller project's slot definitions")
@@ -246,7 +249,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   addCommandNotes(directPause, "Writes the campaign's state. A paused campaign takes no ad slots until it is resumed.");
   addCommandNotes(directResume, "Writes the campaign's state. The campaign takes eligible ad slots again within its flight.");
   addCommandNotes(directEnd, "Writes the campaign's state. Ending is final: an ended campaign cannot be resumed, and its report stays readable. Create a new direct campaign to run the ad again.");
-  addCommandNotes(directReport, "Reads delivery for one direct campaign: plays, played_ms, plays not played, pace, and value, the recorded price applied to the delivery for the seller to bill the advertiser. --format csv writes the rows as day,screen_id,slot_id,media_id,plays,played_ms. A report that holds only part of the rows carries the warning direct_report_truncated: narrow --from and --to for the rest.");
+  addCommandNotes(directReport, "Reads delivery for one direct campaign: plays, played_ms, plays not played, estimated_impressions, pace, and value, the recorded price applied to the delivery for the seller to bill the advertiser. --format csv writes the rows as day,screen_id,slot_id,media_id,plays,played_ms,estimated_impressions (empty when the screen had no estimate). A report that holds only part of the rows carries the warning direct_report_truncated: narrow --from and --to for the rest.");
   addCommandNotes(directAvailability, "Reads only; nothing is booked. The query JSON takes screen_ids, slot_ids, venue_types, cities, tags, dayparts, flight_start, flight_end and exclude_campaign_id (the campaign being edited, so its own bookings are not counted against it). The answer gives estimated_plays, booked_plays and available_plays for the selected screens.");
 
   const reviews = ads.command("reviews").description("Decide exact submitted creative versions");
@@ -284,6 +287,6 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default now); at most 35 days after --from", playsInstantOption("--to"))
     .action(bind(handleAdsReportsFill));
   addCommandNotes(reportFill, "Fill statistics count this project's ad-slot occurrences over up to 35 days: how many were filled by direct campaigns, marketplace campaigns and the slot's VAST tag, how many stayed unfilled and why (no_demand, ineligible, separated, capped), the fill_rate, and the same by day.");
-  addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings.");
-  addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this project's own delivery, with one row per completed occurrence. Normal project costs consume the shared balance.");
+  addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings; estimated_impressions appears when a screen carries an impressions estimate.");
+  addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this project's own delivery, with one row per completed occurrence. Normal project costs consume the shared balance. estimated_impressions appears when a screen carries an impressions estimate.");
 }
