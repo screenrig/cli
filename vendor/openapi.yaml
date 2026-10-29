@@ -2172,7 +2172,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlaylistWriteV2'
+              $ref: '#/components/schemas/PlaylistCreateRequest'
       responses:
         '202':
           $ref: '#/components/responses/PendingReview'
@@ -18257,7 +18257,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PlaylistWriteV2'
+              $ref: '#/components/schemas/PlaylistCreateRequest'
       responses:
         '202':
           $ref: '#/components/responses/PendingReview'
@@ -24238,16 +24238,35 @@ components:
     PlaylistWriteV2:
       type: object
       additionalProperties: false
-      required: [name]
-      description: "pages is required unless from_template or starter makes the playlist (then send only name and that member; starter alone names it). fields, from_template and starter belong to a create; a replacement takes fields."
+      required: [name, pages]
       properties:
         name: {type: string, minLength: 1, maxLength: 120}
         fields: {$ref: "#/components/schemas/PlaylistTemplateFields"}
-        from_template: {$ref: "#/components/schemas/PlaylistFromTemplate"}
-        starter: {type: string, enum: [urgent-notice], description: "Creates the built-in Urgent notice template (a headline and a message): send only starter, and optionally name."}
         pages: {type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all, by:tag or by:folder definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: {$ref: "#/components/schemas/PlaylistPageWriteV2"}}
         audio: {$ref: "#/components/schemas/PlaylistAudioWrite"}
         format: {$ref: "#/components/schemas/PlaylistFormat", description: "Omitted means none: an ordinary playlist."}
+    PlaylistFromTemplateWrite:
+      type: object
+      additionalProperties: false
+      required: [name, from_template]
+      description: "Creates a playlist from a template. Send only name and from_template."
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        from_template: {$ref: "#/components/schemas/PlaylistFromTemplate"}
+    PlaylistStarterWrite:
+      type: object
+      additionalProperties: false
+      required: [starter]
+      description: "Adds the built-in Urgent notice template (a headline and a message). Send only starter, and optionally name."
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        starter: {type: string, enum: [urgent-notice]}
+    PlaylistCreateRequest:
+      description: "A playlist's pages, or a template to make it from, or the built-in starter."
+      oneOf:
+        - {$ref: "#/components/schemas/PlaylistWriteV2"}
+        - {$ref: "#/components/schemas/PlaylistFromTemplateWrite"}
+        - {$ref: "#/components/schemas/PlaylistStarterWrite"}
     PlaylistPatch:
       type: object
       additionalProperties: false
