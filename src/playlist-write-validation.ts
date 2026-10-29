@@ -298,20 +298,43 @@ function validateMotion(value: unknown, name: string, primitive: string): void {
   throw usageError(`${name}.type is invalid.`);
 }
 
-function validateIframe(value: JsonRecord, name: string): void {
-  exact(value, ["type", "src", "title"], name);
-  const src = string(value, "src", name, 4096);
-  string(value, "title", name, 200);
+/** The address of an iframe's src or fallback_src; both take the same forms. */
+function validateIframeAddress(value: JsonRecord, key: "src" | "fallback_src", name: string): void {
+  const address = string(value, key, name, 4096);
   // A sign shows what its owner points it at: http or https, any host including
   // the screen's LAN, with user:pass@ credentials for a page behind a login. The
-  // server also reads a pasted <iframe ...> embed code for its src.
+  // server also reads a pasted <iframe ...> embed code for the address.
   let parsed: URL;
-  try { parsed = new URL(iframeSnippetSource(src) ?? src); } catch (error) {
+  try { parsed = new URL(iframeSnippetSource(address) ?? address); } catch (error) {
     if (error instanceof CliError) throw error;
-    throw usageError(`${name}.src must be an http or https URL.`);
+    throw usageError(`${name}.${key} must be an http or https URL.`);
   }
   if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
-    throw usageError(`${name}.src must be an http or https URL.`);
+    throw usageError(`${name}.${key} must be an http or https URL.`);
+  }
+}
+
+function validateIframe(value: JsonRecord, name: string): void {
+  exact(value, ["type", "src", "title", "reload_s", "fallback_src", "navigation_allowlist"], name);
+  validateIframeAddress(value, "src", name);
+  string(value, "title", name, 200);
+  if (value.fallback_src !== undefined) validateIframeAddress(value, "fallback_src", name);
+  if (value.navigation_allowlist !== undefined) {
+    // Absent means no restriction and [] is refused; the server owns the entry grammar (CSP host-sources).
+    const list = value.navigation_allowlist;
+    if (!Array.isArray(list) || list.length < 1 || list.length > 64) {
+      throw usageError(`${name}.navigation_allowlist must be 1 to 64 strings.`);
+    }
+    for (const [index, entry] of list.entries()) {
+      if (typeof entry !== "string" || entry.length < 1 || entry.length > 2048) {
+        throw usageError(`${name}.navigation_allowlist[${index}] must be a string of 1 to 2048 characters.`);
+      }
+    }
+  }
+  if (value.reload_s !== undefined) {
+    // 0 is no reload; the schema bounds the range and cannot state the gap below 60.
+    const seconds = number(value, "reload_s", name, { integer: true, min: 0, max: 86_400 });
+    if (seconds > 0 && seconds < 60) throw usageError(`${name}.reload_s must be 0 (no reload) or 60 to 86400 seconds.`);
   }
 }
 
@@ -474,8 +497,15 @@ export function validatePlaylistWrite(
       if (primitive.enter !== undefined) validateEnter(primitive.enter, `${primitiveName}.enter`);
       if (primitive.primitive === "application") throw usageError("Playlist bundles do not support application primitives.");
       if (primitive.primitive === "iframe") {
-        exact(primitive, ["id", "primitive", "src", "title", "rect", "layer", "content_fit", "enter", "motion"], primitiveName);
-        validateIframe({ type: "iframe", src: primitive.src, title: primitive.title }, primitiveName);
+        exact(primitive, ["id", "primitive", "src", "title", "reload_s", "fallback_src", "navigation_allowlist", "rect", "layer", "content_fit", "enter", "motion"], primitiveName);
+        validateIframe({
+          type: "iframe",
+          src: primitive.src,
+          title: primitive.title,
+          ...(primitive.reload_s !== undefined ? { reload_s: primitive.reload_s } : {}),
+          ...(primitive.fallback_src !== undefined ? { fallback_src: primitive.fallback_src } : {}),
+          ...(primitive.navigation_allowlist !== undefined ? { navigation_allowlist: primitive.navigation_allowlist } : {}),
+        }, primitiveName);
         if (primitive.content_fit !== "fill") throw usageError(`${primitiveName}.content_fit must be fill for an iframe.`);
         if (primitive.motion !== undefined) validateMotion(primitive.motion, `${primitiveName}.motion`, "iframe");
         iframeCount += 1;

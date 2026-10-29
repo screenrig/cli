@@ -49,6 +49,102 @@ function signageUrl(value: unknown, protocols: readonly string[]): boolean {
   } catch { return false; }
 }
 
+const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+/** The rule a bracketed IPv6 host breaks, or undefined (server splitNavigationAuthority). */
+function ipv6Issue(address: string): string | undefined {
+  let canonical: string;
+  try { canonical = new URL(`http://[${address}]/`).hostname; } catch { return "host is not a valid IPv6 address"; }
+  return canonical.startsWith("[::ffff:") ? "host must not be an IPv4-mapped IPv6 address: write the IPv4 address" : undefined;
+}
+
+/** The rule a host (not an IPv6 address) breaks: a name, an IPv4 address, `*.name` or `*`. */
+function navigationHostIssue(host: string): string | undefined {
+  if (host === "*" || host.startsWith("[")) return undefined;
+  const wildcard = host.startsWith("*.");
+  const name = (wildcard ? host.slice(2) : host).toLowerCase();
+  if (name.includes("*")) return "host may use * only alone or as a leading *. (as in *.example.com)";
+  if (name === "") return "host is required";
+  if (name.length > 253) return "host must be at most 253 characters";
+  const labels = name.split(".");
+  for (const label of labels) {
+    if (label === "") return "host has an empty label (a leading, trailing or doubled dot)";
+    if (label.length > 63) return "host labels must be at most 63 characters";
+    if (!/^[a-z0-9-]+$/.test(label)) return "host may contain only letters, digits, hyphens and dots";
+  }
+  // A host whose last label is a number is an IPv4 address to a URL parser: only the four-part form is unambiguous.
+  if (/^\d+$/.test(labels[labels.length - 1]!)) {
+    if (!IPV4.test(name)) return "host must be a name or an IPv4 address written as four decimal parts (a.b.c.d)";
+    if (wildcard) return "a wildcard needs a domain name, not an IP address";
+  }
+  return undefined;
+}
+
+function navigationPathIssue(path: string): string | undefined {
+  if (path === "" || path === "/*") return undefined;
+  if (path.endsWith("/*")) path = path.slice(0, -1);
+  if (path.includes("*")) return "path may use * only as a final /*";
+  for (let index = 0; index < path.length; index++) {
+    const char = path[index]!;
+    if (char === "%") {
+      if (!/^[0-9a-fA-F]{2}$/.test(path.slice(index + 1, index + 3))) return "path has a % that is not a %XX escape";
+      index += 2;
+    } else if (!/^[A-Za-z0-9\-._~!$&()+=:@/]$/.test(char)) {
+      return "path may contain only letters, digits, - . _ ~ ! $ & ( ) + = : @ / and %XX escapes";
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The rule an iframe navigation_allowlist entry breaks, or undefined: a CSP3
+ * host-source, [scheme "://"] host [":" port] [path], mirroring the server's
+ * NormalizeNavigationEntry (internal/playlists/navigation_allowlist.go) rule for rule.
+ */
+function navigationEntryIssue(entry: string): string | undefined {
+  if (entry === "") return "must not be empty";
+  if (entry.length > 2048) return "must be at most 2048 characters";
+  for (const char of entry) {
+    const code = char.codePointAt(0)!;
+    if (code > 0x7f) return "must be ASCII: write a host in punycode (xn--) and a path percent-encoded";
+    if (code <= 0x20 || code === 0x7f) return "must not contain spaces or control characters";
+    if (char === "?" || char === "#") return "must not have a query or a fragment: they never count";
+    if (char === ";" || char === "," || char === "'" || char === '"') return "must not contain ; , ' or \": they end a CSP source";
+  }
+  let rest = entry;
+  const schemeEnd = rest.indexOf("://");
+  if (schemeEnd >= 0 && !rest.slice(0, schemeEnd).includes("/")) {
+    const scheme = rest.slice(0, schemeEnd).toLowerCase();
+    if (scheme !== "http" && scheme !== "https") return "scheme must be http or https";
+    rest = rest.slice(schemeEnd + 3);
+  }
+  const slash = rest.indexOf("/");
+  const authority = slash >= 0 ? rest.slice(0, slash) : rest;
+  const path = slash >= 0 ? rest.slice(slash) : "";
+  if (authority.includes("@")) return "must not include credentials (user:pass@)";
+
+  let host: string, port: string | undefined;
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    if (end < 0) return "an IPv6 host needs its closing ]";
+    const issue = ipv6Issue(authority.slice(1, end));
+    if (issue !== undefined) return issue;
+    host = "[";
+    const after = authority.slice(end + 1);
+    if (after.startsWith(":")) port = after.slice(1);
+    else if (after !== "") return "an IPv6 host may be followed only by :port or a path";
+  } else {
+    const colon = authority.indexOf(":");
+    host = colon < 0 ? authority : authority.slice(0, colon);
+    port = colon < 0 ? undefined : authority.slice(colon + 1);
+    if (port?.includes(":")) return "an IPv6 host must be written in brackets, as [::1]";
+  }
+  const hostIssue = navigationHostIssue(host);
+  if (hostIssue !== undefined) return hostIssue;
+  if (port !== undefined && port !== "*" && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) return "port must be 1 to 65535 or *";
+  return navigationPathIssue(path);
+}
+
 // A stream source that names no protocol takes it from its URL's scheme.
 function impliedStreamProtocol(value: unknown): string | undefined {
   const scheme = typeof value === "string" ? /^([a-z][a-z0-9+.-]*):\/\//i.exec(value)?.[1]?.toLowerCase() : undefined;
@@ -199,8 +295,29 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
-      if (primitive.primitive === "iframe" && !signageUrl(embeddedSource(primitive.src), ["http:", "https:"])) {
-        fail(`${itemPath}/src`, "must be an http or https URL");
+      if (primitive.primitive === "iframe") {
+        if (!signageUrl(embeddedSource(primitive.src), ["http:", "https:"])) fail(`${itemPath}/src`, "must be an http or https URL");
+        // fallback_src takes the forms of src; an empty string is not "none" (omit the key).
+        if (Object.hasOwn(primitive, "fallback_src") && !signageUrl(embeddedSource(primitive.fallback_src), ["http:", "https:"])) {
+          fail(`${itemPath}/fallback_src`, "must be an http or https URL");
+        }
+        // The schema bounds reload_s to 0 through 86400; the gap between 0 and 60 is the rule it cannot state.
+        if (typeof primitive.reload_s === "number" && primitive.reload_s !== 0 && (primitive.reload_s < 60 || primitive.reload_s > 86400)) {
+          fail(`${itemPath}/reload_s`, "must be 0 (no reload) or 60 to 86400 seconds");
+        }
+        // The schema bounds the list to 1 through 64 strings; the entry grammar is the rule it cannot state.
+        if (Object.hasOwn(primitive, "navigation_allowlist")) {
+          const list = primitive.navigation_allowlist, listPath = `${itemPath}/navigation_allowlist`;
+          if (!Array.isArray(list)) fail(listPath, "must be an array of 1 to 64 strings");
+          else if (list.length === 0) fail(listPath, "must not be empty: omit it for no restriction");
+          else if (list.length > 64) fail(listPath, "must have at most 64 entries");
+          else {
+            for (const [entryIndex, entry] of list.entries()) {
+              const issue = typeof entry === "string" ? navigationEntryIssue(entry) : "must be a string";
+              if (issue !== undefined) fail(`${listPath}/${entryIndex}`, issue);
+            }
+          }
+        }
       }
       if (primitive.primitive === "stream") {
         streams++;

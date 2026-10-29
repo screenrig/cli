@@ -98,7 +98,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .requiredOption("--output <PATH>", "Write the exported bundle to this directory (required)")
     .option("--skip-applications", "Drop applications and empty or application-controlled pages; report what was skipped")
     .action(bind(handlePlaylistExport));
-  addCommandNotes(exportCommand, "Bundles image and video media, soundtrack audio and iframe URLs; dynamic media selectors are snapshotted. Cards, streams and adslot pages stop the export. Applications stop it by default; --skip-applications drops them and empty or application-controlled pages, reports skipped ids, and requires at least one remaining page. For an editable document retaining card and application references in the same project, use playlist show <id> --output playlist.json. Referenced resources stay in that project.");
+  addCommandNotes(exportCommand, "Bundles image and video media, soundtrack audio and iframe URLs with their reload_s, fallback_src and navigation_allowlist; dynamic media selectors are snapshotted. Cards, streams and adslot pages stop the export. Applications stop it by default; --skip-applications drops them and empty or application-controlled pages, reports skipped ids, and requires at least one remaining page. For an editable document retaining card and application references in the same project, use playlist show <id> --output playlist.json. Referenced resources stay in that project.");
 
   const importCommand = playlist.command("import").description("Import a playlist bundle")
     .argument("<directory>", "Local directory")

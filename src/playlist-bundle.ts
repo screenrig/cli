@@ -138,6 +138,18 @@ function integerField(owner: JsonRecord, key: string, name: string): number {
   return value as number;
 }
 
+/** An array of 1 to maxItems non-empty strings of at most maxLength characters; the server owns what each string means. */
+function stringListField(owner: JsonRecord, key: string, name: string, maxItems: number, maxLength: number): string[] {
+  const value = owner[key];
+  if (
+    !Array.isArray(value) || value.length < 1 || value.length > maxItems ||
+    value.some((entry) => typeof entry !== "string" || entry.length < 1 || entry.length > maxLength)
+  ) {
+    throw usageError(`${name}.${key} must be 1 to ${maxItems} non-empty strings of at most ${maxLength} characters.`);
+  }
+  return [...(value as string[])];
+}
+
 function exactKeys(owner: JsonRecord, allowed: readonly string[], name: string): void {
   const extras = Object.keys(owner).filter((key) => !allowed.includes(key));
   if (extras.length > 0) throw usageError(`${name} contains unsupported fields: ${extras.join(", ")}.`);
@@ -466,6 +478,10 @@ export function normalizePlaylistForBundle(
           primitive: "iframe",
           src: stringField(primitive, "src", "Iframe primitive"),
           title: stringField(primitive, "title", "Iframe primitive"),
+          // The server stores reload_s only above 0, and fallback_src and navigation_allowlist only when set.
+          ...(primitive.reload_s !== undefined ? { reload_s: integerField(primitive, "reload_s", "Iframe primitive") } : {}),
+          ...(primitive.fallback_src !== undefined ? { fallback_src: stringField(primitive, "fallback_src", "Iframe primitive") } : {}),
+          ...(primitive.navigation_allowlist !== undefined ? { navigation_allowlist: stringListField(primitive, "navigation_allowlist", "Iframe primitive", 64, 2048) } : {}),
         };
       } else if (category === "image" || category === "video") {
         const selector = normalizedMediaSelector(primitive.selector);
