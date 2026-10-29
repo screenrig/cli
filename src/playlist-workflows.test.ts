@@ -461,6 +461,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   let interrupted = false;
   const conflict = () => ({ status: 409, headers: {}, body: { code: 'idempotency_conflict', title: 'Conflict', status: 409 } });
   const transport = new FakeTransport()
+   .on('GET', '/api/project/capabilities', () => response({ media_video_bytes: 500_000_000 }))
    .on('POST', '/api/media/uploads', req => {
     const key = req.headers?.['idempotency-key']; assert.ok(key);
     const body = JSON.stringify(req.body);

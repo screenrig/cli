@@ -2323,6 +2323,7 @@ async function projectCapabilities(args: ParsedArgs, runtime: CliRuntime, resolv
       ["features", `advertiser=${capabilities.features.advertiser} screens=${capabilities.features.screens}`],
       ["feature_revision", String(capabilities.feature_revision)],
       ["capabilities", [...capabilities.capabilities].sort().join(", ") || "(none)"],
+      ["media_video_bytes", capabilities.media_video_bytes === undefined ? "(not stated)" : String(capabilities.media_video_bytes)],
       ["request_id", client.requestId],
     ]),
   };

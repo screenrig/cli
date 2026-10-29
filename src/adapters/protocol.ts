@@ -114,6 +114,8 @@ export interface ProjectCapabilities {
   features: ProjectFeatures;
   feature_revision: number;
   capabilities: string[];
+  /** The most bytes one video upload may declare on the project's plan. */
+  media_video_bytes?: number;
 }
 
 /** Enrollment delivers the grant's first token pair. */

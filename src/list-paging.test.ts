@@ -248,6 +248,7 @@ test("media upload reuses its earlier upload from a later page of the media list
   });
   const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
   const transport = new FakeTransport()
+    .on("GET", "/api/project/capabilities", () => ({ status: 200, headers: {}, body: { media_video_bytes: 500_000_000 } }))
     .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
     .on("GET", "/api/operations/op_EARLIER", () => ({
       status: 200, headers: {},

@@ -96,6 +96,8 @@ export function fakeProject(options: { linkCap?: number; campaignCap?: number } 
 
   route("GET", "/api/project", () => ({ status: 200, headers: {}, body: { id: PROJECT_ID, name: "Amber Acorn", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization" } }));
 
+  // The project's plan video limit (Standard's), which a video import is held to.
+  route("GET", "/api/project/capabilities", () => ({ status: 200, headers: {}, body: { media_video_bytes: 500_000_000 } }));
   route("GET", "/api/media", (req) => listPage(req, [...media.values()], 1000));
   route("POST", "/api/media/uploads", keyed((req) => {
     const declaration = body(req);

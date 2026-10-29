@@ -159,6 +159,8 @@ export interface TranscodeRequest {
   explicitContentType?: string;
   options: TranscodeOptions;
   reporter?: ProgressReporter;
+  /** The project's video size limit (`media_video_bytes`); a video source needs it. */
+  videoBytes?: number;
 }
 
 export async function transcodeForUpload(request: TranscodeRequest): Promise<TranscodeResult> {
@@ -240,7 +242,8 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     );
   }
 
-  const verified = kind === "video" ? await inspectH264Passthrough(runtime, toolchain, filePath, probe, options) : undefined;
+  if (kind === "video" && request.videoBytes === undefined) throw new Error("A video transcode needs the project's video limit.");
+  const verified = kind === "video" ? await inspectH264Passthrough(runtime, toolchain, filePath, probe, options, request.videoBytes!) : undefined;
   const passthrough = verified
     ? "source H.264 passed full compressed-stream delivery checks; original bytes preserved"
     : passthroughReason(kind, probe, options, sourceWebp);
