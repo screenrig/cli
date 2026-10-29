@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
+import { rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { ExitCode } from "./exit-codes.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
+import { testTemp } from "./test-temp.js";
+import { FakeTransport } from "./transport/fake.js";
 import { assertPlaylistValid, playlistIssues } from "./playlist-validate.js";
 
 const PANNING_BACKGROUND_PAGE = {
@@ -204,4 +212,37 @@ test("local canonical validation accepts a camera's rtsp URL as given, or a bare
   assert.deepEqual(playlistIssues(strip(stream([{ url: "rtsp://camera.local:554/stream1" }, { url: "https://example.com/live.m3u8" }]))), []);
   assert.notDeepEqual(playlistIssues(strip(stream([{ protocol: "rtsp", url: "http://192.168.1.1/stream" }]))), []);
   assert.notDeepEqual(playlistIssues(strip(stream([{ url: "rtsp://camera.local/one" }, { protocol: "rtsp", url: "rtsps://camera.local/two" }]))), []);
+});
+
+test("offline playlist validate rejects unknown entry fields without HTTP", async () => {
+  const cwdDir = await testTemp("playlist-offline-");
+  try {
+    const transport = new FakeTransport();
+    const input = path.join(cwdDir, "playlist.json");
+    await writeFile(input, JSON.stringify({ name: "Intro", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [{ id: "image", primitive: "image", selector: { by: "all", one_at_a_time: true }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain", enter: { type: "fade-left", duration_ms: 500 } }] }] }));
+    const stdout = new PassThrough(), stderr = new PassThrough();
+    const chunks: Buffer[] = [];
+    stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    stderr.resume();
+    const base = processRuntime();
+    const env = { XDG_CONFIG_HOME: cwdDir };
+    const code = await run({
+      ...base,
+      argv: ["--json", "playlist", "validate", input],
+      env,
+      homedir: () => cwdDir,
+      cwd: () => cwdDir,
+      fs: { ...base.fs, homedir: () => cwdDir, env },
+      stdout,
+      stderr,
+      transport,
+    });
+    stdout.end();
+    const output = Buffer.concat(chunks).toString("utf8");
+    assert.equal(code, ExitCode.Usage, output);
+    assert.equal(JSON.parse(output).error.errors[0].path, "/pages/0/primitives/0/enter/duration_ms");
+    assert.deepEqual(transport.calls, []);
+  } finally {
+    await rm(cwdDir, { recursive: true, force: true });
+  }
 });

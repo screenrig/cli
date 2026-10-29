@@ -8,7 +8,7 @@ import type { ConfigFs } from "./config.js";
 import type { OperationLogger } from "./log/types.js";
 import { redactText } from "./redact.js";
 import { USER_AGENT } from "./user-agent.js";
-import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
+import { openExternalUrl, type OpenUrl } from "./open-url.js";
 
 export interface CliRuntime {
   stdin?: AsyncIterable<Uint8Array | string>;
@@ -26,7 +26,6 @@ export interface CliRuntime {
   signedRawPut?: SignedRawPut;
   cwd: () => string;
   openUrl?: OpenUrl;
-  openPath?: OpenPath;
   runProcess?: RunProcess;
   isStderrTty?: () => boolean;
   /** The fetch migrate uses for the vendor it reads; the global fetch when absent. Tests inject a fixture router. */
@@ -364,7 +363,6 @@ export function processRuntime(): CliRuntime {
     cwd: () => process.cwd(),
     signedRawPut: fetchSignedRawPut(),
     openUrl: openExternalUrl,
-    openPath: openLocalPath,
     runProcess: spawnRunProcess(),
     isStderrTty: () => process.stderr.isTTY === true,
     fs: {

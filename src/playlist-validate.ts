@@ -2,7 +2,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { readAsset } from "./assets.js";
 import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
-import { lintPlaylistPages, type LintFinding } from "./compose/lint.js";
+import { lintPlaylistPages, type LintFinding } from "./playlist-lint.js";
 import { ExitCode } from "./exit-codes.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";

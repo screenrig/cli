@@ -12,7 +12,7 @@ temporary="$(mktemp -d "${TMPDIR:-/tmp}/screenrig-cli-release.XXXXXX")"
 trap 'rm -rf -- "${temporary}"' EXIT
 
 # One minified dist/bin.js with every runtime dependency inside it, built from
-# `npm run build` output. Renderer platform binaries are fetched on first render.
+# `npm run build` output.
 install -d "${temporary}/normalized/package"
 node "${root}/scripts/bundle-release.mjs" \
   --destination "${temporary}/normalized/package"

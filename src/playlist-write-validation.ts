@@ -1,9 +1,11 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
-import { WIRE_PRIMITIVES } from "./compose/catalog.js";
 
 interface JsonRecord { [key: string]: unknown }
+
+/** The playlist wire's closed primitive kinds. */
+const WIRE_PRIMITIVES = ["image", "video", "iframe", "application", "stream", "card"] as const;
 
 const PLAYLIST_TRANSITION_TYPES = [
   "crossfade",
@@ -554,15 +556,15 @@ function pageLabel(page: JsonRecord, index: number): string {
   return typeof page.id === "string" && page.id.length > 0 ? `Page ${page.id}` : `pages[${index}]`;
 }
 
-const COMPOSE_NEXT = {
-  command: "screenrig compose catalog",
-  reason: "List the local compose catalog, then run compose render and media upload.",
+const PRIMITIVE_NEXT = {
+  command: "screenrig media generate --help",
+  reason: "Finished stills come from media generate; live text comes from built-in cards.",
 };
 
 /**
- * Wire-shape checks every page gets before a write or a preview: primitives are
- * the closed wire kinds (copy and chrome are composed locally into images), and
- * an image or video names its media in `selector`.
+ * Wire-shape checks every page gets before a write: primitives are the closed
+ * wire kinds (a finished still is media, live text is a built-in card), and an
+ * image or video names its media in `selector`.
  */
 export function assertWirePages(pages: unknown[]): void {
   for (const [index, page] of pages.entries()) {
@@ -575,7 +577,7 @@ export function assertWirePages(pages: unknown[]): void {
       const wire = primitive as JsonRecord;
       const category = wire.primitive;
       if (typeof category !== "string" || !(WIRE_PRIMITIVES as readonly string[]).includes(category)) {
-        throw usageError(`${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Compose copy and chrome locally.`, COMPOSE_NEXT);
+        throw usageError(`${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Generate a finished still with media generate, or use a built-in card for live text.`, PRIMITIVE_NEXT);
       }
       if (category === "image" || category === "video") {
         const selector = wire.selector;

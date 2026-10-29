@@ -382,7 +382,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  assert.match(timed.body.warnings[0].message,/page_2 \(8000 ms\)/);
  const longer=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'longer.json',['--duration-ms','60000']);
  assert.equal(longer.code,0); assert.deepEqual(longer.body.warnings,[]);
- assert.equal(parseArgv(result.body.data.preview.argv).positionals[2],dir+'/prepared.json');
+ assert.equal(result.body.data.preview,undefined);
  // A sign shows LAN pages over http and pages behind a login, stored as authored.
  for (const [src, output] of [['http://user:secret@192.168.1.20:8080/status','lan.json'],['http://printer.local/','local.json']] as const) {
   const lan = await invoke([src], output);

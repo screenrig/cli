@@ -25,7 +25,6 @@ const invalid = [
   ["media", "update", "med_TEST", "--tag", "x", "--clear-tag", "--expect-rev", "1"],
   ["feedback", "bug", "Title", "--body", "x", "--body-file", "x.md"],
   ["kv", "set", "key", "--application-id", "app_TEST", "--json-value", "{}", "--file", "x"],
-  ["compose", "render", "page.json", "--target-width", "1920"],
   ["events", "list", "--after", "a", "--cursor", "b"],
   ["playlist", "import", "bundle", "--expect-rev", "1"],
 ];

@@ -164,12 +164,8 @@ test("root help is compact and every command is discoverable through immediate c
     "media sync update",
     "media sync run",
     "media sync delete",
-    "compose catalog",
-    "compose batch",
-    "compose render",
     "playlist init",
     "playlist validate",
-    "playlist preview",
     "playlist replace-release",
     "playlist create",
     "playlist update",
@@ -499,7 +495,6 @@ test("declared relationships and choices reject invalid commands before authenti
     ["media", "generate"],
     ["media", "generate", "--prompt", "test", "--quality", "ultra"],
     ["playlist", "init", "med_TEST", "--name", "Test", "--output", "out.json", "--target-width", "1920"],
-    ["compose", "render", "input.json", "--target-height", "1080"],
     ["playlist", "import", "bundle", "--expect-rev", "1"],
     ["notifications", "create"],
     ["notifications", "create", "--email", "owner"],
@@ -590,7 +585,7 @@ test("every operational command has examples that parse and stdin help matches i
     assert.ok(help.examples.length > 0, path);
     for (const example of help.examples) assert.doesNotThrow(() => parseArgv(words(example).slice(1)), example);
   }
-  for (const action of ["validate", "preview", "create", "update"]) {
+  for (const action of ["validate", "create", "update"]) {
     assert.ok(commandHelp(["playlist", action]).arguments.some(argument => argument.description.includes("stdin")), action);
   }
   assert.match(commandHelp(["screen", "publish"]).usage, /does not update an existing playlist/);

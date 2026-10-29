@@ -12,7 +12,6 @@ import { registerServiceClientCommands } from "./service-client.js";
 import { registerDashboardCommands } from "./dashboard.js";
 import { registerAppCommands } from "./app.js";
 import { registerMediaCommands } from "./media.js";
-import { registerComposeCommands } from "./compose.js";
 import { registerPlaylistCommands } from "./playlist.js";
 import { registerScreenCommands } from "./screen.js";
 import { registerCampaignCommands } from "./campaign.js";
@@ -54,7 +53,6 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerDashboardCommands(root, bind);
   registerAppCommands(root, bind);
   registerMediaCommands(root, bind);
-  registerComposeCommands(root, bind);
   registerPlaylistCommands(root, bind);
   registerScreenCommands(root, bind);
   registerCampaignCommands(root, bind);

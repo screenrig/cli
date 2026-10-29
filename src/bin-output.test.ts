@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,22 +10,14 @@ import { testTemp } from "./test-temp.js";
 test("CLI drains a large JSON envelope through a backpressured child-process pipe", { timeout: 30000 }, async () => {
   const directory = await testTemp("bin-output-");
   try {
-    const file = path.join(directory, "batch.json"), output = path.join(directory, "rendered");
-    await mkdir(output);
-    await writeFile(file, JSON.stringify({
-      width: 1280,
-      height: 720,
-      background: "#111111",
-      text: "#eeeeee",
-      pages: Array.from({ length: 64 }, (_, index) => ({
-        id: `page-${index}`,
-        left: {
-          title: `Page ${index}`,
-          text: Array.from({ length: 8 }, (_, textIndex) => `Page ${index} text ${textIndex}: diagnostics remain complete.`),
-        },
-      })),
-    }));
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./bin.js", import.meta.url)), "--json", "compose", "batch", file, "--output", output], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CONFIG_HOME: directory, SCREENRIG_CONFIG: path.join(directory, "missing-config.json") } });
+    // `app pack` runs offline and lists every packed file in its envelope: 2,500 files exceed a pipe buffer.
+    const site = path.join(directory, "site");
+    await mkdir(site);
+    await writeFile(path.join(site, "index.html"), "<!doctype html><title>Large</title>\n");
+    for (let start = 0; start < 2500; start += 250) {
+      await Promise.all(Array.from({ length: 250 }, (_, offset) => writeFile(path.join(site, `file-${String(start + offset).padStart(4, "0")}.txt`), `file ${start + offset}\n`)));
+    }
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./bin.js", import.meta.url)), "--json", "app", "pack", site, "--output", path.join(directory, "site.tgz")], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CONFIG_HOME: directory, SCREENRIG_CONFIG: path.join(directory, "missing-config.json") } });
     const chunks: Buffer[] = [], errors: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => errors.push(chunk));
@@ -40,8 +32,8 @@ test("CLI drains a large JSON envelope through a backpressured child-process pip
     assert.ok(Buffer.byteLength(stdout) > 65536, "regression must exceed a typical pipe buffer");
     const envelope = JSON.parse(stdout);
     assert.equal(envelope.ok, true);
-    assert.equal(envelope.data.rendered, 64);
-    assert.deepEqual(envelope.data.pages, JSON.parse(await readFile(path.join(output, "compose-batch.json"), "utf8")).pages);
+    assert.equal(envelope.data.file_count, 2502);
+    assert.equal(envelope.data.entries.length, 2502);
     assert.ok(stdout.endsWith("\n"));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

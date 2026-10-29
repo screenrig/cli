@@ -226,19 +226,9 @@ import { quotedRevision } from "./if-match.js";
 import { screenLinkSummaryLines } from "./screen-link-format.js";
 import { applicationNameHeaders, normalizeApplicationName } from "./application-name.js";
 import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.js";
-import { loadCanvas } from "./canvas.js";
-import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
 import { assertWirePages } from "./playlist-write-validation.js";
 import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
-import {
-  lintComposedPage,
-  pageSpecForLint,
-  pixelsFromPng,
-  sortLint,
-  viewingOf,
-} from "./compose/lint.js";
-import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist, type PreviewPlaceholder, type SelectorPreviewEntry } from "./playlist-preview.js";
 import { uploadMediaFile, type MediaUploadTiming } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
@@ -258,8 +248,6 @@ import {
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
 import { isSensitiveKey, isSensitiveValue, redactEvent, redactText } from "./redact.js";
-import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
-import { composeAndWrite, defaultComposeOutDir, rejectImageLikeOutput } from "./compose/compose.js";
 import {
   cwebpLookup,
   ffmpegLookup,
@@ -440,167 +428,6 @@ function enrollmentSetupCode(value: string | undefined): string | undefined {
   }
   const bare = code.replace("-", "").toUpperCase();
   return `${bare.slice(0, 4)}-${bare.slice(4)}`;
-}
-
-/** Drawing commands load the native renderer here, so a failed first download names this command to rerun. */
-async function loadRenderer(runtime: CliRuntime): Promise<void> {
-  await loadCanvas({ env: runtime.env, homedir: runtime.homedir, argv: runtime.argv });
-}
-
-function rethrowCompose(err: unknown): never {
-  if (err instanceof CliError) {
-    throw err;
-  }
-  if (err instanceof Error && (err as { code?: string }).code === "usage_error") {
-    throw usageError(err.message, {
-      command: "screenrig compose catalog",
-      reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
-    });
-  }
-  throw err;
-}
-
-async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
-  const file = args.positionals[2];
-  if (!file) {
-    throw usageError("compose render requires a spec file.", {
-      command: "screenrig compose catalog",
-      reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
-    });
-  }
-
-  if (file.includes("\0")) {
-    throw usageError("compose render spec path must not contain a NUL byte.");
-  }
-  requireFlagValue(args, "output", "./still");
-  const specPath = path.resolve(runtime.cwd(), file);
-  const outputFlag = flagString(args.flags, "output");
-  if (outputFlag?.includes("\0")) {
-    throw usageError("compose render --output must not contain a NUL byte.");
-  }
-  const output = path.resolve(runtime.cwd(), outputFlag ?? defaultComposeOutDir(file));
-  if (output.includes("\0")) {
-    throw usageError("compose render --output must not contain a NUL byte.");
-  }
-  try {
-    rejectImageLikeOutput(output, "compose render");
-  } catch (err) {
-    rethrowCompose(err);
-  }
-  if (flagBool(args.flags, "ink-tight") || flagString(args.flags, "ink-padding") !== undefined) {
-    throw usageError("compose render no longer crops with --ink-tight; layered region PNGs are the publishing model. Run compose catalog.");
-  }
-  const lintOnly = flagBool(args.flags, "lint-only");
-  const combined = flagBool(args.flags, "combined") || flagBool(args.flags, "open");
-  requireFlagValue(args, "target-width", "3840");
-  requireFlagValue(args, "target-height", "2160");
-  const targetWidth = args.flags["target-width"] === undefined ? undefined : Number(flagString(args.flags, "target-width"));
-  const targetHeight = args.flags["target-height"] === undefined ? undefined : Number(flagString(args.flags, "target-height"));
-  if ((targetWidth === undefined) !== (targetHeight === undefined)) {
-    throw usageError("Provide both --target-width and --target-height for the physical content viewport.");
-  }
-  const target = targetWidth !== undefined && targetHeight !== undefined ? { width: targetWidth, height: targetHeight } : undefined;
-  let spec: unknown;
-  try {
-    spec = JSON.parse(await readFile(specPath, "utf8"));
-  } catch (err) {
-    throw usageError(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
-  }
-  await loadRenderer(runtime);
-  const logger = loggerOf(runtime);
-  let written;
-  try {
-    written = await logger.withLocal(
-      { op: "compose.render", message: `render ${path.basename(specPath)}` },
-      async (span) => {
-        const rendered = await composeAndWrite(spec, {
-          baseDir: path.dirname(specPath),
-          outDir: output,
-          combined,
-          target,
-          safeArea: flagBool(args.flags, "safe-area"),
-          lintOnly,
-        });
-        span.finish({
-          output,
-          width: rendered.canvas.width,
-          height: rendered.canvas.height,
-          pages: rendered.pages.length,
-        });
-        return rendered;
-      },
-    );
-  } catch (err) {
-    rethrowCompose(err);
-  }
-  const combinedPath = written.pages[0]?.combined ? path.join(written.pages[0].dir, "combined.png") : undefined;
-  const opened = !lintOnly && flagBool(args.flags, "open") && combinedPath
-    ? await (runtime.openPath?.(combinedPath) ?? Promise.resolve(false))
-    : undefined;
-  const lintWithPixels = [];
-  for (const page of written.result.pages) {
-    const pixels = await pixelsFromPng(page.combined);
-    const pageSpec = pageSpecForLint(spec, page.id);
-    lintWithPixels.push(...lintComposedPage({
-      page_id: page.id,
-      spec: pageSpec,
-      quality: page.quality,
-      pixels,
-      viewing: viewingOf(pageSpec),
-    }));
-  }
-  const ordered = sortLint(lintWithPixels, written.result.pages.map((page) => page.id));
-  if (lintOnly) {
-    // Nothing was written, so report no output paths or files.
-    return {
-      envelope: successEnvelope({ lint_only: true, canvas: written.canvas, name: written.name, width: written.canvas.width,
-        height: written.canvas.height, font_family: written.font_family, quality: written.quality, lint: ordered }, { warnings: written.warnings }),
-      exitCode: ExitCode.Success,
-      human: humanLines("Compose lint (nothing written)", [
-        ["name", written.name ?? undefined],
-        ["width", String(written.canvas.width)],
-        ["height", String(written.canvas.height)],
-        ...written.warnings.map((warning): [string, string] => ["warning", warning.message]),
-        ...ordered.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
-      ]),
-    };
-  }
-  const data = {
-    output,
-    files: written.files,
-    canvas: written.canvas,
-    name: written.name,
-    manifest: written.manifest,
-    pages: written.pages.map((page) => ({
-      id: page.id,
-      dir: page.dir,
-      manifest: page.manifest,
-      images: page.images,
-      combined: page.combined,
-      scale: page.scale,
-    })),
-    width: written.canvas.width,
-    height: written.canvas.height,
-    font_family: written.font_family,
-    quality: written.quality,
-    lint: ordered,
-    ...(opened !== undefined ? { opened } : {}),
-  };
-  return {
-    envelope: successEnvelope(data, { warnings: written.warnings }),
-    exitCode: ExitCode.Success,
-    human: humanLines("Composed still", [
-      ["output", output],
-      ["name", written.name ?? undefined],
-      ["width", String(written.canvas.width)],
-      ["height", String(written.canvas.height)],
-      ["font_family", written.font_family],
-      ["files", written.files.join(", ")],
-      ...written.warnings.map((warning): [string, string] => ["warning", warning.message]),
-      ...ordered.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
-      ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
-    ]),
-  };
 }
 
 function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Transport {
@@ -951,18 +778,6 @@ export const handleVersion: CommandHandler = async () => {
 
 };
 
-export const handleComposeCatalog = commandHandler(async (args, runtime, resolved) => {
-  await loadRenderer(runtime);
-  return loggerOf(runtime).withLocal({ op: "compose.catalog", message: "compose catalog" }, async () => {
-    const catalog = await composeCatalog();
-    return {
-      envelope: successEnvelope(catalog),
-      exitCode: ExitCode.Success,
-      human: formatComposeCatalog(catalog),
-    };
-  });
-}, false);
-
 export const handlePlaylistValidate = commandHandler(async (args, runtime, resolved) => {
   const file = args.positionals[2];
   if (!file) throw usageError("playlist validate requires one JSON file.");
@@ -981,52 +796,9 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime, resol
       "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks.",
       ...(shortApplication ? [`warning: ${shortApplication.message}`] : []),
       ...lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-      LOOK_AT_THE_CONTACT_SHEET,
     ].join("\n"),
   };
 }, false);
-
-export const handlePlaylistPreview = commandHandler(playlistPreviewCommand, false);
-
-export const handleComposeBatch = commandHandler(async (args, runtime, resolved) => {
-  const file = args.positionals[2];
-  requireFlagValue(args, "output", "./rendered");
-  const output = flagString(args.flags, "output");
-  if (!file || !output) throw usageError("compose batch requires one JSON file and --output DIRECTORY.");
-  try {
-    rejectImageLikeOutput(path.resolve(runtime.cwd(), output), "compose batch");
-  } catch (error) { rethrowCompose(error); }
-  requireFlagValue(args, "target-width", "3840"); requireFlagValue(args, "target-height", "2160"); requireFlagValue(args, "only", "page-id");
-  const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
-  if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
-  const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
-  await loadRenderer(runtime);
-  let result;
-  try {
-    result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), {
-      target,
-      safeArea: flagBool(args.flags, "safe-area"),
-      only: flagString(args.flags, "only"),
-      lintOnly: flagBool(args.flags, "lint-only"),
-    });
-  }
-  catch (error) { rethrowCompose(error); }
-  const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
-  if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest}${result.preview ? ` and ${result.preview}` : ""}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
-  return {
-    envelope: successEnvelope(result, { warnings }),
-    exitCode: ExitCode.Success,
-    human: [
-      result.preview
-        ? `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`
-        : `Linted ${result.checked ?? 0} page(s); no images written. Details: ${result.manifest}.`,
-      ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-      ...(result.preview ? [LOOK_AT_THE_CONTACT_SHEET] : []),
-    ].join("\n"),
-  };
-}, false);
-
-export const handleComposeRender = commandHandler(composeRender, false);
 
 export const handleDoctor = commandHandler(doctor, false);
 
@@ -5414,108 +5186,6 @@ async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<Comman
   };
 }
 
-function previewPlaceholderWarning(placeholders: PreviewPlaceholder[], online: boolean): Warning {
-  const ids = [...new Set(placeholders.map((item) => item.media_id).filter((id): id is string => Boolean(id)))];
-  const what = ids.length > 0 ? ` (${ids.slice(0, 5).join(", ")}${ids.length > 5 ? ", ..." : ""})` : "";
-  const fix = online
-    ? "The project could not supply those pixels; check the media IDs with media show."
-    : "Sign in (screenrig login or agent enroll) to fetch project media, or save each file beside the playlist as <media_id>.png, .jpg, .webp, .gif, .mp4 or .webm.";
-  return {
-    code: "preview_media_placeholder",
-    message: `${placeholders.length} primitive(s) or dependencies could not be fully rendered${what}. Applications, iframes, runtime ads and unavailable feeds are reported in placeholders. ${fix}`,
-  };
-}
-
-async function playlistPreviewCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-): Promise<CommandResult> {
-  const target = args.positionals[2];
-  requireFlagValue(args, "output", "./preview");
-  requireFlagValue(args, "frame-ms", "1000");
-  const output = flagString(args.flags, "output");
-  if (!target || !output) {
-    throw usageError("playlist preview requires <file|id> and --output DIR.");
-  }
-  if (target.includes("\0") || output.includes("\0")) {
-    throw usageError("playlist preview paths must not contain a NUL byte.");
-  }
-  const frameRaw = flagString(args.flags, "frame-ms");
-  const frameMs = frameRaw === undefined ? 1000 : Number(frameRaw);
-  if (!Number.isSafeInteger(frameMs) || frameMs < 0 || frameMs > 60_000) {
-    throw usageError("playlist preview --frame-ms must be an integer from 0 to 60000.");
-  }
-  const outputDir = path.resolve(runtime.cwd(), output);
-  const filePath = path.resolve(runtime.cwd(), target);
-  let playlist: unknown;
-  let searchDirs = [path.dirname(filePath), runtime.cwd(), outputDir];
-  let client: ApiClient | undefined;
-  let fromFile = false;
-  try {
-    playlist = await readAuthoringJson(target, runtime);
-    fromFile = true;
-  } catch {
-    fromFile = false;
-  }
-  if (fromFile && resolved.token) {
-    // Media that is not beside the file is fetched from the project when a
-    // credential exists; without one the preview stays local and offline.
-    client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
-  }
-  if (!fromFile) {
-    if (!RESOURCE_ID_PATTERNS.playlist.test(target)) {
-      throw usageError("Cannot read playlist JSON.");
-    }
-    const token = requireToken(resolved.token);
-    client = clientFor(runtime, args, resolved.apiUrl, token);
-    const response = await callPlaylist(client, { method: "GET", id: target });
-    playlist = editablePlaylist(response.body);
-    searchDirs = [runtime.cwd(), outputDir];
-  }
-  await loadRenderer(runtime);
-  const result = await previewPlaylist({
-    playlist,
-    outputDirectory: outputDir,
-    viewport: PREVIEW_VIEWPORT,
-    frameMs,
-    contactSheet: flagBool(args.flags, "contact-sheet"),
-    lintOnly: flagBool(args.flags, "lint-only"),
-    searchDirs,
-    client,
-    runtime,
-    apiUrl: resolved.apiUrl,
-    now: flagString(args.flags, "now"),
-    timezone: flagString(args.flags, "timezone"),
-  });
-  const shortApplication = shortApplicationPageWarning(playlist);
-  const warnings = [
-    ...(result.placeholders.length > 0 ? [previewPlaceholderWarning(result.placeholders, Boolean(client))] : []),
-    ...(shortApplication ? [shortApplication] : []),
-  ];
-  return {
-    envelope: successEnvelope(result, { request_id: client?.requestId, warnings }),
-    exitCode: ExitCode.Success,
-    human: [
-      `Previewed ${result.pages.length} page(s). Output: ${result.output}.`,
-      ...warnings.map((warning) => `warning: ${warning.message}`),
-      ...(result.contact_sheet ? [`contact_sheet: ${result.contact_sheet}`] : []),
-      ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-      ...selectorPreviewLines(result.selector_previews ?? []),
-      LOOK_AT_THE_CONTACT_SHEET,
-    ].join("\n"),
-  };
-}
-
-/** Expected share of each weighted item and the files fit: aspect leaves out, one line each. */
-export function selectorPreviewLines(previews: SelectorPreviewEntry[]): string[] {
-  return previews.flatMap((preview) => [
-    `selector ${preview.page_id}/${preview.primitive_id}: ${preview.matched_count} file(s)${preview.cycle ? `, one cycle is ${preview.cycle} plays` : ""}`,
-    ...preview.items.filter((item) => item.share_percent !== undefined).map((item) => `  ${item.share_percent}%\t${item.filename}\t${item.media_id}`),
-    ...preview.excluded.map((item) => `  left out (${item.reason})\t${item.filename}\t${item.media_id}`),
-  ]);
-}
-
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
 
   const result = await simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
@@ -8858,8 +8528,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     ...(releaseIds.length > 0 ? { release_ids: releaseIds } : {}), ...(mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
     ...(uploads.length > 0 ? { uploads: uploads.sort((a, b) => a.index - b.index).map(({ index, ...upload }) => ({ source: args.positionals[2 + index], ...upload })) } : {}),
     ...(target ? { screen_id: target.id, screen_revision: target.revision } : {}),
-    preview: { argv: ["playlist", "preview", output, "--output", `${output}.preview`, "--contact-sheet", ...context] },
-    ...(target ? { publish: { argv: ["screen", "publish", target.id, output, ...context], reason: "Inspect the prepared document and preview before publishing." } } : {}),
+    ...(target ? { publish: { argv: ["screen", "publish", target.id, output, ...context], reason: "Inspect the prepared document before publishing." } } : {}),
   }, { request_id: existingClient?.requestId, warnings }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
 }, false);
 

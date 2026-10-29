@@ -7,7 +7,7 @@ import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine, selectorPreviewLines } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";
@@ -6492,7 +6492,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create refuses a text primitive and points at compose", async () => {
+test("playlist create refuses a text primitive and points at media generate and cards", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-text-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -6513,8 +6513,8 @@ test("playlist create refuses a text primitive and points at compose", async () 
   assert.equal(result.code, ExitCode.Usage, result.stdout);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /Compose copy and chrome locally/);
-  assert.equal(envelope.error.next?.command, "screenrig compose catalog");
+  assert.match(envelope.error.detail, /Generate a finished still with media generate, or use a built-in card for live text/);
+  assert.equal(envelope.error.next?.command, "screenrig media generate --help");
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -6676,10 +6676,6 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(sharesData.cycle, 10);
     assert.equal(sharesData.candidates[0].share_percent, 60);
     assert.equal(sharesData.excluded[0].reason, "aspect_mismatch");
-    assert.deepEqual(selectorPreviewLines([{ page_id: "p", primitive_id: "i", matched_count: 2, cycle: 10,
-      items: [{ media_id: "med_a", filename: "a.png", weight: 6, share_percent: 60 }],
-      excluded: [{ media_id: "med_c", filename: "c.png", reason: "aspect_mismatch" }] }]),
-    ["selector p/i: 2 file(s), one cycle is 10 plays", "  60%\ta.png\tmed_a", "  left out (aspect_mismatch)\tc.png\tmed_c"]);
     const badRect = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "image", "--rect", "wide"], transport, { fs: fsLike });
     assert.equal(badRect.code, ExitCode.Usage, badRect.stdout);
   } finally {
