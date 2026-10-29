@@ -65,44 +65,75 @@ function validCivil(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
-interface WallFormat { displays: number; arrangement: "row" | "column"; orientation: "landscape" | "portrait" }
-/** The displays a primitive covers, first through last (1-based, inclusive). */
-interface Frame { first: number; last: number }
+/** columns is the tiles across: displays for a row, 1 for a column, the format's columns for a grid. */
+interface WallFormat { displays: number; arrangement: "row" | "column" | "grid"; orientation: "landscape" | "portrait"; columns: number }
+/** The displays a primitive covers: ascending, unique, 1-based. */
+type Frame = number[];
 
-function readFormat(value: unknown): WallFormat | undefined {
-  const { displays, arrangement, orientation } = object(value);
-  if ((displays !== 2 && displays !== 3) || (arrangement !== "row" && arrangement !== "column") || (orientation !== "landscape" && orientation !== "portrait")) return undefined;
-  return { displays, arrangement, orientation };
+const MAX_DISPLAYS = 12;
+
+/** The wall a format names, or why its columns are refused. The JSON Schema holds the other members; the columns rules are cross-field. */
+function readFormat(value: unknown): { format?: WallFormat; columnsReason?: string } {
+  const { displays, arrangement, orientation, columns } = object(value);
+  if (typeof displays !== "number" || !Number.isInteger(displays) || displays < 2 || displays > MAX_DISPLAYS) return {};
+  if (orientation !== "landscape" && orientation !== "portrait") return {};
+  if (arrangement === "row" || arrangement === "column") {
+    return columns === undefined ? { format: { displays, arrangement, orientation, columns: arrangement === "row" ? displays : 1 } } : { columnsReason: "is only for arrangement grid" };
+  }
+  if (arrangement !== "grid") return {};
+  if (columns === undefined) return { columnsReason: "is required for arrangement grid: the displays per row" };
+  // A grid holds whole rows: at least two columns of them and at least two rows.
+  if (typeof columns !== "number" || !Number.isInteger(columns) || columns < 2 || displays % columns !== 0 || displays / columns < 2) {
+    return { columnsReason: "must be an integer of at least 2 that divides displays into at least 2 rows" };
+  }
+  return { format: { displays, arrangement, orientation, columns } };
 }
+
+/** The format in words, as the server says it: "3 landscape displays in a row", "12 landscape displays in a 4-column grid". */
+const describeFormat = (format: WallFormat): string =>
+  `${format.displays} ${format.orientation} displays in ${format.arrangement === "grid" ? `a ${format.columns}-column grid` : `a ${format.arrangement}`}`;
 
 /** One display: 1920 x 1080 landscape, 1080 x 1920 portrait. */
 const tileOf = (format: WallFormat): [number, number] => format.orientation === "portrait" ? [1080, 1920] : [1920, 1080];
 
-/** The canvas every ordinary page of the format has: a row is displays tiles wide, a column displays tiles high. */
+/** The canvas every ordinary page of the format has: a tile times the columns across and the rows down. */
 function canvasOf(format: WallFormat): [number, number] {
   const [width, height] = tileOf(format);
-  return format.arrangement === "column" ? [width, height * format.displays] : [width * format.displays, height];
+  return [width * format.columns, height * (format.displays / format.columns)];
 }
 
-/** The union of the tiles first through last, in canvas units. */
+/** The first and last column and row of the tiles of a frame. Display n sits at column (n - 1) mod columns, row floor((n - 1) / columns). */
+function spanOf(format: WallFormat, frame: Frame): { left: number; right: number; top: number; bottom: number } {
+  const columns = frame.map(display => (display - 1) % format.columns), rows = frame.map(display => Math.floor((display - 1) / format.columns));
+  return { left: Math.min(...columns), right: Math.max(...columns), top: Math.min(...rows), bottom: Math.max(...rows) };
+}
+
+/** The bounding box of the tiles of a frame, in canvas units. */
 function frameRect(format: WallFormat, frame: Frame): { x: number; y: number; width: number; height: number } {
-  const [width, height] = tileOf(format), count = frame.last - frame.first + 1;
-  return format.arrangement === "column"
-    ? { x: 0, y: (frame.first - 1) * height, width, height: count * height }
-    : { x: (frame.first - 1) * width, y: 0, width: count * width, height };
+  const [width, height] = tileOf(format), { left, right, top, bottom } = spanOf(format, frame);
+  return { x: left * width, y: top * height, width: (right - left + 1) * width, height: (bottom - top + 1) * height };
 }
 
-/** Ascending contiguous 1-based display numbers such as [2] or [1, 2, 3]; undefined for anything else. */
-function contiguousDisplays(value: unknown): Frame | undefined {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 3) return undefined;
-  const first: unknown = value[0];
-  for (const [index, display] of value.entries()) {
-    if (typeof first !== "number" || !Number.isInteger(display) || display < 1 || display > 3 || display !== first + index) return undefined;
+/** Whether the frame is exactly the tiles of one rectangle of the wall, none of the rectangle missing. */
+function fillsRectangle(format: WallFormat, frame: Frame): boolean {
+  const { left, right, top, bottom } = spanOf(format, frame);
+  return (right - left + 1) * (bottom - top + 1) === frame.length;
+}
+
+const DISPLAYS_REASON = "must be ascending display numbers that fill a rectangle of the wall, such as [2] or [1, 2]";
+
+/** Ascending, unique 1-based display numbers such as [2] or [1, 2, 5, 6]; undefined for anything else. Which fill a rectangle depends on the format. */
+function readDisplays(value: unknown): Frame | undefined {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_DISPLAYS) return undefined;
+  let previous = 0;
+  for (const display of value as unknown[]) {
+    if (typeof display !== "number" || !Number.isInteger(display) || display < 1 || display > MAX_DISPLAYS || display <= previous) return undefined;
+    previous = display;
   }
-  return { first: value[0] as number, last: value[value.length - 1] as number };
+  return value as number[];
 }
 
-const framesShare = (a: Frame, b: Frame): boolean => a.first <= b.last && b.first <= a.last;
+const framesShare = (a: Frame, b: Frame): boolean => a.some(display => b.includes(display));
 const sameNumber = (a: unknown, b: number): boolean => typeof a === "number" && Math.abs(a - b) < 1e-6;
 
 const LAYOUTS = ["full", "free", "center", "wide", "header", "footer", "corner", "chip", "strip"];
@@ -114,7 +145,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
   const fail = (path: string, message: string): void => { issues.push({ path, message }); };
   const playlist = object(value);
   const pages = array(playlist.pages);
-  const format = readFormat(playlist.format);
+  const { format, columnsReason } = readFormat(playlist.format);
+  if (columnsReason !== undefined) fail("/format/columns", columnsReason);
   if (typeof playlist.name === "string" && !playlist.name.trim()) fail("/name", "must not be blank");
   const pageIds = new Set<unknown>();
   let unscheduled = 0;
@@ -125,7 +157,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     if (format !== undefined && page.type !== "adslot") {
       const canvas = object(page.canvas), [wantWidth, wantHeight] = canvasOf(format);
       if (typeof canvas.width === "number" && typeof canvas.height === "number" && (canvas.width !== wantWidth || canvas.height !== wantHeight)) {
-        fail(`${path}/canvas`, `must be ${wantWidth} x ${wantHeight} canvas units, the canvas of ${format.displays} ${format.orientation} displays in a ${format.arrangement}`);
+        fail(`${path}/canvas`, `must be ${wantWidth} x ${wantHeight} canvas units, the canvas of ${describeFormat(format)}`);
       }
     }
     if (!Object.hasOwn(page, "visibility")) unscheduled++;
@@ -191,11 +223,12 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (primitive.primitive !== "application" || mode !== "application") fail(`${itemPath}/controller`, "is valid only on an application in application advance mode");
       }
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
-      const named = Object.hasOwn(primitive, "displays") ? contiguousDisplays(primitive.displays) : undefined;
+      const named = Object.hasOwn(primitive, "displays") ? readDisplays(primitive.displays) : undefined;
       if (Object.hasOwn(primitive, "displays") && Array.isArray(primitive.displays)) {
-        if (named === undefined) fail(`${itemPath}/displays`, "must be ascending contiguous display numbers such as [2] or [1, 2]");
+        if (named === undefined) fail(`${itemPath}/displays`, DISPLAYS_REASON);
         else if (format === undefined) fail(`${itemPath}/displays`, "needs a playlist format");
-        else if (named.last > format.displays) fail(`${itemPath}/displays`, `must name displays 1 through ${format.displays}, the displays of the playlist format`);
+        else if (Math.max(...named) > format.displays) fail(`${itemPath}/displays`, `must name displays 1 through ${format.displays}, the displays of the playlist format`);
+        else if (!fillsRectangle(format, named)) fail(`${itemPath}/displays`, DISPLAYS_REASON);
         else if (primitive.primitive !== "card" && typeof object(primitive.rect).x === "number") {
           const rect = object(primitive.rect), want = frameRect(format, named);
           if (!sameNumber(rect.x, want.x) || !sameNumber(rect.y, want.y) || !sameNumber(rect.width, want.width) || !sameNumber(rect.height, want.height)) {
@@ -207,7 +240,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         fail(`${itemPath}/rect`, "is required unless displays is set");
       }
       if (primitive.primitive === "card") {
-        const frame: Frame = named ?? { first: 1, last: format?.displays ?? 1 };
+        const frame: Frame = named ?? Array.from({ length: format?.displays ?? 1 }, (_, index) => index + 1);
         // Placement shape. The card's tier, the strip edges (a header takes the top edge's normal strip slot and a footer the
         // bottom edge's; a strip's presence is server knowledge) and the derived rect and layer stay server checks.
         const layout = primitive.layout;
