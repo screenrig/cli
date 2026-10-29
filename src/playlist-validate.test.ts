@@ -56,6 +56,12 @@ test("local canonical validation accepts dynamic selectors and application/ifram
   p.pages[0]!.advance = { mode: "application", max_ms: 180000 } as any;
   assert.deepEqual(playlistIssues(p), []);
 });
+test("media named outside the selector is refused by the canonical schema", () => {
+  for (const member of ["media_id", "media_ids", "query", "filter", "items"]) {
+    const paths = playlistIssues(playlist({ [member]: "med_EXAMPLE" })).map((issue) => issue.path);
+    assert.ok(paths.includes(`/pages/0/primitives/0/${member}`), member);
+  }
+});
 test("local canonical validation accepts a folder selector and plays it one at a time on a duration page", () => {
   assert.deepEqual(playlistIssues(playlist({ selector: { by: "folder", folder_id: "mfd_Lobby1", order: "random", one_at_a_time: true } })), []);
   assert.deepEqual(playlistIssues(playlist({ selector: { by: "folder", folder_id: "mfd_Lobby1" } })).map((issue) => issue.path), ["/pages/0/primitives/0/selector/one_at_a_time"]);

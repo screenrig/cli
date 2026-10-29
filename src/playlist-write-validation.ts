@@ -585,9 +585,6 @@ export function assertWirePages(pages: unknown[]): void {
           !["id", "ids", "all", "tag", "folder"].includes(String((selector as JsonRecord).by))) {
           throw usageError(`${label} primitives[${primitiveIndex}] ${category} requires a selector with by id|ids|all|tag|folder.`);
         }
-        for (const retired of ["query", "filter", "items", "media_id", "media_ids"]) {
-          if (retired in wire) throw usageError(`${label} primitives[${primitiveIndex}] puts media selection in selector, not ${retired}.`);
-        }
       } else if ("selector" in wire) {
         throw usageError(`${label} primitives[${primitiveIndex}] ${category} does not take a selector.`);
       }
