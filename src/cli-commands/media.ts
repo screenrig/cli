@@ -130,24 +130,22 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaFolderDelete));
 
-  const sync = media.command("sync").description("Keep a SharePoint or OneDrive for work folder, or a Canva design, in step with a media folder");
+  // Canva commands stay hidden until the platform has a Canva Connect integration (ENG-6435).
+  const sync = media.command("sync").description("Keep a SharePoint or OneDrive for work folder in step with a media folder");
   addCommandNotes(sync, [
     "Media sync:",
     "  A sync imports the images, videos and audio directly inside a SharePoint or",
-    "  OneDrive for work folder, or the pages of a Canva design, into a media folder,",
+    "  OneDrive for work folder into a media folder,",
     "  and keeps them in step: a changed file replaces its bytes under the same media",
     "  ID, so every playlist that plays it updates, and a file removed at the source",
     "  is taken out of play.",
     "  SharePoint reads through your own Microsoft Entra app (an account):",
     "  application permission Sites.Selected, granted on each site, or Files.Read.All,",
     "  with admin consent. The client secret is sealed on the server and never shown.",
-    "  Canva reads through a person's Canva account: media sync account add canva",
-    "  prints a link the person opens in a browser signed in to Canva (the CLI never",
-    "  opens one); the connection belongs to the project.",
     "  Play the media folder with a folder selector in a playlist.",
   ].join("\n"));
 
-  const account = sync.command("account").description("Add, test and manage the Microsoft Entra apps and Canva connections a project's syncs read through");
+  const account = sync.command("account").description("Add, test and manage the Microsoft Entra apps a project's syncs read through");
   const add = account.command("add").description("Add the credentials of your own app");
   add.command("microsoft365").description("Add a Microsoft Entra app: its tenant, application id and a client secret")
     .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
@@ -155,7 +153,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .requiredOption("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
     .requiredOption("--secret-file <FILE>", `${SECRET_FILE}; the file holds only the secret's Value`)
     .action(bind(handleMediaSyncAccountAdd));
-  add.command("canva").description("Add a Canva account: prints the link a person opens, signed in to Canva, to connect it")
+  add.command("canva", { hidden: true }).description("Add a Canva account: prints the link a person opens, signed in to Canva, to connect it")
     .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
     .action(bind(handleMediaSyncAccountAddCanva));
   account.command("list").description("List this project's media sync accounts").action(bind(handleMediaSyncAccountList));
@@ -170,14 +168,14 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--expect-rev <REVISION>", "Optionally require this account revision", revision)
     .action(bind(handleMediaSyncAccountUpdate));
   requireOptionGroup(accountUpdate, "atLeastOne", ["--name", "--tenant-id", "--client-id", "--secret-file"]);
-  account.command("connect").description("Make a new link to connect (or reconnect) a Canva account; send it to the person who owns the Canva account")
+  account.command("connect", { hidden: true }).description("Make a new link to connect (or reconnect) a Canva account; send it to the person who owns the Canva account")
     .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountConnect));
-  account.command("designs").description("List the Canva designs a connected account can see, most recently changed first")
+  account.command("designs", { hidden: true }).description("List the Canva designs a connected account can see, most recently changed first")
     .argument("<id>", "Account identifier (msa_...)")
     .option("--query <TEXT>", "Only designs that match this text")
     .option("--continuation <TOKEN>", "Read the next page: the continuation of the previous answer")
     .action(bind(handleMediaSyncAccountDesigns));
-  account.command("test").description("Check an account: a Microsoft app's sign-in and Graph permissions, or whether Canva still accepts the connection")
+  account.command("test").description("Check an account: a Microsoft app's sign-in and Graph permissions")
     .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountTest));
   account.command("delete").description("Delete an account no sync uses")
     .argument("<id>", "Account identifier (msa_...)")
@@ -192,7 +190,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--every <DURATION>", "How often to look for changes, 5 minutes to 24 hours (default 15m)", mediaSyncEvery)
     .option("--name <NAME>", "Name the sync, 1 to 80 characters (default: the source folder's name)", mediaSyncName)
     .action(bind(handleMediaSyncCreate));
-  create.command("canva").description("Sync a Canva design: its pages as images, or one video")
+  create.command("canva", { hidden: true }).description("Sync a Canva design: its pages as images, or one video")
     .requiredOption("--account-id <ID>", "The connected Canva account (msa_...)", mediaSyncAccountOption)
     .requiredOption("--design <ID|URL>", "The design's id, or its canva.com/design/ID/... address", mediaSyncDesign)
     .option("--pages <PAGES>", "Only these pages, such as 1,3-5 (default: every page)", mediaSyncPages)
@@ -216,7 +214,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
   requireOptionGroup(syncUpdate, "atLeastOne", ["--name", "--every", "--folder-id", "--pause", "--resume"]);
   sync.command("run").description("Run a sync now instead of at its next time")
     .argument("<id>", "Sync identifier (msy_...)")
-    .option("--force", "Canva only: export the design even if Canva reports it unchanged")
+    .addOption(new Option("--force", "Canva only: export the design even if Canva reports it unchanged").hideHelp())
     .action(bind(handleMediaSyncRun));
   sync.command("delete").description("Stop a sync; its media and folder stay")
     .argument("<id>", "Sync identifier (msy_...)")

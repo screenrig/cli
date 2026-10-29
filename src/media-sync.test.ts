@@ -589,21 +589,21 @@ test("the renderers show a Canva connection and its sync", () => {
   assert.ok(lines.includes("source: https://www.canva.com/design/DAFVztcvd9z/Rm4Kd8/view"));
 });
 
-test("help names the Canva commands and their examples", () => {
+test("Canva stays out of discovery until the platform has a Canva Connect integration (ENG-6435)", () => {
   const group = commandHelp(["media", "sync"]);
-  assert.match(group.notes.join("\n"), /Canva/);
-  assert.match(group.notes.join("\n"), /never\s+opens a browser|never\s+opens one/);
+  assert.doesNotMatch(group.notes.join("\n"), /Canva/);
+  assert.ok(!(commandHelp(["media", "sync"], true).allCommands ?? []).some((path) => /canva|connect|designs/.test(path)));
+  assert.ok(commandHelp(["media", "sync", "run"]).options.every((option) => option.name !== "--force"));
+  // The hidden commands still run and keep their own help, so unhiding is the flags alone.
   for (const [words, example] of [
     [["media", "sync", "account", "add", "canva"], "screenrig media sync account add canva"],
     [["media", "sync", "account", "connect"], "screenrig media sync account connect"],
     [["media", "sync", "account", "designs"], "screenrig media sync account designs"],
     [["media", "sync", "create", "canva"], "screenrig media sync create canva"],
-    [["media", "sync", "run"], "screenrig media sync run"],
   ] as Array<[string[], string]>) {
     const help = commandHelp(words);
     assert.ok(help.examples.length > 0, words.join(" "));
     assert.ok(help.examples.every((text) => text.startsWith(example)), words.join(" "));
   }
   assert.match(commandHelp(["media", "sync", "account", "add", "canva"]).notes.join("\n"), /authorize_url/);
-  assert.match(commandHelp(["media", "sync", "create", "canva"]).notes.join("\n"), /updated_at|last changed|only when it moved/);
 });
