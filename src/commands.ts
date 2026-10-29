@@ -229,6 +229,7 @@ import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.
 import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
+import { assertWirePages } from "./playlist-write-validation.js";
 import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import {
   lintComposedPage,
@@ -237,7 +238,7 @@ import {
   sortLint,
   viewingOf,
 } from "./compose/lint.js";
-import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist, type PreviewPlaceholder } from "./playlist-preview.js";
+import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist, type PreviewPlaceholder, type SelectorPreviewEntry } from "./playlist-preview.js";
 import { uploadMediaFile, type MediaUploadTiming } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
@@ -252,11 +253,6 @@ import {
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
 import { isSensitiveKey, isSensitiveValue, redactEvent, redactText } from "./redact.js";
-import {
-  expandPlaylistPages,
-  formatTemplateCatalog,
-  playlistTemplateCatalog,
-} from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
 import { composeAndWrite, defaultComposeOutDir, rejectImageLikeOutput } from "./compose/compose.js";
 import {
@@ -968,7 +964,8 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime, resol
   let parsed: Record<string, unknown>;
   try { parsed = await readAuthoringJson(file, runtime); }
   catch { throw usageError("Cannot read playlist JSON."); }
-  const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) assertWirePages(parsed.pages);
+  const body = parsed;
   assertPlaylistValid(body);
   const lint = playlistLint(body);
   const shortApplication = shortApplicationPageWarning(body);
@@ -1025,16 +1022,6 @@ export const handleComposeBatch = commandHandler(async (args, runtime, resolved)
 }, false);
 
 export const handleComposeRender = commandHandler(composeRender, false);
-
-export const handlePlaylistTemplates = commandHandler(async (args, runtime, resolved) => {
-
-  const catalog = playlistTemplateCatalog();
-  return {
-    envelope: successEnvelope(catalog),
-    exitCode: ExitCode.Success,
-    human: formatTemplateCatalog(catalog),
-  };
-}, false);
 
 export const handleDoctor = commandHandler(doctor, false);
 
@@ -2336,6 +2323,7 @@ async function projectCapabilities(args: ParsedArgs, runtime: CliRuntime, resolv
       ["features", `advertiser=${capabilities.features.advertiser} screens=${capabilities.features.screens}`],
       ["feature_revision", String(capabilities.feature_revision)],
       ["capabilities", [...capabilities.capabilities].sort().join(", ") || "(none)"],
+      ["media_video_bytes", capabilities.media_video_bytes === undefined ? "(not stated)" : String(capabilities.media_video_bytes)],
       ["request_id", client.requestId],
     ]),
   };
@@ -3741,8 +3729,22 @@ export const handleSelectorPreview = commandHandler(async (args, runtime, resolv
   if (!file) throw usageError("media selector-preview requires <selector.json> and --primitive image|video.");
   const selector = await readAuthoringJson(file, runtime);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector } });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
+  const rect = flagString(args.flags, "rect");
+  let rectBody: { width: number; height: number } | undefined;
+  if (rect !== undefined) {
+    const match = /^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/.exec(rect);
+    if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) throw usageError("media selector-preview --rect takes WIDTHxHEIGHT, both above 0, for example 1080x1920.");
+    rectBody = { width: Number(match[1]), height: Number(match[2]) };
+  }
+  const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector, ...(rectBody ? { rect: rectBody } : {}) } });
+  const preview = response.body as { candidates?: Array<{ filename: string; media_id: string; weight?: number; share_percent?: number }>; excluded?: Array<{ filename: string; media_id: string; reason: string }>; cycle?: number };
+  const shares = (preview.candidates ?? []).filter((item) => item.share_percent !== undefined).map((item) => `${item.share_percent}%\t${item.filename}\t${item.media_id}`);
+  const left = (preview.excluded ?? []).map((item) => `left out (${item.reason})\t${item.filename}\t${item.media_id}`);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [JSON.stringify(response.body, null, 2), ...(shares.length > 0 ? [`Expected shares (one cycle is ${preview.cycle} plays):`, ...shares] : []), ...left].join("\n"),
+  };
 }, true);
 
 export const handleMediaUpdate = commandHandler(async (args, runtime, resolved) => {
@@ -5376,9 +5378,19 @@ async function playlistPreviewCommand(
       ...warnings.map((warning) => `warning: ${warning.message}`),
       ...(result.contact_sheet ? [`contact_sheet: ${result.contact_sheet}`] : []),
       ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+      ...selectorPreviewLines(result.selector_previews ?? []),
       LOOK_AT_THE_CONTACT_SHEET,
     ].join("\n"),
   };
+}
+
+/** Expected share of each weighted item and the files fit: aspect leaves out, one line each. */
+export function selectorPreviewLines(previews: SelectorPreviewEntry[]): string[] {
+  return previews.flatMap((preview) => [
+    `selector ${preview.page_id}/${preview.primitive_id}: ${preview.matched_count} file(s)${preview.cycle ? `, one cycle is ${preview.cycle} plays` : ""}`,
+    ...preview.items.filter((item) => item.share_percent !== undefined).map((item) => `  ${item.share_percent}%\t${item.filename}\t${item.media_id}`),
+    ...preview.excluded.map((item) => `  left out (${item.reason})\t${item.filename}\t${item.media_id}`),
+  ]);
 }
 
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
@@ -5528,7 +5540,8 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (extra.length > 0) {
     throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
   }
-  const pages = expandPlaylistPages(parsed.pages);
+  const pages = parsed.pages;
+  assertWirePages(pages);
   const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), pages };
   assertPlaylistValid(body);
   await validatePlaylistCards(client, body);
@@ -5597,7 +5610,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
   }
   if (Object.hasOwn(body, "pages")) {
     if (!Array.isArray(body.pages) || body.pages.length === 0) throw usageError("pages must be a non-empty array.");
-    body.pages = expandPlaylistPages(body.pages);
+    assertWirePages(body.pages);
   }
   if (body.audio !== undefined && body.audio !== null && (typeof body.audio !== "object" || Array.isArray(body.audio))) {
     throw usageError("audio must be a soundtrack object or null.");
@@ -6295,7 +6308,7 @@ export const handleScreenWallSet = commandHandler(async (args, runtime, resolved
   const outputs = flagString(args.flags, "outputs");
   const arrangement = flagString(args.flags, "arrangement");
   if (!id || !outputs || !arrangement) throw usageError("screen wall set requires <id> --outputs --arrangement.");
-  const wall = wallFromFlags(outputs, arrangement, flagString(args.flags, "rotation"));
+  const wall = wallFromFlags(outputs, arrangement, flagString(args.flags, "rotation"), flagString(args.flags, "columns"));
   const { response, client, screen } = await screenWallPatch(args, runtime, resolved, id, wall);
   return {
     envelope: jsonBody(response, client.requestId),
@@ -8722,7 +8735,8 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
 
 export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {
   const parsed = await readAuthoringJson(args.positionals[3]!, runtime);
-  const document = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) assertWirePages(parsed.pages);
+  const document = parsed;
   assertPlaylistValid(document);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const json = !flagBool(args.flags, "human");

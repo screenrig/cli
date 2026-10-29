@@ -10,9 +10,9 @@ import { quotedRevision } from "./if-match.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import type { ProgressReporter } from "./media/progress.js";
-import { transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
+import { classifySource, transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
 import { assertDeclaredTypeMatchesBytes } from "./media/sniff.js";
-import { MAX_VIDEO_UPLOAD_BYTES } from "./media/video-profile.js";
+import { projectVideoBytes, videoLimitText } from "./media/video-limit.js";
 import { readWebpContainer } from "./media/webp.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import {
@@ -93,7 +93,7 @@ export const SUPPORTED_MEDIA_CONTENT_TYPES = [
 
 export type SupportedMediaContentType = (typeof SUPPORTED_MEDIA_CONTENT_TYPES)[number];
 
-/** Every type is held to this transport bound; a video is held to the server's lower cap (`MAX_VIDEO_UPLOAD_BYTES`). */
+/** Every type is held to this transport bound; a video is held to its project's plan limit (`media_video_bytes`). */
 const MAX_TRANSPORT_BYTES = 1_073_741_824;
 
 interface UploadCeiling {
@@ -108,14 +108,14 @@ const TRANSPORT_CEILING: UploadCeiling = {
     "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
 };
 
-const VIDEO_CEILING: UploadCeiling = {
-  bytes: MAX_VIDEO_UPLOAD_BYTES,
-  message: "Video exceeds the 500,000,000-byte (500 MB) limit for one video upload. Trim the video to a shorter clip, then run the upload again.",
-};
-
-/** The size ceiling for one upload of this content type. */
-function uploadCeiling(contentType: string): UploadCeiling {
-  return contentType.startsWith("video/") ? VIDEO_CEILING : TRANSPORT_CEILING;
+/** The size ceiling for one upload of this content type; a video's is the project's plan limit, read before the upload is prepared. */
+function uploadCeiling(contentType: string, videoBytes: number | undefined): UploadCeiling {
+  if (!contentType.startsWith("video/")) return TRANSPORT_CEILING;
+  if (videoBytes === undefined) throw new Error("A video upload needs the project's video limit.");
+  return {
+    bytes: videoBytes,
+    message: `Video exceeds the ${videoLimitText(videoBytes)} limit for one video upload on this project's plan. Trim the video to a shorter clip, then run the upload again.`,
+  };
 }
 
 export interface PreparedMediaUpload {
@@ -147,14 +147,19 @@ function supported(value: string): value is SupportedMediaContentType {
   return (SUPPORTED_MEDIA_CONTENT_TYPES as readonly string[]).includes(value);
 }
 
-export async function prepareMediaUpload(filePath: string, explicitContentType?: string, expectedSha256?: string): Promise<PreparedMediaUpload> {
+export async function prepareMediaUpload(
+  filePath: string,
+  explicitContentType?: string,
+  expectedSha256?: string,
+  videoBytes?: number,
+): Promise<PreparedMediaUpload> {
   const filename = path.basename(filePath);
   if (!filename || Buffer.byteLength(filename, "utf8") > 255) throw usageError("Media filename must be 1 to 255 bytes.");
   const contentType = explicitContentType ?? EXTENSIONS[path.extname(filename).toLowerCase()];
   if (!contentType || !supported(contentType)) {
     throw usageError(`Unsupported media type; use one of: ${SUPPORTED_MEDIA_CONTENT_TYPES.join(", ")}.`);
   }
-  const bytes = await readMediaSnapshot(filePath, uploadCeiling(contentType));
+  const bytes = await readMediaSnapshot(filePath, uploadCeiling(contentType, videoBytes));
   if (contentType === "image/webp" && readWebpContainer(bytes)?.lossless) {
     throw usageError(
       "Lossless WebP (VP8L) is not accepted. Encode lossy WebP that keeps alpha, then upload with --no-transcode.",
@@ -508,6 +513,10 @@ export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Pr
   if (!sourceFilename || Buffer.byteLength(sourceFilename, "utf8") > 255) {
     throw usageError("Media filename must be 1 to 255 bytes.");
   }
+  // Only a video is held to the plan's size limit, so only a video asks for it.
+  const sourceType = input.explicitContentType ?? EXTENSIONS[path.extname(sourceFilename).toLowerCase()];
+  const isVideo = input.noTranscode ? sourceType?.startsWith("video/") === true : classifySource(input.sourcePath, input.explicitContentType) === "video";
+  const videoBytes = isVideo ? await projectVideoBytes(input.client) : undefined;
   let transcode: TranscodeResult | undefined;
   if (!input.noTranscode) {
     transcode = await transcodeForUpload({
@@ -516,12 +525,13 @@ export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Pr
       explicitContentType: input.explicitContentType,
       options: input.transcodeOptions,
       reporter: input.reporter,
+      videoBytes,
     });
   }
   try {
     const prepared = transcode
-      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
-      : await prepareMediaUpload(input.sourcePath, input.explicitContentType);
+      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256, videoBytes)
+      : await prepareMediaUpload(input.sourcePath, input.explicitContentType, undefined, videoBytes);
     // Always declare the caller's file name. The server derives the stored
     // filename from it (photo.png uploaded as WebP becomes photo.png.webp), so
     // distinct sources no longer collide, and `media list` keeps the handle.

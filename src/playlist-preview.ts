@@ -16,7 +16,7 @@ import {
 export { LOOK_AT_THE_CONTACT_SHEET };
 import { ffmpegLookup, inputGuardArgs, runProcessFor, sniffedDemuxer } from "./media/ffmpeg.js";
 import { assertPlaylistValid } from "./playlist-validate.js";
-import { expandPlaylistPages } from "./playlist-templates.js";
+import { assertWirePages } from "./playlist-write-validation.js";
 import { usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 
@@ -122,6 +122,18 @@ export interface PreviewPlaceholder {
   reason?: string;
 }
 
+/** What a weighted or aspect-fitted media selector resolves to now, from the server, with each item's expected share of plays. */
+export interface SelectorPreviewEntry {
+  page_id: string;
+  primitive_id: string;
+  matched_count: number;
+  /** Plays after which every item has played exactly its weight (weighted order). */
+  cycle?: number;
+  items: Array<{ media_id: string; filename: string; weight?: number; share_percent?: number }>;
+  /** Matches left out by fit aspect. */
+  excluded: Array<{ media_id: string; filename: string; reason: string }>;
+}
+
 export interface PlaylistPreviewResult {
   output: string;
   viewport: Size;
@@ -132,6 +144,43 @@ export interface PlaylistPreviewResult {
   /** Content that could not be rendered, including live applications and feeds. */
   placeholders: PreviewPlaceholder[];
   rendered_cards: Array<{page_id: string; primitive_id: string; card: string; version: string}>;
+  /** Expected shares and aspect exclusions of the playlist's weighted or fit selectors; present with a project credential. */
+  selector_previews?: SelectorPreviewEntry[];
+}
+
+/** Asks the server what each weighted or aspect-fitted selector of the pages matches now. */
+export async function previewSelectors(pages: unknown[], client: ApiClient): Promise<SelectorPreviewEntry[]> {
+  const entries: SelectorPreviewEntry[] = [];
+  for (const rawPage of pages) {
+    const page = recordOf(rawPage);
+    const pageId = typeof page.id === "string" ? page.id : "";
+    for (const rawPrimitive of Array.isArray(page.primitives) ? page.primitives : []) {
+      const primitive = recordOf(rawPrimitive);
+      const selector = recordOf(primitive.selector);
+      const dynamic = selector.by === "all" || selector.by === "tag" || selector.by === "folder";
+      if ((primitive.primitive !== "image" && primitive.primitive !== "video") || !dynamic || (selector.order !== "weighted" && selector.fit !== "aspect")) continue;
+      const rect = recordOf(primitive.rect);
+      const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: {
+        primitive: primitive.primitive, selector,
+        ...(selector.fit === "aspect" ? { rect: { width: rect.width, height: rect.height } } : {}),
+      } });
+      const body = recordOf(response.body);
+      const list = (value: unknown) => (Array.isArray(value) ? value : []).map(recordOf);
+      entries.push({
+        page_id: pageId,
+        primitive_id: typeof primitive.id === "string" ? primitive.id : "",
+        matched_count: numberOf(body.matched_count, 0),
+        ...(typeof body.cycle === "number" ? { cycle: body.cycle } : {}),
+        items: list(body.candidates).map((item) => ({
+          media_id: String(item.media_id), filename: String(item.filename),
+          ...(typeof item.weight === "number" ? { weight: item.weight } : {}),
+          ...(typeof item.share_percent === "number" ? { share_percent: item.share_percent } : {}),
+        })),
+        excluded: list(body.excluded).map((item) => ({ media_id: String(item.media_id), filename: String(item.filename), reason: String(item.reason) })),
+      });
+    }
+  }
+  return entries;
 }
 
 export async function previewPlaylist(options: {
@@ -188,6 +237,7 @@ export async function previewPlaylist(options: {
     if (!options.lintOnly) await writeFile(contact_sheet, sheet.png);
   }
   const soundtrack = soundtrackOf(body.audio);
+  const selectorPreviews = options.client ? await previewSelectors(body.pages, options.client) : [];
   return {
     output: options.outputDirectory,
     viewport,
@@ -197,6 +247,7 @@ export async function previewPlaylist(options: {
     lint,
     placeholders,
     rendered_cards: renderedCards,
+    ...(selectorPreviews.length > 0 ? { selector_previews: selectorPreviews } : {}),
   };
 }
 
@@ -213,7 +264,8 @@ function normalizePlaylist(input: unknown): { name: string; audio?: unknown; for
     throw usageError("Playlist JSON must be an object with name and pages.");
   }
   const raw = input as Record<string, unknown>;
-  const pages = Array.isArray(raw.pages) ? expandPlaylistPages(raw.pages) : undefined;
+  const pages = Array.isArray(raw.pages) ? raw.pages : undefined;
+  if (pages) assertWirePages(pages);
   if (typeof raw.name !== "string" || !pages) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }

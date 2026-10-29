@@ -114,6 +114,8 @@ export interface ProjectCapabilities {
   features: ProjectFeatures;
   feature_revision: number;
   capabilities: string[];
+  /** The most bytes one video upload may declare on the project's plan. */
+  media_video_bytes?: number;
 }
 
 /** Enrollment delivers the grant's first token pair. */
@@ -329,13 +331,9 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
 /**
  * Full playlist pages stay opaque: the CLI forwards author-supplied playlist
  * JSON unchanged, including all page transition types and their members, optional
- * object `enter`, and optional object `motion`. Templated pages are the
- * exception — the CLI expands `template` + `slots` into an ordinary write page
- * in `playlist-templates.ts` and never sends `template` to the server. Omitted
- * templated transitions stay `{ type: "crossfade", duration_ms: 200 }` with no
- * `enter` and no `motion`. The contract's page and primitive schemas are still
- * not mirrored here except for the fields that expander writes. Mirror a schema
- * only when the CLI builds or reads its fields.
+ * object `enter`, and optional object `motion`. The contract's page and
+ * primitive schemas are not mirrored here. Mirror a schema only when the CLI
+ * builds or reads its fields.
  *
  * The backend-owned playlist semantics decide whether page visibility has
  * civil-time bounds and needs a screen timezone. Data-only rules need no zone;
@@ -354,27 +352,30 @@ export interface ScreenObservationSurface {
   width: number;
 }
 
-export type ScreenWallArrangement = "row" | "column";
+export type ScreenWallArrangement = "row" | "column" | "grid";
 export type ScreenWallRotation = 0 | 90 | 180 | 270;
 
 /**
- * The video wall a screen's Player lays out: two or three outputs that show
+ * The video wall a screen's Player lays out: two to twelve outputs that show
  * one canvas. `outputs` are output names as the Player reports them
- * (observation surface ids) in physical order: left to right for a row, top
- * to bottom for a column. `rotation` is clockwise degrees on every output
- * (default 0); 90 and 270 mean portrait panels.
+ * (observation surface ids) in physical order: left to right, then top to
+ * bottom. `columns` is the outputs per row of a grid, given for a grid only.
+ * `rotation` is clockwise degrees on every output (default 0); 90 and 270
+ * mean portrait panels.
  */
 export interface ScreenWall {
   outputs: string[];
   arrangement: ScreenWallArrangement;
+  columns?: number;
   rotation?: ScreenWallRotation;
 }
 
-/** The video wall a playlist is authored for: displays tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait). */
+/** The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait); `columns` for a grid only. */
 export interface PlaylistFormat {
-  displays: 2 | 3;
+  displays: number;
   arrangement: ScreenWallArrangement;
   orientation: "landscape" | "portrait";
+  columns?: number;
 }
 
 /**

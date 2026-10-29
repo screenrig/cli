@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CliRuntime, RunProcessResult } from "../runtime.js";
 import { inputGuardArgs, probeMedia, runProcessFor, type FfmpegToolchain, type MediaProbe } from "./ffmpeg.js";
-import { MAX_VIDEO_UPLOAD_BYTES, planVideoDelivery, validateVideoOutput, type VideoOptions } from "./video-profile.js";
+import { planVideoDelivery, validateVideoOutput, type VideoOptions } from "./video-profile.js";
 
 // High-profile limits from FFmpeg libavcodec/h264_levels.c. All these levels
 // permit the policy's 8 Mbit/s rate and 16 Mbit buffer. Encoder floors stay separate.
@@ -16,8 +16,6 @@ const LEVELS: Record<number, [number, number, number]> = {
   51: [36864, 983040, 184320], 52: [36864, 2073600, 184320],
 };
 const INSPECTION_TIMEOUT_MS = 15_000;
-// A passthrough uploads the source bytes as they are, so a source over the server's video cap is re-encoded instead.
-const MAX_MEDIA_BYTES = MAX_VIDEO_UPLOAD_BYTES;
 const MAX_LINES = 2_000_000;
 const MAX_LINE_CHARS = 16_384;
 
@@ -43,7 +41,8 @@ export class VideoPacketInspection {
   readonly audio = packetState();
   private valid = true;
   private lines = 0;
-  constructor(private readonly probe: MediaProbe) {}
+  /** `maxBytes` is the project's video limit: a passthrough uploads the source as it is, so a source over it is re-encoded instead. */
+  constructor(private readonly probe: MediaProbe, private readonly maxBytes: number) {}
   line(line: string): boolean {
     if (++this.lines > MAX_LINES) return this.valid = false;
     if (!line.trim()) return this.valid;
@@ -69,7 +68,7 @@ export class VideoPacketInspection {
     state.bucket = Math.max(0, state.bucket - delta * (video ? 8_000_000 : 192_000)) + bytes * 8;
     if (state.bucket > (video ? 16_000_000 : 384_000)) return this.valid = false;
     state.lastDts = dts; state.lastDuration = duration; state.count++; state.bytes += bytes;
-    if (state.bytes > MAX_MEDIA_BYTES) return this.valid = false;
+    if (state.bytes > this.maxBytes) return this.valid = false;
     if (video) {
       state.nextPts ??= pts;
       if (state.pendingPts.some((value) => Math.abs(value - pts) < tolerance)) return this.valid = false;
@@ -222,21 +221,21 @@ function completed(result: RunProcessResult): boolean {
   return result.code === 0 && !result.signal && !result.spawnError && !result.timedOut && !result.outputTruncated && !result.stoppedEarly;
 }
 
-export async function inspectH264Passthrough(runtime: CliRuntime, toolchain: FfmpegToolchain, source: string, initialProbe: MediaProbe, options: VideoOptions):
+export async function inspectH264Passthrough(runtime: CliRuntime, toolchain: FfmpegToolchain, source: string, initialProbe: MediaProbe, options: VideoOptions, maxBytes: number):
   Promise<{ filePath: string; cleanupDir: string; sha256: string; bytes: number; probe: MediaProbe } | undefined> {
   if (!candidate(initialProbe, options)) return undefined;
   let cleanupDir: string | undefined;
   try {
     const sourceInfo = await stat(source);
-    if (!sourceInfo.isFile() || sourceInfo.size < 1 || sourceInfo.size > MAX_MEDIA_BYTES) return undefined;
+    if (!sourceInfo.isFile() || sourceInfo.size < 1 || sourceInfo.size > maxBytes) return undefined;
     cleanupDir = await mkdtemp(path.join(tmpdir(), "screenrig-inspect-"));
     const filePath = path.join(cleanupDir, `${path.basename(source, path.extname(source)) || "media"}.mp4`);
     await copyFile(source, filePath, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
     const snapshot = await stat(filePath);
-    if (snapshot.size < 1 || snapshot.size > MAX_MEDIA_BYTES) return undefined;
+    if (snapshot.size < 1 || snapshot.size > maxBytes) return undefined;
     const probe = await probeMedia(runtime, toolchain, filePath);
     if (!candidate(probe, options)) return undefined;
-    const packets = new VideoPacketInspection(probe), headers = new H264HeaderInspection(probe), run = runProcessFor(runtime);
+    const packets = new VideoPacketInspection(probe, maxBytes), headers = new H264HeaderInspection(probe), run = runProcessFor(runtime);
     const packetResult = await run({ command: toolchain.ffprobe,
       args: ["-v", "error", ...inputGuardArgs(probe.inputDemuxer), "-show_packets", "-show_entries", "packet=stream_index,pts_time,dts_time,duration_time,size,flags", "-of", "compact=p=0:nk=0", filePath],
       timeoutMs: INSPECTION_TIMEOUT_MS, maxLineChars: MAX_LINE_CHARS, onStdoutLine: (line) => packets.line(line) });
