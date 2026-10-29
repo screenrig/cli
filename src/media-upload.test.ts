@@ -537,3 +537,20 @@ test("media read errors preserve the usage envelope and close the descriptor", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("--no-transcode accepts an ultra-wide LED master: the CLI sets no dimension limit of its own", async () => {
+  const dir = await testTemp("media-led-");
+  await mkdir(dir, { recursive: true });
+  try {
+    // The server bounds an image at 16383 pixels per edge and 67,108,864 pixels in one frame.
+    for (const [width, height] of [[12000, 540], [9216, 2160], [16383, 4096]]) {
+      const file = path.join(dir, `led-${width}x${height}.webp`);
+      await writeFile(file, lossyVp8xWebp(width, height));
+      const prepared = await prepareMediaUpload(file);
+      assert.equal(prepared.declaration.content_type, "image/webp");
+      assert.equal(prepared.declaration.filename, `led-${width}x${height}.webp`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
