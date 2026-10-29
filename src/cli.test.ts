@@ -2581,6 +2581,21 @@ async function doctorWithToolchain(
   };
 }
 
+test("doctor passes a check an uploader's credential is answered outside_upload_scope", async () => {
+  const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-uploader-", {
+    encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
+  }, { status: 403, body: { request_id: "req_TEST", errors: [{ status: 403, code: "outside_upload_scope", type: "https://screenrig.ai/problems/outside-upload-scope",
+    title: "Outside this uploader's playlists and folders", detail: "An uploader uploads media into its folders.", hint: "x", upload_scope: { playlist_ids: [], folder_ids: ["mfd_AAAAAAAAAAAAAAAAAAAAAAAA"] } }] } });
+  try {
+    assert.equal(code, ExitCode.Success);
+    assert.equal(byName.ready?.status, "pass");
+    assert.equal(byName.ready?.detail, "uploader: these playlists and folders");
+    assert.notEqual(status, "fail");
+  } finally {
+    await cleanup();
+  }
+});
+
 test("doctor warns about degraded application workers without failing HTTP readiness", async () => {
   const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-degraded-", {
     encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,

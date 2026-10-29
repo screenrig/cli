@@ -371,6 +371,8 @@ export interface MediaFileUploadInput {
   sourcePath: string;
   explicitContentType?: string;
   tag?: string;
+  /** The media folder the file is declared into (folder_id at declare); it lands there when ready, with no move afterwards. */
+  folderId?: string;
   transcodeOptions: TranscodeOptions;
   noTranscode: boolean;
   reporter: ProgressReporter;
@@ -425,6 +427,7 @@ export interface MediaFileUploadResult {
     bytes: number;
     sha256: string;
     tag?: string;
+    folder_id?: string;
   };
   transcode: {
     applied: boolean;
@@ -481,6 +484,9 @@ export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Pr
     prepared.declaration.source_filename = sourceFilename;
     if (input.tag !== undefined) {
       prepared.declaration.tag = input.tag;
+    }
+    if (input.folderId !== undefined) {
+      prepared.declaration.folder_id = input.folderId;
     }
     return { prepared, transcode };
   } catch (error) {
@@ -640,7 +646,8 @@ async function existingUpload(
       const source = asRecord(item.upload_source) ?? item;
       return source.sha256 === declaration.sha256 && source.bytes === declaration.bytes &&
         source.content_type === declaration.content_type &&
-        source.source_filename === declaration.source_filename && item.tag === declaration.tag;
+        source.source_filename === declaration.source_filename && item.tag === declaration.tag &&
+        (declaration.folder_id === undefined || item.folder_id === declaration.folder_id);
     });
     if (!match) return undefined;
     const operation = await client.getOperation(match.operation_id as string);
@@ -679,6 +686,7 @@ export async function uploadMediaFile(input: MediaFileUploadInput): Promise<Medi
         bytes: preparedFile.prepared.declaration.bytes,
         sha256: preparedFile.prepared.declaration.sha256,
         ...(preparedFile.prepared.declaration.tag ? { tag: preparedFile.prepared.declaration.tag } : {}),
+        ...(preparedFile.prepared.declaration.folder_id ? { folder_id: preparedFile.prepared.declaration.folder_id } : {}),
       },
       transcode: transcodeEnvelope(preparedFile.transcode),
       warnings: uploadWarnings(preparedFile.prepared, preparedFile.transcode),

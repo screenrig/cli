@@ -6,6 +6,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
+import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
@@ -141,6 +142,43 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .requiredOption("--revision <N>", "Revision to copy forward, as playlist revisions numbers it (required)", positiveInteger("revision"))
     .requiredOption("--expect-rev <REVISION>", "The playlist's current revision, from playlist show or the current row of playlist revisions (If-Match; required)", revision)
     .action(bind(handlePlaylistPromote));
+
+  const page = playlist.command("page").description("Add, replace or remove one page of a playlist without resending the others");
+  const pageAdd = page.command("add").description("Add a page: an uploaded image or video, or a page file")
+    .argument("<playlist-id>", "Playlist identifier")
+    .option("--file <PAGE.json>", "A page object to add, or - for stdin")
+    .option("--media <MED_ID>", "Show this image or video full-canvas, built on the playlist's canvas")
+    .option("--seconds <N>", "How long an image shows (default 10); a video plays to its end", positiveInteger("seconds"))
+    .addOption(new Option("--fit <FIT>", "How the media fits the canvas (default contain)").choices(["contain", "cover"]))
+    .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
+    .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
+    .option("--before <PAGE_ID>", "Put the page in front of this page (default: at the end)")
+    .option("--page-id <ID>", "The new page's id (default: up- and eight letters or digits)")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistPageAdd));
+  requireOptionGroup(pageAdd, "exactlyOne", ["--file", "--media"]);
+  const pageReplace = page.command("replace").description("Replace one page, keeping its place and id")
+    .argument("<playlist-id>", "Playlist identifier")
+    .argument("<page-id>", "The page to replace")
+    .option("--file <PAGE.json>", "The complete new page, or - for stdin")
+    .option("--media <MED_ID>", "Swap the page's media; everything else, dates included, stays as stored. Without --file or --media, only the dates (and --seconds, --fit) change")
+    .option("--seconds <N>", "How long an image shows", positiveInteger("seconds"))
+    .addOption(new Option("--fit <FIT>", "How the media fits the canvas").choices(["contain", "cover"]))
+    .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
+    .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
+    .option("--always", "Remove the page's dates: it is shown always")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistPageReplace));
+  requireOptionGroup(pageReplace, "atMostOne", ["--file", "--media"]);
+  requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always"]);
+  const pageRemove = page.command("remove").description("Remove one page")
+    .argument("<playlist-id>", "Playlist identifier")
+    .argument("<page-id>", "The page to remove")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistPageRemove));
 
   playlist.command("delete").description("Delete a playlist")
     .argument("<id>", "Playlist identifier")

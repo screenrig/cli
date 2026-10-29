@@ -49,8 +49,18 @@ export interface InvitationAdvertising {
   slot_ids: string[];
 }
 
+/** What an uploader may use: the playlists it changes pages of and the media folders it uploads into. */
+export interface UploadScope {
+  playlist_ids: string[];
+  folder_ids: string[];
+  /** A member's level: propose (the default) or manage. Absent on a service client. */
+  access?: "propose" | "manage";
+}
+
 export interface Invitation {
   advertising?: InvitationAdvertising;
+  /** An uploader invitation: the scope the accepting person receives. */
+  upload_scope?: UploadScope;
   created_at: string;
   delivery: "email" | "link";
   expires_at: string;
@@ -63,6 +73,7 @@ export interface Invitation {
 
 export interface InvitationCreate {
   advertising?: InvitationAdvertising;
+  upload_scope?: UploadScope;
   delivery?: "email" | "link";
   emails?: string[];
   kind: "project_member" | "ad_buyer";
@@ -1140,6 +1151,8 @@ export interface MediaUploadDeclaration {
   sha256: string;
   /** Optional mutable query tag. Stored on the ready object, not redeclared at commit. */
   tag?: string;
+  /** The media folder the ready file lands in; omitted lands it at the library root. An uploader must send one of its folders. */
+  folder_id?: string;
 }
 
 /** The subset of a ready Media row that `media download` verifies against. */
