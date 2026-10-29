@@ -10127,6 +10127,130 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/media/{id}/replace:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: contribute
+      operationId: replaceMedia
+      description: >-
+        Replaces a ready media item's file in place with an upload that was declared (createMediaUpload) and whose bytes were written, instead of committing it as new media. The media keeps its id, so every playlist and schedule that names it plays the new file without being rescheduled, and the folder, tag and all-media selectors that pick it play it at their next resolve. The replacement must be the same kind of file (image for image, video for video, audio for audio); another kind is invalid_request. A changed aspect ratio is allowed: the operation's result carries a warnings entry aspect_ratio_changed naming the playlists that use the item. Every upload rule applies (the plan's video byte limit, the dimension limits, the storage allowance). The file in service stays in the media's version history (listMediaVersions) and counts toward stored bytes until its version is deleted. If-Match, when sent, is the media revision the caller read (revision_conflict when stale). The answer is the upload's operation, like commitMediaUpload: poll getOperation; a succeeded operation's result is {media_id, id, version, warnings}. Bytes identical to the file in service replace nothing and fail the operation with resource_conflict. Under effective Propose the replacement waits for review instead: the operation succeeds with result.status pending_review and result.review_id, the media keeps playing its file until a person approves, and a newer replacement of the same media supersedes the waiting one.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: false, schema: {type: string}, description: "The media item's current revision, quoted or bare. Omitted means any."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaReplace'
+      responses:
+        '202':
+          description: The replacement was recorded; the upload's operation carries its outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaVersions
+      description: >-
+        Lists the versions of a media item, newest first, the version in service first (current: true). A version is a file the item had: number is its content epoch plus one (1 for the upload, one more for each replacement, restore or media sync change), and its bytes are kept until the version is deleted. Read a version's bytes with GET /api/media/{id}/content?version=N.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaVersionPage'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions/{version}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/MediaVersionNumber'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteMediaVersion
+      description: >-
+        Drops a past version: its record goes, its bytes leave the project's stored bytes at once, and its object is removed after 24 hours unless another version or the version in service holds the same file. The version in service cannot be deleted (resource_conflict), and no version can be deleted while a replacement of the media waits for review. A deleted version cannot be restored.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The version was dropped.
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/{id}/versions/{version}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/MediaVersionNumber'
+    post:
+      x-screenrig-access: review
+      operationId: restoreMediaVersion
+      description: >-
+        Puts a past version back in service as a new version, in the media's next content epoch: the media keeps its id and revision moves by one, so every playlist and schedule that names it plays that file again without being rescheduled. The version it copies stays in the history and shares its bytes; the new version counts toward stored bytes like any other. The version in service cannot be restored (resource_conflict). If-Match, when sent, is the media revision the caller read. The body may carry a note. Under effective Propose the restore becomes a review: 202 pending_review, and the media keeps its file until a person approves.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: false, schema: {type: string}, description: "The media item's current revision, quoted or bare. Omitted means any."}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaRestore'
+      responses:
+        '200':
+          description: The media as it is now, and warnings about the file put back.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRestored'
+        '202':
+          description: The restore waits for a person's review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRestorePending'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/media/{id}/content:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10138,6 +10262,13 @@ paths:
         schema:
           type: string
         description: Exact strong media SHA-256 ETag returned by this route.
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: Read this version of the media (listMediaVersions) instead of the one in service.
     get:
       x-screenrig-access: read
       operationId: exportMediaContent
@@ -13891,7 +14022,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to three surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
+      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -20971,6 +21102,7 @@ components:
     ReviewNote: {name: Screenrig-Review-Note, in: header, required: false, schema: {type: string, maxLength: 280}, description: "Optional proposer note on a review-class write, sent as percent-encoded UTF-8 (what JavaScript's encodeURIComponent writes). The server percent-decodes it (an invalid escape is 400 invalid_request); the decoded note is plain text, at most 280 characters after trimming, no control characters (else 400 invalid_request). Stored on the review when the write becomes one; ignored when it applies live."}
     ProjectTarget: {name: ScreenRig-Project, in: header, required: false, deprecated: true, schema: {type: string}, description: "Deprecated for one release. Must be consistent with the JWT projects grants; adds Deprecation and Warning headers. No token exchange."}
     ResourceID: {name: id, in: path, required: true, schema: {type: string}}
+    MediaVersionNumber: {name: version, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A version number of the media item (listMediaVersions)."}
     NoteID: {name: note_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}, description: The id of one of the agent's notes.}
     WebhookDeliveryID: {name: delivery_id, in: path, required: true, schema: {type: string}, description: The id of one of the webhook's deliveries.}
     NotificationUnsubscribedUserID: {name: user_id, in: path, required: true, schema: {type: string, maxLength: 200}, description: The user_id of a person in the notification's unsubscribed list.}
@@ -21268,7 +21400,7 @@ components:
       additionalProperties: false
       required: [operation, base_revision, proposed, diff]
       properties:
-        operation: {type: string, enum: [create, update, selector_refresh]}
+        operation: {type: string, enum: [create, update, selector_refresh, media_replace]}
         base_revision: {type: integer, minimum: 0, description: "The live revision when proposed; 0 for a create."}
         applied_revision: {type: integer, minimum: 1}
         proposed:
@@ -21285,6 +21417,7 @@ components:
         diff: {$ref: "#/components/schemas/ReviewPlaylistDiff"}
         media_playlists: {type: array, items: {$ref: "#/components/schemas/ReviewMediaPlaylist"}, description: "The playlists whose tag, folder or all selectors approving this review's pending media would make start or stop playing it: for a selector_refresh (a media review) every playlist with an approved version, plus every playlist with an open create or update review whose proposed selectors would, one entry per playlist; for a create or update the approved playlists beside its subject. impact.screens includes their screens."}
         media_change: {$ref: "#/components/schemas/ReviewMediaChange"}
+        media_replace: {$ref: "#/components/schemas/ReviewMediaReplace"}
         previously_rejected_media: {type: array, items: {type: string}, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media."}
     ReviewPageEdit:
       type: object
@@ -21295,6 +21428,111 @@ components:
         page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
         page: {$ref: "#/components/schemas/PlaylistPageWriteV2", description: "The page an add or replace writes, as the proposer sent it."}
         before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "An add's neighbour: the page it goes in front of."}
+    MediaReplace:
+      type: object
+      additionalProperties: false
+      required: [upload_id]
+      properties:
+        upload_id: {type: string, minLength: 1, description: "The id of an upload declared with createMediaUpload and written to its upload_url, not committed."}
+        note: {type: string, maxLength: 280, description: "A note kept with the new version."}
+    MediaRestore:
+      type: object
+      additionalProperties: false
+      properties:
+        note: {type: string, maxLength: 280, description: "A note kept with the new version."}
+    MediaVersionActor:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [person, agent, client, sync]}
+        id: {type: string}
+        name: {type: string}
+    MediaVersion:
+      type: object
+      additionalProperties: false
+      required: [number, current, filename, content_type, sha256, bytes, source, created_at]
+      properties:
+        number: {type: integer, minimum: 1}
+        current: {type: boolean, description: "True for the version in service."}
+        filename: {type: string}
+        source_filename: {type: string}
+        content_type: {type: string}
+        sha256: {type: string}
+        bytes: {type: integer, minimum: 0}
+        width: {type: integer, minimum: 0}
+        height: {type: integer, minimum: 0}
+        duration_ms: {type: integer, minimum: 0}
+        codecs: {type: string}
+        source: {type: string, enum: [upload, replace, sync, restore], description: "How it came to be: the first upload, a replacement, a media sync's changed file, or a restore of an older version."}
+        note: {type: string}
+        by: {$ref: "#/components/schemas/MediaVersionActor", description: "Who or which agent put the version in service; absent for the first upload."}
+        restored_from: {type: integer, minimum: 1, description: "The version number a restore copied."}
+        created_at: {type: string, format: date-time, description: "When the version went into service."}
+    MediaVersionPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/MediaVersion"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
+    MediaWarning:
+      type: object
+      additionalProperties: false
+      required: [code, detail, playlists]
+      properties:
+        code: {type: string, enum: [aspect_ratio_changed]}
+        detail: {type: string}
+        playlists: {type: array, items: {$ref: "#/components/schemas/MediaWarningPlaylist"}, description: "The playlists that use the media."}
+    MediaWarningPlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+    MediaRestored:
+      type: object
+      additionalProperties: false
+      required: [media, warnings]
+      properties:
+        media: {$ref: "#/components/schemas/Media"}
+        warnings: {type: array, items: {$ref: "#/components/schemas/MediaWarning"}}
+    MediaRestorePending:
+      type: object
+      additionalProperties: false
+      required: [status, review, warnings]
+      properties:
+        status: {type: string, enum: [pending_review]}
+        review: {$ref: "#/components/schemas/ReviewSummary"}
+        warnings: {type: array, items: {$ref: "#/components/schemas/MediaWarning"}}
+    ReviewMediaReplace:
+      type: object
+      additionalProperties: false
+      description: "The replacement of one media item's file a media_replace review asks about. The media keeps its file until approval."
+      required: [media_id, filename, source, version, before, after, aspect_changed, playlists]
+      properties:
+        media_id: {type: string}
+        filename: {type: string}
+        source: {type: string, enum: [replace, restore]}
+        restored_from: {type: integer, minimum: 1}
+        note: {type: string}
+        version: {type: integer, minimum: 2, description: "The version number the file gets on approval."}
+        before: {$ref: "#/components/schemas/ReviewMediaFile"}
+        after: {$ref: "#/components/schemas/ReviewMediaFile"}
+        aspect_changed: {type: boolean}
+        playlists: {type: array, items: {$ref: "#/components/schemas/MediaWarningPlaylist"}, description: "The playlists that use the media; impact.screens counts their screens."}
+    ReviewMediaFile:
+      type: object
+      additionalProperties: false
+      required: [sha256, bytes, content_type]
+      properties:
+        sha256: {type: string}
+        bytes: {type: integer, minimum: 0}
+        content_type: {type: string}
+        width: {type: integer, minimum: 0}
+        height: {type: integer, minimum: 0}
+        duration_ms: {type: integer, minimum: 0}
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
@@ -23263,7 +23501,7 @@ components:
         application_path_bytes: {type: integer, enum: [255]}
         media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies each image is at most 16383 pixels wide and 16383 tall and at most 67,108,864 pixels (8192 by 8192) in one frame, so an ultra-wide canvas such as 12000 by 540 or 9216 by 2160 uploads, and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
-        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload, 500000000 bytes, 500 MB. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
+        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
         playlist_max_pages: {type: integer, enum: [100]}
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
@@ -23779,25 +24017,26 @@ components:
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, name: {type: string}, revision: {type: integer}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
     ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
-    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
+    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
       type: object
       additionalProperties: false
       required: [displays, arrangement, orientation]
       description: >-
-        The video wall a playlist is authored for: displays tiles, each 1920 x 1080 (landscape) or 1080 x 1920 (portrait), laid out in a row or a column. The canvas of n tiles of width w and height h is (n * w, h) for a row and (w, n * h) for a column, for example 5760 x 1080 for 3 landscape displays in a row and 1080 x 3840 for 2 portrait displays in a column. Every ordinary page's canvas width and height must equal it exactly, else 400 invalid_request at pages[i].canvas. Card scale on such a playlist is the tile's min(width, height) / 1080 = 1. A playlist with a format may be bound only to a screen whose wall has the same shape (displays = number of outputs, arrangement, portrait if and only if rotation is 90 or 270), else 409 playlist_format_mismatch: assignment, fleet assignment, schedule entries and takeover. A playlist without a format binds to any screen.
+        The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait), laid out in a row, a column or a grid. A row has the displays as columns and one row, a column one column and the displays as rows, a grid columns and displays / columns rows. Display n sits at column (n - 1) mod columns and row floor((n - 1) / columns): left to right, then top to bottom. The canvas of c columns and r rows of tiles of width w and height h is (c * w, r * h), for example 5760 x 1080 for 3 landscape displays in a row, 1080 x 3840 for 2 portrait displays in a column and 7680 x 3240 for 12 landscape displays in a grid of 4 columns. Every ordinary page's canvas width and height must equal it exactly, else 400 invalid_request at pages[i].canvas. Card scale on such a playlist is the tile's min(width, height) / 1080 = 1. A playlist with a format may be bound only to a screen whose wall has the same shape (displays = number of outputs, arrangement, columns, portrait if and only if rotation is 90 or 270), else 409 playlist_format_mismatch: assignment, fleet assignment, schedule entries and takeover. A playlist without a format binds to any screen.
       properties:
-        displays: {type: integer, enum: [2, 3]}
-        arrangement: {type: string, enum: [row, column]}
+        displays: {type: integer, minimum: 2, maximum: 12}
+        arrangement: {type: string, enum: [row, column, grid]}
         orientation: {type: string, enum: [landscape, portrait]}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Displays per row of a grid. Required for arrangement grid and not allowed otherwise; displays divided by columns is at least 2. Echoed for a grid only."}
     PlaylistDisplays:
       type: array
       minItems: 1
-      maxItems: 3
+      maxItems: 12
       uniqueItems: true
-      items: {type: integer, minimum: 1, maximum: 3}
+      items: {type: integer, minimum: 1, maximum: 12}
       description: >-
-        Playlists with a format only. The displays a primitive covers: ascending contiguous 1-based display numbers within 1..format.displays, such as [2], [1, 2] or [1, 2, 3]. The server derives rect as the union of those tiles; rect is omitted or exactly the derived value. Stored and echoed on read.
+        Playlists with a format only. The displays a primitive covers: ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2], [1, 2] or, on a grid of 4 columns, [2, 3, 6, 7]. In a row or a column they are contiguous. The server derives rect as the bounding box of those tiles; rect is omitted or exactly the derived value. Stored and echoed on read.
     PlaylistWrite:
       type: object
       additionalProperties: false
@@ -23910,12 +24149,13 @@ components:
     ProjectCapabilities:
       type: object
       additionalProperties: false
-      required: [project_id, plan_id, features, feature_revision, capabilities]
+      required: [project_id, plan_id, features, feature_revision, capabilities, media_video_bytes]
       properties:
         project_id: {type: string}
         plan_id: {type: string}
         features: {$ref: "#/components/schemas/ProjectFeatures"}
         feature_revision: {type: integer}
+        media_video_bytes: {type: integer, enum: [500000000, 1000000000], description: "The most one video/mp4 or video/webm upload may declare on this project's plan, in decimal bytes: 500000000 (500 MB) on Standard, 1000000000 (1 GB) on every other plan. A larger declaration is rejected with invalid_request before any byte is transferred. A plan change never affects a stored video, only later uploads and replacements. GET /api/capabilities publishes the Standard value for callers that have no project."}
         capabilities: {type: array, items: {type: string, enum: [media, credits, signage.pairing, signage.playlists, signage.publish, advertising]}}
     ProjectFeatures:
       type: object
@@ -25145,9 +25385,17 @@ components:
     PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}}
-    SelectorPreviewInput: {type: object, additionalProperties: false, required: [primitive, selector], properties: {primitive: {type: string, enum: [image, video]}, selector: {oneOf: [{$ref: "#/components/schemas/PlaylistMediaSelectorByAll"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByTag"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByFolder"}]}}}
-    SelectorPreviewMedia: {type: object, required: [media_id, filename, tags], properties: {media_id: {type: string}, filename: {type: string}, tags: {type: array, items: {type: string}}}}
-    SelectorPreview: {type: object, required: [primitive, selector, matched_count, candidates], properties: {primitive: {type: string, enum: [image, video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, matched_count: {type: integer, minimum: 0, maximum: 1024}, candidates: {type: array, maxItems: 1024, items: {$ref: "#/components/schemas/SelectorPreviewMedia"}}}}
+    MediaSelectorWeights:
+      type: object
+      minProperties: 1
+      maxProperties: 64
+      propertyNames: {pattern: "^(med_.{1,124}|tag:[A-Za-z0-9]{1,32})$"}
+      additionalProperties: {type: integer, minimum: 1, maximum: 1000}
+      description: >-
+        Shares of a weighted selector, keyed by media id or tag:NAME. An item's weight is its media id key if present; otherwise the first tag:NAME key, in alphabetical order, among the tags it carries, with that weight split equally among the items of the selection that share the key, so a sponsor's share holds however many creatives it has; otherwise the item is its own group with weight 1. Every full cycle plays each item exactly its share.
+    SelectorPreviewInput: {type: object, additionalProperties: false, required: [primitive, selector], properties: {rect: {type: object, additionalProperties: false, required: [width, height], properties: {width: {type: number, exclusiveMinimum: 0}, height: {type: number, exclusiveMinimum: 0}}, description: "The primitive's rect size; required with selector.fit aspect."}, primitive: {type: string, enum: [image, video]}, selector: {oneOf: [{$ref: "#/components/schemas/PlaylistMediaSelectorByAll"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByTag"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByFolder"}]}}}
+    SelectorPreviewMedia: {type: object, required: [media_id, filename, tags], properties: {media_id: {type: string}, filename: {type: string}, tags: {type: array, items: {type: string}}, width: {type: integer}, height: {type: integer}, reason: {type: string, enum: [aspect_mismatch], description: "Why an item of excluded is left out."}, weight: {type: integer, minimum: 1, description: "Weight in the cycle; weighted order only."}, share_percent: {type: number, minimum: 0, maximum: 100, description: "Expected share of plays; weighted order only."}}}
+    SelectorPreview: {type: object, required: [primitive, selector, matched_count, candidates], properties: {primitive: {type: string, enum: [image, video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, matched_count: {type: integer, minimum: 0, maximum: 1024}, candidates: {type: array, maxItems: 1024, items: {$ref: "#/components/schemas/SelectorPreviewMedia"}}, excluded: {type: array, maxItems: 1024, items: {$ref: "#/components/schemas/SelectorPreviewMedia"}, description: "Matches left out by fit aspect, each with reason aspect_mismatch."}, cycle: {type: integer, minimum: 1, description: "Plays after which every item has played exactly its weight; weighted order only."}}}
     PlaylistMediaSelector:
       oneOf:
         - {$ref: "#/components/schemas/PlaylistMediaSelectorByID"}
@@ -25158,9 +25406,9 @@ components:
       discriminator: {propertyName: by}
     PlaylistMediaSelectorByID: {type: object, additionalProperties: false, required: [by, media_id], properties: {by: {type: string, enum: [id]}, media_id: {type: string, pattern: "^med_"}, one_at_a_time: {type: boolean, enum: [false], default: false}}}
     PlaylistMediaSelectorByIDs: {type: object, additionalProperties: false, required: [by, media_ids], properties: {by: {type: string, enum: [ids]}, media_ids: {type: array, minItems: 1, maxItems: 1024, uniqueItems: true, items: {type: string, pattern: "^med_"}}, one_at_a_time: {type: boolean, default: false}}}
-    PlaylistMediaSelectorByAll: {type: object, additionalProperties: false, required: [by], properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
-    PlaylistMediaSelectorByTag: {type: object, additionalProperties: false, required: [by], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
-    PlaylistMediaSelectorByFolder: {type: object, additionalProperties: false, required: [by, folder_id], description: "The ready files of the primitive directly inside one media folder (GET /api/media-folders), not those of its subfolders, ordered and paced like by:all. Like a tag, the folder is read again at every selector resolve, so moving files in or out changes what playing screens show from their next loop. Writing a playlist requires the folder to exist in the project; it may be empty. A folder that holds no ready file of the primitive, or is deleted later, matches nothing. Players receive it as by:all; the server resolves the folder.", properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [folder]}, folder_id: {type: string, pattern: "^([a-z]+_)?mfd_[A-Za-z0-9]{1,64}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random], default: filename}}}
+    PlaylistMediaSelectorByAll: {type: object, additionalProperties: false, required: [by], properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "filename plays the pass in filename order, random shuffles each pass, weighted rotates by weights: one item per visit, so one_at_a_time or batch_size 1 is required."}, weights: {$ref: "#/components/schemas/MediaSelectorWeights"}, fit: {type: string, enum: [aspect], description: "aspect keeps only media whose width over height is within 5% of the primitive's rect, so a portrait slot never plays a landscape file. Read when the selector resolves, from the stored rect (a video wall or display frame included); the Player is unchanged."}}}
+    PlaylistMediaSelectorByTag: {type: object, additionalProperties: false, required: [by], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "filename plays the pass in filename order, random shuffles each pass, weighted rotates by weights: one item per visit, so one_at_a_time or batch_size 1 is required."}, weights: {$ref: "#/components/schemas/MediaSelectorWeights"}, fit: {type: string, enum: [aspect], description: "aspect keeps only media whose width over height is within 5% of the primitive's rect, so a portrait slot never plays a landscape file. Read when the selector resolves, from the stored rect (a video wall or display frame included); the Player is unchanged."}}}
+    PlaylistMediaSelectorByFolder: {type: object, additionalProperties: false, required: [by, folder_id], description: "The ready files of the primitive directly inside one media folder (GET /api/media-folders), not those of its subfolders, ordered and paced like by:all. Like a tag, the folder is read again at every selector resolve, so moving files in or out changes what playing screens show from their next loop. Writing a playlist requires the folder to exist in the project; it may be empty. A folder that holds no ready file of the primitive, or is deleted later, matches nothing. Players receive it as by:all; the server resolves the folder.", properties: {batch_size: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [folder]}, folder_id: {type: string, pattern: "^([a-z]+_)?mfd_[A-Za-z0-9]{1,64}$"}, one_at_a_time: {type: boolean, default: false}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "filename plays the pass in filename order, random shuffles each pass, weighted rotates by weights: one item per visit, so one_at_a_time or batch_size 1 is required."}, weights: {$ref: "#/components/schemas/MediaSelectorWeights"}, fit: {type: string, enum: [aspect], description: "aspect keeps only media whose width over height is within 5% of the primitive's rect, so a portrait slot never plays a landscape file. Read when the selector resolves, from the stored rect (a video wall or display frame included); the Player is unchanged."}}}
     PlaylistResolvedMedia: {type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: {media_id: {type: string, pattern: "^med_"}, intrinsic_size: {$ref: "#/components/schemas/PlaylistIntrinsicSize"}, content_epoch: {type: integer, minimum: 1, description: "How many times the media's bytes were replaced under the same id (a media sync's changed file); absent until the first. It makes a replacement change the playlist's content so its screens fetch the new bytes. Clients must not send it."}}}
     CanvasColor: {type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA.}
     LinearGradientStop:
@@ -25207,10 +25455,11 @@ components:
       additionalProperties: false
       required: [outputs, arrangement]
       description: >-
-        The video wall a screen's Player lays out: two or three outputs that show one canvas. Setting it needs a Player that declared the display.wall host capability (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans it.
+        The video wall a screen's Player lays out: two to twelve outputs that show one canvas. Setting it needs a Player that declared the display.wall host capability (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans it.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 3, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right for row, top to bottom for column."}
-        arrangement: {type: string, enum: [row, column]}
+        outputs: {type: array, minItems: 2, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right, then top to bottom."}
+        arrangement: {type: string, enum: [row, column, grid]}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
     ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {type: string}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}}}
     ScreenLocation:
@@ -25862,7 +26111,7 @@ components:
         Player-reported playback surface. Absent on Screen until the first accepted PUT /screen/observation. Read-only on the project API; ScreenPatch, PairScreen, pairing bodies, session bodies, canvas, runtime manifest, and POST /screen/reports cannot write it.
       properties:
         observed_at: {type: string, format: date-time, description: Player clock at the observation. Last write wins; an identical surfaces tuple ignores a later timestamp.}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to three surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
     ScreenObservationSurface:
       type: object
       additionalProperties: false
@@ -25881,7 +26130,7 @@ components:
       description: details object on a durable screen.surface_changed project event. Pixels are not present. This type is not a runtime audience command and is not delivered on GET /screen/events.
       properties:
         observed_at: {type: string, format: date-time}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/ScreenObservationSurface"}}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}}
     RuntimeObservationWrite:
       type: object
       additionalProperties: true
@@ -25890,7 +26139,7 @@ components:
         The PUT /screen/observation body. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the project ScreenObservation.
       properties:
         observed_at: {type: string, format: date-time}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to three surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
     RuntimeObservationSurfaceWrite:
       type: object
       additionalProperties: true
@@ -26739,7 +26988,7 @@ components:
         quality: {type: string, enum: [low, medium, high]}
         credits: {type: integer, minimum: 1}
         usd: {type: string}
-    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
+    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded by the project's plan, 500000000 bytes, 500 MB, on Standard and 1000000000 bytes, 1 GB, on every other plan, and a larger one is rejected the same way, naming the limit that applies; read media_video_bytes from GET /api/project/capabilities to preflight it. A plan change affects only later declarations: stored videos keep playing. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
     MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
@@ -28552,7 +28801,7 @@ components:
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
         level: {type: string, description: "Always warning today. A reader treats a level it does not know as warning."}
-        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), or overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it)."}
+        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it), or selector_order_downgraded (a selector with order weighted reaches a Player that did not declare the selector.weighted host capability as order random)."}
         pageId: {type: string}
         primitiveId: {type: string}
         detail: {type: string}
@@ -28707,7 +28956,7 @@ components:
         major: {type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins."}
         params: {type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>. A string may carry {screen.name}, {screen.timezone} and {screen.field.NAME}, and a location param may be the string {screen.location}; the backend expands them for each screen."}
         data: {type: string, pattern: '^(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]+\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]+\}){0,255}$', description: "Card data key holding the dynamic properties. May not start with feed:. {screen.field.NAME} in the key reads a per-screen document, for example menu-{screen.field.store_number}: the backend fills in each screen's own field."}
-        displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending contiguous 1-based display numbers within 1..format.displays, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
+        displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
         rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required for layout free. For every other layout omit it or send the rect the server derives; left and right strips are the band on that edge (120 units wide, canvas high), which the Player draws as a horizontal strip turned 90 degrees."}
         layer: {type: integer, minimum: 0, maximum: 1024, description: "Required for layout free. Fixed for every other layout (full 10, center and wide 20, strip, header and footer 30, corner 40, chip 50): omit it or send that value."}
         content_fit: {type: string, enum: [fill]}
@@ -28783,8 +29032,8 @@ components:
       discriminator: {propertyName: by}
     RuntimeMediaSelectorByID: {type: object, required: [by, mediaId, oneAtATime], properties: {by: {type: string, enum: [id]}, mediaId: {type: string, pattern: "^med_"}, oneAtATime: {type: boolean, enum: [false]}}}
     RuntimeMediaSelectorByIDs: {type: object, required: [by, mediaIds, oneAtATime], properties: {by: {type: string, enum: [ids]}, mediaIds: {type: array, minItems: 1, maxItems: 1024, uniqueItems: true, items: {type: string, pattern: "^med_"}}, oneAtATime: {type: boolean}}}
-    RuntimeMediaSelectorByAll: {type: object, required: [by, oneAtATime], properties: {batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random], default: filename}}}
-    RuntimeMediaSelectorByTag: {type: object, required: [by, oneAtATime], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random], default: filename}}}
+    RuntimeMediaSelectorByAll: {type: object, required: [by, oneAtATime], properties: {batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "weighted is sent only to a Player that declared the selector.weighted host capability, and every item of the selector snapshot then carries weight; any other Player gets random."}}}
+    RuntimeMediaSelectorByTag: {type: object, required: [by, oneAtATime], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "weighted is sent only to a Player that declared the selector.weighted host capability, and every item of the selector snapshot then carries weight; any other Player gets random."}}}
     RuntimeApplicationPackage:
       type: object
       description: >-
@@ -28808,6 +29057,7 @@ components:
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: {type: string}
+        weight: {type: integer, minimum: 1, maximum: 4096, description: "Smooth weighted round-robin weight of a weighted selector item, in the selector snapshot only, for a Player that declared selector.weighted. A missing weight counts as 1."}
         src: {type: string, format: uri-reference, description: *manifest-bound-route}
         intrinsicSize: {$ref: "#/components/schemas/RuntimeIntrinsicSize"}
         sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability.}
@@ -28818,6 +29068,7 @@ components:
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: {type: string}
+        weight: {type: integer, minimum: 1, maximum: 4096, description: "Smooth weighted round-robin weight of a weighted selector item, in the selector snapshot only, for a Player that declared selector.weighted. A missing weight counts as 1."}
         src: {type: string, format: uri-reference, description: *manifest-bound-route}
         intrinsicSize: {$ref: "#/components/schemas/RuntimeIntrinsicSize"}
         sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability.}
@@ -29429,10 +29680,11 @@ components:
       description: >-
         The screen's video wall as its Player lays it out (docs/player-compatibility.md §6.8). Emitted only when the screen has a wall. Unknown members are ignored.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 3, items: {type: string}, description: "Output names in physical order: left to right for row, top to bottom for column."}
-        arrangement: {type: string, enum: [row, column]}
+        outputs: {type: array, minItems: 2, maxItems: 12, items: {type: string}, description: "Output names in physical order: left to right, then top to bottom."}
+        arrangement: {type: string, enum: [row, column, grid]}
         rotation: {type: integer, enum: [0, 90, 180, 270], description: "Clockwise degrees applied to every output."}
         span: {type: boolean, description: "true when the manifest's playlist has a format (it then matches the wall). false is an ordinary playlist that every output mirrors."}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid; present for arrangement grid only."}
     RuntimeDisplay:
       type: object
       additionalProperties: true
