@@ -1,6 +1,6 @@
 import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
-import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
+import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
@@ -83,6 +83,8 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .option("--day-from <YYYY-MM-DD>", "First UTC day, inclusive (default 29 days before --day-to)")
     .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today); at most 366 days after --day-from")
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("screen-uptime.FORMAT"))
     .action(bind(handleScreenUptime));
 
   screen.command("presence").description("List a screen's online and offline transitions, newest first")
@@ -96,6 +98,8 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--from <TIME>", "Inclusive start of the report time: RFC 3339, now, or an age such as 7d, 12h, 30m (default 24 hours before --to)", playsInstantOption("--from"))
     .option("--to <TIME>", "Exclusive end of the report time: RFC 3339, now, or an age (default now); at most 31 days after --from, 93 with --resolution hour", playsInstantOption("--to"))
     .addOption(new Option("--resolution <RESOLUTION>", "raw (default) lists each report; hour summarizes each UTC hour").choices(["raw", "hour"]))
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("screen-health-history.FORMAT"))
     .action(bind(handleScreenHealthHistory));
 
   screen.command("storage-forecast").description("Dry-run whether a playlist fits a screen's reported storage")

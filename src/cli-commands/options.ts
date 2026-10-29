@@ -1,3 +1,4 @@
+import { Option } from "commander";
 import { isResourceID } from "../generated/resource-ids.js";
 import { quotedRevision } from "../if-match.js";
 import { usageError } from "../problems.js";
@@ -110,3 +111,7 @@ export function projectSubset(value: string): string {
   }
   return ids.join(",");
 }
+
+/** --format of a report command: json is the envelope; csv, xlsx and pdf are written to --output. */
+export const reportFormatOption = (): Option => new Option("--format <FORMAT>", "json (default), or csv, xlsx or pdf written to --output").choices(["json", "csv", "xlsx", "pdf"]);
+export const reportOutputOption = (name = "NAME.FORMAT"): Option => new Option("--output <FILE>", `File to write with --format csv, xlsx or pdf (default ./${name})`);

@@ -1,12 +1,12 @@
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
-import { positiveInteger } from "./options.js";
+import { positiveInteger, reportFormatOption, reportOutputOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handlePlaybackCompleteness, handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../commands.js";
 import { playsCursor, playsInstantOption, playsLimit } from "../playback-export.js";
 
-const formatOption = () => new Option("--format <FORMAT>", "json (default) or csv").choices(["json", "csv"]);
-const outputOption = () => new Option("--output <FILE>", "CSV file to write (with --format csv); - writes the CSV to stdout instead of the envelope");
+const formatOption = () => new Option("--format <FORMAT>", "json (default), csv, xlsx or pdf").choices(["json", "csv", "xlsx", "pdf"]);
+const outputOption = () => new Option("--output <FILE>", "File to write (with --format csv, xlsx or pdf); - writes a CSV to stdout instead of the envelope");
 
 export function registerPlaybackCommands(root: Command, bind: CommandActionBinder): void {
   const playback = root.command("playback").description("Inspect playback records");
@@ -42,6 +42,8 @@ export function registerPlaybackCommands(root: Command, bind: CommandActionBinde
     .option("--screen-id <ID>", "With --by day: only this screen")
     .option("--media-id <ID>", "With --by day: only this media")
     .option("--top <N>", "Rows of a ranking, 1 to 100 (1 to 10 with --by screen_day; default 10)", positiveInteger("top"))
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("play-totals.FORMAT"))
     .action(bind(handlePlaybackTotals));
   requireOptionGroup(totals, "atMostOne", ["--screen-id", "--media-id"]);
   requireOptionGroup(totals, "requires", ["--top", "--by"]);
@@ -51,5 +53,7 @@ export function registerPlaybackCommands(root: Command, bind: CommandActionBinde
     .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today)")
     .option("--screen-id <ID>", "Only this screen")
     .option("--limit <N>", "Gaps to list, newest first, 1 to 500 (default 100)", positiveInteger("limit"))
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("play-completeness.FORMAT"))
     .action(bind(handlePlaybackCompleteness));
 }
