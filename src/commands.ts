@@ -3541,9 +3541,6 @@ function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
 
 export const handleMediaList = commandHandler(async (args, runtime, resolved) => {
 
-  if (Object.hasOwn(args.flags, "kind")) {
-    throw usageError("media list uses --primitive image|video|audio, not --kind.");
-  }
   const folder = flagString(args.flags, "folder");
   return simpleList(args, runtime, resolved, "/api/media", "Media", {
     tag: mediaTagFromArgs(args),

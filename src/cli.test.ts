@@ -1459,19 +1459,6 @@ test("removed identity commands and dashboard credential switches fail before ne
     assert.equal(transport.calls.length, 0);
     await rm(result.configDir, { recursive: true, force: true });
   }
-  for (const [args, replacement] of [
-    [["account", "show"], "project show"],
-    [["account", "capabilities"], "project capabilities"],
-    [["account", "invite", "--email", "guest@example.com"], "invitations create"],
-    [["account", "recover", "--email", "owner@example.com"], "dashboard reset-sign-in"],
-    [["account", "constructor"], "project"],
-  ] as const) {
-    const result = await withRuntime(["--json", ...args], new FakeTransport());
-    const error = JSON.parse(result.stdout).error;
-    assert.equal(error.detail, `account commands are retired. Use screenrig ${replacement}.`);
-    assert.equal(error.next.command, `screenrig ${replacement} --help`);
-    await rm(result.configDir, { recursive: true, force: true });
-  }
 });
 
 const BROWSER_CLAIM_SCREEN = {
@@ -4873,17 +4860,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     );
     assert.equal(revoked.code, ExitCode.Usage, revoked.stdout);
     assert.equal(transport.calls.length, callsBeforeRevoke);
-    assert.equal(transport.calls.length, callsBeforeDelete + 3, "delete, show and its notes read reach the server; revoke-credential does not");
-    const revokeEnvelope = JSON.parse(revoked.stdout) as {
-      error: { code: string; detail: string; next?: { command: string; reason: string } };
-    };
-    assert.equal(revokeEnvelope.error.code, "usage_error");
-    assert.match(revokeEnvelope.error.detail, /retired/);
-    assert.match(revokeEnvelope.error.next?.command ?? "", /screen archive/);
-    assert.equal(
-      transport.calls.some((call) => String(call.path).includes("/credential/revoke")),
-      false,
-    );
+    assert.equal(transport.calls.length, callsBeforeDelete + 3, "delete, show and its notes read reach the server; an unknown command does not");
 
     const badState = await withRuntime(["--json", "screen", "list", "--state", "active"], transport, { fs: fsLike });
     assert.equal(badState.code, ExitCode.Usage, badState.stdout);
@@ -6644,13 +6621,13 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(badPrimitive.code, ExitCode.Usage, badPrimitive.stdout);
     assert.match(JSON.parse(badPrimitive.stdout).error.detail, /--primitive must be image, video, or audio/);
 
-    const retiredKind = await withRuntime(
+    const unknownKind = await withRuntime(
       ["--json", "media", "list", "--kind", "image"],
       transport,
       { fs: fsLike },
     );
-    assert.equal(retiredKind.code, ExitCode.Usage, retiredKind.stdout);
-    assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video\|audio, not --kind/);
+    assert.equal(unknownKind.code, ExitCode.Usage, unknownKind.stdout);
+    assert.match(JSON.parse(unknownKind.stdout).error.detail, /media list does not accept --kind/);
     const tagSet = await withRuntime(["media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tags", "Summer,Drinks"], transport, { fs: fsLike });
     assert.equal(tagSet.code, ExitCode.Success, tagSet.stdout);
     assert.deepEqual(transport.calls.filter(c => c.method === "PATCH" && c.path.startsWith("/api/media/")).at(-1)?.body, { tags: ["Summer", "Drinks"] });
