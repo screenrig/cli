@@ -1112,6 +1112,8 @@ export function memoryBackend(options: {
     | { kind: "display"; power: "on" | "off"; until?: string | null }
     | { kind: "display_schedule"; enabled: boolean; windows: Array<Record<string, unknown>> }
     | { kind: "display_schedule_clear" }
+    | { kind: "reboot_schedule"; enabled: boolean; windows: Array<Record<string, unknown>> }
+    | { kind: "reboot_schedule_clear" }
     | { kind: "display_clear" };
   const resolveDisplay = (screen: Screen, schedule: NonNullable<Screen["display"]>["schedule"] | undefined, override: NonNullable<Screen["display"]>["override"] | undefined): Screen => {
     const { display: _old, ...rest } = screen;
@@ -1123,6 +1125,21 @@ export function memoryBackend(options: {
   };
   const applyDisplay = (screen: Screen, change: DisplayChange): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
     if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    if (change.kind === "reboot_schedule") {
+      if (!screen.timezone) return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a reboot schedule can be set") };
+      if (!(screen.host?.capabilities ?? []).includes("reboot")) return { problem: controlProblem(409, "reboot_unsupported", "The screen's Player does not declare the reboot capability.") };
+      const { next_reboot_at: _stale, ...held } = screen;
+      return { screen: {
+        ...held, revision: screen.revision + 1,
+        reboot_schedule: { enabled: change.enabled, windows: change.windows as unknown as NonNullable<Screen["reboot_schedule"]>["windows"], updated_at: "2026-08-14T17:00:00.000Z" },
+        ...(change.enabled ? { next_reboot_at: "2026-08-15T11:00:00.000Z" } : {}),
+      } };
+    }
+    if (change.kind === "reboot_schedule_clear") {
+      if (!screen.reboot_schedule) return { screen };
+      const { reboot_schedule: _schedule, next_reboot_at: _next, ...rest } = screen;
+      return { screen: { ...rest, revision: screen.revision + 1 } };
+    }
     const current = screen.display;
     if (change.kind === "display") {
       if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
@@ -1253,6 +1270,16 @@ export function memoryBackend(options: {
     return displayRoute(req, { kind: "display_schedule", enabled: body.enabled, windows: body.windows ?? [] });
   });
   transport.on("DELETE", /^\/api\/screens\/[^/]+\/display-schedule$/, (req) => displayRoute(req, { kind: "display_schedule_clear" }));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/reboot-schedule$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    return { status: 200, headers: { etag: `"${screen.revision}"` }, body: { reboot_schedule: screen.reboot_schedule ?? null, next_reboot_at: screen.next_reboot_at ?? null } };
+  });
+  transport.on("PUT", /^\/api\/screens\/[^/]+\/reboot-schedule$/, (req) => {
+    const body = (req.body ?? {}) as { enabled: boolean; windows: Array<Record<string, unknown>> };
+    return displayRoute(req, { kind: "reboot_schedule", enabled: body.enabled, windows: body.windows ?? [] });
+  });
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/reboot-schedule$/, (req) => displayRoute(req, { kind: "reboot_schedule_clear" }));
 
   // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
@@ -1288,10 +1315,12 @@ export function memoryBackend(options: {
         const outcome = rebootOutcome(screen, action);
         return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", reboot: outcome.accepted };
       }
-      if (["display", "display_clear", "set_display_schedule", "clear_display_schedule"].includes(action.type)) {
+      if (["display", "display_clear", "set_display_schedule", "clear_display_schedule", "set_reboot_schedule", "clear_reboot_schedule"].includes(action.type)) {
         const control = action as unknown as { type: string; power: "on" | "off"; until?: string | null; enabled: boolean; windows?: Array<Record<string, unknown>> };
         const change: DisplayChange = control.type === "display" ? { kind: "display", power: control.power, until: control.until }
           : control.type === "clear_display_schedule" ? { kind: "display_schedule_clear" }
+          : control.type === "set_reboot_schedule" ? { kind: "reboot_schedule", enabled: control.enabled, windows: control.windows ?? [] }
+          : control.type === "clear_reboot_schedule" ? { kind: "reboot_schedule_clear" }
           : control.type === "display_clear" ? { kind: "display_clear" } : { kind: "display_schedule", enabled: control.enabled, windows: control.windows ?? [] };
         const outcome = applyDisplay(screen, change);
         if ("problem" in outcome) return { screen_id: id, status: "failed", problem: outcome.problem };
@@ -1979,6 +2008,9 @@ export function memoryBackend(options: {
   const notificationFor = (req: TransportRequest): Record<string, unknown> | undefined => notifications.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   /** A refusal for what a notification of this channel cannot hold, or undefined when it is whole. */
   const notificationRefusal = (notification: Record<string, unknown>): TransportResponse | undefined => {
+    if (notification.audience && ((notification.screen_tags ?? []) as string[]).length) {
+      return invalidRequest("audience cannot be combined with screen_tags; clear screen_tags to use an audience", "audience");
+    }
     const conditions = (notification.conditions ?? []) as string[];
     const unknown = conditions.find((name) => !conditionNames.includes(name));
     if (unknown !== undefined) return invalidRequest(`${unknown} is not a condition.`, "conditions");
@@ -2019,6 +2051,10 @@ export function memoryBackend(options: {
       id: `${email || chat ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
       ...(body.description ? { description: body.description } : {}),
       conditions: body.conditions ?? [], screen_tags: body.screen_tags ?? [], hold_minutes: body.hold_minutes ?? 10,
+      ...(body.audience ? { audience: body.audience } : {}),
+      ...(body.min_severity ? { min_severity: body.min_severity } : {}),
+      ...(body.severity && Object.keys(body.severity).length ? { severity: body.severity } : {}),
+      ...(body.active_hours ? { active_hours: { outside: "hold", ...body.active_hours } } : {}),
       ...(email ? { recipients: body.recipients }
         : chat ? { destination_hint: destinationHint(body.channel, body.destination), ...(body.channel === "telegram" ? { telegram_chat_id: body.telegram_chat_id } : {}) }
         : { url: body.url, event_types: body.event_types ?? [] }),
@@ -2052,6 +2088,13 @@ export function memoryBackend(options: {
     const next: Record<string, unknown> = { ...notification };
     for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types", "telegram_chat_id"]) {
       if (body[field] !== undefined) next[field] = body[field];
+    }
+    // audience, min_severity, severity and active_hours: null (or an empty severity object) clears; absent keeps.
+    for (const field of ["audience", "min_severity", "severity", "active_hours"]) {
+      if (body[field] === undefined) continue;
+      const empty = body[field] === null || (field === "severity" && Object.keys(body[field]).length === 0);
+      if (empty) delete next[field];
+      else next[field] = field === "active_hours" ? { outside: "hold", ...body[field] } : body[field];
     }
     if (body.destination !== undefined) {
       const reason = destinationReason(notification.channel as string, body.destination);

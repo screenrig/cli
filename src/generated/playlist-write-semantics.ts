@@ -40,6 +40,32 @@ function embeddedSource(value: unknown): unknown {
   }).trim();
 }
 
+/** A screen token in an iframe src or an application param (server screenfacts.urlTokenPattern). */
+const SCREEN_TOKEN = /\{screen\.(?:id|name|timezone|field\.[a-z0-9_]{1,32}|location\.(?:lat|lon|name|address))\}/g;
+const hasScreenToken = (value: string): boolean => value.includes("{screen.") && new RegExp(SCREEN_TOKEN.source).test(value);
+/** The src with one letter in each token's place, the stand-in the server checks (screenfacts.URLPlaceholder). */
+const screenTokenStandIn = (value: string): string => value.replace(SCREEN_TOKEN, "x");
+
+const YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com"]);
+const DOCUMENT_HOSTS = new Set(["docs.google.com", "onedrive.live.com", "view.officeapps.live.com", "1drv.ms"]);
+
+/**
+ * Why an iframe src with screen tokens cannot be a template, or undefined (server screenfacts.CheckURLTemplate and
+ * documentLinks.templateRefusal): tokens stand only in the path, query and fragment of an http(s) URL, and never in a YouTube,
+ * Google or Microsoft document or BI view address, which the server rewrites or appends to.
+ */
+function screenTemplateRefusal(source: string): string | undefined {
+  const origin = /^https?:\/\/[^/?#]*/i.exec(source)?.[0];
+  if (origin === undefined) return "must start with http:// or https:// to carry {screen.…} tokens";
+  if (hasScreenToken(origin)) return "{screen.…} tokens may stand only in the path, query or fragment, not in the scheme, credentials, host or port";
+  let host: string;
+  try { host = new URL(screenTokenStandIn(source)).hostname.toLowerCase().replace(/\.$/, ""); } catch { return undefined; }
+  if (YOUTUBE_HOSTS.has(host)) return "cannot carry {screen.…} tokens: a YouTube link is rewritten to its embed form";
+  if (DOCUMENT_HOSTS.has(host) || /^[a-z0-9-]+\.sharepoint\.com$/.test(host) || host.startsWith("doc.apps.")) return "cannot carry {screen.…} tokens: a Google or Microsoft document link is rebuilt for the screen";
+  if (/^bi-[0-9a-f]{20}\.apps\./.test(host)) return "cannot carry {screen.…} tokens: a BI view's address carries the screen's embed ticket";
+  return undefined;
+}
+
 /** An iframe page a sign shows: http or https, any host, credentials allowed (server signageWebURL). */
 function signageUrl(value: unknown, protocols: readonly string[]): boolean {
   if (typeof value !== "string" || value.length > 2048) return false;
@@ -236,6 +262,40 @@ const LAYOUTS = ["full", "free", "center", "wide", "header", "footer", "corner",
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const EDGES = ["top", "bottom", "left", "right"];
 
+const RESERVED_LAUNCH_PARAMS = ["ticket", "policy"];
+
+/** An application's launch params beyond their schema: the launch URL sets ticket and policy itself, and a value has no control character (server validateLaunchParams). Returns the text members. */
+function launchParams(value: unknown, path: string, fail: (path: string, message: string) => void): Record<string, string> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const params: Record<string, string> = {};
+  for (const [name, item] of Object.entries(value)) {
+    if (RESERVED_LAUNCH_PARAMS.includes(name)) fail(`${path}/${name}`, "is set by the launch URL and cannot be a parameter");
+    else if (typeof item === "string" && /\p{Cc}/u.test(item)) fail(`${path}/${name}`, "must be text without control characters");
+    if (typeof item === "string") params[name] = item;
+  }
+  // The params as the launch URL carries them, a token counted as one letter (server validateLaunchParams).
+  const length = launchQueryLength(Object.fromEntries(Object.entries(params).map(([name, item]) => [name, screenTokenStandIn(item)])));
+  if (length > MAX_LAUNCH_QUERY) fail(path, `must encode to at most ${MAX_LAUNCH_QUERY} characters in the launch URL, not ${length}`);
+  return params;
+}
+
+/** The longest the params may be in the launch URL, "&name=value" for each (server playlists.MaxLaunchQuery). */
+const MAX_LAUNCH_QUERY = 4096;
+const textEncoder = new TextEncoder();
+
+/** How many characters params take in the launch URL: every UTF-8 byte but a letter, digit or - . _ ~ becomes %XX (server playlists.LaunchQueryLength). */
+function launchQueryLength(params: Record<string, string>): number {
+  let length = 0;
+  for (const [name, value] of Object.entries(params)) {
+    length += 2 + name.length;
+    for (const byte of textEncoder.encode(value)) {
+      const unreserved = byte >= 0x61 && byte <= 0x7a || byte >= 0x41 && byte <= 0x5a || byte >= 0x30 && byte <= 0x39 || byte === 0x2d || byte === 0x2e || byte === 0x5f || byte === 0x7e;
+      length += unreserved ? 1 : 3;
+    }
+  }
+  return length;
+}
+
 export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIssue[] {
   const issues: PlaylistWriteIssue[] = [];
   const fail = (path: string, message: string): void => { issues.push({ path, message }); };
@@ -245,6 +305,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
   if (columnsReason !== undefined) fail("/format/columns", columnsReason);
   if (typeof playlist.name === "string" && !playlist.name.trim()) fail("/name", "must not be blank");
   const pageIds = new Set<unknown>();
+  const releaseParams = new Map<string, string | undefined>();
   let unscheduled = 0;
   for (const [index, raw] of pages.entries()) {
     const page = object(raw), path = `/pages/${index}`;
@@ -296,10 +357,15 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
       if (primitive.primitive === "iframe") {
-        if (!signageUrl(embeddedSource(primitive.src), ["http:", "https:"])) fail(`${itemPath}/src`, "must be an http or https URL");
-        // fallback_src takes the forms of src; an empty string is not "none" (omit the key).
-        if (Object.hasOwn(primitive, "fallback_src") && !signageUrl(embeddedSource(primitive.fallback_src), ["http:", "https:"])) {
-          fail(`${itemPath}/fallback_src`, "must be an http or https URL");
+        for (const key of ["src", "fallback_src"] as const) {
+          // fallback_src takes the forms and rules of src; an empty string is not "none" (omit the key).
+          if (key === "fallback_src" && !Object.hasOwn(primitive, key)) continue;
+          // An address with screen tokens is stored as written and checked with a letter in each token's place.
+          const source = embeddedSource(primitive[key]);
+          const templated = typeof source === "string" && hasScreenToken(source);
+          const refusal = templated ? screenTemplateRefusal(source) : undefined;
+          if (refusal !== undefined) fail(`${itemPath}/${key}`, refusal);
+          else if (!signageUrl(templated ? screenTokenStandIn(source) : source, ["http:", "https:"])) fail(`${itemPath}/${key}`, "must be an http or https URL");
         }
         // The schema bounds reload_s to 0 through 86400; the gap between 0 and 60 is the rule it cannot state.
         if (typeof primitive.reload_s === "number" && primitive.reload_s !== 0 && (primitive.reload_s < 60 || primitive.reload_s > 86400)) {
@@ -317,6 +383,19 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
               if (issue !== undefined) fail(`${listPath}/${entryIndex}`, issue);
             }
           }
+        }
+      }
+      if (primitive.primitive === "application") {
+        const release = typeof primitive.release_id === "string" ? primitive.release_id : undefined;
+        const params = Object.hasOwn(primitive, "params") ? launchParams(primitive.params, `${itemPath}/params`, fail) : undefined;
+        if (release !== undefined && release !== "") {
+          // The launch route is keyed by release, so every primitive that pins it carries the same params.
+          // An empty object is no params, as on the server.
+          const canonical = params === undefined || Object.keys(params).length === 0 ? undefined : JSON.stringify(Object.keys(params).sort().map(name => [name, params[name]]));
+          if (releaseParams.has(release) && releaseParams.get(release) !== canonical) {
+            fail(`${itemPath}/params`, "must match the params of the other primitive that pins this release: the launch route is keyed by release, so a release launches with one set of params");
+          }
+          releaseParams.set(release, canonical);
         }
       }
       if (primitive.primitive === "stream") {

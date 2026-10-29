@@ -102,10 +102,13 @@ export function commandLines(screen: Screen | undefined): string[] {
     const command = (item ?? {}) as Record<string, unknown>;
     const { type, state, id } = command;
     if ((type !== "reboot" && type !== "reload") || typeof state !== "string" || !COMMAND_STATES.has(state) || typeof id !== "string" || !COMMAND_ID.test(id)) continue;
-    rows.push([type, id, state, instant(command.expires_at) ?? "", instant(command.sent_at) ?? "", instant(command.done_at) ?? ""]);
+    rows.push([type, id, state, instant(command.expires_at) ?? "", instant(command.sent_at) ?? "", instant(command.done_at) ?? "", command.source === "schedule" ? "schedule" : ""]);
   }
   if (!rows.length) return [];
-  const header = ["TYPE", "ID", "STATE", "EXPIRES", "SENT", "DONE"];
+  // SOURCE appears only when a listed command came from a reboot schedule, so plain lists keep their table.
+  const withSource = rows.some((row) => row[6] !== "");
+  const header = ["TYPE", "ID", "STATE", "EXPIRES", "SENT", "DONE", ...(withSource ? ["SOURCE"] : [])];
+  for (const row of rows) { if (withSource) row[6] = row[6] || "manual"; else row.length = 6; }
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]!.length)));
   const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
   const queued = rows.find((row) => row[2] === "queued");

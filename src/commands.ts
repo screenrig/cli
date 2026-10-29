@@ -19,7 +19,7 @@ import { instantInZone, LEVEL_IDLE_DEFAULT_S, normalizeInstant, assignmentLine, 
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
-import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
+import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
 import { flatFrameNote, frameRow, glassLines } from "./screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
@@ -40,7 +40,7 @@ import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaign
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationAudience, notificationConditions, notificationSeverityMap, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -116,6 +116,7 @@ import {
   type ScreenTakeoverWrite,
   type PlaybackPlay,
   type ScreenDisplayScheduleView,
+  type ScreenRebootScheduleView,
   type ScreenRebootAccepted,
   type ScreenPlayPageAccepted,
   type ScreenPlayPageWrite,
@@ -156,6 +157,8 @@ import {
   type NotificationDeliveryList,
   type NotificationList,
   type NotificationPatch,
+  type NotificationActiveHours,
+  type NotificationSeverity,
   type NotificationWithSecret,
   type NotificationWrite,
   type Webhook,
@@ -214,6 +217,7 @@ import {
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
+import { hasScreenToken, screenTemplateRefusal, screenTokenStandIn } from "./screen-tokens.js";
 import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, parseRetryAfter, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
@@ -6194,6 +6198,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
+      ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone),
       ...healthLines(screen?.health),
       ...outageLines(screen),
       ...commandLines(screen),
@@ -6279,12 +6284,14 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   // A playlist-only change under Propose access waits for review.
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
+  // The answer's screen_fact_missing warning (a playlist the screen shows reads a value it lacks) moves into the envelope.
   const warnings = [
     ...(playlistId ? aspectMismatchWarnings(id, response.body, playlist) : []),
     ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+    ...playlistAnswerWarnings(response.body),
   ];
   return {
-    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     // The merged fields and the location the screen now holds, when this update changed them.
     human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
@@ -6320,9 +6327,10 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const warnings = [
     ...aspectMismatchWarnings(id, response.body, playlist),
     ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+    ...playlistAnswerWarnings(response.body),
   ];
   return {
-    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     human: [`Assigned playlist ${playlistId} to ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
@@ -6347,7 +6355,12 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
     body,
   });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
+  const lifted = playlistAnswerWarnings(response.body);
+  return {
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, lifted),
+    exitCode: ExitCode.Success,
+    human: [`Set timezone ${timezone} on ${id}`, ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
 }, true);
 
 /** screen wall set|clear: one ScreenPatch carrying only wall; null clears it. */
@@ -6612,6 +6625,7 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
   let after: string | undefined;
   const result: import("./adapters/protocol.js").ScreenActionResult = { action: action.type, matched: 0, succeeded: 0, failed: 0, results: [] };
   let total: number | undefined;
+  const answerWarnings: Warning[] = [];
   while (true) {
     try {
       response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body,
@@ -6647,6 +6661,8 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
     result.succeeded += page.succeeded;
     result.failed += page.failed;
     result.results.push(...page.results);
+    // A fleet assign page answers screen_fact_missing when a playlist it assigns reads a value some screen of the page lacks.
+    answerWarnings.push(...playlistWarnings(page.warnings ?? []));
     if (page.next_cursor === undefined) {
       if (response.status !== 200 || (total !== undefined && result.matched !== total)) {
         throw unexpectedResponseError("Fleet action ended without all selected screens; rerun the identical command to resume safely.");
@@ -6665,7 +6681,7 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
   }
   const outcome = fleetOutcome(result);
   return {
-    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, outcome.warnings),
+    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, [...outcome.warnings, ...answerWarnings]),
     exitCode: outcome.exitCode,
     human: [
       fleetHumanLines(title, result, (item) => {
@@ -8068,6 +8084,9 @@ const CANNED_EVENT_MESSAGES = new Set([
   "Screen display override set",
   "Screen display schedule updated",
   "Screen display schedule cleared",
+  "Screen reboot schedule updated",
+  "Screen reboot schedule cleared",
+  "Scheduled reboot skipped",
 ]);
 
 /**
@@ -8734,10 +8753,18 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     } else if (iframeSnippetSource(input) !== undefined || /^[a-z][a-z0-9+.-]*:/i.test(input)) {
       // A pasted <iframe> embed code gives its src; the server rebuilds a
       // Google or Microsoft document link when the playlist is written.
+      // An address with screen tokens ({screen.id}, {screen.field.NAME}, ...) is a template: it is kept as written, braces and all,
+      // and the server fills it in for each screen.
+      const written = iframeSnippetSource(input) ?? input;
+      const templated = hasScreenToken(written);
+      if (templated) {
+        const refusal = screenTemplateRefusal(written);
+        if (refusal !== undefined) throw usageError(`The iframe address ${refusal}.`);
+      }
       let url: URL;
-      try { url = new URL(iframeSnippetSource(input) ?? input); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
+      try { url = new URL(templated ? screenTokenStandIn(written) : written); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
       if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) throw usageError("Iframe URLs must use http or https.");
-      content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
+      content.push({ primitive: "iframe", src: templated ? written.trim() : url.href, title: url.hostname.slice(0, 200) });
     } else {
       const sourcePath = path.resolve(runtime.cwd(), input);
       try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }
@@ -9127,6 +9154,32 @@ async function notificationSecretResult(response: Awaited<ReturnType<ApiClient["
   };
 }
 
+/**
+ * The severity filter, overrides, active hours and audience the flags name, each undefined
+ * when its flags are absent: --min-severity, --severity (repeatable CONDITION=LEVEL),
+ * --active-hours (repeatable weekly windows) with --timezone and --outside-hours, and the
+ * audience as --any-tag, --all-tags or --audience (a campaign audience rule: inline JSON,
+ * FILE or - for stdin).
+ */
+async function notificationRuleFlags(args: ParsedArgs, runtime: CliRuntime) {
+  const severity = flagString(args.flags, "severity");
+  const hours = flagString(args.flags, "active-hours");
+  const anyTags = flagString(args.flags, "any-tag");
+  const allTags = flagString(args.flags, "all-tags");
+  const raw = flagString(args.flags, "audience");
+  const audience: CampaignAudience | undefined = anyTags !== undefined ? campaignAnyTagAudience(anyTags.split(","))
+    : allTags !== undefined ? campaignTagAudience(allTags.split(","))
+    : raw !== undefined ? await notificationAudience(raw, runtime) : undefined;
+  return {
+    audience,
+    minSeverity: flagString(args.flags, "min-severity") as NotificationSeverity | undefined,
+    severity: severity !== undefined ? notificationSeverityMap(severity) : undefined,
+    windows: hours !== undefined ? campaignWindowList(hours) : undefined,
+    timezone: flagString(args.flags, "timezone"),
+    outside: flagString(args.flags, "outside-hours"),
+  };
+}
+
 export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
   const email = flagString(args.flags, "email");
   const webhook = flagString(args.flags, "webhook");
@@ -9146,6 +9199,7 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
   const tags = flagString(args.flags, "tag");
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
+  const rules = await notificationRuleFlags(args, runtime);
   const body: NotificationWrite = {
     channel: email !== undefined ? "email" : webhook !== undefined ? "webhook" : chat[0]!.channel,
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
@@ -9155,6 +9209,10 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
+    ...(rules.audience !== undefined ? { audience: rules.audience } : {}),
+    ...(rules.minSeverity !== undefined ? { min_severity: rules.minSeverity } : {}),
+    ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
+    ...(rules.windows !== undefined ? { active_hours: notificationActiveHours(rules.windows, rules.timezone, rules.outside, undefined) } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
@@ -9205,6 +9263,20 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
   const snooze = flagString(args.flags, "snooze");
+  const rules = await notificationRuleFlags(args, runtime);
+  let client: ApiClient | undefined;
+  const getClient = (): ApiClient => client ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  // The hours are replaced whole: a new zone or outside setting alone keeps the windows the notification has, read first
+  // and guarded by the revision just read, so a concurrent change fails with revision_conflict instead of being overwritten.
+  let readRevision: number | undefined;
+  let hours: NotificationActiveHours | null | undefined;
+  if (flagBool(args.flags, "clear-active-hours")) hours = null;
+  else if (rules.windows !== undefined) hours = notificationActiveHours(rules.windows, rules.timezone, rules.outside, undefined);
+  else if (rules.timezone !== undefined || rules.outside !== undefined) {
+    const current = (await notificationCall(getClient(), { method: "GET", path: `${NOTIFICATIONS_PATH}/${id}` }, id)).body as Notification | undefined;
+    hours = notificationActiveHours(undefined, rules.timezone, rules.outside, current?.active_hours);
+    readRevision = current?.revision;
+  }
   const patch: NotificationPatch = {
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
     ...(url !== undefined ? { url: webhookUrl(url) } : {}),
@@ -9214,8 +9286,15 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(flagBool(args.flags, "clear-conditions") ? { conditions: [] } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(flagBool(args.flags, "clear-events") ? { event_types: [] } : {}),
-    ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
-    ...(flagBool(args.flags, "all-screens") ? { screen_tags: [] } : {}),
+    // The audience and the screen tags exclude each other: switching from one to the other clears the first in the same request.
+    ...(tags !== undefined ? { screen_tags: tags.split(","), audience: null } : {}),
+    ...(rules.audience !== undefined ? { audience: rules.audience, screen_tags: [] } : {}),
+    ...(flagBool(args.flags, "all-screens") ? { screen_tags: [], audience: null } : {}),
+    ...(rules.minSeverity !== undefined ? { min_severity: rules.minSeverity } : {}),
+    ...(flagBool(args.flags, "clear-min-severity") ? { min_severity: null } : {}),
+    ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
+    ...(flagBool(args.flags, "clear-severity") ? { severity: null } : {}),
+    ...(hours !== undefined ? { active_hours: hours } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "clear-description") ? { description: "" } : {}),
@@ -9224,17 +9303,17 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const guard = webhookRevisionHeaders(args) ?? (readRevision !== undefined ? { "if-match": quotedRevision(String(readRevision)) } : undefined);
   // --snooze derives its instant from the clock, so a rerun fingerprints
   // differently; drop the obsolete saved key instead of leaving it behind.
-  const response = await notificationCall(client, {
-    method: "PATCH", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, body: patch, headers: webhookRevisionHeaders(args),
+  const response = await notificationCall(getClient(), {
+    method: "PATCH", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, body: patch, headers: guard,
     ...(snooze !== undefined ? { recoverySupersede: JSON.stringify(["notifications update --snooze", id]) } : {}),
   }, id);
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, getClient().requestId),
     exitCode: ExitCode.Success,
     human: [`Updated notification ${id}`, ...notificationLines(response.body as Notification | undefined)].join("\n"),
   };
@@ -10743,6 +10822,78 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: displayHuman(`Cleared the display schedule on ${id}`, response.body as Screen | undefined),
+  };
+}, true);
+
+function rebootScheduleHuman(title: string, screen: Screen | undefined): string {
+  return [title, ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
+}
+
+export const handleScreenRebootScheduleShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("screen reboot-schedule show requires <id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule` });
+  const view = response.body as ScreenRebootScheduleView | undefined;
+  let timezone: string | undefined;
+  if (flagBool(args.flags, "human")) {
+    try {
+      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+    } catch {
+      timezone = undefined;
+    }
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Reboot schedule for ${id}`, ...(view?.reboot_schedule ? [] : ["No reboot schedule: the screen reboots only when asked (screen reboot)."]), ...rebootScheduleLines(view?.reboot_schedule, view?.next_reboot_at, timezone)].join("\n"),
+  };
+}, true);
+
+export const handleScreenRebootScheduleSet = commandHandler(async (args, runtime, resolved) => {
+  const file = flagString(args.flags, "file");
+  const windows = flagString(args.flags, "window");
+  if ((file === undefined) === (windows === undefined)) throw usageError("screen reboot-schedule set requires --window SPEC (repeatable) or --file FILE (or --file - for stdin).");
+  const target = nestedScreenTarget(args, "screen reboot-schedule set");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule set");
+  const write = file !== undefined
+    ? rebootScheduleWrite(await readAuthoringJson(file, runtime))
+    : { enabled: !flagBool(args.flags, "disabled"), windows: rebootWindowList(windows!) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot schedule set", target.selector, { type: "set_reboot_schedule", ...write });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await client.call({
+      method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule`, idempotent: true, body: write,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw rebootScheduleProblem(screenControlProblem(error, id), id);
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: rebootScheduleHuman(`Set a ${write.windows.length}-window reboot schedule on ${id}${write.enabled ? "" : " (disabled: no reboots)"}`, response.body as Screen | undefined),
+  };
+}, true);
+
+export const handleScreenRebootScheduleClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen reboot-schedule clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot schedule clear", target.selector, { type: "clear_reboot_schedule" });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule`, idempotent: true,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: rebootScheduleHuman(`Cleared the reboot schedule on ${id}`, response.body as Screen | undefined),
   };
 }, true);
 

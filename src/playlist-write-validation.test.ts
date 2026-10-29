@@ -462,3 +462,91 @@ test("a duration page may last until its YouTube video ends, and nothing else ma
     (error: unknown) => error instanceof CliError && error.problem.detail.includes("until must be video_end"),
   );
 });
+
+// Screen tokens in an iframe address (backend conformance cases "iframe src with ...").
+const TOKEN_ADDRESSES = [
+  "https://maps.example.com/venetian?kiosk={screen.field.kiosk_id}&level={screen.field.level}#at={screen.location.name}",
+  "https://u:p@10.0.0.5:8080/{screen.id}/map",
+  "https://maps.example.com/{screen.name}/{screen.timezone}?lat={screen.location.lat}&lon={screen.location.lon}&a={screen.location.address}",
+  "https://maps.example.com/{screen.location}",
+  '<iframe src="https://maps.example.com/m?k={screen.field.kiosk_id}&amp;l={screen.id}"></iframe>',
+];
+
+test("an iframe src and fallback_src take screen tokens in the path, query and fragment, in the canonical schema and in a bundle, and the stored string keeps its braces", () => {
+  for (const address of TOKEN_ADDRESSES) {
+    for (const fields of [{ src: address }, { fallback_src: address, reload_s: 120 }]) {
+      const value = iframeWith(fields);
+      const original = structuredClone(value);
+      assert.deepEqual(playlistIssues(value), [], `schema: ${address}`);
+      assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set(), `bundle: ${address}`);
+      assert.deepEqual(value, original, "validation never normalises the stored string");
+    }
+  }
+});
+
+test("an iframe src and fallback_src refuse screen tokens in the scheme, credentials, host or port, and in YouTube, document and BI addresses", () => {
+  const refused = [
+    "https://{screen.field.host}/x",
+    "https://maps.example.com:{screen.field.port}/x",
+    "https://{screen.field.user}:pw@maps.example.com/x",
+    "https://u:{screen.field.pass}@maps.example.com/x",
+    "{screen.field.scheme}://maps.example.com/x",
+    "https://www.youtube.com/watch?v={screen.field.video}",
+    "https://youtu.be/{screen.field.video}",
+    "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit?slide={screen.field.slide}",
+    "https://contoso.sharepoint.com/:p:/s/team/EAbc?e={screen.id}",
+    "https://bi-0123456789abcdef0123.apps.example.com/view?k={screen.id}",
+    '<iframe src="https://{screen.field.host}/x"></iframe>',
+  ];
+  for (const address of refused) {
+    for (const key of ["src", "fallback_src"] as const) {
+      const value = iframeWith({ [key]: address, ...(key === "fallback_src" ? { reload_s: 120 } : {}) });
+      assert.deepEqual(playlistIssues(value).map((issue) => issue.path), [`/pages/0/primitives/0/${key}`], `schema: ${key} ${address}`);
+      assert.throws(() => validatePlaylistWrite(value, new Map()), (error: unknown) => error instanceof CliError && error.problem.detail.includes(`.${key} `), `bundle: ${key} ${address}`);
+    }
+  }
+  // The reason is named, so the author knows what to change.
+  const host = playlistIssues(iframeWith({ src: "https://{screen.field.host}/x" }));
+  assert.match(host[0]!.message, /only in the path, query or fragment/);
+  assert.throws(() => validatePlaylistWrite(iframeWith({ src: "https://www.youtube.com/watch?v={screen.field.video}" }), new Map()), /YouTube link is rewritten/);
+});
+
+test("the bundle validator's screen token rules agree with the canonical validator", () => {
+  for (const address of [...TOKEN_ADDRESSES, "https://{screen.id}.example.com/", "https://example.com:{screen.id}/", "https://www.youtube.com/watch?v={screen.id}",
+    "https://example.com/{screen.field.UPPER}", "https://example.com/{screen.unknown}", "ftp://example.com/{screen.id}", "https://example.com/{screen.field.}"]) {
+    const value = iframeWith({ src: address });
+    const canonical = playlistIssues(value).length === 0;
+    let bundle = true;
+    try { validatePlaylistWrite(value, new Map()); } catch { bundle = false; }
+    assert.equal(bundle, canonical, address);
+  }
+});
+
+function applicationWith(fields: Record<string, unknown>, release = "rel_ready") {
+  return playlistWithPrimitives([{
+    id: "kiosk", primitive: "application", release_id: release, rect: { x: 0, y: 0, width: 100, height: 100 }, layer: 0, content_fit: "fill", ...fields,
+  }]);
+}
+
+test("an application's params pass the canonical validator with the backend's name, value and length rules", () => {
+  assert.deepEqual(playlistIssues(applicationWith({ params: { kiosk: "{screen.field.kiosk_id}", start: "lobby", where: "{screen.location.lat},{screen.location.lon}" } })), []);
+  assert.deepEqual(playlistIssues(applicationWith({ params: {} })), []);
+  const sixteen = Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`p${index}`, "x".repeat(200)]));
+  assert.deepEqual(playlistIssues(applicationWith({ params: sixteen })), []);
+  assert.deepEqual(playlistIssues(applicationWith({ params: Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`p${index}`, "{screen.field.kiosk_id}"])) })), []);
+  for (const [params, label] of [
+    [{ ticket: "x" }, "ticket name"], [{ policy: "x" }, "policy name"], [{ Kiosk: "x" }, "upper case name"], [{ kiosk: "x".repeat(513) }, "long value"],
+    [{ kiosk: "a\nb" }, "control character"], [{ kiosk: 3 }, "not text"], [Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`p${index}`, "v"])), "too many members"],
+    [Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`p${index}`, "é".repeat(512)])), "more than the launch URL allows"],
+  ] as const) {
+    assert.notDeepEqual(playlistIssues(applicationWith({ params })), [], label);
+  }
+  // The launch route is keyed by release: two primitives pinning one release carry the same params.
+  const two = applicationWith({ params: { kiosk: "a" } });
+  two.pages[0]!.primitives.push({ ...two.pages[0]!.primitives[0]!, id: "kiosk2", params: { kiosk: "b" } } as never);
+  assert.match(playlistIssues(two)[0]!.message, /same params|must match the params/);
+});
+
+test("a bundle keeps an application out, so params never reach its write path", () => {
+  assert.throws(() => validatePlaylistWrite(applicationWith({ params: { kiosk: "a" } }), new Map()), /do not support application primitives/);
+});

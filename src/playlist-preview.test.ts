@@ -334,3 +334,27 @@ test("selector previews skip per-screen tag selectors, keep the rest, and pass t
   await previewSelectors(pages, client, "America/New_York");
   assert.equal((transport.calls[1]!.body as { timezone?: string }).timezone, "America/New_York");
 });
+
+test("preview shows an iframe address with screen tokens, and an application's params, as written", async () => {
+  const cwdDir = await testTemp("preview-tokens-");
+  const src = "https://maps.example.com/{screen.id}/map?kiosk={screen.field.kiosk_id}#at={screen.location.name}";
+  const page = iframePage("one", { src });
+  const application = {
+    ...iframePage("two"),
+    primitives: [{ id: "kiosk", primitive: "application", release_id: "rel_KIOSK", params: { kiosk: "{screen.field.kiosk_id}", level: "2" }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }],
+  };
+  const plain = iframePage("three");
+  const file = path.join(cwdDir, "tokens.json");
+  const document = { name: "Tokens", pages: [page, application, plain] };
+  await writeFile(file, JSON.stringify(document));
+  const { code, stdout } = await withRuntime(["--json", "playlist", "preview", file, "--output", path.join(cwdDir, "out")], { cwdDir, transport: new FakeTransport() });
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as { data: { placeholders: unknown[] } };
+  assert.deepEqual(envelope.data.placeholders, [
+    { page_id: "one", primitive_id: "web", primitive: "iframe", src },
+    { page_id: "two", primitive_id: "kiosk", primitive: "application", params: { kiosk: "{screen.field.kiosk_id}", level: "2" } },
+    { page_id: "three", primitive_id: "web", primitive: "iframe" },
+  ]);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), document, "the file is left as written");
+  await rm(cwdDir, { recursive: true, force: true });
+});

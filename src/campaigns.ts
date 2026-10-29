@@ -105,7 +105,7 @@ function accumulate(value: string, previous: string | undefined): string[] {
   return [...(previous ? previous.split(",") : []), ...value.split(",").map((item) => item.trim())];
 }
 
-function tagList(value: string, previous: string | undefined, flag: string): string {
+export function tagList(value: string, previous: string | undefined, flag: string): string {
   const tags = accumulate(value, previous);
   if (tags.some((tag) => !SCREEN_TAG_PATTERN.test(tag))) {
     throw usageError(`${flag} takes tags of 1 to 32 letters or digits, repeated or comma-separated, for example ${flag} Lobby,Floor2.`);
@@ -205,26 +205,26 @@ function splitTimes(spec: string, fail: (detail: string) => CliError): { head: s
   return { head: text.slice(0, at).trim(), start: times[1]!, end: times[2]! };
 }
 
-function windowError(spec: string, detail: string): CliError {
-  return usageError(`--window ${JSON.stringify(spec)}: ${detail} A window is DAYS or DAYS@HH:MM-HH:MM, such as mon-fri@09:00-17:00, sat,sun or daily@22:00-06:00.`);
+function windowError(spec: string, detail: string, flag = "--window"): CliError {
+  return usageError(`${flag} ${JSON.stringify(spec)}: ${detail} A window is DAYS or DAYS@HH:MM-HH:MM (a space may stand for the @), such as mon-fri@09:00-17:00, "Mon-Fri 09:00-17:00", sat,sun or daily@22:00-06:00.`);
 }
 
-function dayIndex(name: string, spec: string): number {
+function dayIndex(name: string, spec: string, flag: string): number {
   const index = DAYS.indexOf(name as ScreenScheduleDay);
   if (index < 0) {
-    throw windowError(spec, name === "" ? "A day is missing." : `${JSON.stringify(name)} is not a day; use mon, tue, wed, thu, fri, sat or sun (daily stands alone).`);
+    throw windowError(spec, name === "" ? "A day is missing." : `${JSON.stringify(name)} is not a day; use mon, tue, wed, thu, fri, sat or sun (daily stands alone).`, flag);
   }
   return index;
 }
 
-function windowDays(text: string, spec: string): ScreenScheduleDay[] {
+function windowDays(text: string, spec: string, flag: string): ScreenScheduleDay[] {
   if (text === "daily") return [...DAYS];
   const selected = new Set<number>();
   for (const item of text.split(",")) {
     const bounds = item.split("-").map((name) => name.trim());
-    if (bounds.length > 2) throw windowError(spec, `${JSON.stringify(item)} is not a day or a range such as mon-fri.`);
-    const first = dayIndex(bounds[0]!, spec);
-    const last = bounds.length === 2 ? dayIndex(bounds[1]!, spec) : first;
+    if (bounds.length > 2) throw windowError(spec, `${JSON.stringify(item)} is not a day or a range such as mon-fri.`, flag);
+    const first = dayIndex(bounds[0]!, spec, flag);
+    const last = bounds.length === 2 ? dayIndex(bounds[1]!, spec, flag) : first;
     // A range runs forward from its first day and wraps past sun, so fri-mon is fri, sat, sun and mon.
     for (let index = first; ; index = (index + 1) % DAYS.length) {
       selected.add(index);
@@ -239,17 +239,18 @@ function windowDays(text: string, spec: string): ScreenScheduleDay[] {
  * (mon-fri; fri-mon wraps past the week's end) or a comma list (sat,sun).
  * Without a time the window is the whole day; an end at or before the start
  * crosses midnight and belongs to the start day. Days are returned in mon to
- * sun order without duplicates.
+ * sun order without duplicates. A space may stand for the @ ("Mon-Fri 09:00-17:00").
  */
-export function campaignWindow(spec: string): ScreenScheduleWindow {
-  const { head, start, end } = splitTimes(spec, (detail) => windowError(spec, detail));
-  const window: ScreenScheduleWindow = { days: windowDays(head.toLowerCase(), spec) };
+export function campaignWindow(spec: string, flag = "--window"): ScreenScheduleWindow {
+  const written = spec.includes("@") ? spec : spec.replace(/^\s*(\S+)\s+(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})\s*$/, "$1@$2");
+  const { head, start, end } = splitTimes(written, (detail) => windowError(spec, detail, flag));
+  const window: ScreenScheduleWindow = { days: windowDays(head.toLowerCase(), spec, flag) };
   if (start !== undefined) {
     window.start = start;
     window.end = end!;
   }
   // The same check screen schedules and display schedules apply to a window.
-  return scheduleWindow(window, "--window", (_path, message) => windowError(spec, message)) as ScreenScheduleWindow;
+  return scheduleWindow(window, flag, (_path, message) => windowError(spec, message, flag)) as ScreenScheduleWindow;
 }
 
 /** The days of a window in --window spelling: daily, runs of three or more as ranges (mon-fri), the rest listed. */
@@ -274,16 +275,21 @@ export function campaignWindowSpec(window: ScreenScheduleWindow): string {
   return window.start !== undefined && window.end !== undefined ? `${days}@${window.start}-${window.end}` : days;
 }
 
-/** Repeatable --window; returns the accumulated canonical specs joined by semicolons. */
-export function campaignWindows(value: string, previous?: string): string {
-  const specs = [...(previous ? previous.split(";") : []), campaignWindowSpec(campaignWindow(value))];
-  if (specs.length > CAMPAIGN_WINDOWS_MAX) throw usageError(`--window accepts at most ${CAMPAIGN_WINDOWS_MAX} windows.`);
-  return specs.join(";");
+/** Repeatable --window (or another weekly-window flag); returns the accumulated canonical specs joined by semicolons. */
+export function weeklyWindows(flag: string): (value: string, previous?: string) => string {
+  return (value, previous) => {
+    const specs = [...(previous ? previous.split(";") : []), campaignWindowSpec(campaignWindow(value, flag))];
+    if (specs.length > CAMPAIGN_WINDOWS_MAX) throw usageError(`${flag} accepts at most ${CAMPAIGN_WINDOWS_MAX} windows.`);
+    return specs.join(";");
+  };
 }
+
+/** Repeatable --window; returns the accumulated canonical specs joined by semicolons. */
+export const campaignWindows = weeklyWindows("--window");
 
 /** The windows a --window accumulation names, in the order given. */
 export function campaignWindowList(accumulated: string): ScreenScheduleWindow[] {
-  return accumulated.split(";").map(campaignWindow);
+  return accumulated.split(";").map((spec) => campaignWindow(spec));
 }
 
 const ORDINALS: Readonly<Record<string, LevelMonthly["nth"]>> = { "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, last: -1 };

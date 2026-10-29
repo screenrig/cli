@@ -2,7 +2,8 @@ import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import { readAuthoringText } from "./authoring-input.js";
 import type { CliRuntime } from "./runtime.js";
-import type { Notification, NotificationDelivery } from "./adapters/protocol.js";
+import type { CampaignAudience, ScreenScheduleWindow, Notification, NotificationActiveHours, NotificationDelivery, NotificationSeverity, NotificationSeverityOverrides } from "./adapters/protocol.js";
+import { campaignAudienceJson, campaignAudienceText, campaignWindowSpec, tagList } from "./campaigns.js";
 import { fleetLinkTags } from "./fleet-links.js";
 import { normalizeInstant } from "./screen-control.js";
 import { table } from "./webhooks.js";
@@ -54,6 +55,82 @@ export function notificationId(value: string | undefined, command: string): stri
     });
   }
   return value;
+}
+
+/** NotificationSeverity (vendor/openapi.yaml), least severe first. */
+export const NOTIFICATION_SEVERITIES = ["info", "warning", "error"] as const;
+/** The audience JSON a file or stdin carries is a campaign audience rule: a 64 KiB request body at most. */
+export const NOTIFICATION_AUDIENCE_INPUT_MAX_BYTES = 64 * 1024;
+
+/** Repeatable --severity CONDITION=LEVEL; returns the accumulated pairs joined by commas, each condition once. */
+export function notificationSeverityOverride(value: string, previous?: string): string {
+  const pair = /^([a-z_]+)=([a-z]+)$/.exec(value.trim());
+  const conditions = NOTIFICATION_CONDITIONS.join(", ");
+  if (!pair) throw usageError(`--severity takes CONDITION=LEVEL, such as not_playing=error (repeatable). Conditions: ${conditions}. Levels: ${NOTIFICATION_SEVERITIES.join(", ")}.`);
+  const [, condition, level] = pair as unknown as [string, string, string];
+  if (!(NOTIFICATION_CONDITIONS as readonly string[]).includes(condition)) throw usageError(`--severity does not take the condition ${JSON.stringify(condition)}; use ${conditions}.`);
+  if (!(NOTIFICATION_SEVERITIES as readonly string[]).includes(level)) throw usageError(`--severity does not take the level ${JSON.stringify(level)}; use ${NOTIFICATION_SEVERITIES.join(", ")}.`);
+  const pairs = [...(previous ? previous.split(",") : []), `${condition}=${level}`];
+  if (new Set(pairs.map((item) => item.split("=")[0])).size !== pairs.length) throw usageError(`--severity names ${condition} more than once.`);
+  return pairs.join(",");
+}
+
+/** The overrides a --severity accumulation names. */
+export function notificationSeverityMap(accumulated: string): NotificationSeverityOverrides {
+  return Object.fromEntries(accumulated.split(",").map((item) => item.split("=") as [string, NotificationSeverity]));
+}
+
+/** Repeatable --all-tags: the screen carries every listed tag. Returns the accumulated list joined by commas. */
+export function notificationAllTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--all-tags");
+}
+
+/** Repeatable --any-tag: the screen carries at least one listed tag. Returns the accumulated list joined by commas. */
+export function notificationAnyTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--any-tag");
+}
+
+/** --timezone: an IANA zone such as America/Los_Angeles. The server owns the zone database; this catches a typo before the request. */
+export function notificationTimezone(value: string): string {
+  const zone = value.trim();
+  let known = zone.length > 0 && zone.length <= 64 && !/\s/.test(zone);
+  if (known) { try { new Intl.DateTimeFormat("en", { timeZone: zone }); } catch { known = false; } }
+  if (!known) throw usageError("--timezone takes an IANA timezone name, such as America/Los_Angeles, Europe/London or UTC.");
+  return zone;
+}
+
+/** --audience: inline JSON, @FILE, - for stdin, or a FILE path; the handler reads the file or stdin. */
+export function notificationAudienceOption(value: string): string {
+  if (!value.trim() || value.trim() === "@") throw usageError("--audience takes a JSON rule, FILE to read it from a file, or - for stdin.");
+  return value;
+}
+
+/** The text of an --audience value: the value itself when it is inline JSON, else the file (a leading @ is allowed) or stdin. */
+export async function notificationAudienceText(raw: string, runtime: CliRuntime): Promise<string> {
+  const source = raw.trim();
+  if (/^[\[{]/.test(source)) return source;
+  return readAuthoringText(source.startsWith("@") ? source.slice(1) : source, runtime, NOTIFICATION_AUDIENCE_INPUT_MAX_BYTES);
+}
+
+/** The audience rule a --audience value names. The server checks the rule's members. */
+export async function notificationAudience(raw: string, runtime: CliRuntime): Promise<CampaignAudience> {
+  return campaignAudienceJson(await notificationAudienceText(raw, runtime));
+}
+
+/**
+ * The active hours the flags name: --active-hours windows (repeatable), --timezone and
+ * --outside-hours. A change to the zone or to what happens outside the hours alone
+ * (no --active-hours) keeps the notification's current windows, passed as `current`.
+ */
+export function notificationActiveHours(
+  windows: ScreenScheduleWindow[] | undefined, timezone: string | undefined, outside: string | undefined, current: NotificationActiveHours | undefined,
+): NotificationActiveHours {
+  const hours = windows ?? current?.windows;
+  const zone = timezone ?? current?.timezone;
+  if (hours === undefined) throw usageError("--timezone and --outside-hours change active hours; give --active-hours for a notification that has none.");
+  if (zone === undefined) throw usageError('--active-hours needs --timezone ZONE, the zone its windows are read in, such as --timezone America/Los_Angeles.');
+  const when = outside ?? current?.outside;
+  return { timezone: zone, windows: hours, ...(when !== undefined ? { outside: when as "hold" | "drop" } : {}) };
 }
 
 /** Comma-separated NotificationCondition values, each at most once. */
@@ -216,6 +293,26 @@ function withheld(notification: Notification): boolean {
   return notification.url_redacted === true && !notification.url;
 }
 
+/** The severity overrides as "not_playing=error, glass_blank=info"; empty when none. */
+function severityText(severity: NotificationSeverityOverrides | undefined): string {
+  return Object.entries(severity ?? {}).map(([condition, level]) => `${condition}=${level}`).join(", ");
+}
+
+/** The active hours as "America/Los_Angeles mon-fri@08:00-22:00 (outside the hours: hold)". */
+function activeHoursText(hours: NotificationActiveHours): string {
+  const windows = (hours.windows ?? []).map(campaignWindowSpec).join("; ");
+  return `${hours.timezone} ${windows} (outside the hours: ${hours.outside ?? "hold"})`;
+}
+
+/** The severity filter, overrides, active hours and audience of a notification as lines, in the order show prints them; empty for a notification with none. */
+function ruleLines(notification: Notification): string[] {
+  return [
+    ...(notification.min_severity ? [`min_severity: ${notification.min_severity}`] : []),
+    ...(severityText(notification.severity) ? [`severity: ${severityText(notification.severity)}`] : []),
+    ...(notification.active_hours ? [`active_hours: ${activeHoursText(notification.active_hours)}`] : []),
+  ];
+}
+
 export function notificationLines(notification: Notification | undefined): string[] {
   if (!notification) return [];
   return [
@@ -228,7 +325,9 @@ export function notificationLines(notification: Notification | undefined): strin
     ...(notification.url !== undefined || notification.url_redacted ? [`url: ${withheld(notification) ? READ_ONLY_URL : notification.url ?? ""}`] : []),
     `conditions: ${(notification.conditions ?? []).join(", ") || "none"}`,
     ...(notification.event_types?.length ? [`event_types: ${notification.event_types.join(", ")}`] : []),
-    `screen_tags: ${(notification.screen_tags ?? []).join(", ") || "(every screen)"}`,
+    ...(notification.audience ? [`audience: ${campaignAudienceText(notification.audience)}`]
+      : [`screen_tags: ${(notification.screen_tags ?? []).join(", ") || "(every screen)"}`]),
+    ...ruleLines(notification),
     `hold_minutes: ${notification.hold_minutes}`,
     `enabled: ${notification.enabled}`,
     `status: ${notification.status}`,
@@ -249,19 +348,31 @@ function destination(notification: Notification): string {
   return withheld(notification) ? "(withheld)" : notification.url ?? "";
 }
 
-/** SNOOZED_UNTIL, EVENTS and UNSUBSCRIBED appear only when a listed notification has them. */
+/** One cell for the rules a notification sets beyond conditions: "min error; hours …; severity …; audience …". */
+function rulesCell(item: Notification): string {
+  return [
+    ...(item.min_severity ? [`min ${item.min_severity}`] : []),
+    ...(severityText(item.severity) ? [`severity ${severityText(item.severity).replaceAll(", ", ",")}`] : []),
+    ...(item.active_hours ? [`hours ${activeHoursText(item.active_hours)}`] : []),
+    ...(item.audience ? [`audience ${campaignAudienceText(item.audience)}`] : []),
+  ].join("; ");
+}
+
+/** SNOOZED_UNTIL, EVENTS, RULES and UNSUBSCRIBED appear only when a listed notification has them. */
 export function notificationTableLines(items: Notification[]): string[] {
   if (!items.length) return ["No notifications"];
   const snoozed = items.some((item) => item.snoozed_until);
+  const rules = items.some((item) => rulesCell(item) !== "");
   const events = items.some((item) => item.event_types?.length);
   const unsubscribed = items.some((item) => item.unsubscribed?.length);
   const lines = table(
-    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), "TO", ...(unsubscribed ? ["UNSUBSCRIBED"] : [])],
+    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), ...(rules ? ["RULES"] : []), "TO", ...(unsubscribed ? ["UNSUBSCRIBED"] : [])],
     items.map((item) => [
       item.id ?? "", item.channel ?? "", item.status ?? "", String(item.enabled),
       ...(snoozed ? [item.snoozed_until ?? ""] : []),
       (item.conditions ?? []).join(","),
       ...(events ? [(item.event_types ?? []).join(",")] : []),
+      ...(rules ? [rulesCell(item)] : []),
       destination(item),
       ...(unsubscribed ? [String(item.unsubscribed?.length ?? 0)] : []),
     ]),

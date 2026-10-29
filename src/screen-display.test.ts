@@ -8,7 +8,8 @@ import { formatEventLine } from "./commands.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
-import { displayLines, displayScheduleWrite, displayUntil } from "./screen-display.js";
+import { commandLines } from "./screen-commands.js";
+import { displayLines, displayScheduleWrite, displayUntil, rebootScheduleLines, rebootScheduleWrite, rebootWindowList, rebootWindowOption } from "./screen-display.js";
 import { testTemp } from "./test-temp.js";
 import { memoryBackend, type FakeTransport } from "./transport/fake.js";
 
@@ -260,4 +261,160 @@ test("screen display clear: DELETE with optional --expect-rev, fleet display_cle
   const pending = await cli(["--json", "screen", "display", "scr_PENDINGAAAAAAAAAAAAAAAA", "--power", "off"], transport, env);
   assert.equal(pending.code, ExitCode.Conflict, pending.stdout);
   assert.match(pending.envelope.error!.next!.reason, /no paired Player yet/);
+});
+
+test("reboot schedule files are checked locally with paths, and show output round-trips", () => {
+  assert.deepEqual(rebootScheduleWrite(HOURS), HOURS);
+  assert.deepEqual(rebootScheduleWrite({ ok: true, data: { reboot_schedule: { ...HOURS, updated_at: "x" }, next_reboot_at: "2026-08-15T11:00:00Z" } }), HOURS, "show output round-trips");
+  for (const [document, pattern] of [
+    [{ windows: HOURS.windows }, /Reboot schedule file: enabled must be true or false/],
+    [{ enabled: true, windows: [] }, /windows must list 1 to 16/],
+    [{ enabled: true, windows: [{ days: ["mon"], start: "07:00" }] }, /windows\[0\] must set both start and end/],
+    [{ enabled: true, windows: HOURS.windows, extra: 1 }, /unknown field "extra"/],
+    [[], /screen reboot-schedule clear/],
+  ] as const) {
+    assert.throws(() => rebootScheduleWrite(document), pattern);
+  }
+});
+
+test("--window reads DAYS HH:MM-HH:MM or the campaign DAYS@HH:MM-HH:MM, at least five minutes long, up to sixteen", () => {
+  assert.deepEqual(rebootWindowList(rebootWindowOption("Mon-Sun 04:00-04:30")), [{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start: "04:00", end: "04:30" }]);
+  assert.deepEqual(rebootWindowList(rebootWindowOption("sat,sun@22:00-02:00", rebootWindowOption("Mon-Fri 04:00-04:05"))), [
+    { days: ["mon", "tue", "wed", "thu", "fri"], start: "04:00", end: "04:05" }, { days: ["sat", "sun"], start: "22:00", end: "02:00" },
+  ]);
+  assert.deepEqual(rebootWindowList(rebootWindowOption("daily")), [{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] }], "a window without edges is the whole day");
+  assert.throws(() => rebootWindowOption("Mon 04:00-04:04"), /5 minutes to 24 hours/);
+  assert.throws(() => rebootWindowOption("Funday 04:00-05:00"), /--window "Funday 04:00-05:00": "funday" is not a day/);
+  assert.throws(() => rebootWindowOption("Mon 25:00-26:00"), /--window/);
+  let accumulated: string | undefined;
+  for (let index = 0; index < 16; index += 1) accumulated = rebootWindowOption("Mon 04:00-04:30", accumulated);
+  assert.throws(() => rebootWindowOption("Mon 04:00-04:30", accumulated), /at most 16 windows/);
+});
+
+test("screen reboot-schedule set sends the windows from --window, one screen or a fleet, with the revision guard", async () => {
+  const env = await enrolled();
+  const transport = fleet();
+  const set = await cli(["--json", "screen", "reboot-schedule", "set", LOBBY, "--window", "Mon-Sun 04:00-04:30", "--expect-rev", "3"], transport, env);
+  assert.equal(set.code, ExitCode.Success, set.stdout);
+  const put = transport.calls.find((item) => item.method === "PUT" && item.path === `/api/screens/${LOBBY}/reboot-schedule`);
+  assert.deepEqual(put?.body, { enabled: true, windows: [{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start: "04:00", end: "04:30" }] });
+  assert.equal(put?.headers?.["if-match"], '"3"');
+  assert.ok(put?.headers?.["idempotency-key"]);
+  assert.equal(set.envelope.data.reboot_schedule.enabled, true);
+  assert.equal(set.envelope.data.next_reboot_at, "2026-08-15T11:00:00.000Z");
+
+  const two = await cli(["--json", "screen", "reboot-schedule", "set", LOBBY, "--window", "Mon-Fri 04:00-04:30", "--window", "Sat,Sun 05:00-06:00", "--disabled"], transport, env);
+  assert.equal(two.code, ExitCode.Success, two.stdout);
+  assert.deepEqual(transport.calls.filter((item) => item.method === "PUT").at(-1)?.body, {
+    enabled: false, windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "04:00", end: "04:30" }, { days: ["sat", "sun"], start: "05:00", end: "06:00" }],
+  });
+  assert.equal(two.envelope.data.next_reboot_at, undefined, "a disabled schedule has no next reboot");
+
+  await writeFile(path.join(env.cwd, "reboots.json"), JSON.stringify(HOURS));
+  const file = await cli(["--json", "screen", "reboot-schedule", "set", LOBBY, "--file", "reboots.json"], transport, env);
+  assert.equal(file.code, ExitCode.Success, file.stdout);
+  assert.deepEqual(transport.calls.filter((item) => item.method === "PUT").at(-1)?.body, HOURS);
+
+  const fleetSet = await cli(["--json", "screen", "reboot-schedule", "set", "--tag", "Lobby", "--window", "Mon-Sun 04:00-04:30"], transport, env);
+  assert.equal(fleetSet.envelope.data.action, "set_reboot_schedule");
+  assert.deepEqual((transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1)?.body as { action: unknown }).action,
+    { type: "set_reboot_schedule", enabled: true, windows: [{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start: "04:00", end: "04:30" }] });
+  assert.equal(fleetSet.envelope.data.succeeded, 1);
+  assert.equal(fleetSet.envelope.data.failed, 1, "the screen that cannot reboot fails alone");
+  assert.equal(fleetSet.envelope.data.results.find((item: any) => item.screen_id === PLAIN).problem.code, "reboot_unsupported");
+  assert.notEqual(fleetSet.code, ExitCode.Success);
+  const ids = await cli(["--json", "screen", "reboot-schedule", "set", LOBBY, PLAIN, "--window", "daily@03:00-03:30", "--disabled"], transport, env);
+  assert.deepEqual((transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1)?.body as { selector: unknown }).selector, { by: "ids", screen_ids: [LOBBY, PLAIN] });
+  assert.equal(ids.envelope.data.action, "set_reboot_schedule");
+});
+
+test("screen reboot-schedule set refuses what needs a timezone or a reboot-capable Player, and bad input sends nothing", async () => {
+  const env = await enrolled();
+  const transport = fleet();
+  const refused = await cli(["--json", "screen", "reboot-schedule", "set", PLAIN, "--window", "Mon-Sun 04:00-04:30"], transport, env);
+  assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+  assert.equal(refused.envelope.error?.code, "reboot_unsupported");
+  assert.match(refused.envelope.error!.detail, /Nothing was stored/);
+  assert.equal(refused.envelope.error?.next?.command, `screenrig screen show ${PLAIN}`);
+  transport.putScreen!(screen("scr_NOZONEAAAAAAAAAAAAAAAAA", { timezone: undefined, host: { platform: "android", capabilities: ["reboot"] } as unknown as Screen["host"] }));
+  const zone = await cli(["--json", "screen", "reboot-schedule", "set", "scr_NOZONEAAAAAAAAAAAAAAAAA", "--window", "Mon-Sun 04:00-04:30"], transport, env);
+  assert.equal(zone.code, ExitCode.Client, zone.stdout);
+  assert.equal(zone.envelope.error?.code, "invalid_request");
+  assert.equal(zone.envelope.error?.next?.command, "screenrig screen set-timezone scr_NOZONEAAAAAAAAAAAAAAAAA --timezone ZONE");
+  const sent = transport.calls.filter((item) => item.path.includes("reboot-schedule") || item.path === "/api/screens/actions").length;
+  for (const argv of [
+    ["screen", "reboot-schedule", "set", LOBBY],
+    ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-04:03"],
+    ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-05:00", "--file", "reboots.json"],
+    ["screen", "reboot-schedule", "set", LOBBY, "--file", "reboots.json", "--disabled"],
+    ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-05:00", "--enabled", "--disabled"],
+    ["screen", "reboot-schedule", "set", LOBBY, PLAIN, "--window", "Mon 04:00-05:00", "--expect-rev", "3"],
+    ["screen", "reboot-schedule", "set", "--window", "Mon 04:00-05:00"],
+  ]) {
+    const result = await cli(["--json", ...argv], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+  }
+  assert.equal(transport.calls.filter((item) => item.path.includes("reboot-schedule") || item.path === "/api/screens/actions").length, sent, "usage errors must not reach the server");
+});
+
+test("screen reboot-schedule show prints the windows and the next reboot, clear removes them, single and fleet", async () => {
+  const env = await enrolled();
+  const transport = fleet();
+  const none = await cli(["--human", "screen", "reboot-schedule", "show", LOBBY], transport, env);
+  assert.match(none.stdout, /No reboot schedule/);
+  await cli(["--json", "screen", "reboot-schedule", "set", LOBBY, "--window", "Mon-Fri 04:00-04:30"], transport, env);
+  const json = await cli(["--json", "screen", "reboot-schedule", "show", LOBBY], transport, env);
+  assert.equal(json.envelope.data.reboot_schedule.windows[0].start, "04:00");
+  assert.equal(json.envelope.data.next_reboot_at, "2026-08-15T11:00:00.000Z");
+  const shown = await cli(["--human", "screen", "reboot-schedule", "show", LOBBY], transport, env);
+  assert.match(shown.stdout, /Reboot schedule: enabled, 1 window in America\/Los_Angeles\n  mon,tue,wed,thu,fri 04:00-04:30\nNext reboot: 2026-08-15 04:00 America\/Los_Angeles/);
+  const screenShow = await cli(["--human", "screen", "show", LOBBY], transport, env);
+  assert.match(screenShow.stdout, /Reboot schedule: enabled, 1 window in America\/Los_Angeles/);
+  assert.match(screenShow.stdout, /"next_reboot_at": "2026-08-15T11:00:00.000Z"/, "screen show passes next_reboot_at through");
+  const listed = await cli(["--json", "screen", "list"], transport, env);
+  assert.equal(listed.envelope.data.items.find((item: any) => item.id === LOBBY).next_reboot_at, "2026-08-15T11:00:00.000Z");
+
+  const cleared = await cli(["--json", "screen", "reboot-schedule", "clear", LOBBY, "--expect-rev", "4"], transport, env);
+  assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
+  const del = transport.calls.at(-1);
+  assert.equal(del?.method, "DELETE");
+  assert.equal(del?.path, `/api/screens/${LOBBY}/reboot-schedule`);
+  assert.equal(del?.headers?.["if-match"], '"4"');
+  assert.equal(cleared.envelope.data.reboot_schedule, undefined);
+  const fleetClear = await cli(["--json", "screen", "reboot-schedule", "clear", LOBBY, PLAIN], transport, env);
+  assert.equal(fleetClear.envelope.data.action, "clear_reboot_schedule");
+  assert.equal(fleetClear.envelope.data.succeeded, 2);
+  const tagClear = await cli(["--json", "screen", "reboot-schedule", "clear", "--tag", "Lobby"], transport, env);
+  assert.deepEqual((transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1)?.body as { selector: unknown }).selector, { by: "tag", tag: "Lobby" });
+  assert.equal(tagClear.code, ExitCode.Success, tagClear.stdout);
+  const missing = await cli(["--json", "screen", "reboot-schedule", "show", "scr_MISSINGAAAAAAAAAAAAAAAA"], transport, env);
+  assert.equal(missing.code, ExitCode.NotFound);
+});
+
+test("Reboot schedule lines show the windows in the screen zone and the next reboot; commands show where a reboot came from", () => {
+  assert.deepEqual(rebootScheduleLines({ enabled: true, windows: [{ days: ["mon"], start: "04:00", end: "04:30" }, { days: ["sat"] }], updated_at: "2026-08-01T00:00:00Z" }, "2026-08-15T11:00:00Z", "America/Los_Angeles"), [
+    "Reboot schedule: enabled, 2 windows in America/Los_Angeles",
+    "  mon 04:00-04:30",
+    "  sat all day",
+    "Next reboot: 2026-08-15 04:00 America/Los_Angeles",
+  ]);
+  assert.deepEqual(rebootScheduleLines({ enabled: false, windows: [{ days: ["mon"], start: "04:00", end: "04:30" }], updated_at: "x" }, null, undefined), ["Reboot schedule: disabled (no reboots), 1 window", "  mon 04:00-04:30"]);
+  assert.deepEqual(rebootScheduleLines(undefined, undefined, "UTC"), []);
+  const command = (id: string, source?: "schedule") => ({ id, type: "reboot" as const, state: "done" as const, requested_at: "2026-08-14T11:00:00Z", expires_at: "2026-08-14T11:30:00Z", sent_at: "2026-08-14T11:00:00Z", done_at: "2026-08-14T11:01:00Z", ...(source ? { source } : {}) });
+  const withSource = commandLines({ id: LOBBY, commands: [command("rbt_MANUAL001"), command("rbt_SCHED0001", "schedule")] } as unknown as Screen);
+  assert.match(withSource[1]!, /SOURCE$/);
+  assert.match(withSource[2]!, /manual$/);
+  assert.match(withSource[3]!, /schedule$/);
+  const plain = commandLines({ id: LOBBY, commands: [command("rbt_MANUAL001")] } as unknown as Screen);
+  assert.doesNotMatch(plain[1]!, /SOURCE/, "a screen with no scheduled reboot keeps its table");
+});
+
+test("scheduled reboot events render as logfmt without repeating their canned message", () => {
+  const base = { cursor: "ev1_1", at: "2026-08-14T17:00:00Z", severity: "info", resource: { type: "screen", id: LOBBY } };
+  assert.equal(formatEventLine({ ...base, type: "screen.reboot_requested", message: "Screen reboot requested", details: { reboot_id: "rbt_ABCDEFGH12", expires_at: "2026-08-14T17:30:00Z", state: "sent", source: "schedule" } } as never),
+    `at=2026-08-14T17:00:00Z type=screen.reboot_requested severity=info resource_type=screen resource_id=${LOBBY} expires_at=2026-08-14T17:30:00Z reboot_id=rbt_ABCDEFGH12 source=schedule state=sent`);
+  assert.equal(formatEventLine({ ...base, type: "screen.reboot_schedule_changed", message: "Screen reboot schedule updated", details: { enabled: true, windows: 1 } } as never),
+    `at=2026-08-14T17:00:00Z type=screen.reboot_schedule_changed severity=info resource_type=screen resource_id=${LOBBY} enabled=true windows=1`);
+  assert.equal(formatEventLine({ ...base, type: "screen.reboot_skipped", message: "Scheduled reboot skipped", details: { reason: "reboot_pending" } } as never),
+    `at=2026-08-14T17:00:00Z type=screen.reboot_skipped severity=info resource_type=screen resource_id=${LOBBY} reason=reboot_pending`);
 });

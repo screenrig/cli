@@ -389,6 +389,13 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
   assert.equal(lan.code,0,JSON.stringify(lan.body));
   assert.equal(JSON.parse(await readFile(`${dir}/${output}`,'utf8')).pages[0].primitives[0].src,src);
  }
+ // Screen tokens in the path, query and fragment are kept as written (a URL parser would encode the braces); a token elsewhere is refused.
+ for (const [src, output] of [['https://maps.example.com/{screen.id}/map?kiosk={screen.field.kiosk_id}#at={screen.location.name}','token-a.json'],['https://Maps.example.com/{screen.field.level}?k={screen.id}','token-b.json']] as const) {
+  const templated = await invoke([src], output);
+  assert.equal(templated.code,0,JSON.stringify(templated.body));
+  assert.equal(JSON.parse(await readFile(`${dir}/${output}`,'utf8')).pages[0].primitives[0].src,src);
+ }
+ for (const src of ['https://{screen.field.host}/x','https://example.com:{screen.field.port}/x','https://www.youtube.com/watch?v={screen.id}']) assert.equal((await invoke([src],'token-bad.json')).code,2,src);
  assert.equal((await invoke(['ftp://example.com/'],'bad.json')).code,2);
  assert.equal((await invoke(['med_IMAGE'])).code,2);
  mediaState = 'processing';

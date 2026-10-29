@@ -6,7 +6,8 @@ import {
   handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList,
   handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate,
 } from "../commands.js";
-import { NOTIFICATION_CONDITIONS, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags, notificationUserId } from "../notifications.js";
+import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationAudienceOption, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
+import { weeklyWindows } from "../campaigns.js";
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
 const conditionsOption = (value: string): string => { notificationConditions(value); return value; };
@@ -22,7 +23,13 @@ const CHANNEL_FLAGS = ["email", "webhook", "slack", "teams", "pagerduty", "teleg
 /** The channel flags a channel flag cannot be given with, as option attribute names. */
 const otherChannels = (flag: (typeof CHANNEL_FLAGS)[number]): string[] => CHANNEL_FLAGS.filter((name) => name !== flag);
 
+const activeHoursOption = weeklyWindows("--active-hours");
+
 const CONDITIONS = NOTIFICATION_CONDITIONS.join(", ");
+const SEVERITIES = NOTIFICATION_SEVERITIES.join(", ");
+const SEVERITY_HELP = `Override a condition's severity for this notification, CONDITION=LEVEL such as not_playing=error (repeatable; conditions: ${CONDITIONS}; levels: ${SEVERITIES}). The default is error for screen_offline and warning for every other condition. It counts for --min-severity and is the severity every channel shows`;
+const HOURS_HELP = 'Send opened notices only in this weekly window, DAYS HH:MM-HH:MM such as "Mon-Fri 08:00-22:00" (repeatable, at most 16; needs --timezone)';
+const AUDIENCE_HELP = 'The screens it covers, as a campaign audience rule in JSON such as {"all":[{"tag":"level2"},{"tag":"overhead"}]} (inline, a FILE, or - for stdin); instead of --tag';
 const RECIPIENTS = "comma-separated, at most 20: owner (whoever owns the project when a notice sends) and project members' user ids";
 const EVENTS = "exact event types (screen.online) or prefixes (screen.*), comma-separated, at most 32";
 
@@ -38,7 +45,17 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  a notice went out; crashing is sent at once. A notice sends nothing when the",
     "  screen's alert is acknowledged or snoozed during the hold, or a mute covers the",
     "  screen (screenrig alerts). --tag limits a notification to screens carrying one",
-    "  of those tags. Email goes to each recipient's verified address, one email per",
+    "  of those tags, --any-tag and --all-tags to screens carrying at least one or",
+    "  every one of them, and --audience takes any campaign audience rule.",
+    "  --min-severity (info, warning, error) creates no opened notice below that level",
+    "  and --severity CONDITION=LEVEL sets a condition's level: error for",
+    "  screen_offline and warning for every other condition unless overridden;",
+    "  email, Slack and Telegram text show the severity, Teams and PagerDuty use it,",
+    "  and a signed webhook body carries severity. --active-hours \"Mon-Fri",
+    "  08:00-22:00\" --timezone ZONE sends opened notices only in those windows: a",
+    "  notice that falls due outside them is held until the next window opens (and",
+    "  sent if its condition still holds) or, with --outside-hours drop, skipped; a",
+    "  resolved notice for a sent notice and a test always go out. Email goes to each recipient's verified address, one email per",
     "  recipient for everything that falls due within about two minutes, and is free.",
     "  Every email has an unsubscribe link for its recipient alone (the",
     "  List-Unsubscribe button of mail apps, and the footer): it stops that",
@@ -63,7 +80,15 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--telegram-chat <CHAT_ID>", "With --telegram: the chat to post to, its numeric id (-1001234567890) or @channelname").argParser(chatOption))
     .option("--conditions <LIST>", `Notify on these screen state changes, comma-separated: ${CONDITIONS}`, conditionsOption)
     .option("--events <TYPES>", `Webhook only: also POST these raw project events as they happen, ${EVENTS}`, eventsOption)
-    .option("--tag <TAG>", "Only screens carrying this tag (repeatable, or comma-separated; at most 16). Without --tag, every screen", notificationTags)
+    .addOption(new Option("--tag <TAG>", "Only screens carrying any of these tags (repeatable, or comma-separated; at most 16). Without a screen option, every screen").argParser(notificationTags).conflicts(["anyTag", "allTags", "audience"]))
+    .addOption(new Option("--any-tag <TAG>", "Only screens carrying at least one of these tags (repeatable, or comma-separated), as a campaign any rule").argParser(notificationAnyTags).conflicts(["tag", "allTags", "audience"]))
+    .addOption(new Option("--all-tags <TAG>", "Only screens carrying every one of these tags (repeatable, or comma-separated), as a campaign all rule").argParser(notificationAllTags).conflicts(["tag", "anyTag", "audience"]))
+    .addOption(new Option("--audience <FILE|->", AUDIENCE_HELP).argParser(notificationAudienceOption).conflicts(["tag", "anyTag", "allTags"]))
+    .addOption(new Option("--min-severity <LEVEL>", "Create no opened notice below this severity (a resolved notice follows its opened one); info, warning or error").choices([...NOTIFICATION_SEVERITIES]))
+    .addOption(new Option("--severity <CONDITION=LEVEL>", SEVERITY_HELP).argParser(notificationSeverityOverride))
+    .addOption(new Option("--active-hours <SPEC>", HOURS_HELP).argParser(activeHoursOption))
+    .addOption(new Option("--timezone <ZONE>", "With --active-hours: the IANA timezone its windows are read in, such as America/Los_Angeles").argParser(notificationTimezone))
+    .addOption(new Option("--outside-hours <WHEN>", "With --active-hours: hold (default) keeps a notice until the next window opens and sends it if its condition still holds; drop skips it").choices(["hold", "drop"]))
     .option("--hold <MINUTES>", "Minutes a condition must last before it notifies, 0 to 1440 (default 10); crashing is never held", notificationHold)
     .option("--description <TEXT>", "Describe the notification (at most 200 characters)", webhookDescription)
     .option("--disabled", "Create it disabled; nothing is sent until notifications update --enable")
@@ -73,6 +98,9 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
   requireOptionGroup(create, "requires", ["--email", "--conditions"]);
   requireOptionGroup(create, "requires", ["--events", "--webhook"]);
   requireOptionGroup(create, "together", ["--telegram", "--telegram-chat"]);
+  requireOptionGroup(create, "requires", ["--active-hours", "--timezone"]);
+  requireOptionGroup(create, "requires", ["--timezone", "--active-hours"]);
+  requireOptionGroup(create, "requires", ["--outside-hours", "--active-hours"]);
 
   notifications.command("list").description("List this project's notifications (never their secrets)")
     .action(bind(handleNotificationsList));
@@ -81,7 +109,7 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .argument("<id>", "Notification identifier")
     .action(bind(handleNotificationsShow));
 
-  const update = notifications.command("update").description("Change a notification's recipients, URL, destination, conditions, screens, hold, snooze or enabled state")
+  const update = notifications.command("update").description("Change a notification's recipients, URL, destination, conditions, screens, severity, active hours, hold, snooze or enabled state")
     .argument("<id>", "Notification identifier")
     .addOption(new Option("--email <RECIPIENTS>", `Email notifications: replace the recipients, ${RECIPIENTS}`).argParser(recipientsOption).conflicts(["url", "destination"]))
     .addOption(new Option("--url <URL>", "Webhook notifications: replace the https URL; checked like create").argParser(urlOption).conflicts(["email", "destination"]))
@@ -91,8 +119,19 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--clear-conditions", "Remove every condition (a webhook then needs --events)").conflicts(["conditions"]))
     .addOption(new Option("--events <TYPES>", `Webhook notifications: replace the raw project events, ${EVENTS}`).argParser(eventsOption).conflicts(["clearEvents"]))
     .addOption(new Option("--clear-events", "Webhook notifications: stop POSTing raw project events (it then needs conditions)").conflicts(["events"]))
-    .addOption(new Option("--tag <TAG>", "Replace the screen tags (repeatable, or comma-separated; at most 16)").argParser(notificationTags).conflicts(["allScreens"]))
-    .addOption(new Option("--all-screens", "Remove the screen tags; the notification covers every screen").conflicts(["tag"]))
+    .addOption(new Option("--tag <TAG>", "Replace the screens with any of these tags (repeatable, or comma-separated; at most 16); replaces an audience too").argParser(notificationTags).conflicts(["allScreens", "anyTag", "allTags", "audience"]))
+    .addOption(new Option("--any-tag <TAG>", "Replace the screens with those carrying at least one of these tags (repeatable, or comma-separated), as a campaign any rule").argParser(notificationAnyTags).conflicts(["allScreens", "tag", "allTags", "audience"]))
+    .addOption(new Option("--all-tags <TAG>", "Replace the screens with those carrying every one of these tags (repeatable, or comma-separated), as a campaign all rule").argParser(notificationAllTags).conflicts(["allScreens", "tag", "anyTag", "audience"]))
+    .addOption(new Option("--audience <FILE|->", `Replace the screens with ${AUDIENCE_HELP.replace(/^The screens it covers, as/, "")}`).argParser(notificationAudienceOption).conflicts(["allScreens", "tag", "anyTag", "allTags"]))
+    .addOption(new Option("--all-screens", "Remove the screen tags and the audience; the notification covers every screen").conflicts(["tag", "anyTag", "allTags", "audience"]))
+    .addOption(new Option("--min-severity <LEVEL>", "Create no opened notice below this severity; info, warning or error").choices([...NOTIFICATION_SEVERITIES]).conflicts(["clearMinSeverity"]))
+    .addOption(new Option("--clear-min-severity", "Remove the severity filter; every opened notice is created").conflicts(["minSeverity"]))
+    .addOption(new Option("--severity <CONDITION=LEVEL>", `Replace every override with these. ${SEVERITY_HELP}`).argParser(notificationSeverityOverride).conflicts(["clearSeverity"]))
+    .addOption(new Option("--clear-severity", "Remove every severity override; each condition has its default severity again").conflicts(["severity"]))
+    .addOption(new Option("--active-hours <SPEC>", `Replace the active hours with these windows. ${HOURS_HELP.replace("; needs --timezone", "; --timezone defaults to the zone the notification has")}`).argParser(activeHoursOption).conflicts(["clearActiveHours"]))
+    .addOption(new Option("--timezone <ZONE>", "The IANA timezone the active hours are read in; alone it keeps the current windows").argParser(notificationTimezone).conflicts(["clearActiveHours"]))
+    .addOption(new Option("--outside-hours <WHEN>", "hold keeps a notice until the next window opens, drop skips it; alone it keeps the current windows").choices(["hold", "drop"]).conflicts(["clearActiveHours"]))
+    .addOption(new Option("--clear-active-hours", "Remove the active hours; notices go out at any time").conflicts(["activeHours", "timezone", "outsideHours"]))
     .option("--hold <MINUTES>", "Minutes a condition must last before it notifies, 0 to 1440", notificationHold)
     .addOption(new Option("--description <TEXT>", "Replace the description (at most 200 characters)").argParser(webhookDescription).conflicts(["clearDescription"]))
     .addOption(new Option("--clear-description", "Remove the description").conflicts(["description"]))
@@ -102,7 +141,8 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .option("--expect-rev <REVISION>", "Optionally require this notification revision", revision)
     .action(bind(handleNotificationsUpdate));
   requireOptionGroup(update, "atLeastOne", [
-    "--email", "--url", "--destination", "--telegram-chat", "--conditions", "--clear-conditions", "--events", "--clear-events", "--tag", "--all-screens",
+    "--email", "--url", "--destination", "--telegram-chat", "--conditions", "--clear-conditions", "--events", "--clear-events", "--tag", "--any-tag", "--all-tags", "--audience", "--all-screens",
+    "--min-severity", "--clear-min-severity", "--severity", "--clear-severity", "--active-hours", "--timezone", "--outside-hours", "--clear-active-hours",
     "--hold", "--description", "--clear-description", "--enable", "--disable", "--snooze",
   ]);
   requireOptionGroup(update, "atMostOne", ["--email", "--url", "--destination"]);

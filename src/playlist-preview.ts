@@ -20,6 +20,7 @@ import { assertWirePages } from "./playlist-write-validation.js";
 import { usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 import { selectorHasScreenTokens } from "./selector-tokens.js";
+import { hasScreenToken } from "./screen-tokens.js";
 
 export const PREVIEW_STATES = ["rest", "entry", "motion-mid"] as const;
 export type PreviewState = (typeof PREVIEW_STATES)[number];
@@ -121,6 +122,10 @@ export interface PreviewPlaceholder {
   primitive: string;
   media_id?: string;
   reason?: string;
+  /** An iframe whose address carries screen tokens: the template as written, which the server fills in for each screen. */
+  src?: string;
+  /** An application with launch params: as written, tokens included. */
+  params?: Record<string, string>;
 }
 
 /** What a weighted or aspect-fitted media selector resolves to now, from the server, with each item's expected share of plays. */
@@ -378,7 +383,10 @@ async function preparePages(
         for (const reason of image.result.unrendered ?? []) placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: "card", reason });
         options.renderedCards?.push({ page_id: id, primitive_id: primitiveId, card: placement.card, version: image.result.version });
       } else if (kind !== "image" && kind !== "video" && kind !== "stream") {
-        placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: kind });
+        const source = typeof primitive.src === "string" && hasScreenToken(primitive.src) ? { src: primitive.src } : {};
+        const params = kind === "application" && recordOf(primitive.params) && Object.keys(recordOf(primitive.params)).length
+          ? { params: recordOf(primitive.params) as Record<string, string> } : {};
+        placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: kind, ...source, ...params });
       }
       if (media && !media.image) {
         const mediaId = mediaIdOf(selector);

@@ -170,3 +170,51 @@ test("a rerun of a finished publish reports the saved framing warning again, jou
   const saved = JSON.parse(await readFile(`${dir}/publishes/${journals[0]}`, "utf8"));
   assert.equal(saved.warnings[0].code, "iframe_framing_refused");
 });
+
+const SCREEN_FACTS = {
+  code: "screen_fact_missing", page_id: "one", primitive_id: "web", src: "https://maps.example.com/m?k={screen.field.kiosk_id}",
+  tokens: ["{screen.field.kiosk_id}"], screen_ids: ["scr_B", "scr_A"], screen_count: 22,
+  message: "2 screens lack a value that web reads ({screen.field.kiosk_id}), so the primitive is left out of their manifests. Set the field or location on each screen, or remove the token.",
+};
+
+test("a screen_fact_missing warning names the screens and the tokens and says how to give a value", () => {
+  const [item] = playlistWarningItems([SCREEN_FACTS]);
+  assert.deepEqual(item!.screen_ids, ["scr_B", "scr_A"]);
+  assert.equal(item!.screen_count, 22);
+  const lifted = playlistAnswerWarnings({ id: PLAYLIST, warnings: [SCREEN_FACTS] });
+  assert.equal(lifted.length, 1);
+  assert.equal(lifted[0]!.code, "screen_fact_missing");
+  assert.match(lifted[0]!.message, /left out of their manifests/);
+  assert.match(lifted[0]!.message, /First use: page one, primitive web\./);
+  assert.match(lifted[0]!.message, /Tokens: \{screen\.field\.kiosk_id\}\./);
+  assert.match(lifted[0]!.message, /Screens: scr_B, scr_A and 20 more\./);
+  assert.match(lifted[0]!.message, /screenrig screen update scr_B --field NAME=VALUE/);
+});
+
+test("playlist writes, screen writes and a fleet assign lift the screen_fact_missing warning into the envelope", async () => {
+  const env = await enrolled();
+  try {
+    const transport = new FakeTransport()
+      .on("POST", "/api/playlists", () => json(201, { id: PLAYLIST, revision: 1, name: "Lobby", warnings: [SCREEN_FACTS] }))
+      .on("PATCH", `/api/screens/${SCREEN}`, () => json(200, { id: SCREEN, revision: 4, playlist_id: PLAYLIST, warnings: [SCREEN_FACTS] }))
+      .on("POST", "/api/screens/actions", () => json(200, { action: "assign", matched: 1, succeeded: 1, failed: 0, results: [{ screen_id: SCREEN, status: "ok", revision: 4 }], warnings: [SCREEN_FACTS] }))
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => json(200, { id: PLAYLIST, revision: 1, name: "Lobby", pages: [] }))
+      .on("GET", `/api/screens/${SCREEN}`, () => json(200, { id: SCREEN, revision: 3, timezone: "UTC" }));
+    for (const argv of [
+      ["--json", "playlist", "create", "lobby.json"],
+      ["--json", "screen", "update", SCREEN, "--field", "kiosk_id=A1"],
+      ["--json", "screen", "assign", SCREEN, "--playlist-id", PLAYLIST],
+      ["--json", "screen", "set-timezone", SCREEN, "--timezone", "UTC"],
+      ["--json", "screen", "assign", SCREEN, "scr_OTHER", "--playlist-id", PLAYLIST],
+    ]) {
+      const result = await cli(argv, transport, env);
+      assert.equal(result.code, 0, `${argv.join(" ")}: ${result.stdout}`);
+      const warning = result.envelope.warnings.find((item: any) => item.code === "screen_fact_missing");
+      assert.ok(warning, `${argv.join(" ")}: ${JSON.stringify(result.envelope.warnings)}`);
+      assert.match(warning.message, /Screens: scr_B, scr_A and 20 more\./);
+      assert.equal(result.envelope.data.warnings, undefined, "warnings are lifted out of data");
+    }
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});

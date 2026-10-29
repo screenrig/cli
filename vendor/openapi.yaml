@@ -2160,7 +2160,7 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A dashboard session (the page editor) creates the playlist live, never as a proposal, attributed to the person, and needs the project owner or a member who can approve (approver_required otherwise); media it names that waits for its review is media_pending_review (409), where an agent's live write approves it. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A dashboard session (the page editor) creates the playlist live, never as a proposal, attributed to the person, and needs the project owner or a member who can approve (approver_required otherwise); media it names that waits for its review is media_pending_review (409), where an agent's live write approves it. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. A write whose iframe src, fallback_src or application params read a screen token ({screen.field.NAME} and the others of the primitive schemas) that a screen showing the playlist lacks also answers with a screen_fact_missing warning naming the first 20 such screens; those screens' manifests leave that primitive out. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2210,7 +2210,7 @@ paths:
     put:
       x-screenrig-access: review
       operationId: updatePlaylistV2
-      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision. A dashboard session (the page editor) replaces the playlist live, never as a proposal, attributed to the person; it needs the project owner or a member who can approve (approver_required otherwise) and If-Match (invalid_request when absent); a playlist no person approved yet is playlist_not_approved (409), as for patchPlaylistStructure, and media a page names that waits for its review is media_pending_review (409). A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
+      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision. A dashboard session (the page editor) replaces the playlist live, never as a proposal, attributed to the person; it needs the project owner or a member who can approve (approver_required otherwise) and If-Match (invalid_request when absent); a playlist no person approved yet is playlist_not_approved (409), as for patchPlaylistStructure, and media a page names that waits for its review is media_pending_review (409). A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. A write whose iframe src, fallback_src or application params read a screen token ({screen.field.NAME} and the others of the primitive schemas) that a screen showing the playlist lacks also answers with a screen_fact_missing warning naming the first 20 such screens; those screens' manifests leave that primitive out. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2295,7 +2295,7 @@ paths:
     patch:
       operationId: patchPlaylistStructure
       description: >-
-        A signed-in person changes a playlist's structure and never what its pages show: its name, the order of its pages, which pages stay, and each kept page's advance and visibility. pages is the complete new order; a stored page it omits is removed, and an id the playlist does not hold, or a repeated one, is invalid_request at pages[i].id. A kept page's canvas, transition, audio_cue, primitives and comments are always the stored ones: the body has no member for them, and any other member is refused. The kept pages go back through the same resolution and validation as any stored playlist, so a media item deleted since is refused (resource_conflict) and the playlist still keeps one ordinary page with no visibility, at most 16 ad slot pages and its audio_end cues. advance replaces the page's advance (an ad slot page has none); visibility replaces the page's visibility when an object, removes it when null and keeps it when omitted. A change that leaves the playlist as stored is a no-op. If-Match carries the playlist revision and is required (invalid_request when absent, revision_conflict when stale). The write is live at once on every screen showing the playlist and is attributed to the person on playlist.updated; it is never a proposal, so the answer is never 202. A playlist no person approved yet (approved_revision 0) is refused with playlist_not_approved (409): decide its review first. A name another playlist of the project uses is resource_conflict. The dashboard session only; agents change playlists with patchPlaylist, and a person changes what pages show with updatePlaylistV2. The body is at most 64 KiB.
+        A signed-in person changes a playlist's structure and never what its pages show: its name, the order of its pages, which pages stay, and each kept page's advance and visibility. pages is the complete new order; a stored page it omits is removed, and an id the playlist does not hold, or a repeated one, is invalid_request at pages[i].id. A kept page's canvas, transition, audio_cue, primitives and comments are always the stored ones: the body has no member for them, and any other member is refused. The kept pages go back through the same resolution and validation as any stored playlist, so a media item deleted since is refused (resource_conflict) and the playlist still keeps one ordinary page with no visibility, at most 16 ad slot pages and its audio_end cues. advance replaces the page's advance (an ad slot page has none); visibility replaces the page's visibility when an object, removes it when null and keeps it when omitted. A change that leaves the playlist as stored is a no-op. If-Match carries the playlist revision and is required (invalid_request when absent, revision_conflict when stale). The write is live at once on every screen showing the playlist and is attributed to the person on playlist.updated; it is never a proposal, so the answer is never 202. A playlist no person approved yet (approved_revision 0) is refused with playlist_not_approved (409): decide its review first. A name another playlist of the project uses is resource_conflict. The dashboard session only; agents change playlists with patchPlaylist, and a person changes what pages show with updatePlaylistV2. The answer carries warnings (PlaylistWarning) as for any write, among them screen_fact_missing when a screen that shows the playlist lacks a value an iframe src or application params of its pages read. The body is at most 64 KiB.
       security:
         - dashboardSession: []
       parameters:
@@ -2447,7 +2447,7 @@ paths:
       x-screenrig-access: write
       operationId: promotePlaylistRevision
       description: >-
-        Makes an earlier revision current again by copying it forward: its pages, soundtrack and format become a new revision, the current one plus one, whose change is promoted and restored_from names the revision copied. The playlist keeps its current name, earlier revisions stay as they were, and every screen that shows the playlist updates as for any other write. If-Match is required and names the current revision (invalid_request when absent, revision_conflict when stale). The pages are resolved again as a structure change resolves them: a selector matches today's media, and media or a web app the revision named that is gone or not ready refuses the promote with the problem a write would get. A revision whose content is the current content changes nothing and answers the current playlist. Needs a credential that publishes live (forbidden for one whose writes are proposed for review) or a dashboard session of the project owner or a member who can approve (approver_required); a playlist no person approved yet is playlist_not_approved (409).
+        Makes an earlier revision current again by copying it forward: its pages, soundtrack and format become a new revision, the current one plus one, whose change is promoted and restored_from names the revision copied. The playlist keeps its current name, earlier revisions stay as they were, and every screen that shows the playlist updates as for any other write. If-Match is required and names the current revision (invalid_request when absent, revision_conflict when stale). The pages are resolved again as a structure change resolves them: a selector matches today's media, and media or a web app the revision named that is gone or not ready refuses the promote with the problem a write would get. A revision whose content is the current content changes nothing and answers the current playlist. Needs a credential that publishes live (forbidden for one whose writes are proposed for review) or a dashboard session of the project owner or a member who can approve (approver_required); a playlist no person approved yet is playlist_not_approved (409). As for any write, the answer carries warnings (PlaylistWarning), among them screen_fact_missing when a screen that shows the playlist lacks a value an iframe src or application params of the promoted pages read.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3189,7 +3189,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched.
+        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched.
       security:
         - projectBearer: []
       parameters:
@@ -3284,7 +3284,7 @@ paths:
       x-screenrig-access: review
       operationId: updateScreen
       description: >-
-        Updates the screen's name, playlist_id, timezone, wall, tags, fields or location. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields and location included, is insufficient_access. A playlist with no approved version is playlist_not_approved.
+        Updates the screen's name, playlist_id, timezone, wall, tags, fields or location. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields and location included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out.
       security:
         - projectBearer: []
       parameters:
@@ -4398,7 +4398,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). The optional body sets expires_in_s, how long the reboot stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.reboot_requested. A screen that is online is sent the per-screen runtime command player.reboot at once (details reboot_id, reason project, at, expires_at; never delivered after expires_at) and the reboot is recorded in Screen.commands as sent. A screen that is offline holds the reboot as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reboot_id and expires_at, and the command becomes sent. A sent reboot becomes done when a health report carrying uptime_s puts the boot after it was sent. A newer reboot supersedes an older one still queued. A queued reboot past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). The optional body sets expires_in_s, how long the reboot stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.reboot_requested. A screen that is online is sent the per-screen runtime command player.reboot at once (details reboot_id, reason project, at, expires_at; never delivered after expires_at) and the reboot is recorded in Screen.commands as sent. A screen that is offline holds the reboot as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reboot_id and expires_at, and the command becomes sent. A sent reboot becomes done when a health report carrying uptime_s puts the boot after it was sent. A newer reboot supersedes an older one still queued. A queued reboot past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing. From the moment the reboot is sent until a health report proves it done or ten minutes pass, the screen raises no screen_offline, display_disconnected or crashing notice or alert; a condition that still holds then opens normally. The reboot schedule (PUT /api/screens/{id}/reboot-schedule) issues the same reboot with source schedule.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4444,6 +4444,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/commands:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenCommands
+      description: >-
+        Lists every reboot and reload asked of an active or archived screen, newest first: the commands Screen.commands holds (its newest 10) and every older one, with the state each reached. A queued command past expires_at reads expired. A command that was still queued when the screen's device was replaced reads cancelled. Cancel one still queued with POST /api/screens/{id}/commands/{command_id}/cancel.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of the screen's commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenCommandPage'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -4743,6 +4770,145 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/reboot-schedule:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenRebootSchedule
+      description: Returns reboot_schedule (null when none) and next_reboot_at, the start of the next window the backend reboots the screen at (null when there is none). The ETag is the screen revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Reboot schedule.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenRebootScheduleView'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      x-screenrig-access: write
+      operationId: setScreenRebootSchedule
+      x-rate-limit-policies:
+        - name: display-project
+          quota: 600
+          windowSeconds: 60
+        - name: display-screen
+          quota: 10
+          windowSeconds: 60
+        - name: display-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Replaces the reboot schedule: enabled and 1 to 16 screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start crosses midnight owned by the start day, whole day without edges), each 5 minutes to 24 hours long. At the start of each window in the screen timezone (required, invalid_request otherwise) the backend issues the same reboot POST /api/screens/{id}/reboot does, with source schedule in Screen.commands, screen.reboot_requested and the player.reboot details. A start inside a spring-forward gap fires at the first valid minute of the window; a window with no valid minute that day, because it lies wholly inside the gap, is skipped with screen.reboot_skipped reason window_missed (next_reboot_at shows the minute the gap ends). A fall-back repeat fires once per window per local date. A screen that is online is sent the reboot at once; an offline one keeps it queued only until its window ends (expires_at), so a late reboot never lands outside it. An occurrence never replaces a reboot a person asked for that still waits for the screen: it is skipped with screen.reboot_skipped reason reboot_pending. A timezone change cancels the scheduled reboots still waiting and moves next_reboot_at to the new zone. A planned reboot raises no screen_offline, display_disconnected or crashing alert for ten minutes after it is sent, and a notice for one of them that falls due in that time waits until the period ends plus its hold (a crashing notice is skipped as planned_reboot). enabled false keeps the windows and reboots nothing. Windows that leave no gap, so that no start follows, are invalid_request. The screen''s host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is stored; a screen that loses it later skips each window with screen.reboot_skipped and keeps its schedule. Appends screen.reboot_schedule_changed, bumps the revision (If-Match guards it), and never re-mints the manifest. The screen must be active.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenRebootScheduleWrite'
+      responses:
+        '200':
+          description: Screen with its reboot schedule and next_reboot_at.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: clearScreenRebootSchedule
+      x-rate-limit-policies:
+        - name: display-project
+          quota: 600
+          windowSeconds: 60
+        - name: display-screen
+          quota: 10
+          windowSeconds: 60
+        - name: display-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Removes the reboot schedule and next_reboot_at; a reboot already issued is not cancelled (POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued). Clearing none answers 200 unchanged.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: Screen without a reboot schedule.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/toast:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -12329,7 +12495,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -12518,7 +12684,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createNotification
-      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -12587,7 +12753,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateNotification
-      description: Changes any of description (empty clears it), conditions, screen_tags, hold_minutes, recipients (email), url and event_types (webhook), destination and telegram_chat_id (Slack, Teams, PagerDuty and Telegram), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
+      description: Changes any of description (empty clears it), conditions, screen_tags, audience, min_severity, severity, active_hours (null clears each of these), hold_minutes, recipients (email), url and event_types (webhook), destination and telegram_chat_id (Slack, Teams, PagerDuty and Telegram), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14847,6 +15013,8 @@ paths:
         description: Trusted player/runtime origin
     post:
       operationId: launchApplicationRelease
+      description: >-
+        Mints the single-use ticket for one application release of the screen's current manifest. launch_url is the release host's index page with ticket first and then the application's params (the primitive's params, filled with this screen's facts, percent-encoded, at most 4096 characters together), so the application reads them from location.search. Only the web Player and the Players that run it call this route; the Qt, Android, Apple and Windows Players load the application from their local package and receive no params. The release host passes them on to the page and adds its own policy marker. A screen that lacks a value a param reads, or whose values fill into more than the limit, has no such application in its manifest (diagnostic screen_fact_missing or screen_fact_invalid), and a launch for its release is refused. Params are not bound to the ticket: an application treats them as untrusted hints and reads the screen's identity from context.screen_id.
       x-rate-limit-policies:
         - name: release-launch
           quota: 120
@@ -17634,7 +17802,7 @@ paths:
     post:
       operationId: approveReview
       description: >-
-        Approves a pending review as a person who can approve (the project owner or a member with can_approve; else approver_required). The flag is read again inside the decision's transaction, so a person whose approval was turned off meanwhile decides nothing (approver_required). Staff shadow sessions cannot decide. A playlist update is applied with the base revision as If-Match; when the live playlist moved on the review becomes stale and the call answers review_stale. A create or update whose tag, folder or all selectors would now play media they did not resolve when proposed, that the review does not name and that the live version does not already play, also becomes stale (review_stale). A screen change replays its stored request (a tag resolves now): the call applies screens for a few seconds and the rest continue in the background while screen_change.result.applying is true. A screen change waiting on a pending playlist review answers review_blocked naming it; one whose playlist has no approved version answers playlist_not_approved. include_dependents also approves, in order, the screen changes waiting on this playlist review. Events of the applied change carry the person as actor and the proposing agent as agent. A decided review is review_not_pending; repeating the same decision replays.
+        Approves a pending review as a person who can approve (the project owner or a member with can_approve; else approver_required). The flag is read again inside the decision's transaction, so a person whose approval was turned off meanwhile decides nothing (approver_required). Staff shadow sessions cannot decide. A playlist update is applied with the base revision as If-Match; when the live playlist moved on the review becomes stale and the call answers review_stale. A create or update whose tag, folder or all selectors would now play media they did not resolve when proposed, that the review does not name and that the live version does not already play, also becomes stale (review_stale). A screen change replays its stored request (a tag resolves now): the call applies screens for a few seconds and the rest continue in the background while screen_change.result.applying is true. A screen change waiting on a pending playlist review answers review_blocked naming it; one whose playlist has no approved version answers playlist_not_approved. include_dependents also approves, in order, the screen changes waiting on this playlist review. Events of the applied change carry the person as actor and the proposing agent as agent. The answer carries warnings (PlaylistWarning): screen_fact_missing when the approved change puts pages whose iframe src or application params read a screen token on screens that lack it. A decided review is review_not_pending; repeating the same decision replays.
       security:
         - dashboardSession: []
       parameters:
@@ -18293,7 +18461,7 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2InProject
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page. A write whose iframe src, fallback_src or application params read a screen token ({screen.field.NAME} and the others of the primitive schemas) that a screen showing the playlist lacks also answers with a screen_fact_missing warning naming the first 20 such screens; those screens' manifests leave that primitive out. An iframe src or fallback_src that is a Google Slides, Docs or Sheets link (share, Publish to web or embed) or a Microsoft 365 OneDrive or SharePoint Embed link is stored rebuilt for the screen, where Slides loop and advance on the link's delayms held to the page's duration, Docs, Sheets, Word and Excel reload every 5 minutes. A pasted <iframe> embed code in src or fallback_src is read for its src. A file that asks viewers to sign in is refused with document_not_shared (400), whose errors[0].field is that src or fallback_src and whose detail names the sharing setting to change.
       security:
         - projectBearer: []
       parameters:
@@ -18677,7 +18845,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched.
+      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched.
       security:
         - projectBearer: []
       parameters:
@@ -20664,7 +20832,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -20770,7 +20938,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createNotificationInProject
-      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -21484,16 +21652,23 @@ components:
     PlaylistWarning:
       type: object
       additionalProperties: false
-      required: [code, message, page_id, primitive_id, src, reason]
+      required: [code, message, page_id, primitive_id]
       description: >-
-        Something the author of a successful playlist write should act on. The write stored what it carried; a warning never fails it. The one code is iframe_framing_refused: a public https page named by an iframe primitive (its src or its fallback_src) sends X-Frame-Options (DENY, SAMEORIGIN or the obsolete ALLOW-FROM) or a Content-Security-Policy frame-ancestors list that does not admit the Player web app's origin. The Player web app and the macOS, Samsung Tizen and BrightSign Players frame the page, so they cannot show it; Android, Linux and Windows Players open an iframe page as a whole page and are not affected. The backend reads the page's response headers once the write commits, for at most 8 distinct pages per write; a page it cannot reach in time, or that answers an error, is not reported. Each distinct page appears once, naming the first primitive that uses it, and appends one playlist.iframe_framing_refused event (warning) to the project's event log.
+        Something the author of a successful write should act on. The write stored what it carried; a warning never fails it. A playlist write answers with warnings on the playlist; a screen write (updateScreen, the dashboard's fields, location and playlist routes) on the screen; a fleet assign on the result page. Two codes.
+
+        iframe_framing_refused: a public https page named by an iframe primitive (its src or its fallback_src) sends X-Frame-Options (DENY, SAMEORIGIN or the obsolete ALLOW-FROM) or a Content-Security-Policy frame-ancestors list that does not admit the Player web app's origin. The Player web app and the macOS, Samsung Tizen and BrightSign Players frame the page, so they cannot show it; Android, Linux and Windows Players open an iframe page as a whole page and are not affected. The backend reads the page's response headers once the write commits, for at most 8 distinct pages per write; a page it cannot reach in time, or that answers an error, is not reported. Each distinct page appears once, naming the first primitive that uses it, and appends one playlist.iframe_framing_refused event (warning) to the project's event log. A src with screen tokens is not one page and is not read.
+
+        screen_fact_missing: a screen the write reaches lacks a value that an iframe's src or an application's params read through a screen token ({screen.field.NAME}, {screen.location.…}, {screen.timezone}), or the values it has fill into one the manifest refuses (an address over 2048 characters, a path segment of . or .., launch params over 4096 characters in the launch URL), so the primitive is left out of that screen's manifest (manifest diagnostic screen_fact_missing or screen_fact_invalid) until the screen has the value. One warning per write names the first such primitive, the tokens no listed screen could fill (at most 64), the first 20 affected screens and how many there are. A playlist write (a replace, patch, structure change, promote or applied review) reaches the screens that show the playlist; a screen write reaches that screen, for the playlist it shows and the one it was just assigned; a fleet assign reaches the screens of its page; approving a screen change reaches the screens it names.
       properties:
-        code: {type: string, enum: [iframe_framing_refused]}
-        message: {type: string, description: "What is refused and by which header, which Players it affects, and the next step: use a page that allows framing from the Player origin, or ask its owner to allow that origin."}
-        page_id: {type: string, description: "The page of the first iframe primitive that names src."}
-        primitive_id: {type: string, description: "The first iframe primitive that names src, as its src or its fallback_src."}
-        src: {type: string, description: "The iframe page as authored."}
-        reason: {type: string, enum: [x_frame_options, frame_ancestors], description: "Which header refused: X-Frame-Options, or the Content-Security-Policy frame-ancestors directive."}
+        code: {type: string, enum: [iframe_framing_refused, screen_fact_missing]}
+        message: {type: string, description: "What is wrong, which Players it affects and the next step. For iframe_framing_refused: use a page that allows framing from the Player origin, or ask its owner to allow that origin. For screen_fact_missing: set the field or location on each listed screen, or remove the token."}
+        page_id: {type: string, description: "The page of the first iframe primitive that uses src; for screen_fact_missing, of the first primitive that needs a value."}
+        primitive_id: {type: string, description: "The first iframe primitive that uses src (or fallback_src); for screen_fact_missing, the first iframe or application that needs a value."}
+        src: {type: string, description: "The iframe page as authored; for screen_fact_missing, the template of an iframe (absent when the primitive is an application)."}
+        reason: {type: string, enum: [x_frame_options, frame_ancestors], description: "iframe_framing_refused only. Which header refused: X-Frame-Options, or the Content-Security-Policy frame-ancestors directive."}
+        tokens: {type: array, maxItems: 64, items: {type: string}, description: "screen_fact_missing only. The screen tokens, such as {screen.field.kiosk_id}, that some listed screen has no value for, at most 64. Absent when the screens have every value but fill into one the manifest refuses."}
+        screen_ids: {type: array, maxItems: 20, items: {type: string}, description: "screen_fact_missing only. The first 20 affected screens, in id order."}
+        screen_count: {type: integer, minimum: 1, description: "screen_fact_missing only. How many screens lack a value or fill into one the manifest refuses; screen_ids lists the first 20."}
     ReviewPolicy:
       type: object
       additionalProperties: false
@@ -21890,6 +22065,7 @@ components:
         id: {type: string}
         state: {type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale]}
         problem: {$ref: "#/components/schemas/Problem"}
+        warnings: {type: array, maxItems: 1, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "approve only: the screen_fact_missing warning when the approved screen change assigns a playlist with an iframe src or application params that read a screen token some screen it names lacks. Absent when there is nothing to act on."}
     ReviewDecisionResult:
       type: object
       additionalProperties: false
@@ -21897,6 +22073,7 @@ components:
       properties:
         review: {$ref: "#/components/schemas/Review"}
         dependents: {type: array, items: {$ref: "#/components/schemas/ReviewDependentResult"}}
+        warnings: {type: array, maxItems: 1, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "approve only: the screen_fact_missing warning for the screens the approved change reached, when it applies a playlist update whose iframe src or application params read a screen token some screen showing the playlist lacks, or assigns such a playlist to screens that lack it. The change stands. Absent when there is nothing to act on."}
     ReviewLocation:
       type: object
       additionalProperties: false
@@ -25651,14 +25828,14 @@ components:
         - {$ref: "#/components/schemas/PlaylistStreamPrimitive"}
         - {$ref: "#/components/schemas/PlaylistCardPrimitive"}
       discriminator: {propertyName: primitive}
-    PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, params: {type: object, maxProperties: 16, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, maxLength: 512}, description: "Launch parameters, up to 16: the launch URL carries each as a query parameter after ticket, so the application reads them from location.search. Launch params reach applications on the web Player and the Players that run it (Samsung Tizen, BrightSign, webOS and Vega); the Qt, Android, Apple and Windows Players load the application from their local package, which has no launch URL, and do not receive them. Names are 1 to 32 lower case letters, digits or underscores; ticket and policy are reserved. A value may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}), filled for the launching screen and percent-encoded; a filled value is at most 512 characters, and the encoded params together at most 4096 characters in the launch URL. A screen that lacks a value, or whose values fill into more than that, is not shown the application, on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid), and the write answers with a screen_fact_missing warning (PlaylistWarning). The launch route is keyed by release, so every primitive that pins a release carries the same params. Params are hints, not credentials: whoever holds the release host's cookie can open the page with any query, so an application reads the screen's identity from context.screen_id and treats params as untrusted input."}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages.}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared)."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 0, maximum: 86400, description: "Seconds between reloads of the page while it is on glass: 0 (no reload, the default) or 60 to 86400. Each reload loads src again, so a recovered src replaces the fallback. A write of 0 stores nothing."}, fallback_src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "The page a screen shows in src's place when src does not load: a network, DNS, TLS or connection error, an HTTP status of 400 or above, or no completed load within 30 seconds. Takes the forms and rules of src (a pasted iframe embed code, a YouTube link stored as its canonical embed, a Google or Microsoft document link stored rebuilt for the screen, with the document_not_shared refusal). Omit it for none; an empty string is refused."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as 1 to 64 entries. Each entry is [scheme://]host[:port][path], a CSP host-source: the scheme is http or https (an http entry also matches https; no scheme matches both); host is a name, an IPv4 address, an IPv6 address in brackets, *.name (any subdomain of name, not name itself) or *, with no other wildcard; port is a number or * (absent: the scheme's default port); a path ending in / or /* covers everything under it, any other path only itself. No credentials, query, fragment, spaces or ; , ' \" characters. With a list, the page's own links, scripted navigations, forms and redirects reach only src, fallback_src and addresses an entry matches; a refused navigation leaves the page where it was. Query and fragment never count, and a redirect is matched without its path. Frames inside the page and YouTube embeds are not restricted. Entries are stored with the scheme and host lowercased and /* written as /, repeats removed. An empty array is refused: omit the key for no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared). The path, query and fragment may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}): the template is stored as written and each screen's manifest carries its own address, every value percent-encoded for its place in the URL. A token in the scheme, credentials, host or port, or in a YouTube, Google or Microsoft document or BI view address, is invalid_request at src. A screen that lacks a value, or whose values fill into an address over 2048 characters or one with a path segment of . or .., gets no iframe on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid) and the write answers with a screen_fact_missing warning (PlaylistWarning)."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 0, maximum: 86400, description: "Seconds between reloads of the page while it is on glass: 0 (no reload, the default) or 60 to 86400. Each reload loads src again, so a recovered src replaces the fallback. A write of 0 stores nothing."}, fallback_src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "The page a screen shows in src's place when src does not load: a network, DNS, TLS or connection error, an HTTP status of 400 or above, or no completed load within 30 seconds. Takes the forms and rules of src (a pasted iframe embed code, a YouTube link stored as its canonical embed, a Google or Microsoft document link stored rebuilt for the screen, with the document_not_shared refusal). Omit it for none; an empty string is refused."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as 1 to 64 entries. Each entry is [scheme://]host[:port][path], a CSP host-source: the scheme is http or https (an http entry also matches https; no scheme matches both); host is a name, an IPv4 address, an IPv6 address in brackets, *.name (any subdomain of name, not name itself) or *, with no other wildcard; port is a number or * (absent: the scheme's default port); a path ending in / or /* covers everything under it, any other path only itself. No credentials, query, fragment, spaces or ; , ' \" characters. With a list, the page's own links, scripted navigations, forms and redirects reach only src, fallback_src and addresses an entry matches; a refused navigation leaves the page where it was. Query and fragment never count, and a redirect is matched without its path. Frames inside the page and YouTube embeds are not restricted. Entries are stored with the scheme and host lowercased and /* written as /, repeats removed. An empty array is refused: omit the key for no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, params: {type: object, maxProperties: 16, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, maxLength: 512}, description: "Launch parameters, up to 16: the launch URL carries each as a query parameter after ticket, so the application reads them from location.search. Launch params reach applications on the web Player and the Players that run it (Samsung Tizen, BrightSign, webOS and Vega); the Qt, Android, Apple and Windows Players load the application from their local package, which has no launch URL, and do not receive them. Names are 1 to 32 lower case letters, digits or underscores; ticket and policy are reserved. A value may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}), filled for the launching screen and percent-encoded; a filled value is at most 512 characters, and the encoded params together at most 4096 characters in the launch URL. A screen that lacks a value, or whose values fill into more than that, is not shown the application, on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid), and the write answers with a screen_fact_missing warning (PlaylistWarning). The launch route is keyed by release, so every primitive that pins a release carries the same params. Params are hints, not credentials: whoever holds the release host's cookie can open the page with any query, so an application reads the screen's identity from context.screen_id and treats params as untrusted input."}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between reloads of the page while it is on glass. Present only when above 0; absent means the page never reloads."}, fallback_src: {type: string, format: uri, pattern: "^https?://", description: "The page a screen shows in src's place when src does not load, stored by the rules of src. Absent means no fallback."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as stored entries ([scheme://]host[:port][path], CSP host-sources; the write schema has the rules). Absent means no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src. A template with screen tokens ({screen.field.NAME} and the others of the write schema) is returned as written, braces included; each screen's manifest carries its own filled address."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between reloads of the page while it is on glass. Present only when above 0; absent means the page never reloads."}, fallback_src: {type: string, pattern: "^https?://", description: "The page a screen shows in src's place when src does not load, stored by the rules of src, screen tokens included (returned as written). Absent means no fallback."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as stored entries ([scheme://]host[:port][path], CSP host-sources; the write schema has the rules). Absent means no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}}}
     MediaSelectorWeights:
       type: object
@@ -25991,6 +26168,35 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+    ScreenStackStatus:
+      type: object
+      additionalProperties: false
+      required: [manifest_revision, levels, playing, reported_at]
+      description: >-
+        What the screen's Player last reported of its stack (docs/player-compatibility.md §6.11): each level's readiness and the level each display shows. Present only for a Player that resolves its own stack, while that stack is current.
+      properties:
+        manifest_revision: {type: string}
+        levels:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, state]
+            properties:
+              id: {type: string}
+              state: {type: string, enum: [ready, preparing, failed]}
+        playing:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [display, level_id]
+            properties:
+              display: {type: integer, minimum: 1, maximum: 12}
+              level_id: {type: string}
+        reported_at: {type: string, format: date-time}
     StackLevel:
       type: object
       additionalProperties: false
@@ -26106,6 +26312,7 @@ components:
         id: {type: string}
         public_id: {type: string}
         label: {type: string}
+        warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a screen write that succeeded (updateScreen, the dashboard's fields, location and playlist routes): the screen_fact_missing warning when the playlist the screen shows has an iframe or application that reads a fact the screen lacks. Absent when there is nothing to act on, and on every read."}
         playlist_id: {type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover, a campaign that holds or a matching playlist schedule entry takes precedence; effective_playlist names what is shown."}
         playlist_schedule: {$ref: "#/components/schemas/ScreenPlaylistSchedule"}
         takeover: {$ref: "#/components/schemas/ScreenTakeover"}
@@ -26113,8 +26320,11 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
-        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
+        reboot_schedule: {$ref: "#/components/schemas/ScreenRebootSchedule"}
+        next_reboot_at: {type: string, format: date-time, description: "The start of the next window the backend reboots the screen at (PUT /api/screens/{id}/reboot-schedule); on a day a spring-forward gap swallows a whole window it is the minute the gap ends, and that occurrence is skipped (screen.reboot_skipped, window_missed). Absent while the screen has no enabled reboot schedule, and while it is archived. Read-only."}
+        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first; GET /api/screens/{id}/commands lists every one). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
         suspension: {$ref: "#/components/schemas/ScreenSuspension"}
+        stack_status: {$ref: "#/components/schemas/ScreenStackStatus"}
         timezone: {type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone."}
         effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
         timezone_source: {type: string, enum: [screen, device, unknown]}
@@ -26295,6 +26505,8 @@ components:
         - {$ref: "#/components/schemas/ScreenActionDisplayClear"}
         - {$ref: "#/components/schemas/ScreenActionSetDisplaySchedule"}
         - {$ref: "#/components/schemas/ScreenActionClearDisplaySchedule"}
+        - {$ref: "#/components/schemas/ScreenActionSetRebootSchedule"}
+        - {$ref: "#/components/schemas/ScreenActionClearRebootSchedule"}
       discriminator: {propertyName: type}
       description: >-
         One fleet action, discriminated by type. Each member carries only its own parameters; a member of another type is an unknown field and invalid_request.
@@ -26419,16 +26631,33 @@ components:
       description: Removes each screen's display schedule; a screen without one is ok and unchanged.
       properties:
         type: {type: string, enum: [clear_display_schedule]}
+    ScreenActionSetRebootSchedule:
+      type: object
+      additionalProperties: false
+      required: [type, enabled, windows]
+      description: Replaces each screen's reboot schedule (ScreenRebootScheduleWrite), normalized once before fan-out. Manage access only. A screen without a timezone fails alone with invalid_request, and one whose Player did not declare reboot with reboot_unsupported.
+      properties:
+        type: {type: string, enum: [set_reboot_schedule]}
+        enabled: {type: boolean}
+        windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/DisplayWindow"}}
+    ScreenActionClearRebootSchedule:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Removes each screen's reboot schedule; a screen without one is ok and unchanged. Manage access only.
+      properties:
+        type: {type: string, enum: [clear_reboot_schedule]}
     ScreenActionResult:
       type: object
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: {type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule]}
+        action: {type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, set_reboot_schedule, clear_reboot_schedule]}
         matched: {type: integer, minimum: 0}
         succeeded: {type: integer, minimum: 0}
         failed: {type: integer, minimum: 0}
         results: {type: array, items: {$ref: "#/components/schemas/ScreenActionScreenResult"}}
+        warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "assign only: the screen_fact_missing warning when the playlist has an iframe or application that reads a fact some screen of this page lacks. It lists up to 20 of this page's screens and counts them all; it replays with the page."}
         offset: {type: integer, minimum: 0, description: Number of results preceding this page.}
         total: {type: integer, minimum: 0, description: Size of the pinned fleet.}
         next_cursor: {type: string, pattern: "^[0-9]+$", description: Continue with this value as after and the same request body and Idempotency-Key. Absent when complete.}
@@ -26437,7 +26666,7 @@ components:
       additionalProperties: false
       required: [screen_id, status]
       description: >-
-        One screen's outcome. ok carries the result of the single-screen path: revision (and tags for tag actions) for assign, tag, takeover, takeover_clear, set_playlist_schedule, and clear_playlist_schedule actions, reload for reload, toast for toast. failed carries the problem that screen's own request would have answered.
+        One screen's outcome. ok carries the result of the single-screen path: revision (and tags for tag actions) for assign, tag, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, set_reboot_schedule and clear_reboot_schedule actions, reload for reload, toast for toast. failed carries the problem that screen's own request would have answered.
       properties:
         screen_id: {type: string}
         status: {type: string, enum: [ok, failed]}
@@ -26788,6 +27017,14 @@ components:
         expires_at: {type: string, format: date-time}
         sent_at: {type: string, format: date-time, description: "When the runtime event was appended. Absent while the command is queued, and on one cancelled, expired or superseded before it was sent."}
         done_at: {type: string, format: date-time, description: "The boot time a health report proved. Present only on a done reboot."}
+        source: {type: string, enum: [schedule], description: "schedule: the reboot was issued by the screen's reboot schedule at the start of a window, and expires at the window's end. Absent for a command a person or agent asked for."}
+    ScreenCommandPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ScreenCommand"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
     ScreenPlayPageWrite:
       type: object
       additionalProperties: false
@@ -27838,6 +28075,37 @@ components:
       items: {type: string, maxLength: 200, pattern: "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(\\.\\*|\\.[a-z][a-z0-9_]{0,63})$"}
       description: >-
         Webhook only. Project events also POSTed as they happen, exactly as a webhook sends them: exact types such as screen.online, or prefixes ending in .* such as screen.*. notification.test is never fanned out.
+    NotificationSeverity:
+      type: string
+      enum: [info, warning, error]
+      description: >-
+        The severity of a notice, least severe first. An opened notice has its condition's severity: error for screen_offline and warning for every other condition, unless the notification's severity says otherwise. A resolved notice and a test are info.
+    NotificationSeverityOverrides:
+      type: object
+      additionalProperties: false
+      description: >-
+        Condition to severity for this notification, such as {"not_playing": "error"}. It counts for min_severity and is the severity Teams and PagerDuty show for the condition. A condition not listed keeps its default. On a patch an empty object, like null, clears every override.
+      properties:
+        screen_offline: {$ref: "#/components/schemas/NotificationSeverity"}
+        display_disconnected: {$ref: "#/components/schemas/NotificationSeverity"}
+        running_hot: {$ref: "#/components/schemas/NotificationSeverity"}
+        storage_full: {$ref: "#/components/schemas/NotificationSeverity"}
+        content_stuck: {$ref: "#/components/schemas/NotificationSeverity"}
+        not_playing: {$ref: "#/components/schemas/NotificationSeverity"}
+        loop_stalled: {$ref: "#/components/schemas/NotificationSeverity"}
+        glass_blank: {$ref: "#/components/schemas/NotificationSeverity"}
+        glass_frozen: {$ref: "#/components/schemas/NotificationSeverity"}
+        crashing: {$ref: "#/components/schemas/NotificationSeverity"}
+    NotificationActiveHours:
+      type: object
+      additionalProperties: false
+      required: [timezone, windows]
+      description: >-
+        When opened notices go out: the windows (screenrig.schedule/v1), read in timezone. A notice that falls due while they are closed waits for the next opening (outside hold, the default) and goes out then if its condition still holds, so a condition that clears first sends nothing, or is skipped (outside drop; last_error outside_hours). A resolved notice for an opened notice that was sent always goes out, inside the hours or not, and a test ignores them. crashing is held or dropped like any other condition. The hours judge a notice when it first goes out; a failed one is retried on the usual schedule whatever the hours. Adding, changing or removing the hours judges the notices held for the old ones again at once.
+      properties:
+        timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles."}
+        windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        outside: {type: string, enum: [hold, drop], default: hold}
     NotificationWrite:
       type: object
       additionalProperties: false
@@ -27849,6 +28117,10 @@ components:
         description: {type: string, maxLength: 200, description: A name for people.}
         conditions: {$ref: "#/components/schemas/NotificationConditions"}
         screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: "The screens the notification covers, in the rules of a campaign audience (all, any, tag, screen_id; at most 3 deep). Use it instead of screen_tags, which means any of those tags; both is invalid_request."}
+        min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: "Opened notices below this severity are not sent; a resolved notice follows its opened notice. Absent sends them all."}
+        severity: {$ref: "#/components/schemas/NotificationSeverityOverrides"}
+        active_hours: {$ref: "#/components/schemas/NotificationActiveHours"}
         hold_minutes: {type: integer, minimum: 0, maximum: 1440, default: 10, description: "How long a condition must last before it notifies. crashing is never held."}
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri, description: "Webhook only: https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment."}
@@ -27875,6 +28147,18 @@ components:
         description: {type: string, maxLength: 200, description: An empty string clears the description.}
         conditions: {$ref: "#/components/schemas/NotificationConditions"}
         screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        audience:
+          oneOf: [{$ref: "#/components/schemas/CampaignAudience"}, {type: "null"}]
+          description: As on NotificationWrite; null clears it. An audience and screen_tags together are invalid_request, so switching from one to the other clears the first in the same request.
+        min_severity:
+          oneOf: [{$ref: "#/components/schemas/NotificationSeverity"}, {type: "null"}]
+          description: As on NotificationWrite; null clears it.
+        severity:
+          oneOf: [{$ref: "#/components/schemas/NotificationSeverityOverrides"}, {type: "null"}]
+          description: Replaces every override; null or an empty object clears them.
+        active_hours:
+          oneOf: [{$ref: "#/components/schemas/NotificationActiveHours"}, {type: "null"}]
+          description: Replaces the hours; null clears them.
         hold_minutes: {type: integer, minimum: 0, maximum: 1440}
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri}
@@ -27890,14 +28174,18 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification; a notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
         channel: {type: string, description: "email, webhook, slack, teams, pagerduty or telegram. Readers treat another value as a channel they cannot edit."}
         description: {type: string}
         conditions: {type: array, items: {type: string}, description: NotificationCondition values.}
-        screen_tags: {type: array, items: {type: string}, description: Empty means every screen.}
+        screen_tags: {type: array, items: {type: string}, description: "Empty means every screen, unless audience is present."}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: Present while set; it covers the screens instead of screen_tags.}
+        min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: Present while set.}
+        severity: {$ref: "#/components/schemas/NotificationSeverityOverrides", description: Present while any condition is overridden.}
+        active_hours: {$ref: "#/components/schemas/NotificationActiveHours", description: "Present while set; outside is always shown."}
         hold_minutes: {type: integer, minimum: 0, maximum: 1440}
         recipients: {type: array, items: {type: string}, description: Email only. owner or member user_ids.}
         url: {type: string, description: "Webhook only. The receiver URL. Empty, with url_redacted true, below effective Manage."}
@@ -27951,7 +28239,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address who has not unsubscribed), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -29214,7 +29502,30 @@ components:
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
         suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
+        stack: {$ref: "#/components/schemas/RuntimeStack"}
         diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. A playlist format that is not the shape of the screen's wall (or a screen with no wall) projects pages [] plus a wall_format_mismatch diagnostic. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content."}
+    RuntimeStack:
+      type: object
+      additionalProperties: true
+      required: [levels, playlists]
+      description: >-
+        Every level of the screen's stack, sent only to a Player that declared the schedule.stack host capability and only when the stack has more than one level (docs/player-compatibility.md §6.11). The manifest's root members are the bottom level's playlist; the Player resolves the levels itself with the schedule contract.
+      properties:
+        levels: {type: array, maxItems: 64, items: {$ref: "#/components/schemas/StackLevel"}, description: "Highest first; the last is the default and always holds."}
+        playlists:
+          type: object
+          description: Every level playlist other than the root's, by playlist id.
+          additionalProperties: {$ref: "#/components/schemas/RuntimeStackPlaylist"}
+    RuntimeStackPlaylist:
+      type: object
+      additionalProperties: true
+      required: [playlistRevision, pages]
+      properties:
+        playlistName: {type: string}
+        playlistRevision: {type: integer}
+        pages: {type: array, items: {oneOf: [{$ref: "#/components/schemas/RuntimePage"}, {$ref: "#/components/schemas/RuntimeAdslotPage"}]}}
+        audio: {$ref: "#/components/schemas/RuntimeAudio"}
+        diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}}
     RuntimeSuspension:
       type: object
       additionalProperties: true
@@ -29241,7 +29552,7 @@ components:
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
         level: {type: string, description: "Always warning today. A reader treats a level it does not know as warning."}
-        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_iframe_reload, invalid_iframe_fallback, invalid_iframe_navigation_entry, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled), overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it), or selector_order_downgraded (a selector with order weighted reaches a Player that did not declare the selector.weighted host capability as order random)."}
+        code: {type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_iframe_reload, invalid_iframe_fallback, invalid_iframe_navigation_entry, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, invalid_audio_cue, wall_format_mismatch (a playlist format that is not the shape of the screen's wall, or a screen with no wall; pages is then [], a degraded projection), screen_fact_missing (a {screen.…} token names a field or location the screen does not carry: a text param expands empty, a data key or a location param is left out, and an iframe or application whose URL or params read it is left out of this screen's manifest), screen_fact_invalid (a data key or params the card refuses once the screen's facts are filled, or an iframe URL or application param that is not valid once filled). A page left with no primitive to show is dropped with invalid_page, overlay_edge_taken (a page already holds a strip with presence on the edge an overlay trigger's bar takes, so the bar does not show on that page), overlay_page_full (a page already holds the most primitives a page may, so an overlay trigger's bar does not show on it), or selector_order_downgraded (a selector with order weighted reaches a Player that did not declare the selector.weighted host capability as order random)."}
         pageId: {type: string}
         primitiveId: {type: string}
         detail: {type: string}
@@ -30080,6 +30391,29 @@ components:
         enabled: {type: boolean}
         windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/DisplayWindow"}}
         updated_at: {type: string, format: date-time}
+    ScreenRebootScheduleWrite:
+      type: object
+      additionalProperties: false
+      required: [enabled, windows]
+      properties:
+        enabled: {type: boolean}
+        windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/DisplayWindow"}, description: "Reboot windows: the backend reboots the screen at the start of each, in the screen timezone. Each is 5 minutes to 24 hours long."}
+    ScreenRebootSchedule:
+      type: object
+      additionalProperties: false
+      required: [enabled, windows, updated_at]
+      description: The windows in which the backend reboots the screen. Present while one is set.
+      properties:
+        enabled: {type: boolean}
+        windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/DisplayWindow"}}
+        updated_at: {type: string, format: date-time}
+    ScreenRebootScheduleView:
+      type: object
+      additionalProperties: false
+      required: [reboot_schedule, next_reboot_at]
+      properties:
+        reboot_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenRebootSchedule"}, {type: "null"}]}
+        next_reboot_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The start of the next window the backend reboots the screen at; null with no enabled schedule."}
     ScreenDisplayOverride:
       type: object
       additionalProperties: false

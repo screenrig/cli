@@ -618,6 +618,19 @@ export interface ScreenDisplayScheduleView {
   display?: ScreenDisplay;
 }
 
+/** Screen.reboot_schedule: the windows in which the backend reboots the screen, at the start of each, in the screen's timezone. */
+export interface ScreenRebootSchedule {
+  enabled: boolean;
+  windows: ScreenScheduleWindow[];
+  updated_at: string;
+}
+
+/** GET /api/screens/{id}/reboot-schedule: the schedule (null when none) and the start of the next window the backend reboots the screen at (null with no enabled schedule). */
+export interface ScreenRebootScheduleView {
+  reboot_schedule: ScreenRebootSchedule | null;
+  next_reboot_at: string | null;
+}
+
 /** sent: the screen was online and its Player was handed the command at once. queued: the screen was offline; the command is sent when it comes online before expires_at. */
 export type ScreenCommandDelivery = "queued" | "sent";
 
@@ -645,6 +658,8 @@ export interface ScreenCommand {
   expires_at: string;
   sent_at?: string;
   done_at?: string;
+  /** schedule: issued by the screen's reboot schedule at the start of a window. Absent for a reboot a person or agent asked for. */
+  source?: "schedule";
 }
 
 /** Screen.glass: the backend's conclusions about the picture. Readers keep a member and a verdict they do not know. */
@@ -903,6 +918,10 @@ export interface Screen {
   storage?: ScreenStorage;
   health?: ScreenHealth;
   display?: ScreenDisplay;
+  /** The windows in which the backend reboots the screen. Present while one is set. Read-only: screen reboot-schedule set and clear change it. */
+  reboot_schedule?: ScreenRebootSchedule;
+  /** The start of the next window the backend reboots the screen at; absent with no enabled reboot schedule. Read-only. */
+  next_reboot_at?: string;
   /**
    * Approximate steady-state target selection (no transition) from the last
    * reported capacity and the screen's desired manifest. Absent without a
@@ -994,7 +1013,9 @@ export type ScreenAction =
   | { type: "display"; power: "on" | "off"; until?: string | null }
   | { type: "display_clear" }
   | { type: "set_display_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
-  | { type: "clear_display_schedule" };
+  | { type: "clear_display_schedule" }
+  | { type: "set_reboot_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
+  | { type: "clear_reboot_schedule" };
 
 export type ScreenActionType = ScreenAction["type"];
 
@@ -1022,6 +1043,8 @@ export interface ScreenActionResult {
   succeeded: number;
   failed: number;
   results: ScreenActionScreenResult[];
+  /** assign only: the screen_fact_missing warning when the playlist reads a value (screen field, location) some screen of the page lacks. */
+  warnings?: Array<{ code: string; message: string; page_id?: string; primitive_id?: string; src?: string; tokens?: string[]; screen_ids?: string[]; screen_count?: number }>;
   /** Continuation metadata from the backend-owned ScreenActionResult contract. */
   offset?: number;
   total?: number;
@@ -1503,6 +1526,19 @@ export type NotificationCondition = "screen_offline" | "display_disconnected" | 
  * are never part of this shape. Readers treat a channel they do not know as one
  * they cannot edit.
  */
+/** info < warning < error. */
+export type NotificationSeverity = "info" | "warning" | "error";
+
+/** Condition to severity for one notification; a condition not listed keeps its default (error for screen_offline, warning for the rest). */
+export type NotificationSeverityOverrides = Partial<Record<string, NotificationSeverity>>;
+
+/** When opened notices go out: the windows, read in timezone; outside them a notice is held for the next opening (the default) or dropped. */
+export interface NotificationActiveHours {
+  timezone: string;
+  windows: ScreenScheduleWindow[];
+  outside?: "hold" | "drop";
+}
+
 export interface Notification {
   channel: string;
   conditions: string[];
@@ -1523,8 +1559,16 @@ export interface Notification {
   /** Email only: owner, or the user ids of project members. */
   recipients?: string[];
   revision: number;
-  /** Empty means every screen. */
+  /** Empty means every screen, unless audience is present. */
   screen_tags: string[];
+  /** Present while set: a campaign audience rule that covers the screens instead of screen_tags. */
+  audience?: CampaignAudience;
+  /** Present while set: opened notices below this severity are not sent. */
+  min_severity?: NotificationSeverity;
+  /** Present while any condition is overridden. */
+  severity?: NotificationSeverityOverrides;
+  /** Present while set; outside is always shown. */
+  active_hours?: NotificationActiveHours;
   snoozed_until?: string;
   status: "active" | "failing" | "disabled";
   /** Telegram only: the chat messages go to. */
@@ -1555,6 +1599,11 @@ export interface NotificationList {
 
 export interface NotificationWrite {
   channel: "email" | "webhook" | "slack" | "teams" | "pagerduty" | "telegram";
+  /** Instead of screen_tags; both is invalid_request. */
+  audience?: CampaignAudience;
+  min_severity?: NotificationSeverity;
+  severity?: NotificationSeverityOverrides;
+  active_hours?: NotificationActiveHours;
   conditions?: string[];
   description?: string;
   /** Slack, Teams, PagerDuty and Telegram only: the write-only webhook URL, routing key or bot token. */
@@ -1570,6 +1619,14 @@ export interface NotificationWrite {
 }
 
 export interface NotificationPatch {
+  /** null clears it; an audience and screen_tags together are invalid_request, so switching clears the first in the same request. */
+  audience?: CampaignAudience | null;
+  /** null clears it. */
+  min_severity?: NotificationSeverity | null;
+  /** Replaces every override; null or an empty object clears them. */
+  severity?: NotificationSeverityOverrides | null;
+  /** Replaces the hours; null clears them. */
+  active_hours?: NotificationActiveHours | null;
   conditions?: string[];
   /** An empty string clears the description. */
   description?: string;
