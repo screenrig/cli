@@ -4,6 +4,8 @@ import type {
   CampaignAudience,
   CampaignScreens,
   CampaignStatus,
+  LevelDate,
+  LevelMonthly,
   ScreenCampaigns,
   ScreenExplainAt,
   ScreenScheduleDay,
@@ -11,7 +13,10 @@ import type {
   ScreenScheduleWindow,
 } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
-import { effectivePlaylistText, instantInZone, scheduleWindow } from "./screen-control.js";
+import {
+  effectivePlaylistText, instantInZone, isCivilDate, LEVEL_DISPLAYS_MAX, LEVEL_IDLE_DEFAULT_S, LEVEL_IDLE_MAX_S, LEVEL_IDLE_MIN_S, levelRuleParts,
+  SCHEDULE_DATES_MAX, SCHEDULE_EXCEPT_MAX, SCHEDULE_MONTHLY_MAX, scheduleDate, scheduleMonthly, scheduleWindow,
+} from "./screen-control.js";
 import { SCREEN_TAG_PATTERN, screenFolderId } from "./screen-fleet.js";
 
 /** Backend Campaign.id shape (vendor/openapi.yaml). Advertising campaigns share the cmp_ prefix but are a different resource. */
@@ -188,6 +193,18 @@ export function campaignAudienceOption(value: string): string {
   return value;
 }
 
+/** Splits "HEAD@HH:MM-HH:MM" into HEAD and its two times; the times are optional, and `fail` words a malformed one. */
+function splitTimes(spec: string, fail: (detail: string) => CliError): { head: string; start?: string; end?: string } {
+  const text = spec.trim();
+  const at = text.indexOf("@");
+  if (at < 0) return { head: text };
+  const times = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(text.slice(at + 1).trim());
+  if (!times || !CLOCK.test(times[1]!) || !CLOCK.test(times[2]!)) {
+    throw fail("The time of day after @ must be HH:MM-HH:MM in 24-hour time, such as 09:00-17:00.");
+  }
+  return { head: text.slice(0, at).trim(), start: times[1]!, end: times[2]! };
+}
+
 function windowError(spec: string, detail: string): CliError {
   return usageError(`--window ${JSON.stringify(spec)}: ${detail} A window is DAYS or DAYS@HH:MM-HH:MM, such as mon-fri@09:00-17:00, sat,sun or daily@22:00-06:00.`);
 }
@@ -225,17 +242,11 @@ function windowDays(text: string, spec: string): ScreenScheduleDay[] {
  * sun order without duplicates.
  */
 export function campaignWindow(spec: string): ScreenScheduleWindow {
-  const text = spec.trim();
-  const at = text.indexOf("@");
-  const days = windowDays((at < 0 ? text : text.slice(0, at)).trim().toLowerCase(), spec);
-  const window: ScreenScheduleWindow = { days };
-  if (at >= 0) {
-    const times = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(text.slice(at + 1).trim());
-    if (!times || !CLOCK.test(times[1]!) || !CLOCK.test(times[2]!)) {
-      throw windowError(spec, "The time of day after @ must be HH:MM-HH:MM in 24-hour time, such as 09:00-17:00.");
-    }
-    window.start = times[1]!;
-    window.end = times[2]!;
+  const { head, start, end } = splitTimes(spec, (detail) => windowError(spec, detail));
+  const window: ScreenScheduleWindow = { days: windowDays(head.toLowerCase(), spec) };
+  if (start !== undefined) {
+    window.start = start;
+    window.end = end!;
   }
   // The same check screen schedules and display schedules apply to a window.
   return scheduleWindow(window, "--window", (_path, message) => windowError(spec, message)) as ScreenScheduleWindow;
@@ -273,6 +284,128 @@ export function campaignWindows(value: string, previous?: string): string {
 /** The windows a --window accumulation names, in the order given. */
 export function campaignWindowList(accumulated: string): ScreenScheduleWindow[] {
   return accumulated.split(";").map(campaignWindow);
+}
+
+const ORDINALS: Readonly<Record<string, LevelMonthly["nth"]>> = { "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, last: -1 };
+
+function monthlyError(spec: string, detail: string): CliError {
+  return usageError(`--monthly ${JSON.stringify(spec)}: ${detail} A monthly rule is DAY or NTH-WEEKDAY with an optional @HH:MM-HH:MM, such as 15, day15, 1st-mon, 3rd-wed@18:00-21:00 or last-sun@09:00-14:00.`);
+}
+
+/**
+ * One --monthly: a day of the month (15 or day15; a month without that day
+ * skips it) or the nth weekday of the month (1st-mon, 2nd-tue, 3rd-wed,
+ * 4th-thu, last-sun), each with an optional @HH:MM-HH:MM. Times read like a
+ * window's: an end at or before the start crosses midnight and belongs to the
+ * date it starts.
+ */
+export function campaignMonthly(spec: string): LevelMonthly {
+  const fail = (detail: string) => monthlyError(spec, detail);
+  const { head, start, end } = splitTimes(spec, fail);
+  const text = head.toLowerCase();
+  const day = /^(?:day\s*)?(\d{1,2})$/.exec(text);
+  const nth = /^([a-z0-9]+)\s*-\s*([a-z]+)$/.exec(text);
+  let monthly: LevelMonthly;
+  if (day) {
+    if (Number(day[1]) < 1 || Number(day[1]) > 31) throw fail(`${day[1]} is not a day of the month; use 1 to 31.`);
+    monthly = { day: Number(day[1]) };
+  } else if (nth) {
+    const count = ORDINALS[nth[1]!];
+    if (count === undefined) throw fail(`${JSON.stringify(nth[1])} is not an occurrence; use 1st, 2nd, 3rd, 4th or last.`);
+    const weekday = DAYS.find((name) => name === nth[2]);
+    if (!weekday) throw fail(`${JSON.stringify(nth[2])} is not a day; use mon, tue, wed, thu, fri, sat or sun.`);
+    monthly = { nth: count, weekday };
+  } else {
+    throw fail(text === "" ? "The day or occurrence is missing." : `${JSON.stringify(head)} is not a day of the month or an occurrence such as 1st-mon.`);
+  }
+  if (start !== undefined) {
+    monthly.start = start;
+    monthly.end = end!;
+  }
+  return scheduleMonthly(monthly, "--monthly", (_path, message) => fail(message));
+}
+
+/** A monthly rule in --monthly spelling: day15, 1st-mon, last-sun@09:00-14:00. */
+export function campaignMonthlySpec(item: LevelMonthly): string {
+  const ordinal = Object.entries(ORDINALS).find(([, count]) => count === item.nth)?.[0] ?? String(item.nth);
+  const head = item.day !== undefined ? `day${item.day}` : `${ordinal}-${item.weekday}`;
+  return item.start !== undefined && item.end !== undefined ? `${head}@${item.start}-${item.end}` : head;
+}
+
+/** Repeatable --monthly; returns the accumulated canonical specs joined by semicolons. */
+export function campaignMonthlies(value: string, previous?: string): string {
+  const specs = [...(previous ? previous.split(";") : []), campaignMonthlySpec(campaignMonthly(value))];
+  if (specs.length > SCHEDULE_MONTHLY_MAX) throw usageError(`--monthly accepts at most ${SCHEDULE_MONTHLY_MAX} rules.`);
+  return specs.join(";");
+}
+
+/** The monthly rules a --monthly accumulation names, in the order given. */
+export function campaignMonthlyList(accumulated: string): LevelMonthly[] {
+  return accumulated.split(";").map(campaignMonthly);
+}
+
+function dateError(spec: string, detail: string): CliError {
+  return usageError(`--date ${JSON.stringify(spec)}: ${detail} A date is YYYY-MM-DD with an optional @HH:MM-HH:MM, such as 2026-12-24 or 2026-12-24@18:00-22:00.`);
+}
+
+/** One --date: a real civil date, the whole day or between @HH:MM-HH:MM (an end at or before the start crosses midnight and belongs to the date it starts). */
+export function campaignDate(spec: string): LevelDate {
+  const fail = (detail: string) => dateError(spec, detail);
+  const { head, start, end } = splitTimes(spec, fail);
+  if (!isCivilDate(head)) throw fail(head === "" ? "The date is missing." : `${JSON.stringify(head)} is not a real calendar date written YYYY-MM-DD.`);
+  return scheduleDate({ date: head, ...(start !== undefined ? { start, end } : {}) }, "--date", (_path, message) => fail(message));
+}
+
+/** A date in --date spelling: 2026-12-24 or 2026-12-24@18:00-22:00. */
+export function campaignDateSpec(item: LevelDate): string {
+  return item.start !== undefined && item.end !== undefined ? `${item.date}@${item.start}-${item.end}` : item.date;
+}
+
+/** Repeatable --date; returns the accumulated canonical specs joined by semicolons. */
+export function campaignDates(value: string, previous?: string): string {
+  const specs = [...(previous ? previous.split(";") : []), campaignDateSpec(campaignDate(value))];
+  if (specs.length > SCHEDULE_DATES_MAX) throw usageError(`--date accepts at most ${SCHEDULE_DATES_MAX} dates.`);
+  return specs.join(";");
+}
+
+/** The dates a --date accumulation names, in the order given. */
+export function campaignDateList(accumulated: string): LevelDate[] {
+  return accumulated.split(";").map(campaignDate);
+}
+
+/** Repeatable --except; each value may also list comma-separated dates. Returns the accumulated dates, ascending, joined by commas. */
+export function campaignExceptDates(value: string, previous?: string): string {
+  const dates = accumulate(value, previous);
+  const bad = dates.find((date) => !isCivilDate(date));
+  if (bad !== undefined) {
+    throw usageError(`--except takes real calendar dates written YYYY-MM-DD, repeated or comma-separated, for example --except 2026-12-25,2027-01-01; ${JSON.stringify(bad)} is not one.`);
+  }
+  if (new Set(dates).size !== dates.length) throw usageError("--except lists a date more than once.");
+  if (dates.length > SCHEDULE_EXCEPT_MAX) throw usageError(`--except accepts at most ${SCHEDULE_EXCEPT_MAX} dates.`);
+  return dates.sort().join(",");
+}
+
+/** --displays: the video wall outputs the campaign plays on, 1 to 12, comma-separated. Returns them ascending, joined by commas. */
+export function campaignDisplays(value: string): string {
+  const displays = value.split(",").map((item) => (/^\d{1,2}$/.test(item.trim()) ? Number(item) : Number.NaN));
+  if (displays.some((display) => !(display >= 1 && display <= LEVEL_DISPLAYS_MAX))) {
+    throw usageError(`--displays takes display numbers from 1 to ${LEVEL_DISPLAYS_MAX}, comma-separated, for example --displays 1,2.`);
+  }
+  if (new Set(displays).size !== displays.length) throw usageError("--displays lists a display more than once.");
+  return displays.sort((a, b) => a - b).join(",");
+}
+
+/** The display numbers a --displays value names. */
+export function campaignDisplayList(value: string): number[] {
+  return value.split(",").map(Number);
+}
+
+/** --on-touch IDLE_S: the seconds without input before the screen counts as idle, a whole number from 5 to 3600. */
+export function campaignOnTouch(value: string): string {
+  if (!/^\d+$/.test(value) || Number(value) < LEVEL_IDLE_MIN_S || Number(value) > LEVEL_IDLE_MAX_S) {
+    throw usageError(`--on-touch takes the seconds without input before the screen counts as idle, a whole number from ${LEVEL_IDLE_MIN_S} to ${LEVEL_IDLE_MAX_S} (default: ${LEVEL_IDLE_DEFAULT_S}), for example --on-touch 90.`);
+  }
+  return value;
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -393,12 +526,17 @@ export function campaignAudienceText(audience: CampaignAudience | undefined, nes
   return JSON.stringify(audience);
 }
 
-/** The campaign's clock: "always", or its bounds and windows ("from …; until …; mon-fri@09:00-17:00"). */
-export function campaignWhenText(campaign: Pick<Campaign, "from" | "until" | "windows">): string {
+/**
+ * The campaign's clock: "always", or its bounds, windows and the other rule
+ * members ("from …; until …; mon-fri@09:00-17:00; last Sunday 09:00–14:00;
+ * except 2026-12-27; on touch (idle 60 s)").
+ */
+export function campaignWhenText(campaign: Pick<Campaign, "from" | "until" | "windows" | "monthly" | "dates" | "except" | "data" | "interaction">): string {
   const parts = [
     ...(campaign.from ? [`from ${campaign.from}`] : []),
     ...(campaign.until ? [`until ${campaign.until}`] : []),
     ...(campaign.windows ?? []).map(campaignWindowSpec),
+    ...levelRuleParts(campaign),
   ];
   return parts.length ? parts.join("; ") : "always";
 }
@@ -407,12 +545,16 @@ export function campaignWhenText(campaign: Pick<Campaign, "from" | "until" | "wi
 export function campaignLines(campaign: Campaign | undefined): string[] {
   if (!campaign) return [];
   const clock = campaignWhenText(campaign);
+  const civil = Boolean(campaign.from || campaign.until || campaign.windows?.length || campaign.monthly?.length || campaign.dates?.length || campaign.except?.length);
   return [
     `id: ${campaign.id}`,
     `name: ${campaign.name}`,
     `playlist_id: ${campaign.playlist_id}`,
     `audience: ${campaignAudienceText(campaign.audience)}`,
-    `when: ${clock}${clock === "always" ? "" : " (civil times in each screen's timezone)"}`,
+    `when: ${clock}${civil ? " (civil times in each screen's timezone)" : ""}`,
+    ...(campaign.covers && campaign.covers !== "full" ? [`covers: ${campaign.covers}`] : []),
+    ...(campaign.displays?.length ? [`displays: ${campaign.displays.join(", ")}`] : []),
+    ...(campaign.start ? [`start: ${campaign.start === "on_time" ? "on time" : "next item"}`] : []),
     `priority: ${campaign.priority}`,
     `paused: ${campaign.paused}`,
     `revision: ${campaign.revision}`,
@@ -435,6 +577,9 @@ export function campaignTableLines(items: Campaign[]): string[] {
     clip(campaignWhenText(item), 56), String(item.priority ?? 0), item.paused ? "yes" : "no",
   ]));
 }
+
+/** A region, a display lock, interaction or a data condition is honored only by a Player that resolves its own stack. */
+const STACK_ONLY_DETAIL = "needs a Player that resolves its own stack";
 
 const STANDING_ORDER = ["playing", "pending", "waiting", "ended", "outranked", "paused", "blocked", "not_in_audience"];
 
@@ -469,6 +614,8 @@ export function campaignStandingDetail(status: CampaignStatus, screenId?: string
           return `the screen has no timezone: screenrig screen set-timezone ${screenId ?? "SCREEN_ID"} --timezone ZONE`;
         case "playlist_unavailable":
           return "the playlist is missing, unapproved or does not fit the screen";
+        case "stack_only":
+          return STACK_ONLY_DETAIL;
         default:
           return "blocked";
       }
@@ -518,6 +665,7 @@ export function verdictDetail(verdict: ScreenVerdict, screenId: string, timezone
         case "no_default_playlist": return `the screen has no default playlist: screenrig screen assign ${screenId} --playlist-id PLAYLIST_ID`;
         case "no_timezone": return `the screen has no timezone: screenrig screen set-timezone ${screenId} --timezone ZONE`;
         case "playlist_unavailable": return "the playlist is missing or unapproved";
+        case "stack_only": return STACK_ONLY_DETAIL;
         default: return "does not apply";
       }
     default: return "";

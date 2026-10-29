@@ -1967,12 +1967,60 @@ export interface ScreenScheduleWindow {
   end?: string;
 }
 
-export interface ScreenScheduleEntryWrite {
-  id?: string;
-  playlist_id: string;
+/** Where a level plays: the full page, or one region of a playlist laid out for that region. */
+export type LevelCovers = "full" | "main" | "header" | "footer" | "side";
+
+/** on_time switches at the edge, interrupting the current item; next_item (the default) waits for it to end. */
+export type LevelStart = "next_item" | "on_time";
+
+/** A monthly occurrence in the screen timezone: day (1 to 31), or nth (1 to 4, -1 the last) with weekday; start and end as a window's. */
+export interface LevelMonthly {
+  day?: number;
+  nth?: 1 | 2 | 3 | 4 | -1;
+  weekday?: ScreenScheduleDay;
+  start?: string;
+  end?: string;
+}
+
+/** One specific civil date (YYYY-MM-DD), the whole day or between start and end. */
+export interface LevelDate {
+  date: string;
+  start?: string;
+  end?: string;
+}
+
+/** The level holds while someone is using the screen, until idle_s seconds pass with no input. */
+export interface LevelInteraction {
+  idle_s?: number;
+}
+
+/** A card-data predicate: the key's document (at path) exists, or equals the scalar. */
+export interface PageDataCondition {
+  key: string;
+  path?: string;
+  equals?: string | number | boolean | null;
+}
+
+/** The members a playlist schedule entry and a campaign share: the level holds while all its rule members hold. */
+export interface LevelMembers {
   from?: string;
   until?: string;
-  windows: ScreenScheduleWindow[];
+  windows?: ScreenScheduleWindow[];
+  monthly?: LevelMonthly[];
+  dates?: LevelDate[];
+  /** Civil dates; an exception removes the occurrences that start on that date. */
+  except?: string[];
+  data?: PageDataCondition;
+  interaction?: LevelInteraction;
+  covers?: LevelCovers;
+  /** The video wall outputs (1 to 12) the level plays on; absent plays on every output. */
+  displays?: number[];
+  start?: LevelStart;
+}
+
+export interface ScreenScheduleEntryWrite extends LevelMembers {
+  id?: string;
+  playlist_id: string;
 }
 
 export interface ScreenScheduleEntry extends ScreenScheduleEntryWrite {
@@ -2093,15 +2141,12 @@ export interface CampaignAudience {
 }
 
 /** GET /api/campaigns/{id}: a content campaign. from and until are civil YYYY-MM-DDTHH:MM in each screen's timezone. */
-export interface Campaign {
+export interface Campaign extends LevelMembers {
   project_id?: string;
   id: string;
   name: string;
   playlist_id: string;
   audience: CampaignAudience;
-  from?: string;
-  until?: string;
-  windows?: ScreenScheduleWindow[];
   priority: number;
   paused: boolean;
   revision: number;
@@ -2113,28 +2158,24 @@ export interface CampaignList {
   items: Campaign[];
 }
 
-export interface CampaignWrite {
+export interface CampaignWrite extends LevelMembers {
   name: string;
   playlist_id: string;
   audience: CampaignAudience;
-  from?: string;
-  until?: string;
-  windows?: ScreenScheduleWindow[];
   priority?: number;
   paused?: boolean;
 }
 
-export interface CampaignPatch {
+/** null clears a level member (from, until, windows, monthly, dates, except, data, interaction, displays); null covers is the full page and null start is next_item. */
+export interface CampaignPatch extends Nullable<LevelMembers> {
   name?: string;
   playlist_id?: string;
   audience?: CampaignAudience;
-  /** null clears from, until or windows. */
-  from?: string | null;
-  until?: string | null;
-  windows?: ScreenScheduleWindow[] | null;
   priority?: number;
   paused?: boolean;
 }
+
+type Nullable<T> = { [K in keyof T]?: T[K] | null };
 
 export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "paused" | "blocked" | "not_in_audience";
 
@@ -2144,8 +2185,8 @@ export interface CampaignStatus {
   screen_id: string;
   screen_name?: string;
   status: CampaignStanding;
-  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable). */
-  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable";
+  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, stack_only: only a Player that resolves its own stack honors it). */
+  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
   /** The campaign that outranks this one. */
   by?: string;
   next_start?: string;
@@ -2178,8 +2219,8 @@ export interface ScreenVerdict {
   id?: string;
   playlist_id: string;
   verdict: ScreenVerdictName;
-  /** Why an off candidate does not apply. */
-  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable";
+  /** Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition). */
+  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
   /** The candidate that won over an outranked one. */
   by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
   /** When a takeover ends. */

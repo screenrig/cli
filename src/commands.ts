@@ -15,7 +15,7 @@ import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { cacheProjectContexts, clearResultContext, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
-import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
+import { instantInZone, LEVEL_IDLE_DEFAULT_S, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
@@ -36,7 +36,7 @@ import {
   triggerHoldSeconds, triggerId, triggerLines, triggerMapping, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerSigningWarning, triggerStyle,
   triggerTableLines, triggerTag,
 } from "./triggers.js";
-import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
+import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "./campaigns.js";
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
@@ -9917,6 +9917,28 @@ async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime): Prom
   return campaignAudienceJson(text);
 }
 
+/**
+ * The level members the flags set: --monthly, --date, --except, --on-touch
+ * (60 seconds without a value), --displays and --start. A member the flags do
+ * not name stays out of the body.
+ */
+function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "displays" | "start"> {
+  const monthly = flagString(args.flags, "monthly");
+  const dates = flagString(args.flags, "date");
+  const except = flagString(args.flags, "except");
+  const displays = flagString(args.flags, "displays");
+  const start = flagString(args.flags, "start");
+  const onTouch = args.flags["on-touch"];
+  return {
+    ...(monthly !== undefined ? { monthly: campaignMonthlyList(monthly) } : {}),
+    ...(dates !== undefined ? { dates: campaignDateList(dates) } : {}),
+    ...(except !== undefined ? { except: except.split(",") } : {}),
+    ...(onTouch !== undefined && onTouch !== false ? { interaction: { idle_s: typeof onTouch === "string" ? Number(onTouch) : LEVEL_IDLE_DEFAULT_S } } : {}),
+    ...(displays !== undefined ? { displays: campaignDisplayList(displays) } : {}),
+    ...(start !== undefined ? { start: start === "on-time" ? "on_time" as const : "next_item" as const } : {}),
+  };
+}
+
 function campaignResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, title: string): CommandResult {
   return {
     envelope: jsonBody(response, client.requestId),
@@ -9943,6 +9965,7 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
     ...(from !== undefined ? { from } : {}),
     ...(until !== undefined ? { until } : {}),
     ...(windows !== undefined ? { windows: campaignWindowList(windows) } : {}),
+    ...campaignLevelFlags(args),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
     ...(paused ? { paused: true } : {}),
   };
@@ -9981,7 +10004,7 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
   const until = flagString(args.flags, "until");
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
-  const clears = (["clear-from", "clear-until", "clear-windows"] as const).filter((flag) => flagBool(args.flags, flag));
+  const clears = (["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const).filter((flag) => flagBool(args.flags, flag));
   const audience = await campaignAudienceFlag(args, runtime);
   campaignBounds(from, until);
   const patch: CampaignPatch = {
@@ -9994,10 +10017,16 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
     ...(clears.includes("clear-until") ? { until: null } : {}),
     ...(windows !== undefined ? { windows: campaignWindowList(windows) } : {}),
     ...(clears.includes("clear-windows") ? { windows: null } : {}),
+    ...campaignLevelFlags(args),
+    ...(clears.includes("clear-monthly") ? { monthly: null } : {}),
+    ...(clears.includes("clear-dates") ? { dates: null } : {}),
+    ...(clears.includes("clear-except") ? { except: null } : {}),
+    ...(clears.includes("clear-on-touch") ? { interaction: null } : {}),
+    ...(clears.includes("clear-displays") ? { displays: null } : {}),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, or --priority.");
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, {

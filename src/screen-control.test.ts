@@ -6,8 +6,9 @@ import { test } from "node:test";
 import { formatEventLine } from "./commands.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
+import { commandHelp } from "./help.js";
 import { run, type CliRuntime } from "./main.js";
-import { durationMs, effectivePlaylistText, scheduleEntries, takeoverUntil } from "./screen-control.js";
+import { durationMs, effectivePlaylistText, scheduleEntries, scheduleTableLines, takeoverUntil } from "./screen-control.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest } from "./transport/types.js";
@@ -260,6 +261,136 @@ test("schedule files are validated locally with a path in the message", async ()
   assert.equal(missing.code, ExitCode.Usage);
   // A bare array and whole-day windows are accepted.
   assert.deepEqual(scheduleEntries([{ playlist_id: "pl_A", windows: [{ days: ["sat", "sun"] }] }]), [{ playlist_id: "pl_A", windows: [{ days: ["sat", "sun"] }] }]);
+});
+
+const LEVELS = {
+  entries: [
+    { id: "sunday-market", playlist_id: "pl_MARKET", monthly: [{ nth: -1, weekday: "sun", start: "09:00", end: "14:00" }], except: ["2026-12-27"] },
+    { id: "pay-day", playlist_id: "pl_PAYDAY", monthly: [{ day: 15 }, { nth: 1, weekday: "fri" }], dates: [{ date: "2026-12-24", start: "18:00", end: "22:00" }, { date: "2026-12-31" }] },
+    { id: "kiosk", playlist_id: "pl_KIOSK", interaction: { idle_s: 90 }, displays: [1, 2], start: "on_time" },
+    { id: "rain", playlist_id: "pl_RAIN", data: { key: "{screen.weather}", path: "/condition", equals: "rain" }, covers: "header" },
+    { id: "lunch", playlist_id: "pl_LUNCH", windows: [{ days: ["mon", "tue"], start: "11:00", end: "15:00" }], from: "2026-12-01T00:00" },
+  ],
+};
+
+test("screen schedule set takes entries without windows and sends every level member", async () => {
+  const env = await enrolled();
+  const transport = await backend(env);
+  await writeFile(path.join(env.cwd, "levels.json"), JSON.stringify(LEVELS));
+  const set = await cli(["--json", "screen", "schedule", "set", A, "--file", "levels.json"], transport, env);
+  assert.equal(set.code, 0, set.stdout);
+  assert.equal(last(transport).method, "PUT");
+  assert.deepEqual(last(transport).body, LEVELS);
+  assert.deepEqual(set.envelope.data.playlist_schedule.entries.map((entry: { id: string }) => entry.id), ["sunday-market", "pay-day", "kiosk", "rain", "lunch"]);
+
+  const human = await cli(["--human", "screen", "schedule", "set", A, "--file", "levels.json"], transport, env);
+  assert.equal(human.code, 0, human.stderr);
+  assert.match(human.stdout, /^Windows, FROM\/UNTIL and the monthly and date rules are civil times \(screen timezone America\/Los_Angeles\)\.$/m);
+  assert.match(human.stdout, /^ENTRY\s+PLAYLIST\s+WINDOWS\s+FROM\s+UNTIL\s+RULES$/m);
+  assert.match(human.stdout, /^sunday-market\s+pl_MARKET\s+last Sunday 09:00–14:00; except 2026-12-27$/m);
+  assert.match(human.stdout, /^pay-day\s+pl_PAYDAY\s+day 15; 1st Friday; on 2026-12-24 18:00–22:00; on 2026-12-31$/m);
+  assert.match(human.stdout, /^kiosk\s+pl_KIOSK\s+on touch \(idle 90 s\); displays 1, 2; starts on time$/m);
+  assert.match(human.stdout, /^rain\s+pl_RAIN\s+data \{screen\.weather\} \/condition = "rain"; covers header$/m);
+  assert.match(human.stdout, /^lunch\s+pl_LUNCH\s+mon,tue 11:00-15:00\s+2026-12-01T00:00$/m);
+
+  // The saved show envelope, with the stored interaction, is accepted back unchanged.
+  const shown = await cli(["--json", "screen", "schedule", "show", A], transport, env);
+  await writeFile(path.join(env.cwd, "current.json"), shown.stdout);
+  const roundTrip = await cli(["--json", "screen", "schedule", "set", A, "--file", "current.json"], transport, env);
+  assert.equal(roundTrip.code, 0, roundTrip.stdout);
+  assert.deepEqual(last(transport).body, LEVELS);
+  const fleet = await cli(["--json", "screen", "schedule", "set", A, B, "--file", "levels.json"], transport, env);
+  assert.equal(fleet.code, 0, fleet.stdout);
+  assert.deepEqual((last(transport).body as { action: unknown }).action, { type: "set_playlist_schedule", entries: LEVELS.entries });
+});
+
+test("schedule entries keep the level members, ascending where the server stores them", () => {
+  assert.deepEqual(scheduleEntries([{ playlist_id: "pl_A", except: ["2027-01-01", "2026-12-25"], displays: [3, 1], interaction: {}, start: "next_item", covers: "full" }]),
+    [{ playlist_id: "pl_A", except: ["2026-12-25", "2027-01-01"], interaction: {}, covers: "full", displays: [1, 3], start: "next_item" }]);
+  assert.deepEqual(scheduleEntries({ entries: [{ playlist_id: "pl_A", monthly: [{ day: 1, start: "08:00", end: "09:00" }], data: { key: "queue", equals: null } }] }),
+    [{ playlist_id: "pl_A", monthly: [{ day: 1, start: "08:00", end: "09:00" }], data: { key: "queue", equals: null } }]);
+  // Rules alone are an entry: no windows needed.
+  for (const rule of [{ from: "2026-12-24T18:00" }, { until: "2026-12-24T18:00" }, { dates: [{ date: "2026-12-24" }] }, { except: ["2026-12-25"] }, { interaction: {} }, { data: { key: "queue" } }]) {
+    assert.equal(scheduleEntries([{ playlist_id: "pl_A", ...rule }]).length, 1, JSON.stringify(rule));
+  }
+});
+
+test("schedule level members are validated locally with a path in the message", async () => {
+  const env = await enrolled();
+  const transport = await backend(env);
+  const entry = (extra: Record<string, unknown>) => ({ entries: [{ playlist_id: "pl_A", ...extra }] });
+  const cases: Array<[unknown, RegExp]> = [
+    [entry({}), /entries\[0\] must set at least one rule: windows, monthly, dates, except, from, until, data or interaction/],
+    [entry({ displays: [1], start: "on_time", covers: "header" }), /must set at least one rule/],
+    [entry({ monthly: [] }), /entries\[0\]\.monthly must list 1 to 16 monthly rules/],
+    [entry({ monthly: Array.from({ length: 17 }, () => ({ day: 1 })) }), /1 to 16 monthly rules/],
+    [entry({ monthly: [{ day: 0 }] }), /entries\[0\]\.monthly\[0\]\.day must be a day of the month from 1 to 31/],
+    [entry({ monthly: [{ day: 32 }] }), /day of the month from 1 to 31/],
+    [entry({ monthly: [{ day: 1.5 }] }), /day of the month from 1 to 31/],
+    [entry({ monthly: [{ day: 1, nth: 1, weekday: "mon" }] }), /must set either day, or nth and weekday, not both/],
+    [entry({ monthly: [{}] }), /monthly\[0\] must set day, or nth and weekday/],
+    [entry({ monthly: [{ nth: 5, weekday: "mon" }] }), /monthly\[0\]\.nth must be 1, 2, 3, 4 or -1 for the last/],
+    [entry({ monthly: [{ nth: 1 }] }), /monthly\[0\]\.weekday must be one of mon, tue/],
+    [entry({ monthly: [{ nth: 1, weekday: "monday" }] }), /monthly\[0\]\.weekday must be one of mon, tue/],
+    [entry({ monthly: [{ day: 1, start: "09:00" }] }), /must set both start and end/],
+    [entry({ monthly: [{ day: 1, start: "9:00", end: "10:00" }] }), /monthly\[0\]\.start must be HH:MM/],
+    [entry({ monthly: [{ day: 1, every: 2 }] }), /unknown field "every"; allowed: day, nth, weekday, start, end/],
+    [entry({ dates: [] }), /entries\[0\]\.dates must list 1 to 100 dates/],
+    [entry({ dates: Array.from({ length: 101 }, () => ({ date: "2026-12-24" })) }), /1 to 100 dates/],
+    [entry({ dates: [{ date: "2026-02-30" }] }), /entries\[0\]\.dates\[0\]\.date must be a real civil date/],
+    [entry({ dates: [{}] }), /dates\[0\]\.date must be a real civil date/],
+    [entry({ dates: [{ date: "2026-12-24", start: "18:00" }] }), /must set both start and end/],
+    [entry({ dates: [{ date: "2026-12-24", until: "x" }] }), /unknown field "until"; allowed: date, start, end/],
+    [entry({ except: [] }), /entries\[0\]\.except must list 1 to 100 dates/],
+    [entry({ except: ["2026-12-25", "2026-13-01"] }), /entries\[0\]\.except\[1\] must be a real civil date/],
+    [entry({ except: ["2026-12-25", "2026-12-25"] }), /except must not repeat 2026-12-25/],
+    [entry({ data: {} }), /entries\[0\]\.data\.key must name card data/],
+    [entry({ data: { key: "feed:weather" } }), /data\.key must name card data/],
+    [entry({ data: { key: "bad key" } }), /data\.key must name card data/],
+    [entry({ data: { key: "queue", path: "condition" } }), /data\.path must be an RFC 6901 pointer/],
+    [entry({ data: { key: "queue", equals: { a: 1 } } }), /data\.equals must be a string, number, boolean or null/],
+    [entry({ data: { key: "queue", equals: "x".repeat(1025) } }), /data\.equals must be at most 1024 bytes/],
+    [entry({ data: { key: "queue", when: 1 } }), /unknown field "when"; allowed: key, path, equals/],
+    [entry({ interaction: { idle_s: 4 } }), /entries\[0\]\.interaction\.idle_s must be a whole number of seconds from 5 to 3600/],
+    [entry({ interaction: { idle_s: 3601 } }), /from 5 to 3600/],
+    [entry({ interaction: { idle_s: "60" } }), /from 5 to 3600/],
+    [entry({ interaction: { idle: 60 } }), /unknown field "idle"; allowed: idle_s/],
+    [entry({ interaction: true }), /entries\[0\]\.interaction must be an object/],
+    [entry({ windows: [{ days: ["mon"] }], covers: "left" }), /entries\[0\]\.covers must be full, main, header, footer or side/],
+    [entry({ windows: [{ days: ["mon"] }], displays: [] }), /entries\[0\]\.displays must list 1 to 12 displays/],
+    [entry({ windows: [{ days: ["mon"] }], displays: [0] }), /displays\[0\] must be a display number from 1 to 12/],
+    [entry({ windows: [{ days: ["mon"] }], displays: [13] }), /displays\[0\] must be a display number from 1 to 12/],
+    [entry({ windows: [{ days: ["mon"] }], displays: [1, 1] }), /displays must not repeat a display/],
+    [entry({ windows: [{ days: ["mon"] }], start: "now" }), /entries\[0\]\.start must be next_item or on_time/],
+  ];
+  const before = transport.calls.length;
+  for (const [document, message] of cases) {
+    await writeFile(path.join(env.cwd, "bad.json"), JSON.stringify(document));
+    const refused = await cli(["--json", "screen", "schedule", "set", A, "--file", "bad.json"], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${JSON.stringify(document).slice(0, 100)}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, JSON.stringify(document).slice(0, 100));
+  }
+  assert.equal(transport.calls.length, before, "invalid schedules never reach the server");
+});
+
+test("screen schedule set help describes the level members and shows an entry with monthly and except", () => {
+  const help = commandHelp(["screen", "schedule", "set"]);
+  assert.match(help.usage, /1 to 32 entries of \{id\?, playlist_id, from\?, until\?, windows\?, monthly\?, dates\?, except\?, data\?, interaction\?, covers\?, displays\?, start\?\}/);
+  assert.match(help.usage, /sets at least one of from, until, windows, monthly, dates, except, data or interaction \(windows are no longer required\)/);
+  assert.match(help.usage, /"monthly":\[\{"nth":-1,"weekday":"sun","start":"09:00","end":"14:00"\}\],"except":\["2026-12-27"\]/);
+  assert.match(help.usage, /reports reason stack_only/);
+  const example = /Example: (\{"entries":.*?\}\]\})\. from\/until/.exec(help.usage)?.[1];
+  assert.ok(example, "the help carries one example file");
+  assert.equal(scheduleEntries(JSON.parse(example)).length, 2, "the example is a file the CLI accepts");
+});
+
+test("schedule tables keep their columns when no entry sets a level member", () => {
+  const lines = scheduleTableLines([{ id: "a", playlist_id: "pl_A", windows: [{ days: ["sat", "sun"] }] }], "UTC");
+  assert.deepEqual(lines, ["Windows and FROM/UNTIL are civil times (screen timezone UTC).", "ENTRY  PLAYLIST  WINDOWS          FROM  UNTIL", "a      pl_A      sat,sun all day"]);
+  const withRules = scheduleTableLines([{ id: "a", playlist_id: "pl_A", windows: [{ days: ["sat"] }], monthly: [{ day: 1 }] }, { id: "b", playlist_id: "pl_B", until: "2027-01-01T00:00" }]);
+  assert.match(withRules[0]!, /^ENTRY\s+PLAYLIST\s+WINDOWS\s+FROM\s+UNTIL\s+RULES$/);
+  assert.match(withRules[1]!, /^a\s+pl_A\s+sat all day\s+day 1$/);
+  assert.match(withRules[2]!, /^b\s+pl_B\s+2027-01-01T00:00$/);
 });
 
 test("screen takeover sets one screen with --for, --until, or held until cleared", async () => {

@@ -2862,6 +2862,36 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/schedule/calendar:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleCalendar
+      description: >-
+        Answers what a subject's screens play over [from, to) and why, for the dashboard's Schedule calendar: exactly one of screen_id, folder_id (the screens in the folder and every folder inside it), tag, or campaign_id (the screens in its audience). Screens whose stacks have identical inputs (the same levels, default, timezone and display count) share one group with one timeline, so a large subject costs tens of timelines; a group lists up to 500 of its screens and an answer at most 200 groups (truncated). Each group carries its stack, highest first (takeover, campaigns that reach the screens, their own schedule entries, then the default playlist or the nearest folder's), each level's spans (plays on every display it targets, partial with the displays it plays on, outranked, or conditional while it waits on interaction or a data condition only a Player observes), what each display shows (on_screen; the main region of a full page), and conflicts (two campaigns of one priority holding at once; a level that holds yet never plays). from and to are RFC 3339 instants, to after from, at most 93 days apart; they are truncated to the minute. Rules are read in each group's timezone as the sweep and every Player read them; every level is judged playable.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: screen_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+        - {name: folder_id, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}}
+        - {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}
+        - {name: campaign_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200':
+          description: The subject's calendar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleCalendar'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/project/browser-links/claim:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -18262,6 +18292,36 @@ paths:
                 $ref: '#/components/schemas/ScreenMoveResult'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/calendar:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleCalendarInProject
+      description: >-
+        Answers what a subject's screens play over [from, to) and why, for the dashboard's Schedule calendar: exactly one of screen_id, folder_id (the screens in the folder and every folder inside it), tag, or campaign_id (the screens in its audience). Screens whose stacks have identical inputs (the same levels, default, timezone and display count) share one group with one timeline, so a large subject costs tens of timelines; a group lists up to 500 of its screens and an answer at most 200 groups (truncated). Each group carries its stack, highest first (takeover, campaigns that reach the screens, their own schedule entries, then the default playlist or the nearest folder's), each level's spans (plays on every display it targets, partial with the displays it plays on, outranked, or conditional while it waits on interaction or a data condition only a Player observes), what each display shows (on_screen; the main region of a full page), and conflicts (two campaigns of one priority holding at once; a level that holds yet never plays). from and to are RFC 3339 instants, to after from, at most 93 days apart; they are truncated to the minute. Rules are read in each group's timezone as the sweep and every Player read them; every level is judged playable.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: screen_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+        - {name: folder_id, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}}
+        - {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}
+        - {name: campaign_id, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200':
+          description: The subject's calendar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleCalendar'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/project/browser-links/claim:
     parameters:
       - name: project_id
@@ -25551,25 +25611,68 @@ components:
     ScreenScheduleEntryWrite:
       type: object
       additionalProperties: false
-      required: [playlist_id, windows]
+      required: [playlist_id]
       description: >-
-        One playlist schedule entry. id is optional (entry_N is assigned in order when omitted) and unique in the schedule. from (inclusive) and until (exclusive) are optional civil minute-precision bounds with no offset, from before until.
+        One playlist schedule entry, a level of the screen's own stack (packages/schedule-contract SEMANTICS.md, Levels and the stack). id is optional (entry_N is assigned in order when omitted) and unique in the schedule. It holds while all its rule members hold: from (inclusive) and until (exclusive), civil minute-precision bounds with no offset; an occurrence of windows, monthly or dates (none of the three recurs every day) whose date is not in except; data, a card-data condition; interaction, while someone is using the screen. An entry sets at least one rule member. data, interaction, covers and a displays lock that leaves outputs out are honored by a Player that resolves its own stack; the server's resolution for other Players skips such an entry (stack_only).
       properties:
         id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$"}
         playlist_id: {type: string, minLength: 1}
         from: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
     ScreenScheduleEntry:
       type: object
       additionalProperties: false
-      required: [id, playlist_id, windows]
+      required: [id, playlist_id]
       properties:
         id: {type: string}
         playlist_id: {type: string}
         from: {type: string}
         until: {type: string}
         windows: {type: array, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
+    LevelMonthly:
+      type: object
+      additionalProperties: false
+      description: >-
+        A monthly occurrence in the screen timezone: day (1 to 31; a month without that day skips it), or nth (1 to 4, -1 the last) and weekday. start and end as a window's; the date the occurrence starts owns it.
+      properties:
+        day: {type: integer, minimum: 1, maximum: 31}
+        nth: {type: integer, enum: [1, 2, 3, 4, -1]}
+        weekday: {type: string, enum: [mon, tue, wed, thu, fri, sat, sun]}
+        start: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+        end: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+    LevelDate:
+      type: object
+      additionalProperties: false
+      required: [date]
+      description: One specific civil date, the whole day or between start and end as a window's. It starts between from and until and is not an exception date.
+      properties:
+        date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+        start: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+        end: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"}
+    LevelInteraction:
+      type: object
+      additionalProperties: false
+      description: >-
+        The level holds while someone is using the screen: from a touch, click or key until idle_s seconds pass with no input. Typical use: an interactive page above an attract loop. idle_s is stored and returned (60 when omitted).
+      properties:
+        idle_s: {type: integer, minimum: 5, maximum: 3600}
     ScreenPlaylistScheduleWrite:
       type: object
       additionalProperties: false
@@ -25680,6 +25783,90 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+    StackLevel:
+      type: object
+      additionalProperties: false
+      required: [id, source, playlist_id]
+      description: >-
+        One level of a screen's stack (packages/schedule-contract SEMANTICS.md, Levels and the stack). id is takeover, campaign:ID, schedule:ENTRY_ID, default, or folder:FOLDER_ID; record_id names the campaign, entry or folder, name the campaign's or folder's name. rule absent always holds.
+      properties:
+        id: {type: string}
+        source: {type: string, enum: [takeover, campaign, schedule, default, folder]}
+        playlist_id: {type: string}
+        rule: {$ref: "#/components/schemas/StackLevelRule"}
+        covers: {type: string, enum: [main, header, footer, side]}
+        displays: {type: array, items: {type: integer, minimum: 1, maximum: 12}}
+        start: {type: string, enum: [on_time]}
+        name: {type: string}
+        record_id: {type: string}
+        priority: {type: integer, description: A campaign's priority.}
+    StackLevelRule:
+      type: object
+      additionalProperties: false
+      properties:
+        ends_at: {type: string, format: date-time, description: "The level holds before this instant (a takeover's end)."}
+        from: {type: string}
+        until: {type: string}
+        windows: {type: array, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, items: {type: string}}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+    ScheduleCalendar:
+      type: object
+      additionalProperties: false
+      required: [subject, from, to, screens, groups]
+      properties:
+        subject: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string, enum: [screen, folder, tag, campaign]}, id: {type: string}}}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        screens: {type: integer, minimum: 0, description: Live screens in the subject.}
+        groups: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScheduleCalendarGroup"}, description: Largest group first.}
+        truncated: {type: boolean, description: More groups exist than the answer lists.}
+    ScheduleCalendarGroup:
+      type: object
+      additionalProperties: false
+      required: [key, screens, screen_ids, displays, levels, spans, on_screen, conflicts]
+      properties:
+        key: {type: string, description: The identity of the group's inputs.}
+        screens: {type: integer, minimum: 1}
+        screen_ids: {type: array, maxItems: 500, items: {type: string}}
+        timezone: {type: string}
+        displays: {type: integer, minimum: 1}
+        levels: {type: array, items: {$ref: "#/components/schemas/StackLevel"}, description: Highest first.}
+        spans: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarSpan"}}
+        on_screen: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarOnScreen"}}
+        conflicts: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarConflict"}}
+    ScheduleCalendarSpan:
+      type: object
+      additionalProperties: false
+      required: [level_id, from, to, state]
+      properties:
+        level_id: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        state: {type: string, enum: [plays, partial, outranked, conditional]}
+        displays: {type: array, items: {type: integer}, description: The displays a partial level plays on.}
+        reason: {type: string, enum: [interaction, data], description: What a conditional level waits on.}
+    ScheduleCalendarOnScreen:
+      type: object
+      additionalProperties: false
+      required: [display, from, to]
+      properties:
+        display: {type: integer, minimum: 1}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        level_id: {type: string, description: Absent when nothing plays.}
+    ScheduleCalendarConflict:
+      type: object
+      additionalProperties: false
+      required: [kind, level_ids]
+      properties:
+        kind: {type: string, enum: [same_priority, never_plays]}
+        level_ids: {type: array, items: {type: string}}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
     ScreenEffectivePlaylist:
       type: object
       additionalProperties: false
@@ -27807,6 +27994,14 @@ components:
         from: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, inclusive."}
         until: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, exclusive."}
         windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
         paused: {type: boolean}
         revision: {type: integer, minimum: 1}
@@ -27824,6 +28019,14 @@ components:
         from: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
         until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$", description: Later than from.}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
+        data: {$ref: "#/components/schemas/PageDataCondition"}
+        interaction: {$ref: "#/components/schemas/LevelInteraction"}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
+        start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, default: 0}
         paused: {type: boolean, default: false}
     CampaignPatch:
@@ -27837,6 +28040,14 @@ components:
         from: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
         until: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
         windows: {anyOf: [{type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}, {type: "null"}], description: null clears them.}
+        monthly: {anyOf: [{type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}, {type: "null"}], description: null clears them.}
+        dates: {anyOf: [{type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}, {type: "null"}], description: null clears them.}
+        except: {anyOf: [{type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}, {type: "null"}], description: null clears them.}
+        data: {anyOf: [{$ref: "#/components/schemas/PageDataCondition"}, {type: "null"}], description: null clears it.}
+        interaction: {anyOf: [{$ref: "#/components/schemas/LevelInteraction"}, {type: "null"}], description: null clears it.}
+        covers: {anyOf: [{type: string, enum: [full, main, header, footer, side]}, {type: "null"}], description: null is the full page.}
+        displays: {anyOf: [{type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}}, {type: "null"}], description: null plays on every output.}
+        start: {anyOf: [{type: string, enum: [next_item, on_time]}, {type: "null"}], description: null is next_item.}
         priority: {type: integer, minimum: 0, maximum: 100}
         paused: {type: boolean}
     CampaignStatus:
@@ -27844,13 +28055,13 @@ components:
       additionalProperties: false
       required: [campaign_id, screen_id, status]
       description: >-
-        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen). not_in_audience.
+        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, or stack_only: only a Player that resolves its own stack honors it). not_in_audience.
       properties:
         campaign_id: {type: string}
         screen_id: {type: string}
         screen_name: {type: string}
         status: {type: string, enum: [playing, pending, waiting, ended, outranked, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable]}
+        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable, stack_only]}
         by: {type: string, description: The campaign that outranks this one.}
         next_start: {type: string, format: date-time}
     CampaignScreens:
@@ -27897,7 +28108,7 @@ components:
         id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
         playlist_id: {type: string}
         verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, off]}
-        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable], description: "Why an off candidate does not apply."}
+        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, stack_only], description: "Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition)."}
         by:
           type: object
           additionalProperties: false
