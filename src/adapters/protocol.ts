@@ -1495,7 +1495,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing" | "source_failed" | "source_stale";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty

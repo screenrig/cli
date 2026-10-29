@@ -7,7 +7,7 @@ import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help.js";
 import { run, type CliRuntime } from "./main.js";
-import { accumulate, refreshText, secretPairCheck, setMembers, setPairCheck, SOURCE_ID_PATTERN, sourceRefreshSeconds, sourceTestLines, type Source } from "./sources.js";
+import { accumulate, refreshText, secretPairCheck, setMembers, setPairCheck, SOURCE_ID_PATTERN, sourceRefreshSeconds, sourceStaleAfterSeconds, sourceTestLines, type Source, type SourceRooms } from "./sources.js";
 import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -76,10 +76,10 @@ function source(overrides: Partial<Source> = {}): Source {
     id: SOURCE, name: "Lobby calendar", kind: "ics", target: { card_id: CARD }, enabled: true,
     config: { calendars: [{ key: "lobby" }], days: 7, time_zone: "America/Vancouver" },
     secrets: { "calendar_url.lobby": { set: true, hint: "https://calendar.example.com/…", updated_at: "2026-10-28T16:00:00Z" } },
-    refresh_seconds: 300, revision: 3,
+    refresh_seconds: 300, stale_after_seconds: null, revision: 3,
     status: {
       state: "ok", last_attempt_at: "2026-10-28T16:55:00Z", last_success_at: "2026-10-28T16:55:00Z", last_change_at: "2026-10-28T16:00:00Z",
-      next_run_at: "2026-10-28T17:00:20Z", failures: 0, error: null, warnings: [], stats: { calendars: 1, events: 12 },
+      next_run_at: "2026-10-28T17:00:20Z", failures: 0, stale: false, data_expires_at: null, error: null, warnings: [], stats: { calendars: 1, events: 12 },
     },
     created_at: "2026-10-28T15:00:00Z", updated_at: "2026-10-28T16:00:00Z",
     ...overrides,
@@ -123,17 +123,26 @@ test("source ids look like src_ and nothing else", () => {
   assert.ok(!SOURCE_ID_PATTERN.test("src_"));
 });
 
-test("--refresh takes 1m to 24h", () => {
-  for (const [text, seconds] of [["1m", 60], ["90s", 90], ["5m", 300], ["1h", 3600], ["1h30m", 5400], ["24h", 86400], ["60s", 60]] as const) {
+test("--refresh takes 30s to 24h", () => {
+  for (const [text, seconds] of [["1m", 60], ["90s", 90], ["5m", 300], ["1h", 3600], ["1h30m", 5400], ["24h", 86400], ["60s", 60], ["30s", 30]] as const) {
     assert.equal(sourceRefreshSeconds(text), seconds, text);
   }
-  for (const text of ["", "30s", "0m", "25h", "24h1s", "1d", "5", "m", "1h 30m", "-5m", "1.5h"]) {
-    assert.throws(() => sourceRefreshSeconds(text), /--refresh takes 1m to 24h/, text);
+  for (const text of ["", "29s", "0m", "25h", "24h1s", "1d", "5", "m", "1h 30m", "-5m", "1.5h"]) {
+    assert.throws(() => sourceRefreshSeconds(text), /--refresh takes 30s to 24h/, text);
   }
   assert.equal(refreshText(300), "5m");
   assert.equal(refreshText(5400), "1h 30m");
   assert.equal(refreshText(90), "90s");
   assert.equal(refreshText(86400), "24h");
+});
+
+test("--stale-after takes 1m to 7d or none", () => {
+  for (const [text, seconds] of [["1m", 60], ["30m", 1800], ["2h", 7200], ["1d", 86400], ["7d", 604800], ["1d12h", 129600], ["none", null], ["NONE", null]] as const) {
+    assert.equal(sourceStaleAfterSeconds(text), seconds, text);
+  }
+  for (const text of ["", "30s", "0m", "8d", "7d1s", "5", "soon", "-5m"]) {
+    assert.throws(() => sourceStaleAfterSeconds(text), /--stale-after takes 1m to 7d/, text);
+  }
 });
 
 test("--set values are JSON when they parse, text otherwise, and a key may not repeat", () => {
@@ -225,6 +234,101 @@ test("source create sends the shaped body with the secret read from a file", asy
   const disabled = bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!;
   assert.equal(disabled.body.enabled, false);
   assert.deepEqual(disabled.body.config, { calendars: [{ key: "lobby" }] });
+});
+
+test("source create and update send the stale period, and none sends null", async () => {
+  const env = await enrolled();
+  const { transport, bodies } = scripted();
+  const created = await cli(["--json", "source", "create", "--kind", "momentus", "--card", CARD, "--name", "Venue", "--settings", '{"organization":"10"}', "--stale-after", "45m", "--refresh", "30s"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  const sent = bodies.find((call) => call.method === "POST" && call.path === "/api/sources")!;
+  assert.equal(sent.body.stale_after_seconds, 2700);
+  assert.equal(sent.body.refresh_seconds, 30);
+  const plain = await cli(["--json", "source", "create", "--kind", "momentus", "--card", CARD, "--name", "Venue", "--settings", "{}"], transport, env);
+  assert.equal(plain.code, 0, plain.stdout);
+  assert.ok(!("stale_after_seconds" in bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!.body), "an absent option leaves the kind's default");
+  const update = await cli(["--json", "source", "update", SOURCE, "--stale-after", "none"], transport, env);
+  assert.equal(update.code, 0, update.stdout);
+  const patched = bodies.filter((call) => call.method === "PATCH").at(-1)!;
+  assert.deepEqual(patched.body, { stale_after_seconds: null });
+  const bad = await cli(["--json", "source", "update", SOURCE, "--stale-after", "30s"], transport, env);
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.stdout, /--stale-after takes 1m to 7d/);
+});
+
+test("source show says when the data goes stale and when it has", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  const state = { source: source({ kind: "momentus", stale_after_seconds: 1800, status: { ...source().status, state: "error", stale: true, data_expires_at: "2026-10-28T17:25:00Z", error: { code: "http_status", message: "Momentus answered HTTP 500.", at: "2026-10-28T17:30:00Z" } } }) };
+  transport.on("GET", SOURCE_PATH(), () => ({ status: 200, headers: {}, body: state.source }));
+  const human = await cli(["--human", "source", "show", SOURCE], transport, env);
+  assert.match(human.stdout, /stale_after: 30m/);
+  assert.match(human.stdout, /stale: true \(the data has expired/);
+  assert.match(human.stdout, /data_expires_at: 2026-10-28T17:25:00Z/);
+  state.source = source();
+  const fresh = await cli(["--human", "source", "show", SOURCE], transport, env);
+  assert.match(fresh.stdout, /stale_after: none \(the last good data stays until the next refresh\)/);
+  assert.ok(!/^stale: /m.test(fresh.stdout));
+});
+
+function roomsReport(overrides: Partial<SourceRooms> = {}): SourceRooms {
+  return {
+    source_id: SOURCE, room_field: "room", room_key_prefix: "momentus-room-", area_field: "area", area_key_prefix: "momentus-area-", rooms_as_of: "2026-10-28T17:00:00Z",
+    summary: { rooms: 3, unmapped_rooms: 1, areas: 2, unmapped_areas: 1, screens: 3, missing_screens: 1, unknown_screens: 1 },
+    rooms: [
+      { key: "ballroom-a", code: "BALLROOM-A", name: "Grand Ballroom A", area: "Level 2", status: "mapped", screens: [{ id: "scr_1", name: "Ballroom A door" }] },
+      { key: "salon-b", code: "SALON-B", name: "Salon B", area: "Level 2", status: "unmapped", screens: [] },
+      { key: "board-1", code: "BOARD-1", name: "Board Room 1", area: "Level 3", status: "mapped", screens: [{ id: "scr_3", name: "Board door" }] },
+    ],
+    areas: [{ key: "level-2", name: "Level 2", rooms: 2, status: "mapped", screens: [{ id: "scr_4", name: "Hallway" }] }, { key: "level-3", name: "Level 3", rooms: 1, status: "unmapped", screens: [] }],
+    screens: [
+      { id: "scr_1", name: "Ballroom A door", kind: "room", field: "room", value: "ballroom-a", status: "mapped", key: "ballroom-a" },
+      { id: "scr_2", name: "Salon door", kind: "room", field: "room", value: "SALON-B", status: "unknown", suggestion: "salon-b" },
+      { id: "scr_9", name: "New door", kind: "room", field: "room", value: null, status: "missing" },
+    ],
+    warnings: [],
+    ...overrides,
+  };
+}
+
+test("source rooms prints what no screen shows and the screens to fix, with a suggestion", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  transport.on("GET", new RegExp(`^/api/sources/${SOURCE}/rooms$`), () => ({ status: 200, headers: {}, body: roomsReport() }));
+  const json = await cli(["--json", "source", "rooms", SOURCE], transport, env);
+  assert.equal(json.code, 0, json.stdout);
+  assert.equal(json.envelope.data.summary.unmapped_rooms, 1);
+  assert.deepEqual((json.envelope.warnings ?? []).map((warning: { code: string }) => warning.code), ["source_rooms_unmapped", "source_screens_unmapped"]);
+  const human = await cli(["--human", "source", "rooms", SOURCE], transport, env);
+  assert.match(human.stdout, /^Room mapping/m);
+  assert.match(human.stdout, /momentus-room-\{screen\.field\.room\}/);
+  assert.match(human.stdout, /Rooms no screen shows\n.*KEY\s+NAME\s+CODE\s+AREA\n.*salon-b\s+Salon B\s+SALON-B\s+Level 2/s);
+  assert.match(human.stdout, /Areas no screen shows\n.*level-3/s);
+  assert.match(human.stdout, /Screens to fix[\s\S]*scr_2\s+Salon door\s+room\s+SALON-B\s+no such room\s+salon-b/);
+  assert.match(human.stdout, /scr_9\s+New door\s+room\s+no value/);
+  assert.ok(!human.stdout.includes("scr_1 "), "a mapped screen is not listed to fix");
+  assert.equal((await cli(["--human", "source", "rooms", "crd_nope"], transport, env)).code, 2);
+});
+
+test("source rooms is quiet when every room is shown and says why a source has none to map", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  const clean = roomsReport({
+    summary: { rooms: 1, unmapped_rooms: 0, areas: 0, unmapped_areas: 0, screens: 1, missing_screens: 0, unknown_screens: 0 },
+    rooms: [{ key: "a", status: "mapped", screens: [{ id: "scr_1", name: "A" }] }], areas: [],
+    screens: [{ id: "scr_1", name: "A", kind: "room", field: "room", value: "a", status: "mapped", key: "a" }],
+  });
+  transport.on("GET", new RegExp(`^/api/sources/${SOURCE}/rooms$`), () => ({ status: 200, headers: {}, body: clean }));
+  const quiet = await cli(["--json", "source", "rooms", SOURCE], transport, env);
+  assert.deepEqual(quiet.envelope.warnings ?? [], []);
+  assert.match((await cli(["--human", "source", "rooms", SOURCE], transport, env)).stdout, /Every room is shown and every screen names one\./);
+
+  const none = new FakeTransport();
+  none.on("GET", new RegExp(`^/api/sources/${SOURCE}/rooms$`), () => problem(409, "source_has_no_rooms", "This kind of source offers no rooms to map."));
+  const refused = await cli(["--json", "source", "rooms", SOURCE], none, env);
+  assert.equal(refused.code, 5);
+  assert.equal(refused.envelope.error?.code, "source_has_no_rooms");
+  assert.equal(refused.envelope.error?.next?.command, "screenrig source list");
 });
 
 test("source create reads --settings from stdin or a file, and --set overrides it", async () => {
@@ -416,10 +520,10 @@ test("problems carry the next step", async () => {
 test("source help lists the kinds, the secret rule and a working example for every command", () => {
   const help = commandHelp(["source"]).usage;
   assert.match(help, /Keep a card live from an outside address/);
-  for (const text of ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify", "calendar_url.KEY=@FILE", "docs/sources", "never writes", "200"]) {
+  for (const text of ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "momentus", "square", "shopify", "calendar_url.KEY=@FILE", "docs/sources", "never writes", "200", "source_failed", "api_secret"]) {
     assert.ok(help.includes(text), text);
   }
-  for (const leaf of ["list", "show", "create", "update", "test", "refresh", "delete"]) {
+  for (const leaf of ["list", "show", "create", "update", "test", "refresh", "rooms", "delete"]) {
     const leafHelp = commandHelp(["source", leaf]);
     assert.ok(leafHelp.examples.length > 0, leaf);
     assert.ok(leafHelp.examples.every((example) => example.startsWith("screenrig source ")), leaf);

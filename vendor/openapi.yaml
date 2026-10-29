@@ -2982,6 +2982,101 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/schedule/imports/template:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleImportTemplate
+      description: >-
+        Answers a sheet with the columns a schedule import reads and three example rows (a screen code, a screen folder and a tag), as CSV or, with format=xlsx, an XLSX workbook.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, xlsx]}}
+      responses:
+        '200':
+          description: The template sheet.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/schedule/imports/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: read
+      operationId: previewScheduleImport
+      description: >-
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: The preview. valid is false while any row has an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/schedule/imports:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: commitScheduleImport
+      description: >-
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - {name: fingerprint, in: query, required: false, schema: {type: string}, description: "The preview's fingerprint, for a CSV or XLSX body; a JSON body carries it as a member."}
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: What the commit applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportCommitted'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/project/browser-links/claim:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -4444,6 +4539,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/commands:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenCommands
+      description: >-
+        Lists every reboot and reload asked of an active or archived screen, newest first: the commands Screen.commands holds (its newest 10) and every older one, with the state each reached. A queued command past expires_at reads expired. A command that was still queued when the screen's device was replaced reads cancelled. Cancel one still queued with POST /api/screens/{id}/commands/{command_id}/cancel.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of the screen's commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenCommandPage'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -7702,6 +7824,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: campaign_id
           in: query
           required: true
@@ -7730,6 +7853,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: from
           in: query
           required: true
@@ -7970,6 +8094,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/ResourceID'
         - name: from
           in: query
@@ -8034,6 +8159,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: from
           in: query
           required: false
@@ -8189,6 +8315,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/PlaybackTotalsBy'
         - $ref: '#/components/parameters/PlaybackTotalsDayFrom'
         - $ref: '#/components/parameters/PlaybackTotalsDayTo'
@@ -8228,6 +8355,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/PlaybackCompletenessDayFrom'
         - $ref: '#/components/parameters/PlaybackCompletenessDayTo'
         - $ref: '#/components/parameters/PlaybackScreenID'
@@ -8266,6 +8394,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/SeriesFrom'
         - $ref: '#/components/parameters/SeriesTo'
         - $ref: '#/components/parameters/HealthResolution'
@@ -8307,6 +8436,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/UptimeDayFrom'
         - $ref: '#/components/parameters/UptimeDayTo'
       responses:
@@ -8384,6 +8514,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/SeriesFrom'
         - $ref: '#/components/parameters/SeriesTo'
         - $ref: '#/components/parameters/SeriesLimit'
@@ -8421,6 +8552,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/UptimeDayFrom'
         - $ref: '#/components/parameters/UptimeDayTo'
       responses:
@@ -8439,6 +8571,247 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/reports:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listReportKinds
+      description: Lists the report kinds GET /api/reports/{kind} builds, with the filters each takes, and the formats a report is written in. Needs the reports capability.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The report kinds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCatalog'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/reports/{kind}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ReportKind'
+    get:
+      x-screenrig-access: read
+      operationId: getReport
+      description: 'Builds a report from the project''s aggregates (uptime rollups, the alert rows, screen state, direct campaign delivery), never from raw events. fleet_health, uptime, publishing and alerts roll up by group_by folder (default), screen or tag over the inclusive UTC days from to to (default the last 30): a folder holds every screen in it and in every folder inside it, and its first row is the whole project; folder_id limits the report to a folder and what it holds, and with direct to the folder and its child folders (or, grouped by screen, to the screens directly in it). alert_log lists each alert that began in the period. proof_of_play totals the plays of the project''s direct campaigns per campaign, media and screen, for one campaign_id or every campaign of an advertiser. format json (default) returns the table; csv, xlsx and pdf return the same table as a file attachment.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportFormat'
+        - {name: from, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "First UTC day, inclusive. Defaults to 29 days before to. At most 366 days with to."}
+        - {name: to, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Last UTC day, inclusive. Defaults to today (UTC)."}
+        - {name: group_by, in: query, required: false, schema: {type: string, enum: [folder, screen, tag], default: folder}, description: "What a row is. Not for alert_log or proof_of_play."}
+        - {name: folder_id, in: query, required: false, schema: {type: string}, description: "Only this screen folder and everything inside it."}
+        - {name: direct, in: query, required: false, schema: {type: boolean}, description: "With folder_id: only the screens directly in the folder (group_by screen), or the folder and its child folders (group_by folder)."}
+        - {name: tag, in: query, required: false, schema: {type: string}, description: "Only screens carrying this tag."}
+        - {name: campaign_id, in: query, required: false, schema: {type: string}, description: "proof_of_play: one direct campaign."}
+        - {name: advertiser, in: query, required: false, schema: {type: string, maxLength: 200}, description: "proof_of_play: the campaigns of this advertiser or sponsor (exact name, any case)."}
+      responses:
+        '200':
+          description: The report as a table, or as a file for csv, xlsx and pdf.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/report-subscriptions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listReportSubscriptions
+      description: Lists the project's scheduled reports, oldest first (at most 50), each with its next run and the outcome of its last. Requires the project capability.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's report subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscriptionList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createReportSubscription
+      description: 'Schedules a report to be emailed, as a PDF, XLSX or CSV attachment, daily, weekly or monthly at an hour in a time zone. Each run covers the period before it in UTC days: yesterday, the seven days before, or last month. recipients are members of the project, named by user_id or by the email address of the member; anyone else is refused, so a subscription is never a way to mail an outsider, and a member who leaves stops receiving it. A failed run is retried and shows as last_status failed with last_error. At most 50 per project (report_subscription_limit_reached).'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportSubscriptionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscription'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: report_subscription_limit_reached.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/report-subscriptions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getReportSubscription
+      description: Requires the project capability.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One report subscription.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscription'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateReportSubscription
+      description: Changes any of name, filters, schedule, format, recipients and enabled; the report kind never changes. A changed schedule or a re-enabled subscription restarts at its next occurrence. If-Match carries the revision read (revision_conflict when stale).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - {name: If-Match, in: header, required: false, schema: {type: string}, description: "The subscription's revision, quoted or bare."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportSubscriptionPatch'
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscription'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteReportSubscription
+      description: Deletes the subscription; nothing more is sent.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/report-subscriptions/{id}/send:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: sendReportSubscription
+      description: Emails the report to the subscription's recipients now, for the period a scheduled run now would cover, without moving its schedule. The answer is the subscription with the outcome of this send (last_status delivered or failed, last_error).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The subscription with the outcome of this send.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscription'
+        '404':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -8819,6 +9192,85 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CardCreate'
+  /api/projects/{project_id}/reports:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listReportKindsInProject
+      description: Lists the report kinds GET /api/reports/{kind} builds, with the filters each takes, and the formats a report is written in. Needs the reports capability.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The report kinds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCatalog'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/report-subscriptions:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listReportSubscriptionsInProject
+      description: Lists the project's scheduled reports, oldest first (at most 50), each with its next run and the outcome of its last. Requires the project capability.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The project's report subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscriptionList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createReportSubscriptionInProject
+      description: 'Schedules a report to be emailed, as a PDF, XLSX or CSV attachment, daily, weekly or monthly at an hour in a time zone. Each run covers the period before it in UTC days: yesterday, the seven days before, or last month. recipients are members of the project, named by user_id or by the email address of the member; anyone else is refused, so a subscription is never a way to mail an outsider, and a member who leaves stops receiving it. A failed run is retried and shows as last_status failed with last_error. At most 50 per project (report_subscription_limit_reached).'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportSubscriptionWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSubscription'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: report_subscription_limit_reached.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/cards:
     parameters:
       - name: project_id
@@ -9673,6 +10125,43 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '412':
           description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sources/{source_id}/rooms:
+    parameters:
+      - $ref: '#/components/parameters/SourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getSourceRooms
+      description: >-
+        The room mapping of a data source that reads a booking system's rooms (kind momentus): which rooms it offers that no screen shows (summary.unmapped_rooms), and which screens read a room or area document without a value that names one (screens with status missing or unknown, with a suggestion when the value is a room written another way). The rooms are those of the source's last good refresh; nothing is fetched. A kind with no rooms answers source_has_no_rooms.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The room mapping report.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceRooms'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: source_has_no_rooms.
           content:
             application/problem+json:
               schema:
@@ -12334,6 +12823,7 @@ paths:
         - projectBearer: []
         - dashboardSession: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: state
           in: query
           required: false
@@ -18459,6 +18949,110 @@ paths:
                 $ref: '#/components/schemas/ScheduleCalendar'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports/template:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: getScheduleImportTemplateInProject
+      description: >-
+        Answers a sheet with the columns a schedule import reads and three example rows (a screen code, a screen folder and a tag), as CSV or, with format=xlsx, an XLSX workbook.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [csv, xlsx]}}
+      responses:
+        '200':
+          description: The template sheet.
+          content:
+            text/csv:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports/preview:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: read
+      operationId: previewScheduleImportInProject
+      description: >-
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: The preview. valid is false while any row has an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/schedule/imports:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: write
+      operationId: commitScheduleImportInProject
+      description: >-
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - {name: fingerprint, in: query, required: false, schema: {type: string}, description: "The preview's fingerprint, for a CSV or XLSX body; a JSON body carries it as a member."}
+        - {name: name, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 80}, description: "The import's name; importing again under the same name updates the levels it made (default import). Sent with a file body."}
+        - {name: timezone, in: query, required: false, schema: {type: string}, description: "The IANA zone the times are written in when a row has no timezone. Without one, times are read on each screen's own clock."}
+        - {name: source, in: query, required: false, schema: {type: string, maxLength: 200}, description: "The file name, recorded with the import."}
+        - {name: code_field, in: query, required: false, schema: {type: string}, description: "Read a screen code only from this screen field (for example code or room_id); otherwise a code matches any field."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleImportRequest'
+          text/csv:
+            schema: {type: string, description: "The sheet as CSV (UTF-8); the first row names the columns."}
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema: {type: string, format: binary, description: "The sheet as an XLSX workbook; its first sheet is read."}
+      responses:
+        '200':
+          description: What the commit applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleImportCommitted'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/project/browser-links/claim:
     parameters:
       - name: project_id
@@ -19570,6 +20164,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: campaign_id
           in: query
           required: true
@@ -19598,6 +20193,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: from
           in: query
           required: true
@@ -19753,6 +20349,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/PlaybackTotalsBy'
         - $ref: '#/components/parameters/PlaybackTotalsDayFrom'
         - $ref: '#/components/parameters/PlaybackTotalsDayTo'
@@ -19792,6 +20389,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/PlaybackCompletenessDayFrom'
         - $ref: '#/components/parameters/PlaybackCompletenessDayTo'
         - $ref: '#/components/parameters/PlaybackScreenID'
@@ -19829,6 +20427,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/SeriesFrom'
         - $ref: '#/components/parameters/SeriesTo'
         - $ref: '#/components/parameters/SeriesLimit'
@@ -19866,6 +20465,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - $ref: '#/components/parameters/UptimeDayFrom'
         - $ref: '#/components/parameters/UptimeDayTo'
       responses:
@@ -20668,6 +21268,7 @@ paths:
       security:
         - projectBearer: []
       parameters:
+        - $ref: '#/components/parameters/ReportFormat'
         - name: state
           in: query
           required: false
@@ -21366,7 +21967,9 @@ components:
     PlaybackDay: {name: day, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: UTC calendar day of the aggregate.}
     PlaybackDayFrom: {name: day_from, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "First UTC day, inclusive. Excludes day. With day_to spans at most 366 days. CSV defaults it to 30 days before day_to."}
     PlaybackDayTo: {name: day_to, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Last UTC day, inclusive. Excludes day. CSV defaults it to today (UTC)."}
-    PlaybackFormat: {name: format, in: query, required: false, schema: {type: string, enum: [json, csv]}, description: "json (default) or csv. Omitted, an Accept header naming text/csv but not application/json selects csv."}
+    ReportFormat: {name: format, in: query, required: false, schema: {type: string, enum: [json, csv, xlsx, pdf], default: json}, description: "json (default) returns the report as JSON. csv, xlsx and pdf return the same rows as a file attachment (every page of a paged report, up to 50000 rows)."}
+    ReportKind: {name: kind, in: path, required: true, schema: {type: string, enum: [fleet_health, uptime, publishing, alerts, alert_log, proof_of_play]}, description: "The report kind (GET /api/reports)."}
+    PlaybackFormat: {name: format, in: query, required: false, schema: {type: string, enum: [json, csv, xlsx, pdf]}, description: "json (default), csv, xlsx or pdf. Omitted, an Accept header naming text/csv but not application/json selects csv. xlsx and pdf write the first 50000 rows of the same list."}
     PlaysFrom: {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: "Inclusive lower bound on received_at. Defaults to 24 hours before to."}
     PlaysTo: {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: "Exclusive upper bound on received_at. Defaults to now. to - from is at most 31 days."}
     PlaysPlaylistID: {name: playlist_id, in: query, required: false, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?pl_[A-Za-z0-9_-]{1,100}$"}, description: "Only plays shown from this playlist."}
@@ -25991,6 +26594,35 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+    ScreenStackStatus:
+      type: object
+      additionalProperties: false
+      required: [manifest_revision, levels, playing, reported_at]
+      description: >-
+        What the screen's Player last reported of its stack (docs/player-compatibility.md §6.11): each level's readiness and the level each display shows. Present only for a Player that resolves its own stack, while that stack is current.
+      properties:
+        manifest_revision: {type: string}
+        levels:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, state]
+            properties:
+              id: {type: string}
+              state: {type: string, enum: [ready, preparing, failed]}
+        playing:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [display, level_id]
+            properties:
+              display: {type: integer, minimum: 1, maximum: 12}
+              level_id: {type: string}
+        reported_at: {type: string, format: date-time}
     StackLevel:
       type: object
       additionalProperties: false
@@ -26021,6 +26653,123 @@ components:
         except: {type: array, items: {type: string}}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
+    ScheduleImportRequest:
+      type: object
+      additionalProperties: false
+      required: [rows]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80, description: "Identifies the import; the same name updates the levels it made (default import)."}
+        source: {type: string, maxLength: 200, description: The file the rows came from.}
+        timezone: {type: string, description: The IANA zone the times are written in when a row has no timezone.}
+        code_field: {type: string, description: Read a screen code only from this screen field.}
+        fingerprint: {type: string, description: The preview's fingerprint; required by the commit.}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: object
+            additionalProperties: {oneOf: [{type: string}, {type: number}, {type: boolean}, {type: 'null'}]}
+            description: One row keyed by column name (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); a header spelled screen, file, from, until and the like is read as its column. Rows are numbered from 2 in order, as a sheet numbers them under its header, unless a row carries its own number in row.
+    ScheduleImportRowError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        column: {type: string, description: The column of the cell; absent for a problem of the whole row.}
+        code: {type: string, description: "required, unknown_screen, ambiguous_screen, unknown_folder, ambiguous_folder, unknown_tag, unknown_file, ambiguous_file, not_playable, invalid_time, reversed_times, past_end, no_timing, invalid_value, timezone, screen_not_ready, overlap or limit; outranked and open_end are warnings."}
+        message: {type: string}
+    ScheduleImportResolved:
+      type: object
+      additionalProperties: false
+      required: [kind, id, name]
+      properties:
+        kind: {type: string, description: "screen, folder, tag or list for a target; file or playlist for content."}
+        id: {type: string}
+        name: {type: string}
+        screens: {type: integer, minimum: 0, description: The screens a target reaches.}
+    ScheduleImportRow:
+      type: object
+      additionalProperties: false
+      required: [row, status]
+      properties:
+        row: {type: integer, minimum: 2, description: The row's place in the file; the header is row 1.}
+        status: {type: string, enum: [ok, error]}
+        cells: {type: object, additionalProperties: {type: string}, description: "The row's cells by column as the sheet gave them (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); send them again, with corrections, as rows."}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
+        target: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        content: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        from: {type: string, description: The start as written, 'YYYY-MM-DDTHH:MM.': ''}
+        until: {type: string, description: The end as written, exclusive: '', 'YYYY-MM-DDTHH:MM.': ''}
+        level: {type: string, description: The key of the level the row feeds.}
+    ScheduleImportLevel:
+      type: object
+      additionalProperties: false
+      required: [key, action, home, content, screens, priority, rows]
+      properties:
+        key: {type: string}
+        action: {type: string, enum: [create, update, unchanged]}
+        home: {type: string, enum: [screen, shared], description: "screen is an entry of one screen's own schedule; shared is a campaign over an audience."}
+        screen_id: {type: string}
+        entry_id: {type: string, description: The entry (imp_ then the import and level keys) the level is or will be.}
+        campaign_id: {type: string, description: The campaign a stored shared level already is.}
+        name: {type: string, description: The shared level's campaign name.}
+        content: {$ref: "#/components/schemas/ScheduleImportResolved"}
+        screens: {type: integer, minimum: 0}
+        priority: {type: integer, minimum: 0, maximum: 100}
+        from: {type: string}
+        until: {type: string}
+        rows: {type: array, items: {type: integer}}
+    ScheduleImportRemoval:
+      type: object
+      additionalProperties: false
+      required: [home]
+      properties:
+        home: {type: string, enum: [screen, shared]}
+        screen_id: {type: string}
+        entry_id: {type: string}
+        campaign_id: {type: string}
+        name: {type: string}
+    ScheduleImportSummary:
+      type: object
+      additionalProperties: false
+      required: [rows, rows_with_errors, levels, creates, updates, unchanged, removes, screens, playlists]
+      properties:
+        rows: {type: integer}
+        rows_with_errors: {type: integer}
+        levels: {type: integer}
+        creates: {type: integer}
+        updates: {type: integer}
+        unchanged: {type: integer}
+        removes: {type: integer}
+        screens: {type: integer, description: The screens whose own schedules a commit writes.}
+        playlists: {type: integer, description: The one-file playlists a commit makes for the files the sheet names.}
+    ScheduleImportPreview:
+      type: object
+      additionalProperties: false
+      required: [name, columns, valid, fingerprint, summary, rows, levels, removals]
+      properties:
+        name: {type: string}
+        source: {type: string}
+        timezone: {type: string}
+        columns: {type: array, items: {type: string}, description: The columns the sheet had.}
+        ignored_columns: {type: array, items: {type: string}, description: Headers nothing reads.}
+        valid: {type: boolean, description: No row has an error; only then can the import commit.}
+        fingerprint: {type: string}
+        summary: {$ref: "#/components/schemas/ScheduleImportSummary"}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: Problems of the whole file.}
+        rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}}
+        levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}}
+        removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}}
+        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: The stacks of the screens the import changes, as they would be after a commit.: ''}
+    ScheduleImportCommitted:
+      type: object
+      additionalProperties: false
+      required: [preview, applied]
+      properties:
+        preview: {$ref: "#/components/schemas/ScheduleImportPreview"}
+        applied: {$ref: "#/components/schemas/ScheduleImportSummary"}
     ScheduleCalendar:
       type: object
       additionalProperties: false
@@ -26113,8 +26862,9 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
-        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
+        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first; GET /api/screens/{id}/commands lists every one). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
         suspension: {$ref: "#/components/schemas/ScreenSuspension"}
+        stack_status: {$ref: "#/components/schemas/ScreenStackStatus"}
         timezone: {type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone."}
         effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
         timezone_source: {type: string, enum: [screen, device, unknown]}
@@ -26788,6 +27538,13 @@ components:
         expires_at: {type: string, format: date-time}
         sent_at: {type: string, format: date-time, description: "When the runtime event was appended. Absent while the command is queued, and on one cancelled, expired or superseded before it was sent."}
         done_at: {type: string, format: date-time, description: "The boot time a health report proved. Present only on a done reboot."}
+    ScreenCommandPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ScreenCommand"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
     ScreenPlayPageWrite:
       type: object
       additionalProperties: false
@@ -27157,14 +27914,14 @@ components:
     FeedPending: {type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: {key: {type: string}, state: {type: string, enum: [pending]}, retry_after_seconds: {type: integer}}}
     CardDataSummary: {type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}}}
     CardDataList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/CardDataSummary"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
-    SourceKind: {type: string, enum: [ics, sheets, csv, json, microsoft365, google_calendar, square, shopify], description: "Where the data comes from. ics reads iCalendar and webcal:// addresses (the other kinds are described in /docs/sources). A kind that is not available answers invalid_request at kind."}
+    SourceKind: {type: string, enum: [ics, sheets, csv, json, microsoft365, google_calendar, square, shopify, momentus], description: "Where the data comes from. ics reads iCalendar and webcal:// addresses (the other kinds are described in /docs/sources). A kind that is not available answers invalid_request at kind."}
     SourceTarget: {type: object, additionalProperties: false, required: [card_id], properties: {card_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$", description: "The card instance whose dynamic properties the source writes. One source writes one card."}}}
     SourceSecretView: {type: object, additionalProperties: false, required: [set, hint, updated_at], properties: {set: {type: boolean, enum: [true]}, hint: {type: string, description: "A masked hint: the last characters of a token, or the scheme and host of an address. The value is never returned."}, updated_at: {type: string, format: date-time}}}
     SourceError: {type: object, additionalProperties: false, required: [code, message, at], properties: {code: {type: string, enum: [unreachable, timeout, too_large, http_status, auth_failed, not_shared, parse_failed, rate_limited, mapping_failed, card_data_invalid, target_missing, payment_required, config_invalid, internal], description: "Branch on the code; the message is fixed text that names no address and no secret."}, message: {type: string}, upstream_status: {type: integer, description: "The HTTP status the address answered, when it answered one."}, at: {type: string, format: date-time}}}
     SourceStatus:
       type: object
       additionalProperties: false
-      required: [state, last_attempt_at, last_success_at, last_change_at, next_run_at, failures, error, warnings, stats]
+      required: [state, last_attempt_at, last_success_at, last_change_at, next_run_at, failures, stale, data_expires_at, error, warnings, stats]
       description: >-
         What the last runs did. state is pending (not run yet), ok (the last fetch succeeded and the card accepted the document), error (the last run failed and the card kept its last good document) or disabled. ok does not judge whether the upstream data is right or current, nor whether any screen shows the card.
       properties:
@@ -27174,13 +27931,15 @@ components:
         last_change_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When a run last wrote a document that differed from the stored one."}
         next_run_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: Null while disabled.}
         failures: {type: integer, minimum: 0, description: Consecutive failed runs.}
+        stale: {type: boolean, description: "True while the source is failing and the data it last wrote has expired (see stale_after_seconds): the card shows no data and pages that depend on it have fallen back."}
+        data_expires_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the data the last good run wrote stops being served on screens; null for a source with no stale period or no good run."}
         error: {anyOf: [{$ref: "#/components/schemas/SourceError"}, {type: "null"}]}
         warnings: {type: array, items: {type: string}, description: "What the last successful run noticed and worked around: a time zone it could not place, events cut at a limit."}
         stats: {type: object, additionalProperties: {type: integer}, description: "Counts from the last successful run, such as calendars and events."}
     Source:
       type: object
       additionalProperties: false
-      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, revision, status, created_at, updated_at]
+      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, stale_after_seconds, revision, status, created_at, updated_at]
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}
         name: {type: string, minLength: 1, maxLength: 80}
@@ -27189,7 +27948,8 @@ components:
         enabled: {type: boolean}
         config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources."}
         secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         revision: {type: integer, minimum: 1}
         status: {$ref: "#/components/schemas/SourceStatus"}
         created_at: {type: string, format: date-time}
@@ -27205,7 +27965,8 @@ components:
         target: {$ref: "#/components/schemas/SourceTarget"}
         config: {type: object, additionalProperties: true, description: "The kind's settings (/docs/sources). For ics: calendars (1 to 60, each with a key), days, time_zone, private_title."}
         secrets: {type: object, additionalProperties: {type: string, writeOnly: true}, description: "Credentials by name, stored sealed. For ics: calendar_url.<key>, the calendar's address (webcal://, https:// or http://), one per calendar."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60)."}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60; momentus: 60, at least 30)."}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean, default: true}
     SourceUpdate:
       type: object
@@ -27215,8 +27976,79 @@ components:
         target: {$ref: "#/components/schemas/SourceTarget"}
         config: {type: object, additionalProperties: true, description: Replaces the whole config.}
         secrets: {type: object, additionalProperties: {anyOf: [{type: string, writeOnly: true}, {type: "null"}]}, description: "Merged into the stored secrets: a string sets or replaces one, null removes it."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean}
+    SourceStaleAfter:
+      anyOf: [{type: integer, minimum: 60, maximum: 604800}, {type: "null"}]
+      description: >-
+        How long the card keeps the source's last good data when it cannot refresh, in seconds. The source writes its documents to expire that long after the last good refresh, so when it keeps failing they blank on every screen (offline ones included) and pages whose visibility depends on the data fall back to the pages after them; a source that is not failing renews the deadline as it refreshes. At least twice refresh_seconds. null keeps the last good data until the source refreshes again (the default for every kind but momentus, whose default is 1800 when the member is omitted on create). A failing source that passes the period is stale (status.stale) and appends source.stale.
+    SourceRoomRef: {type: object, additionalProperties: false, required: [id, name], properties: {id: {type: string}, name: {type: string}}}
+    SourceRoom:
+      type: object
+      additionalProperties: false
+      required: [key, status, screens]
+      properties:
+        key: {type: string, description: "What a screen's room field says to show this room."}
+        code: {type: string, description: "The room's identifier in the source system (a Momentus space code)."}
+        name: {type: string}
+        floor: {type: string}
+        area: {type: string}
+        capacity: {type: integer}
+        status: {type: string, enum: [mapped, unmapped, ""], description: "mapped when a screen shows the room, unmapped when none does; empty when the source writes no room documents."}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomRef"}}
+    SourceArea:
+      type: object
+      additionalProperties: false
+      required: [key, name, rooms, status, screens]
+      properties:
+        key: {type: string, description: "The value a screen's area field says: the area's name in lower case with other characters as hyphens."}
+        name: {type: string}
+        rooms: {type: integer}
+        status: {type: string, enum: [mapped, unmapped, ""]}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomRef"}}
+    SourceRoomScreen:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, field, value, status]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        kind: {type: string, enum: [room, area]}
+        field: {type: string, description: The screen field read.}
+        value: {anyOf: [{type: string}, {type: "null"}]}
+        status: {type: string, enum: [mapped, missing, unknown], description: "mapped: the value reaches a room or area. missing: the screen's playlist reads the field and the screen has no value. unknown: the value names nothing the source offers."}
+        key: {type: string, description: The room or area a mapped screen shows.}
+        suggestion: {type: string, description: "The key an unknown value probably meant: the same letters in another case, or the room's code or name."}
+    SourceRooms:
+      type: object
+      additionalProperties: false
+      required: [source_id, room_field, room_key_prefix, area_field, area_key_prefix, rooms_as_of, summary, rooms, areas, screens, warnings]
+      description: >-
+        The room mapping of a data source that writes a document for each room or area: the rooms the source offered at its last good refresh against the screens that read them. A screen belongs to the report for a field when it has a value for it, or when its own playlist places a card whose data key is the key prefix followed by {screen.field.NAME}; a playlist it reaches through a folder, campaign or schedule level is not followed.
+      properties:
+        source_id: {type: string}
+        room_field: {type: string, description: "The screen field that names a room; empty when the source writes no room documents."}
+        room_key_prefix: {type: string, description: "A card's data key for a room is this followed by {screen.field.<room_field>}."}
+        area_field: {type: string}
+        area_key_prefix: {type: string}
+        rooms_as_of: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The last good refresh the room list is from; null before one."}
+        summary:
+          type: object
+          additionalProperties: false
+          required: [rooms, unmapped_rooms, areas, unmapped_areas, screens, missing_screens, unknown_screens]
+          properties:
+            rooms: {type: integer}
+            unmapped_rooms: {type: integer, description: Rooms no screen shows.}
+            areas: {type: integer}
+            unmapped_areas: {type: integer}
+            screens: {type: integer}
+            missing_screens: {type: integer, description: Screens that read a room or area document and have no value for its field.}
+            unknown_screens: {type: integer, description: Screens whose value names no room or area the source offers.}
+        rooms: {type: array, items: {$ref: "#/components/schemas/SourceRoom"}}
+        areas: {type: array, items: {$ref: "#/components/schemas/SourceArea"}}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomScreen"}}
+        warnings: {type: array, items: {type: string}}
     SourceTestRequest:
       type: object
       additionalProperties: false
@@ -27815,12 +28647,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 10
+      maxItems: 12
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -27921,6 +28753,17 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
+    ReportColumn: {type: object, additionalProperties: false, required: [key, label, type], properties: {key: {type: string}, label: {type: string}, type: {type: string, enum: [text, int, decimal, percent, hours, date, datetime]}}}
+    ReportParam: {type: object, additionalProperties: false, required: [name, description], properties: {name: {type: string}, description: {type: string}}}
+    ReportKindInfo: {type: object, additionalProperties: false, required: [kind, title, description, params], properties: {kind: {type: string}, title: {type: string}, description: {type: string}, params: {type: array, items: {$ref: "#/components/schemas/ReportParam"}}}}
+    ReportCatalog: {type: object, additionalProperties: false, required: [items, formats], properties: {items: {type: array, items: {$ref: "#/components/schemas/ReportKindInfo"}}, formats: {type: array, items: {type: string}}}}
+    Report: {type: object, additionalProperties: false, required: [kind, title, generated_at, columns, rows, truncated], description: "One report as a table: columns says what each row member is. Rows carry more members than the columns show (ids, parent_id and depth for a folder outline). Percent columns hold 0 to 100.", properties: {kind: {type: string}, title: {type: string}, subtitle: {type: string}, generated_at: {type: string, format: date-time}, from: {type: string}, to: {type: string}, columns: {type: array, items: {$ref: "#/components/schemas/ReportColumn"}}, rows: {type: array, items: {type: object, additionalProperties: true}}, totals: {type: object, additionalProperties: true}, notes: {type: array, items: {type: string}}, truncated: {type: boolean}, prepared_for: {type: string}}}
+    ReportSchedule: {type: object, additionalProperties: false, required: [cadence], properties: {cadence: {type: string, enum: [daily, weekly, monthly]}, weekday: {type: string, enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday], description: Weekly only; default monday.}, day_of_month: {type: integer, minimum: 1, maximum: 28, description: Monthly only; default 1.}, hour: {type: integer, minimum: 0, maximum: 23, description: "Hour of the day in timezone; default 0."}, timezone: {type: string, maxLength: 64, description: "An IANA time zone such as America/Los_Angeles; default UTC."}}}
+    ReportSubscriptionRecipient: {type: object, additionalProperties: false, required: [user_id], properties: {user_id: {type: string}}}
+    ReportSubscription: {type: object, additionalProperties: false, required: [id, name, kind, filters, schedule, format, enabled, recipients, revision, created_at, updated_at], properties: {id: {type: string}, project_id: {type: string}, name: {type: string}, kind: {type: string}, filters: {type: object, additionalProperties: {type: string}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, enabled: {type: boolean}, recipients: {type: array, items: {$ref: "#/components/schemas/ReportSubscriptionRecipient"}}, next_run_at: {type: string, format: date-time, nullable: true}, last_run_at: {type: string, format: date-time, nullable: true}, last_status: {type: string, enum: ["", delivered, failed]}, last_error: {type: string, description: "Why the last run failed, in a sentence; empty after a delivery."}, last_delivered: {type: integer}, last_from: {type: string}, last_to: {type: string}, revision: {type: integer}, created_by: {type: string}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
+    ReportSubscriptionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ReportSubscription"}}}}
+    ReportSubscriptionWrite: {type: object, additionalProperties: false, required: [name, kind, schedule, format, recipients], properties: {name: {type: string, minLength: 1, maxLength: 100}, kind: {type: string, enum: [fleet_health, uptime, publishing, alerts, alert_log, proof_of_play]}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}, description: "The report's filters other than the days (GET /api/reports lists them)."}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}, description: "user_id or email address of project members."}, enabled: {type: boolean, default: true}}}
+    ReportSubscriptionPatch: {type: object, additionalProperties: false, properties: {name: {type: string, minLength: 1, maxLength: 100}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}}, enabled: {type: boolean}}}
     NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Notification"}}}}
     NotificationUnsubscription: {type: object, additionalProperties: false, required: [user_id, at], properties: {user_id: {type: string}, at: {type: string, format: date-time, description: When the person stopped the notification's mail.}}}
     NotificationDelivery:
@@ -28226,6 +29069,7 @@ components:
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
         paused: {type: boolean}
+        import: {type: string, description: "Present on a campaign a schedule import made: the import's mark and the level's key. Importing the same sheet again under the same name updates it."}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -29214,7 +30058,30 @@ components:
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
         suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
+        stack: {$ref: "#/components/schemas/RuntimeStack"}
         diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. A playlist format that is not the shape of the screen's wall (or a screen with no wall) projects pages [] plus a wall_format_mismatch diagnostic. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content."}
+    RuntimeStack:
+      type: object
+      additionalProperties: true
+      required: [levels, playlists]
+      description: >-
+        Every level of the screen's stack, sent only to a Player that declared the schedule.stack host capability and only when the stack has more than one level (docs/player-compatibility.md §6.11). The manifest's root members are the bottom level's playlist; the Player resolves the levels itself with the schedule contract.
+      properties:
+        levels: {type: array, maxItems: 64, items: {$ref: "#/components/schemas/StackLevel"}, description: "Highest first; the last is the default and always holds."}
+        playlists:
+          type: object
+          description: Every level playlist other than the root's, by playlist id.
+          additionalProperties: {$ref: "#/components/schemas/RuntimeStackPlaylist"}
+    RuntimeStackPlaylist:
+      type: object
+      additionalProperties: true
+      required: [playlistRevision, pages]
+      properties:
+        playlistName: {type: string}
+        playlistRevision: {type: integer}
+        pages: {type: array, items: {oneOf: [{$ref: "#/components/schemas/RuntimePage"}, {$ref: "#/components/schemas/RuntimeAdslotPage"}]}}
+        audio: {$ref: "#/components/schemas/RuntimeAudio"}
+        diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}}
     RuntimeSuspension:
       type: object
       additionalProperties: true
@@ -30385,6 +31252,7 @@ x-problem-codes:
   - source_target_unsupported
   - source_target_taken
   - source_busy
+  - source_has_no_rooms
   - source_secret_required
   - source_test_failed
   - card_media_invalid
@@ -30424,6 +31292,8 @@ x-problem-codes:
   - trigger_limit_reached
   - bi_upstream_refused
   - bi_upstream_unavailable
+  - schedule_import_invalid
+  - schedule_import_stale
   - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit
@@ -30467,6 +31337,7 @@ x-problem-codes:
   - notification_limit_reached
   - alert_not_open
   - alert_mute_limit_reached
+  - report_subscription_limit_reached
   - fleet_link_limit_reached
   - webhook_url_rejected
   - notification_destination_rejected

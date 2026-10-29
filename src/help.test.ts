@@ -353,6 +353,7 @@ test("root help is compact and every command is discoverable through immediate c
     "source update",
     "source test",
     "source refresh",
+    "source rooms",
     "source delete",
     "doctor",
     "version",
