@@ -32,7 +32,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("validate").description("Validate a playlist file")
     .argument("<file>", "Playlist JSON file, or - for stdin")
-    .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistValidate));
 
   const create = playlist.command("create").description("Create a playlist from a file, from a template, or the built-in Urgent notice template")

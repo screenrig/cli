@@ -832,12 +832,11 @@ test("agent connect runs screenrig login with a warning naming it", async () => 
       verification_uri: "https://screenrig.ai/dashboard/connect", verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK",
       expires_in: 600, interval: 5 }));
   try {
-    const result = await h.cli(["--json", "agent", "connect", "--capability", "screens"], transport);
+    const result = await h.cli(["--json", "agent", "connect"], transport);
     assert.equal(result.code, 0, result.stdout);
     const envelope = JSON.parse(result.stdout) as { data: { status: string }; warnings: Array<{ code: string; message: string }> };
     assert.equal(envelope.data.status, "pending");
     assert.ok(envelope.warnings.some((warning) => warning.code === "command_renamed" && warning.message.includes("screenrig login")));
-    assert.ok(envelope.warnings.some((warning) => warning.code === "capability_chosen_at_approval"));
   } finally {
     await h.done();
   }

@@ -826,9 +826,6 @@ export const handleAgentConnect = commandHandler(async (args, runtime, resolved)
       return { ...result, envelope: { ...result.envelope, warnings: [AGENT_CONNECT_ALIAS] } };
     }
     const warnings: Warning[] = [AGENT_CONNECT_ALIAS];
-    if (flagString(args.flags, "capability") !== undefined) {
-      warnings.push({ code: "capability_chosen_at_approval", message: "The person approving the sign-in chooses its capabilities; --capability was not sent." });
-    }
     return login(args, runtime, resolved, {
       project: flagString(args.flags, "target-project-id"),
       access: "manage",
