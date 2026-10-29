@@ -119,11 +119,12 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, takeovers and\n  display schedules read their civil times in this zone. Page visibility\n  needs it for from, until or windows; data-only visibility needs no zone.");
 
-  const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two or three displays as one canvas");
+  const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two to twelve displays as one canvas");
   wall.command("set").description("Set a screen's video wall")
     .argument("<id>", "Screen identifier")
-    .requiredOption("--outputs <NAMES>", "Two or three comma-separated output names in physical order, as screen show lists them under observation.surfaces (required)", wallOutputsOption)
-    .addOption(new Option("--arrangement <ARRANGEMENT>", "row (outputs run left to right) or column (top to bottom) (required)").choices([...WALL_ARRANGEMENTS]).makeOptionMandatory())
+    .requiredOption("--outputs <NAMES>", "Two to twelve comma-separated output names in physical order (left to right, then top to bottom), as screen show lists them under observation.surfaces (required)", wallOutputsOption)
+    .addOption(new Option("--arrangement <ARRANGEMENT>", "row (one row, left to right), column (one column, top to bottom) or grid (rows of --columns outputs, top to bottom) (required)").choices([...WALL_ARRANGEMENTS]).makeOptionMandatory())
+    .option("--columns <N>", "Outputs per row of a grid (required for grid, not allowed for row or column); at least 2, dividing the outputs into at least 2 rows", positiveInteger("columns"))
     .addOption(new Option("--rotation <DEGREES>", "Clockwise rotation of every output (default 0); 90 and 270 are portrait panels").choices([...WALL_ROTATIONS]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenWallSet));

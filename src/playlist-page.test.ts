@@ -52,6 +52,11 @@ test("the canvas is the format's, else the first ordinary page's, else 1920 x 10
   const wall = { displays: 2, arrangement: "row", orientation: "landscape" };
   assert.deepEqual(formatCanvas(wall), { width: 3840, height: 1080 });
   assert.deepEqual(formatCanvas({ displays: 3, arrangement: "column", orientation: "portrait" }), { width: 1080, height: 5760 });
+  // A grid is its columns wide and displays / columns high; a grid that cannot be laid out has no canvas.
+  assert.deepEqual(formatCanvas({ displays: 12, arrangement: "grid", orientation: "landscape", columns: 4 }), { width: 7680, height: 3240 });
+  assert.deepEqual(formatCanvas({ displays: 6, arrangement: "grid", orientation: "portrait", columns: 2 }), { width: 2160, height: 5760 });
+  assert.equal(formatCanvas({ displays: 12, arrangement: "grid", orientation: "landscape" }), undefined);
+  assert.equal(formatCanvas({ displays: 12, arrangement: "grid", orientation: "landscape", columns: 5 }), undefined);
   assert.deepEqual(pageCanvas(playlistBody([storedImagePage()], { format: wall })), { width: 3840, height: 1080, background: "#112233FF" });
   assert.deepEqual(pageCanvas(playlistBody([{ id: "slot", type: "adslot" }, storedImagePage({ canvas: { width: 1280, height: 720, background: "#000000FF" } })])), { width: 1280, height: 720, background: "#000000FF" });
   assert.deepEqual(pageCanvas(playlistBody([])), { width: 1920, height: 1080, background: "#000000FF" });
