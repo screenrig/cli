@@ -145,6 +145,41 @@ test("normalizes server playlists, preserves snapshotted selectors and iframes, 
   assert.match(text, /"primitive":"iframe"/);
 });
 
+function iframeWithFields(source: Record<string, any>, fields: Record<string, unknown>) {
+  const [first, web] = source.pages[0].primitives;
+  source.pages[0].primitives = [first, { ...web, ...fields }];
+  return source;
+}
+
+test("an iframe's reload_s, fallback_src and navigation_allowlist travel with the bundle, and are left out when the page has none", () => {
+  const fields = { reload_s: 300, fallback_src: "https://status.example.com/offline", navigation_allowlist: ["example.com", "*.example.org/docs/"] };
+  const source = iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_A" })), fields);
+  const [, web] = (normalizePlaylistForBundle(source).playlist.pages as any[])[0].primitives;
+  assert.equal(web.src, "https://example.com/");
+  assert.equal(web.reload_s, 300);
+  assert.equal(web.fallback_src, "https://status.example.com/offline");
+  assert.deepEqual(web.navigation_allowlist, ["example.com", "*.example.org/docs/"]);
+  assert.equal("controller" in web, false);
+  const plain = (normalizePlaylistForBundle(playlist(mediaPrimitive({ by: "id", media_id: "med_A" }))).playlist.pages as any[])[0].primitives[1];
+  assert.equal("reload_s" in plain, false);
+  assert.equal("fallback_src" in plain, false);
+  assert.equal("navigation_allowlist" in plain, false);
+  const longest = "a".repeat(2048);
+  const sixtyFour = Array.from({ length: 64 }, (_, index) => `host${index}.example.com`);
+  for (const navigation_allowlist of [[longest], sixtyFour]) {
+    const [, kept] = (normalizePlaylistForBundle(iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_A" })), { navigation_allowlist })).playlist.pages as any[])[0].primitives;
+    assert.deepEqual(kept.navigation_allowlist, navigation_allowlist);
+  }
+  const tooMany = Array.from({ length: 65 }, (_, index) => `host${index}.example.com`);
+  for (const bad of [
+    { reload_s: "300" }, { reload_s: -60 }, { reload_s: 1.5 }, { fallback_src: "" }, { fallback_src: 7 },
+    { navigation_allowlist: [] }, { navigation_allowlist: "example.com" }, { navigation_allowlist: [7] }, { navigation_allowlist: [""] },
+    { navigation_allowlist: ["example.com", null] }, { navigation_allowlist: tooMany }, { navigation_allowlist: ["a".repeat(2049)] },
+  ]) {
+    assert.throws(() => normalizePlaylistForBundle(iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_A" })), bad)), CliError, JSON.stringify(bad));
+  }
+});
+
 test("a soundtrack and page cues travel with the bundle and its media is exported", () => {
   const source = playlist(mediaPrimitive({ by: "id", media_id: "med_A" })) as Record<string, any>;
   source.audio = { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 0.8 };
@@ -442,6 +477,15 @@ test("preflight validates the complete playlist write surface and media primitiv
       delete value.pages[0].primitives[0].alt;
       value.pages[0].primitives[0].content_fit = "fill";
     }],
+    ...([
+      { reload_s: 59 }, { reload_s: 86401 }, { reload_s: 1.5 }, { fallback_src: "" }, { fallback_src: "ftp://example.com/" }, { sidecar: true },
+      { navigation_allowlist: [] }, { navigation_allowlist: "example.com" }, { navigation_allowlist: [7] }, { navigation_allowlist: [""] },
+      { navigation_allowlist: Array.from({ length: 65 }, (_, index) => `host${index}.example.com`) }, { navigation_allowlist: ["a".repeat(2049)] },
+    ] as Array<Record<string, unknown>>).map(
+      (fields, index): [string, (playlist: any) => void] => [`iframe-${Object.keys(fields)[0]}-${index}`, (value) => {
+        value.pages[0].primitives.push({ id: "web", primitive: "iframe", src: "https://example.com/", title: "Example", rect: { x: 0, y: 0, width: 1, height: 1 }, layer: 1, content_fit: "fill", ...fields });
+      }],
+    ),
     ["media-primitive", (value) => {
       value.pages[0].primitives[0] = {
         ...value.pages[0].primitives[0],
@@ -458,6 +502,24 @@ test("preflight validates the complete playlist write surface and media primitiv
     await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2, 3]) }]);
     await replacePlaylist(dir, mutate);
     await assert.rejects(() => preflightPlaylistBundle(dir), CliError, name);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("preflight accepts an iframe with reload_s 0, 60 or 86400, a fallback_src given as an embed code and a navigation_allowlist of 1 to 64 strings", async () => {
+  const embed = '<iframe src="https://status.example.com/offline?a=1&amp;b=2" width="640"></iframe>';
+  const sixtyFour = Array.from({ length: 64 }, (_, index) => `host${index}.example.com`);
+  for (const fields of [
+    { reload_s: 0 }, { reload_s: 60 }, { reload_s: 86400, fallback_src: "https://status.example.com/offline" }, { reload_s: 300, fallback_src: embed }, { fallback_src: embed },
+    { navigation_allowlist: ["example.com"] }, { navigation_allowlist: sixtyFour }, { navigation_allowlist: ["a".repeat(2048)] },
+    { reload_s: 300, fallback_src: embed, navigation_allowlist: ["https://*.example.com:*/docs/*", "10.0.0.5"] },
+  ]) {
+    const dir = await testTemp("bundle-iframe-ok-");
+    await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2, 3]) }]);
+    await replacePlaylist(dir, (value) => {
+      value.pages[0].primitives.push({ id: "web", primitive: "iframe", src: "https://example.com/", title: "Example", rect: { x: 0, y: 0, width: 1, height: 1 }, layer: 1, content_fit: "fill", ...fields });
+    });
+    await (await preflightPlaylistBundle(dir)).close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -654,6 +716,37 @@ test("import dedupes exact media injectively, rewrites selectors, and performs n
   assert.doesNotMatch(text, /med_Z_LAST/);
   assert.equal(transport.calls.some((call) => call.method === "DELETE"), false);
   assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("an iframe's reload_s, fallback_src and navigation_allowlist survive export and import", async () => {
+  const dir = await testTemp("bundle-iframe-roundtrip-");
+  const output = path.join(dir, "export");
+  const bytes = Uint8Array.from([7, 8, 9]);
+  const source = iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_SOURCE" })), {
+    reload_s: 300,
+    fallback_src: "https://status.example.com/offline",
+    navigation_allowlist: ["example.com", "*.example.org/docs/", "https://status.example.com:8443/"],
+  });
+  source.pages[0].primitives.push({ id: "plain", primitive: "iframe", src: "https://example.org/", title: "Plain", rect: { x: 0, y: 0, width: 100, height: 100 }, layer: 2, content_fit: "fill", controller: false });
+  const client = new ApiClient({ transport: exportTransport(bytes, { playlist: source }), token: "token" });
+  await exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client });
+  const iframes = (document: any) => document.pages[0].primitives.filter((primitive: any) => primitive.primitive === "iframe")
+    .map(({ id, reload_s, fallback_src, navigation_allowlist }: any) => ({ id, reload_s, fallback_src, navigation_allowlist }));
+  const expected = [
+    { id: "web", reload_s: 300, fallback_src: "https://status.example.com/offline", navigation_allowlist: ["example.com", "*.example.org/docs/", "https://status.example.com:8443/"] },
+    { id: "plain", reload_s: undefined, fallback_src: undefined, navigation_allowlist: undefined },
+  ];
+  assert.deepEqual(iframes(JSON.parse(await readFile(path.join(output, PLAYLIST_BUNDLE_PLAYLIST), "utf8"))), expected);
+
+  const transport = importTransport([remoteMedia("med_SOURCE", bytes)]);
+  await importPlaylistBundle({
+    directory: output,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-iframe-key" }),
+    runtime: runtimeForImport([]),
+  });
+  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists")!;
+  assert.deepEqual(iframes(create.body), expected);
   await rm(dir, { recursive: true, force: true });
 });
 

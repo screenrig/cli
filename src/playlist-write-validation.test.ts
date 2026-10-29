@@ -188,6 +188,61 @@ test("playlist write accepts a pasted iframe embed code as an iframe src, as the
   }
 });
 
+function iframeWith(fields: Record<string, unknown>) {
+  return playlistWithPrimitives([{ ...iframePrimitive("web", "https://example.com/"), ...fields }]);
+}
+
+test("an iframe takes reload_s of 0 or 60 to 86400 seconds in the canonical schema and in a bundle", () => {
+  for (const reload_s of [0, 60, 300, 86400]) {
+    assert.deepEqual(playlistIssues(iframeWith({ reload_s })), [], `schema: ${reload_s}`);
+    assert.deepEqual(validatePlaylistWrite(iframeWith({ reload_s }), new Map()), new Set(), `bundle: ${reload_s}`);
+  }
+  for (const reload_s of [1, 30, 59, 86401, -1, 60.5, "60", null]) {
+    const paths = playlistIssues(iframeWith({ reload_s })).map((issue) => issue.path);
+    assert.ok(paths.includes("/pages/0/primitives/0/reload_s"), `schema: ${JSON.stringify(reload_s)} -> ${paths.join(", ")}`);
+    assert.throws(
+      () => validatePlaylistWrite(iframeWith({ reload_s }), new Map()),
+      (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /reload_s/.test(error.problem.detail),
+      `bundle: ${JSON.stringify(reload_s)}`,
+    );
+  }
+});
+
+test("an iframe fallback_src takes the forms of src, including a pasted embed code, and an empty one is refused", () => {
+  const code = '<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vExample/embed?start=true&amp;loop=true" width="640"></iframe>';
+  for (const fallback_src of ["https://status.example.com/offline", "http://192.168.1.20/board", code, `  ${code}`, "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/edit"]) {
+    assert.deepEqual(playlistIssues(iframeWith({ fallback_src, reload_s: 120 })), [], `schema: ${fallback_src}`);
+    assert.deepEqual(validatePlaylistWrite(iframeWith({ fallback_src, reload_s: 120 }), new Map()), new Set(), `bundle: ${fallback_src}`);
+  }
+  for (const fallback_src of ["", "docs.google.com/presentation", "javascript:alert(1)", '<script src="https://example.com/x.js"></script>', "<iframe></iframe>", null, 7]) {
+    assert.notDeepEqual(playlistIssues(iframeWith({ fallback_src })), [], `schema: ${JSON.stringify(fallback_src)}`);
+    assert.throws(() => validatePlaylistWrite(iframeWith({ fallback_src }), new Map()), CliError, `bundle: ${JSON.stringify(fallback_src)}`);
+  }
+  // A bundle names the field it refuses.
+  assert.throws(
+    () => validatePlaylistWrite(iframeWith({ fallback_src: "ftp://example.com/" }), new Map()),
+    (error: unknown) => error instanceof CliError && /primitives\[0\]\.fallback_src must be an http or https URL/.test(error.problem.detail),
+  );
+});
+
+test("an iframe navigation_allowlist is 1 to 64 strings of 1 to 2048 characters in the canonical schema and in a bundle", () => {
+  const hosts = (count: number) => Array.from({ length: count }, (_, index) => `host${index}.example.com`);
+  for (const navigation_allowlist of [["example.com"], ["https://*.example.com:*/docs/*", "10.0.0.5:8080/board", "*"], hosts(64), ["https://example.com/" + "a".repeat(2028)]]) {
+    assert.deepEqual(playlistIssues(iframeWith({ navigation_allowlist })), [], `schema: ${JSON.stringify(navigation_allowlist).slice(0, 80)}`);
+    assert.deepEqual(validatePlaylistWrite(iframeWith({ navigation_allowlist }), new Map()), new Set(), `bundle: ${JSON.stringify(navigation_allowlist).slice(0, 80)}`);
+  }
+  for (const navigation_allowlist of [[], hosts(65), [""], [7], ["example.com", null], "example.com", null, ["https://example.com/" + "a".repeat(2029)]]) {
+    const label = JSON.stringify(navigation_allowlist)?.slice(0, 80);
+    const paths = playlistIssues(iframeWith({ navigation_allowlist })).map((issue) => issue.path);
+    assert.ok(paths.some((path) => path.startsWith("/pages/0/primitives/0/navigation_allowlist")), `schema: ${label} -> ${paths.join(", ")}`);
+    assert.throws(
+      () => validatePlaylistWrite(iframeWith({ navigation_allowlist }), new Map()),
+      (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /navigation_allowlist/.test(error.problem.detail),
+      `bundle: ${label}`,
+    );
+  }
+});
+
 test("playlist write accepts a panning background and a spinning badge", () => {
   assert.deepEqual(
     validatePlaylistWrite(playlistWithPrimitives([{

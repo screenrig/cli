@@ -5,7 +5,8 @@ import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import type { CampaignStatus, Screen, ScreenCampaigns, ScreenVerdict } from "./adapters/protocol.js";
 import {
-  campaignAudienceText, campaignCountsText, campaignExplainLines, campaignExplainTime, campaignInstant, campaignStandingDetail, campaignWhenText, campaignWindow, campaignWindowSpec,
+  campaignAudienceText, campaignCountsText, campaignDate, campaignDateSpec, campaignDisplays, campaignExceptDates, campaignExplainLines, campaignExplainTime, campaignInstant, campaignLines,
+  campaignMonthly, campaignMonthlySpec, campaignOnTouch, campaignStandingDetail, campaignTableLines, campaignWhenText, campaignWindow, campaignWindowSpec,
   verdictDetail,
 } from "./campaigns.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -862,4 +863,267 @@ test("campaign help names the audience flags, the screens it schedules and how t
   const everything = JSON.stringify([commandHelp(["campaign"]), ...["list", "show", "create", "update", "pause", "resume", "delete", "screens", "explain"].map((action) => commandHelp(["campaign", action]))]);
   assert.doesNotMatch(everything, /\b(beta|coming soon|not yet|planned|in development|not available yet|experimental)\b/i);
   assert.doesNotMatch(everything, /localhost|MCP|\/home\//);
+});
+
+const usage = (flag: string) => (error: any) => error.problem?.code === "usage_error" && error.problem.detail.includes(flag);
+
+test("campaign monthly rules parse days of the month, nth weekdays and times", () => {
+  assert.deepEqual(campaignMonthly("15"), { day: 15 });
+  assert.deepEqual(campaignMonthly("day15"), { day: 15 });
+  assert.deepEqual(campaignMonthly("Day 1"), { day: 1 });
+  assert.deepEqual(campaignMonthly("31@09:00-10:00"), { day: 31, start: "09:00", end: "10:00" });
+  assert.deepEqual(campaignMonthly("1st-mon"), { nth: 1, weekday: "mon" });
+  assert.deepEqual(campaignMonthly("2nd-tue"), { nth: 2, weekday: "tue" });
+  assert.deepEqual(campaignMonthly("3rd-wed"), { nth: 3, weekday: "wed" });
+  assert.deepEqual(campaignMonthly("4th-thu@18:00-21:00"), { nth: 4, weekday: "thu", start: "18:00", end: "21:00" });
+  assert.deepEqual(campaignMonthly("last-sun@09:00-14:00"), { nth: -1, weekday: "sun", start: "09:00", end: "14:00" });
+  assert.deepEqual(campaignMonthly(" LAST - Fri @ 22:00-02:00 "), { nth: -1, weekday: "fri", start: "22:00", end: "02:00" }, "an end at or before the start crosses midnight");
+  for (const bad of ["", "0", "32", "100", "day", "day0", "15th", "first-mon", "5th-mon", "1st", "1st-", "1st-monday", "last-xyz", "1st-mon-tue", "15@", "15@09:00", "15@9:00-10:00", "15@09:00-24:00", "1st-mon@09:00-10:00-11:00", "mon", "-5"]) {
+    assert.throws(() => campaignMonthly(bad), usage("--monthly"), JSON.stringify(bad));
+  }
+  assert.throws(() => campaignMonthly("5th-mon"), usage("use 1st, 2nd, 3rd, 4th or last"));
+});
+
+test("campaign monthly and date specs print in flag spelling and parse back to the same rule", () => {
+  for (const [rule, spec] of [
+    [{ day: 15 }, "day15"], [{ day: 1, start: "08:00", end: "09:30" }, "day1@08:00-09:30"],
+    [{ nth: 1, weekday: "mon" }, "1st-mon"], [{ nth: 4, weekday: "thu", start: "18:00", end: "21:00" }, "4th-thu@18:00-21:00"],
+    [{ nth: -1, weekday: "sun", start: "09:00", end: "14:00" }, "last-sun@09:00-14:00"],
+  ] as const) {
+    assert.equal(campaignMonthlySpec(rule as never), spec);
+    assert.deepEqual(campaignMonthly(spec), rule, spec);
+  }
+  for (const [rule, spec] of [[{ date: "2026-12-24" }, "2026-12-24"], [{ date: "2026-12-24", start: "18:00", end: "22:00" }, "2026-12-24@18:00-22:00"]] as const) {
+    assert.equal(campaignDateSpec(rule), spec);
+    assert.deepEqual(campaignDate(spec), rule, spec);
+  }
+});
+
+test("campaign dates, exceptions, displays and idle seconds take real values", () => {
+  assert.deepEqual(campaignDate("2028-02-29"), { date: "2028-02-29" });
+  assert.deepEqual(campaignDate(" 2026-12-31 @ 22:00-02:00 "), { date: "2026-12-31", start: "22:00", end: "02:00" });
+  for (const bad of ["", "2026-12", "2026-02-29", "2026-13-01", "2026-04-31", "2026-12-24T18:00", "12/24/2026", "2026-12-24@", "2026-12-24@18:00", "2026-12-24@18:00-25:00", "@18:00-22:00"]) {
+    assert.throws(() => campaignDate(bad), usage("--date"), JSON.stringify(bad));
+  }
+  assert.equal(campaignExceptDates("2026-12-25"), "2026-12-25");
+  assert.equal(campaignExceptDates("2027-01-01, 2026-12-25"), "2026-12-25,2027-01-01", "dates are sent ascending");
+  assert.equal(campaignExceptDates("2026-12-26", campaignExceptDates("2027-01-01,2026-12-25")), "2026-12-25,2026-12-26,2027-01-01", "repeating accumulates");
+  for (const bad of ["", "2026-12-25,", "2026-02-30", "tomorrow", "2026-12-25 2026-12-26"]) assert.throws(() => campaignExceptDates(bad), usage("--except"), JSON.stringify(bad));
+  assert.throws(() => campaignExceptDates("2026-12-25,2026-12-25"), usage("more than once"));
+  assert.throws(() => campaignExceptDates("2026-12-26", "2026-12-26"), usage("more than once"));
+  assert.equal(campaignDisplays("2,1"), "1,2");
+  assert.equal(campaignDisplays("12"), "12");
+  for (const bad of ["", "0", "13", "1,", "a", "1.5", "1;2", "-1"]) assert.throws(() => campaignDisplays(bad), usage("--displays"), JSON.stringify(bad));
+  assert.throws(() => campaignDisplays("1,1"), usage("more than once"));
+  for (const good of ["5", "60", "3600"]) assert.equal(campaignOnTouch(good), good);
+  for (const bad of ["", "4", "3601", "1.5", "soon", "-5", "1e3"]) assert.throws(() => campaignOnTouch(bad), usage("--on-touch"), JSON.stringify(bad));
+});
+
+test("campaign create sends monthly rules, dates, exceptions, touch, displays and start", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const created = await cli(["--json", "campaign", "create", "--name", "Sunday market", "--playlist-id", PLAYLIST, "--tag", "Lobby",
+    "--monthly", "last-sun@09:00-14:00", "--monthly", "15", "--monthly", "2nd-tue", "--date", "2026-12-24@18:00-22:00", "--date", "2026-12-31",
+    "--except", "2027-01-17,2026-12-27", "--except", "2026-12-20", "--on-touch", "90", "--displays", "2,1", "--start", "on-time"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  const call = lastCall(transport);
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, {
+    name: "Sunday market", playlist_id: PLAYLIST, audience: { tag: "Lobby" },
+    monthly: [{ nth: -1, weekday: "sun", start: "09:00", end: "14:00" }, { day: 15 }, { nth: 2, weekday: "tue" }],
+    dates: [{ date: "2026-12-24", start: "18:00", end: "22:00" }, { date: "2026-12-31" }],
+    except: ["2026-12-20", "2026-12-27", "2027-01-17"], interaction: { idle_s: 90 }, displays: [1, 2], start: "on_time",
+  });
+  assert.equal(call.body && (call.body as Record<string, unknown>).windows, undefined, "no window is needed");
+  assert.deepEqual(created.envelope.data.interaction, { idle_s: 90 });
+
+  const bare = await cli(["--json", "campaign", "create", "--name", "Touch", "--playlist-id", PLAYLIST, "--screen-id", A, "--on-touch"], transport, env);
+  assert.equal(bare.code, 0, bare.stdout);
+  assert.deepEqual(lastCall(transport).body, { name: "Touch", playlist_id: PLAYLIST, audience: { screen_id: A }, interaction: { idle_s: 60 } }, "--on-touch alone means 60 seconds");
+  const beforeFlag = await cli(["--json", "campaign", "create", "--on-touch", "--name", "Touch", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--start", "next-item"], transport, env);
+  assert.equal(beforeFlag.code, 0, beforeFlag.stdout);
+  assert.deepEqual(lastCall(transport).body, { name: "Touch", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, interaction: { idle_s: 60 }, start: "next_item" });
+  assert.equal(beforeFlag.envelope.data.start, undefined, "the server stores next_item absent");
+});
+
+test("campaign shows monthly rules, dates, exceptions, touch, displays and start in words", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const campaign = await create(transport, env, "--tag", "Lobby", "--monthly", "last-sun@09:00-14:00", "--monthly", "day15", "--date", "2026-12-24@18:00-22:00", "--except", "2026-12-27,2027-01-01",
+    "--on-touch", "30", "--displays", "1,3", "--start", "on-time");
+  const shown = await cli(["--human", "campaign", "show", campaign.id], transport, env);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /^when: last Sunday 09:00–14:00; day 15; on 2026-12-24 18:00–22:00; except 2026-12-27, 2027-01-01; on touch \(idle 30 s\) \(civil times in each screen's timezone\)$/m);
+  assert.match(shown.stdout, /^displays: 1, 3$/m);
+  assert.match(shown.stdout, /^start: on time$/m);
+  assert.doesNotMatch(shown.stdout, /^covers:/m);
+
+  const listed = await cli(["--human", "campaign", "list"], transport, env);
+  assert.match(listed.stdout, /last Sunday 09:00–14:00; day 15; on 2026-12-24 18:00–22…/, "the list clips WHEN like any long clock");
+
+  // Only touch: nothing reads the civil clock, so no timezone note.
+  const touch = await create(transport, env, "--tag", "Cafe", "--on-touch");
+  const touched = await cli(["--human", "campaign", "show", touch.id], transport, env);
+  assert.match(touched.stdout, /^when: on touch \(idle 60 s\)$/m);
+});
+
+test("campaign clock text covers every rule member", () => {
+  assert.equal(campaignWhenText({ monthly: [{ nth: 1, weekday: "mon" }, { nth: 3, weekday: "wed", start: "18:00", end: "21:00" }] }), "1st Monday; 3rd Wednesday 18:00–21:00");
+  assert.equal(campaignWhenText({ monthly: [{ nth: 2, weekday: "tue" }, { nth: 4, weekday: "thu" }, { nth: -1, weekday: "sat" }] }), "2nd Tuesday; 4th Thursday; last Saturday");
+  assert.equal(campaignWhenText({ dates: [{ date: "2026-12-24" }] }), "on 2026-12-24");
+  assert.equal(campaignWhenText({ except: ["2026-12-25"] }), "except 2026-12-25");
+  assert.equal(campaignWhenText({ interaction: {} }), "on touch (idle 60 s)");
+  assert.equal(campaignWhenText({ interaction: { idle_s: 5 } }), "on touch (idle 5 s)");
+  assert.equal(campaignWhenText({ data: { key: "{screen.weather}", path: "/condition", equals: "rain" } }), 'data {screen.weather} /condition = "rain"');
+  assert.equal(campaignWhenText({ data: { key: "queue", path: "/open", equals: false } }), "data queue /open = false");
+  assert.equal(campaignWhenText({ data: { key: "queue" } }), "data queue exists");
+  assert.equal(campaignWhenText({ from: "2026-12-01T00:00", windows: [{ days: ["sat", "sun"] }], monthly: [{ day: 1 }], except: ["2026-12-06"] }), "from 2026-12-01T00:00; sat,sun; day 1; except 2026-12-06");
+  const lines = campaignLines({
+    id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, revision: 4, created_at: "c", updated_at: "u",
+    covers: "header", displays: [2], start: "next_item",
+  });
+  assert.deepEqual(lines.filter((line) => /^(when|covers|displays|start):/.test(line)), ["when: always", "covers: header", "displays: 2", "start: next item"]);
+  assert.ok(campaignTableLines([{ id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, revision: 4, created_at: "c", updated_at: "u", monthly: [{ nth: -1, weekday: "sun" }] }])[1]!.includes("last Sunday"));
+});
+
+test("campaign create refuses a bad level member before any request", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const base = ["--name", "Menu", "--playlist-id", PLAYLIST, "--all-screens"];
+  const cases: Array<[string[], RegExp]> = [
+    [["--monthly", "5th-mon"], /--monthly "5th-mon": "5th" is not an occurrence; use 1st, 2nd, 3rd, 4th or last\. A monthly rule is DAY or NTH-WEEKDAY/],
+    [["--monthly", "32"], /--monthly "32": 32 is not a day of the month; use 1 to 31/],
+    [["--monthly", "1st-mon@09:00"], /HH:MM-HH:MM/],
+    [["--monthly", ""], /--monthly requires a value/],
+    [[...Array.from({ length: 17 }, () => ["--monthly", "15"]).flat()], /--monthly accepts at most 16 rules/],
+    [["--date", "2026-02-29"], /--date "2026-02-29": "2026-02-29" is not a real calendar date written YYYY-MM-DD/],
+    [["--date", "2026-12-24@18:00"], /HH:MM-HH:MM/],
+    [[...Array.from({ length: 101 }, () => ["--date", "2026-12-24"]).flat()], /--date accepts at most 100 dates/],
+    [["--except", "2026-12-25,not-a-date"], /--except takes real calendar dates/],
+    [["--except", "2026-12-25", "--except", "2026-12-25"], /more than once/],
+    [["--on-touch", "4"], /--on-touch takes the seconds without input .* from 5 to 3600/],
+    [["--on-touch", "soon"], /from 5 to 3600/],
+    [["--on-touch", "30", "--on-touch", "40"], /only once/],
+    [["--displays", "0"], /--displays takes display numbers from 1 to 12/],
+    [["--displays", "1,1"], /more than once/],
+    [["--displays", "1", "--displays", "2"], /only once/],
+    [["--start", "later"], /--start/],
+    [["--start", "on_time"], /--start/],
+  ];
+  for (const [flags, detail] of cases) {
+    const refused = await cli(["--json", "campaign", "create", ...base, ...flags], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${flags.join(" ").slice(0, 120)}: ${refused.stdout}`);
+    assert.match(refused.envelope.error?.detail ?? "", detail, flags.join(" ").slice(0, 120));
+  }
+  assert.equal(campaignCalls(transport).length, 0);
+});
+
+test("campaign update replaces level members, sends null to clear them and keeps the rest", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const campaign = await create(transport, env, "--tag", "Lobby", "--monthly", "1st-mon", "--date", "2026-12-24", "--except", "2026-12-28", "--on-touch", "45", "--displays", "1", "--start", "on-time");
+
+  const replaced = await cli(["--json", "campaign", "update", campaign.id, "--monthly", "last-fri@17:00-23:00", "--monthly", "day1", "--date", "2026-12-31@20:00-02:00", "--except", "2027-01-01",
+    "--on-touch", "120", "--displays", "3,2", "--start", "next-item", "--expect-rev", "1"], transport, env);
+  assert.equal(replaced.code, 0, replaced.stdout);
+  const call = lastCall(transport);
+  assert.equal(call.method, "PATCH");
+  assert.equal(call.headers?.["if-match"], '"1"');
+  assert.deepEqual(call.body, {
+    monthly: [{ nth: -1, weekday: "fri", start: "17:00", end: "23:00" }, { day: 1 }], dates: [{ date: "2026-12-31", start: "20:00", end: "02:00" }], except: ["2027-01-01"],
+    interaction: { idle_s: 120 }, displays: [2, 3], start: "next_item",
+  });
+  assert.deepEqual(replaced.envelope.data.monthly.length, 2);
+  assert.deepEqual(replaced.envelope.data.interaction, { idle_s: 120 });
+  assert.equal(replaced.envelope.data.start, undefined);
+
+  const bare = await cli(["--json", "campaign", "update", campaign.id, "--on-touch"], transport, env);
+  assert.equal(bare.code, 0, bare.stdout);
+  assert.deepEqual(lastCall(transport).body, { interaction: { idle_s: 60 } });
+  const start = await cli(["--json", "campaign", "update", campaign.id, "--start", "on-time"], transport, env);
+  assert.deepEqual(lastCall(transport).body, { start: "on_time" });
+  assert.equal(start.envelope.data.start, "on_time");
+
+  const cleared = await cli(["--json", "campaign", "update", campaign.id, "--clear-monthly", "--clear-dates", "--clear-except", "--clear-on-touch", "--clear-displays"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(lastCall(transport).body, { monthly: null, dates: null, except: null, interaction: null, displays: null });
+  for (const member of ["monthly", "dates", "except", "interaction", "displays"]) assert.equal(cleared.envelope.data[member], undefined, member);
+  assert.equal(cleared.envelope.data.start, "on_time", "members that were not cleared stay");
+
+  const human = await cli(["--human", "campaign", "show", campaign.id], transport, env);
+  assert.match(human.stdout, /^when: always$/m);
+});
+
+test("campaign update refuses conflicting level options before any request", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const campaign = await create(transport, env);
+  const before = campaignCalls(transport).length;
+  const cases: Array<[string[], RegExp]> = [
+    [["--monthly", "15", "--clear-monthly"], /cannot be used with/],
+    [["--date", "2026-12-24", "--clear-dates"], /cannot be used with/],
+    [["--except", "2026-12-25", "--clear-except"], /cannot be used with/],
+    [["--on-touch", "30", "--clear-on-touch"], /cannot be used with/],
+    [["--on-touch", "--clear-on-touch"], /cannot be used with/],
+    [["--displays", "1", "--clear-displays"], /cannot be used with/],
+    [["--monthly", "later"], /--monthly "later"/],
+    [["--on-touch", "4"], /from 5 to 3600/],
+    [["--start", "whenever"], /--start/],
+    [["--expect-rev", "1"], /Provide at least one of .*--monthly.*--clear-monthly.*--on-touch.*--start/],
+  ];
+  for (const [flags, detail] of cases) {
+    const refused = await cli(["--json", "campaign", "update", campaign.id, ...flags], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${flags.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error?.detail ?? "", detail, flags.join(" "));
+  }
+  assert.equal(campaignCalls(transport).length, before);
+});
+
+test("campaign help documents the level flags, their relationships and the stack-only reason", () => {
+  const create = commandHelp(["campaign", "create"]);
+  for (const name of ["--monthly", "--date", "--except", "--on-touch", "--displays", "--start"]) assert.ok(create.options.some((option) => option.name === name), `create has ${name}`);
+  assert.equal(create.options.find((option) => option.name === "--on-touch")!.valueRequired, false, "--on-touch takes an optional IDLE_S");
+  assert.equal(create.options.find((option) => option.name === "--monthly")!.valueRequired, true);
+  assert.deepEqual(create.relationships, [{ kind: "exactlyOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] }]);
+  assert.deepEqual(create.options.find((option) => option.name === "--start")!.choices, ["on-time", "next-item"]);
+  assert.match(create.usage, /--monthly is a day of the month \(15 or day15/);
+  assert.match(create.usage, /last-sun/);
+  assert.match(create.usage, /--except lists dates/);
+  assert.match(create.usage, /--on-touch \[IDLE_S\]/);
+  assert.match(create.usage, /stack_only \(needs a Player that resolves its own stack\)/);
+  assert.ok(create.examples.some((example) => /--monthly last-sun@09:00-14:00 --except 2026-12-27/.test(example)));
+  assert.ok(create.examples.some((example) => /--on-touch 90/.test(example)));
+
+  const update = commandHelp(["campaign", "update"]);
+  const relationship = update.relationships.find((item) => item.kind === "atLeastOne")!;
+  for (const name of ["--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--displays", "--clear-displays", "--start"]) {
+    assert.ok(relationship.options.includes(name), `${name} counts as a change`);
+  }
+  assert.deepEqual(update.options.find((option) => option.name === "--monthly")!.conflicts, ["--clear-monthly"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--clear-on-touch")!.conflicts, ["--on-touch"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--displays")!.conflicts, ["--clear-displays"]);
+  assert.match(update.usage, /--clear-monthly, --clear-dates, --clear-except, --clear-on-touch and --clear-displays remove them/);
+  assert.ok(update.examples.some((example) => /--clear-monthly --clear-except --clear-on-touch --clear-displays/.test(example)));
+  assert.match(commandHelp(["campaign", "explain"]).usage, /stack_only: only a Player that resolves its own stack honors it/);
+  assert.match(commandHelp(["campaign", "screens"]).usage, /stack_only: only a Player that resolves its own stack honors the campaign/);
+});
+
+test("a stack-only reason reads as needing a Player that resolves its own stack", async () => {
+  const blocked = (fields: Partial<CampaignStatus>): CampaignStatus => ({ campaign_id: "cmp_X", screen_id: A, status: "blocked", reason: "stack_only", ...fields });
+  assert.equal(campaignStandingDetail(blocked({})), "needs a Player that resolves its own stack");
+  assert.equal(verdictDetail({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "off", reason: "stack_only" }, A, "UTC"), "needs a Player that resolves its own stack");
+  assert.equal(verdictDetail({ kind: "schedule", id: "touch", playlist_id: PLAYLIST, verdict: "off", reason: "stack_only" }, A, "UTC"), "needs a Player that resolves its own stack");
+
+  const env = await enrolled();
+  const transport = backend();
+  transport.putScreen!(screen(A, { tags: ["Lobby"] }));
+  const touch = await create(transport, env, "--tag", "Lobby", "--on-touch");
+  const reach = await cli(["--human", "campaign", "screens", touch.id], transport, env);
+  assert.match(reach.stdout, new RegExp(`^${A}\\s+Screen A\\s+blocked\\s+needs a Player that resolves its own stack$`, "m"));
+  const explained = await cli(["--human", "campaign", "explain", A], transport, env);
+  assert.match(explained.stdout, new RegExp(`^${touch.id}\\s+blocked\\s+needs a Player that resolves its own stack$`, "m"));
+  const at = await cli(["--human", "campaign", "explain", A, "--at", "2026-12-24T18:00"], transport, env);
+  assert.match(at.stdout, new RegExp(`^campaign ${touch.id}\\s+${PLAYLIST}\\s+off\\s+needs a Player that resolves its own stack$`, "m"));
+  const json = await cli(["--json", "campaign", "screens", touch.id], transport, env);
+  assert.equal(json.envelope.data.items[0].reason, "stack_only");
 });

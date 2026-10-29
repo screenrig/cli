@@ -6883,6 +6883,51 @@ test("partial advertising edits preserve stored eligibility, pricing, metadata a
   assert.deepEqual(JSON.parse(memberships.stdout).data.memberships, [{ ...originalMembership, policy: "trusted", revision: 6 }]);
 });
 
+test("ads inventory update sends the impressions estimate as a number, keeps it, clears it and refuses bad input", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  let inventory: Record<string, unknown> = {
+    screen_id: "scr_TEST", revision: 4, ads_enabled: true, site_name: "Lobby", audience_tags: [], rate_override_mcr_per_15s: null,
+  };
+  const transport = new FakeTransport()
+    .on("GET", "/api/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [inventory] } }))
+    .on("PUT", "/api/advertising/inventory/scr_TEST", request => {
+      inventory = { ...(request.body as Record<string, unknown>), screen_id: "scr_TEST", revision: Number(inventory.revision) + 1 };
+      return { status: 200, headers, body: inventory };
+    });
+  const putBodies = () => transport.calls.filter(call => call.method === "PUT").map(call => call.body as Record<string, unknown>);
+  const update = (...flags: string[]) => withAuthenticatedRuntime(["--json", "ads", "inventory", "update", "scr_TEST", ...flags], transport);
+
+  const set = await update("--impressions-per-hour", "12.5");
+  assert.equal(set.code, ExitCode.Success, set.stdout);
+  assert.equal(putBodies()[0]!.impressions_per_hour, 12.5);
+  assert.equal(typeof putBodies()[0]!.impressions_per_hour, "number");
+
+  const kept = await update("--city", "Vancouver");
+  assert.equal(kept.code, ExitCode.Success, kept.stdout);
+  assert.equal(putBodies()[1]!.impressions_per_hour, 12.5, "an update that omits the flag keeps the stored estimate");
+
+  const zero = await update("--impressions-per-hour", "0");
+  assert.equal(zero.code, ExitCode.Success, zero.stdout);
+  assert.equal(putBodies()[2]!.impressions_per_hour, 0);
+
+  const cleared = await update("--clear-impressions-per-hour");
+  assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
+  assert.equal(putBodies()[3]!.impressions_per_hour, null);
+
+  const afterClear = await update("--city", "Burnaby");
+  assert.equal(afterClear.code, ExitCode.Success, afterClear.stdout);
+  assert.equal(putBodies()[4]!.impressions_per_hour, undefined, "a cleared estimate stays cleared");
+
+  const writes = putBodies().length;
+  for (const bad of ["-1", "NaN", "abc", "", "Infinity"]) {
+    const refused = await update("--impressions-per-hour", bad);
+    assert.equal(refused.code, ExitCode.Usage, `${bad}: ${refused.stdout}`);
+  }
+  const both = await update("--impressions-per-hour", "5", "--clear-impressions-per-hour");
+  assert.equal(both.code, ExitCode.Usage, both.stdout);
+  assert.equal(putBodies().length, writes, "refused input sends no write");
+});
+
 test("advertising lifecycle mutations send required If-Match preconditions and canonical bodies", async () => {
   const headers = { "cache-control": "private, no-store" };
   const transport = new FakeTransport()

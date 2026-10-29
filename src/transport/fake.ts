@@ -2689,6 +2689,17 @@ export function memoryBackend(options: {
   };
   const campaignsInOrder = (): Record<string, unknown>[] => [...campaigns.values()]
     .sort((a, b) => (b.priority as number) - (a.priority as number) || (b.sequence as number) - (a.sequence as number));
+  // The level members a campaign carries beside from, until and windows. The server stores the defaults (covers full, start next_item) absent and an interaction always with its idle_s.
+  const LEVEL_MEMBERS = ["monthly", "dates", "except", "data", "interaction", "covers", "displays", "start"];
+  const storedLevel = (record: Record<string, unknown>): Record<string, unknown> => {
+    const { covers, start, interaction, ...rest } = record;
+    return {
+      ...rest,
+      ...(interaction != null ? { interaction: { idle_s: (interaction as { idle_s?: number }).idle_s ?? 60 } } : {}),
+      ...(covers != null && covers !== "full" ? { covers } : {}),
+      ...(start != null && start !== "next_item" ? { start } : {}),
+    };
+  };
   const publicCampaign = (campaign: Record<string, unknown>): Record<string, unknown> => {
     const { sequence: _sequence, ...rest } = campaign;
     return rest;
@@ -2697,13 +2708,15 @@ export function memoryBackend(options: {
     let winner: string | undefined;
     return campaignsInOrder().map((campaign) => {
       const standing = { campaign_id: campaign.id as string, screen_id: screen.id, screen_name: screen.label };
-      const bounded = campaign.from !== undefined || campaign.until !== undefined || campaign.windows !== undefined;
+      const bounded = ["from", "until", "windows", "monthly", "dates", "except"].some((key) => campaign[key] !== undefined);
       const playlistId = campaign.playlist_id as string;
       if (!inCampaignAudience(campaign.audience as Record<string, unknown>, screen)) return { ...standing, status: "not_in_audience" };
       if (campaign.paused) return { ...standing, status: "paused" };
       if (!screen.playlist_id) return { ...standing, status: "blocked", reason: "no_default_playlist" };
       if (bounded && !screen.timezone) return { ...standing, status: "blocked", reason: "no_timezone" };
       if (!playlists.has(playlistId) || playlistId.startsWith("pl_UNAPPROVED")) return { ...standing, status: "blocked", reason: "playlist_unavailable" };
+      // The server resolves one playlist; only a Player that resolves its own stack honors a region, a display lock, interaction or a data condition.
+      if (["interaction", "data", "covers", "displays"].some((key) => campaign[key] !== undefined)) return { ...standing, status: "blocked", reason: "stack_only" };
       if (screen.takeover) return { ...standing, status: "outranked", reason: "takeover" };
       if (winner) return { ...standing, status: "outranked", reason: "campaign", by: winner };
       winner = campaign.id as string;
@@ -2730,6 +2743,7 @@ export function memoryBackend(options: {
       ...(body.from !== undefined ? { from: body.from } : {}),
       ...(body.until !== undefined ? { until: body.until } : {}),
       ...(body.windows !== undefined ? { windows: body.windows } : {}),
+      ...storedLevel(Object.fromEntries(LEVEL_MEMBERS.filter((key) => body[key] != null).map((key) => [key, body[key]]))),
       priority: body.priority ?? 0, paused: body.paused ?? false, revision: 1,
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
@@ -2746,7 +2760,7 @@ export function memoryBackend(options: {
     const stale = staleCampaign(req, campaign);
     if (stale) return stale;
     const body = (req.body ?? {}) as Record<string, unknown>;
-    if (!Object.keys(body).length) return campaignInvalid("body", "must set at least one of name, playlist_id, audience, from, until, windows, priority or paused");
+    if (!Object.keys(body).length) return campaignInvalid("body", "must set at least one of name, playlist_id, audience, from, until, windows, monthly, dates, except, data, interaction, covers, displays, start, priority or paused");
     if (body.audience !== undefined) {
       const audience = campaignAudienceProblem(body.audience);
       if (audience) return audience;
@@ -2756,11 +2770,12 @@ export function memoryBackend(options: {
       if (unknown) return unknown;
       if (body.playlist_id.startsWith("pl_UNAPPROVED")) return problem(409, "playlist_not_approved", "The playlist has no approved version: a person approves its review before any screen uses it.");
     }
-    const next = { ...campaign };
+    const merged = { ...campaign };
     for (const [key, value] of Object.entries(body)) {
-      if (value === null) delete next[key];
-      else next[key] = key === "name" && typeof value === "string" ? value.trim() : value;
+      if (value === null) delete merged[key];
+      else merged[key] = key === "name" && typeof value === "string" ? value.trim() : value;
     }
+    const next = storedLevel(merged);
     if (typeof next.from === "string" && typeof next.until === "string" && next.until <= next.from) return campaignInvalid("until", "must be later than from");
     for (const key of Object.keys(campaign)) if (!(key in next)) delete campaign[key];
     Object.assign(campaign, next, { revision: (next.revision as number) + 1, updated_at: "2026-08-14T17:00:30.000Z" });

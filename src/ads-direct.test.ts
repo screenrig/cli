@@ -66,10 +66,10 @@ const CAMPAIGN = { id: "adc_TEST", revision: 2, name: "Brand X November", state:
 
 const REPORT = {
   campaign_id: "adc_TEST", name: "Brand X November", advertiser: "Brand X", from: "2026-11-01T00:00:00Z", to: "2026-12-01T00:00:00Z",
-  goal_plays: 200000, delivered_plays: 24, plays: 24, played_ms: 240000, not_played: 1,
+  goal_plays: 200000, delivered_plays: 24, plays: 24, played_ms: 240000, not_played: 1, estimated_impressions: 33.5,
   value: { model: "cpm", amount: "0.30", currency: "USD" },
   rows: [
-    { day: "2026-11-01", screen_id: "scr_A", slot_id: "ads_A", media_id: "med_A", plays: 12, played_ms: 120000 },
+    { day: "2026-11-01", screen_id: "scr_A", slot_id: "ads_A", media_id: "med_A", plays: 12, played_ms: 120000, estimated_impressions: 33.5 },
     { day: "2026-11-02", screen_id: "scr_B", slot_id: "ads_B", media_id: "med,\"B\"", plays: 12, played_ms: 120000 },
   ],
   truncated: false,
@@ -191,9 +191,9 @@ test("ads direct report --format csv writes the rows to a file and to stdout", a
   await withDir("ads-direct-report-csv-", async (configDir) => {
     const transport = directTransport();
     const expected = [
-      "day,screen_id,slot_id,media_id,plays,played_ms",
-      "2026-11-01,scr_A,ads_A,med_A,12,120000",
-      "2026-11-02,scr_B,ads_B,\"med,\"\"B\"\"\",12,120000",
+      "day,screen_id,slot_id,media_id,plays,played_ms,estimated_impressions",
+      "2026-11-01,scr_A,ads_A,med_A,12,120000,33.5",
+      "2026-11-02,scr_B,ads_B,\"med,\"\"B\"\"\",12,120000,",
     ].map((line) => `${line}\r\n`).join("");
     const file = path.join(configDir, "report.csv");
     const written = await withRuntime(["--json", "ads", "direct", "report", "adc_TEST", "--format", "csv", "--output", file], transport, configDir);
@@ -222,7 +222,7 @@ test("ads direct report CSV is only the header for a campaign with no rows, and 
     const file = path.join(configDir, "empty.csv");
     const result = await withRuntime(["--json", "ads", "direct", "report", "adc_TEST", "--format", "csv", "--output", file], transport, configDir);
     assert.equal(result.code, ExitCode.Success, result.stdout);
-    assert.equal(await readFile(file, "utf8"), "day,screen_id,slot_id,media_id,plays,played_ms\r\n");
+    assert.equal(await readFile(file, "utf8"), "day,screen_id,slot_id,media_id,plays,played_ms,estimated_impressions\r\n");
     assert.equal(JSON.parse(result.stdout).warnings[0].code, "direct_report_truncated");
   });
 });
@@ -238,6 +238,24 @@ test("ads reports fill sends the window and defaults to the server window", asyn
     const windowed = await withRuntime(["--json", "ads", "reports", "fill", "--from", "14d", "--to", "now"], transport, configDir);
     assert.equal(windowed.code, ExitCode.Success, windowed.stdout);
     assert.deepEqual(lastCall(transport).query, { from: "2026-10-13T12:00:00Z", to: "2026-10-27T12:00:00Z" });
+  });
+});
+
+test("ads spend and delivery reports print the estimated impressions when present", async () => {
+  await withDir("ads-reports-impressions-", async (configDir) => {
+    const transport = directTransport()
+      .on("GET", "/api/advertising/reports/spend", () => ({ status: 200, headers: HEADERS, body: { campaign_id: "cmp_TEST", spent_mcr: "10", reserved_mcr: "0", completed: 2, unbillable: 0, pending: 0, estimated_impressions: 7.5 } }))
+      .on("GET", "/api/advertising/reports/delivery", () => ({ status: 200, headers: HEADERS, body: {
+        gross_mcr: "10", fee_mcr: "1", net_mcr: "9", completed: 2, interrupted: 0, unbillable: 0, estimated_impressions: 7.5,
+        rows: [{ screen_id: "scr_A", slot_id: "ads_A", reservation_id: "res_A", gross_mcr: "5", fee_mcr: "0", net_mcr: "5", estimated_impressions: 7.5, completed_at: "2026-11-01T00:00:00Z" }],
+      } }));
+    const spend = await withRuntime(["--human", "ads", "reports", "spend", "--campaign-id", "cmp_TEST"], transport, configDir);
+    assert.equal(spend.code, ExitCode.Success, spend.stdout);
+    assert.match(spend.stdout, /estimated_impressions: 7\.5/);
+    const delivery = await withRuntime(["--human", "ads", "reports", "delivery", "--from", "2026-11-01T00:00:00Z", "--to", "2026-12-01T00:00:00Z"], transport, configDir);
+    assert.equal(delivery.code, ExitCode.Success, delivery.stdout);
+    assert.match(delivery.stdout, /estimated_impressions: 7\.5/);
+    assert.match(delivery.stdout, /estimated_impressions=7\.5 completed_at=/);
   });
 });
 

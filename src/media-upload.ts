@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession, Operation } from "./adapters/protocol.js";
 import type { ApiClient } from "./client.js";
 import { ExitCode } from "./exit-codes.js";
+import { quotedRevision } from "./if-match.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import type { ProgressReporter } from "./media/progress.js";
@@ -353,10 +354,39 @@ async function cancelInterruptedUpload(client: ApiClient, error: CliError): Prom
 }
 
 export function deriveCommitIdempotencyKey(base: string): string {
-  if (!isValidIdempotencyKey(base)) throw usageError("Invalid base idempotency key for media commit.");
-  const derived = createHash("sha256").update("screenrig.media.commit\0").update(base).digest("base64url");
-  if (derived === base || !isValidIdempotencyKey(derived)) throw usageError("Could not derive media commit idempotency key.");
+  return deriveStepIdempotencyKey(base, "commit");
+}
+
+/** The key of the request that finishes a declared upload: the commit, or for a replacement the replace. */
+function deriveStepIdempotencyKey(base: string, step: "commit" | "replace"): string {
+  if (!isValidIdempotencyKey(base)) throw usageError(`Invalid base idempotency key for media ${step}.`);
+  const derived = createHash("sha256").update(`screenrig.media.${step}\0`).update(base).digest("base64url");
+  if (derived === base || !isValidIdempotencyKey(derived)) throw usageError(`Could not derive media ${step} idempotency key.`);
   return derived;
+}
+
+/** The primitive (image, video or audio) a file of this content type is. */
+export function mediaPrimitiveOf(contentType: string): "image" | "video" | "audio" | undefined {
+  const kind = contentType.split("/")[0];
+  return kind === "image" || kind === "video" || kind === "audio" ? kind : undefined;
+}
+
+/** A replacement of another kind than the media it replaces: refused before any transfer. */
+export function replaceKindError(mediaId: string, primitive: "image" | "video" | "audio", file: string): CliError {
+  return usageError(
+    `${file} is not ${primitive === "image" ? "an" : "a"} ${primitive} file, and ${mediaId} is ${primitive === "image" ? "an" : "a"} ${primitive}: a replacement must be the same kind of file as the media it replaces. Nothing was uploaded.`,
+    { command: "screenrig media upload FILE", reason: "Add a file of another kind as new media instead; then point the playlist at it." },
+  );
+}
+
+/**
+ * The primitive a local file will upload as, from the declared content type or
+ * its extension, before any transcode or read. Undefined when neither names a
+ * supported type: the upload pipeline reports that itself.
+ */
+export function mediaPrimitiveOfFile(filePath: string, explicitContentType?: string): "image" | "video" | "audio" | undefined {
+  const contentType = explicitContentType ?? EXTENSIONS[path.extname(filePath).toLowerCase()];
+  return contentType && supported(contentType) ? mediaPrimitiveOf(contentType) : undefined;
 }
 
 /** SHA-256 of the local source bytes. Batch resume keys this, not the transcoded digest. */
@@ -394,6 +424,20 @@ export interface MediaFileUploadInput {
   resumable?: boolean;
   /** Called after declare succeeds and before the signed PUT. */
   onDeclared?: (session: ValidatedMediaUploadSession) => Promise<void>;
+  /**
+   * Replace this media's file with the upload instead of committing it as new
+   * media: the same declare and signed PUT, then POST /api/media/{id}/replace.
+   */
+  replace?: MediaReplaceTarget;
+}
+
+export interface MediaReplaceTarget {
+  mediaId: string;
+  /** The primitive of the media being replaced; the new file must be the same kind. */
+  primitive?: "image" | "video" | "audio";
+  /** If-Match: the media revision the caller read. */
+  ifMatch?: string;
+  note?: string;
 }
 
 /**
@@ -563,6 +607,9 @@ export async function submitPreparedMedia(
   const { runtime, client } = input;
   const { prepared } = preparedFile;
   const declareKey = input.idempotencyKey ?? client.idempotencyKey;
+  if (input.replace?.primitive && mediaPrimitiveOf(prepared.declaration.content_type) !== input.replace.primitive) {
+    throw replaceKindError(input.replace.mediaId, input.replace.primitive, prepared.declaration.source_filename ?? prepared.declaration.filename);
+  }
   let mark = runtime.now().getTime();
   const lap = () => { const now = runtime.now().getTime(); const elapsed = now - mark; mark = now; return elapsed; };
   const declarationResponse = await client.call({
@@ -588,13 +635,15 @@ export async function submitPreparedMedia(
     throw await cancelInterruptedUpload(client, error);
   }
   const transfer_ms = lap();
-  const commitResponse = await client.call({
-    method: "POST",
-    path: `/api/media/uploads/${session.id}/commit`,
-    idempotent: true,
-    idempotencyKey: deriveCommitIdempotencyKey(declareKey),
-    body: prepared.commit,
-  });
+  const commitResponse = input.replace
+    ? await requestReplace(input, input.replace, session, declareKey)
+    : await client.call({
+      method: "POST",
+      path: `/api/media/uploads/${session.id}/commit`,
+      idempotent: true,
+      idempotencyKey: deriveCommitIdempotencyKey(declareKey),
+      body: prepared.commit,
+    });
   let operation = commitResponse.body as Operation;
   const timing: Omit<MediaUploadTiming, "prepare_ms"> = { declare_ms, transfer_ms, commit_ms: lap() };
   if (!input.noWait) {
@@ -605,7 +654,46 @@ export async function submitPreparedMedia(
     });
     timing.processing_ms = lap();
   }
-  return { mediaId: readyMediaId(operation), operation, timing };
+  return { mediaId: readyMediaId(operation) ?? input.replace?.mediaId, operation, timing };
+}
+
+/**
+ * The replace request of a declared and written upload. A refusal (a stale
+ * If-Match, a file of another kind) leaves the upload usable but not wanted:
+ * unless the caller resumes it by key, cancel it so it holds no storage.
+ */
+async function requestReplace(
+  input: MediaFileUploadInput,
+  target: MediaReplaceTarget,
+  session: ValidatedMediaUploadSession,
+  declareKey: string,
+) {
+  try {
+    return await input.client.call({
+      method: "POST",
+      path: `/api/media/${encodeURIComponent(target.mediaId)}/replace`,
+      idempotent: true,
+      idempotencyKey: deriveStepIdempotencyKey(declareKey, "replace"),
+      ...(target.ifMatch !== undefined ? { headers: { "if-match": quotedRevision(target.ifMatch) } } : {}),
+      body: { upload_id: session.id, ...(target.note !== undefined ? { note: target.note } : {}) },
+    });
+  } catch (error) {
+    const status = error instanceof CliError ? error.problem.status : undefined;
+    if (input.resumable || !(error instanceof CliError) || typeof status !== "number" || status >= 500 || status === 408 || status === 429) throw error;
+    throw await releaseRefusedUpload(input.client, session.operationId, error);
+  }
+}
+
+/** Cancels the declared upload a refused replace left behind; a cancel that fails changes nothing (the server releases it after 24 hours). */
+async function releaseRefusedUpload(client: ApiClient, operationId: string, error: CliError): Promise<CliError> {
+  try {
+    await client.call({ method: "POST", path: `/api/operations/${encodeURIComponent(operationId)}/cancel`, idempotent: true, idempotencyKey: newIdempotencyKey() });
+  } catch {
+    return error;
+  }
+  return error.problem.hint
+    ? error
+    : new CliError({ ...error.problem, hint: `Upload ${operationId} was cancelled, so it holds no storage.` }, error.exitCode, error.warnings);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -675,14 +763,22 @@ async function existingUpload(
 
 export async function uploadMediaFile(input: MediaFileUploadInput): Promise<MediaFileUploadResult> {
   const started = input.runtime.now().getTime();
+  // A file of another kind cannot replace the media: say so before any transcode work.
+  if (input.replace?.primitive) {
+    const local = mediaPrimitiveOfFile(input.sourcePath, input.explicitContentType);
+    if (local !== undefined && local !== input.replace.primitive) {
+      throw replaceKindError(input.replace.mediaId, input.replace.primitive, path.basename(input.sourcePath));
+    }
+  }
   const preparedFile = await prepareMediaFileForUpload(input);
   const prepare_ms = input.runtime.now().getTime() - started;
   try {
-    const existing = await existingUpload(input.client, preparedFile.prepared.declaration);
+    // A replacement is never "already uploaded": the server answers one that carries the same bytes itself.
+    const existing = input.replace ? undefined : await existingUpload(input.client, preparedFile.prepared.declaration);
     const submitted = existing
       ? { mediaId: existing.mediaId, operation: existing.operation, reused: true, timing: { prepare_ms } }
       : await submitPreparedMedia(input, preparedFile).then(({ timing, ...rest }) => ({ ...rest, reused: false, timing: { prepare_ms, ...timing } }));
-    const stored = existing ?? (submitted.mediaId ? await storedMediaFilename(input.client, submitted.mediaId) : {});
+    const stored = existing ?? (submitted.mediaId && !input.replace ? await storedMediaFilename(input.client, submitted.mediaId) : {});
     return {
       ...submitted,
       upload: {

@@ -1,5 +1,11 @@
 import type {
+  LevelDate,
+  LevelInteraction,
+  LevelMembers,
+  LevelMonthly,
+  PageDataCondition,
   ScreenEffectivePlaylist,
+  ScreenScheduleDay,
   ScreenScheduleEntry,
   ScreenScheduleEntryWrite,
   ScreenScheduleWindow,
@@ -15,12 +21,26 @@ import { CliError, usageError } from "./problems.js";
  */
 export const SCHEDULE_ENTRIES_MAX = 32;
 export const SCHEDULE_WINDOWS_MAX = 16;
+export const SCHEDULE_MONTHLY_MAX = 16;
+export const SCHEDULE_DATES_MAX = 100;
+export const SCHEDULE_EXCEPT_MAX = 100;
+export const LEVEL_DISPLAYS_MAX = 12;
+export const LEVEL_IDLE_MIN_S = 5;
+export const LEVEL_IDLE_MAX_S = 3600;
+export const LEVEL_IDLE_DEFAULT_S = 60;
 export const TAKEOVER_REASON_MAX = 120;
 export const TAKEOVER_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const CIVIL = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const ENTRY_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const CIVIL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const NTHS: readonly unknown[] = [1, 2, 3, 4, -1];
+const COVERS: readonly unknown[] = ["full", "main", "header", "footer", "side"];
+const STARTS: readonly unknown[] = ["next_item", "on_time"];
+/** The data key of a card, or the {screen.weather} template; feed keys are not accepted. */
+const DATA_KEY = /^(?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}|\{screen\.weather\})$/;
+const ENTRY_KEYS = ["id", "playlist_id", "from", "until", "windows", "monthly", "dates", "except", "data", "interaction", "covers", "displays", "start"];
 const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -30,45 +50,191 @@ function record(value: unknown): Record<string, unknown> | undefined {
 function scheduleError(path: string, message: string): CliError {
   return usageError(`Schedule file: ${path} ${message}`, {
     command: "screenrig screen schedule --help",
-    reason: "The file is {\"entries\": [{\"id\"?, \"playlist_id\", \"from\"?, \"until\"?, \"windows\": [{\"days\": [...], \"start\"?, \"end\"?}]}]} in priority order.",
+    reason: "The file is {\"entries\": [{\"id\"?, \"playlist_id\", \"from\"?, \"until\"?, \"windows\"?, \"monthly\"?, \"dates\"?, \"except\"?, \"data\"?, \"interaction\"?, \"covers\"?, \"displays\"?, \"start\"?}]} in priority order, each entry with at least one of from, until, windows, monthly, dates, except, data or interaction.",
   });
 }
 
-function onlyKeys(value: Record<string, unknown>, allowed: string[], path: string): void {
+type Fail = (path: string, message: string) => CliError;
+
+function onlyKeys(value: Record<string, unknown>, allowed: string[], path: string, fail: Fail = scheduleError): void {
   const extra = Object.keys(value).find((key) => !allowed.includes(key));
-  if (extra !== undefined) throw scheduleError(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: ${allowed.join(", ")}.`);
+  if (extra !== undefined) throw fail(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: ${allowed.join(", ")}.`);
 }
 
-/** One screenrig.schedule/v1 window; `fail` names the file kind in the error. */
-export function scheduleWindow(value: unknown, path: string, fail: (path: string, message: string) => CliError = scheduleError): ScreenScheduleWindow {
-  const scheduleError = fail;
-  const item = record(value);
-  if (!item) throw scheduleError(path, "must be an object with days and optional start and end.");
-  const extra = Object.keys(item).find((key) => !["days", "start", "end"].includes(key));
-  if (extra !== undefined) throw scheduleError(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: days, start, end.`);
-  const days = item.days;
-  if (!Array.isArray(days) || days.length < 1 || days.length > 7) throw scheduleError(`${path}.days`, "must list 1 to 7 days.");
-  days.forEach((day, index) => {
-    if (typeof day !== "string" || !(DAYS as readonly string[]).includes(day)) {
-      throw scheduleError(`${path}.days[${index}]`, `must be one of ${DAYS.join(", ")}.`);
-    }
-  });
-  if (new Set(days).size !== days.length) throw scheduleError(`${path}.days`, "must not repeat a day.");
+/** start and end are HH:MM together, or both absent for the whole day. */
+function clockEdges(item: Record<string, unknown>, path: string, fail: Fail): void {
   for (const key of ["start", "end"] as const) {
     if (item[key] !== undefined && (typeof item[key] !== "string" || !CLOCK.test(item[key] as string))) {
-      throw scheduleError(`${path}.${key}`, "must be HH:MM in 24-hour time, such as 07:30.");
+      throw fail(`${path}.${key}`, "must be HH:MM in 24-hour time, such as 07:30.");
     }
   }
   if ((item.start === undefined) !== (item.end === undefined)) {
-    throw scheduleError(path, "must set both start and end, or neither for the whole day.");
+    throw fail(path, "must set both start and end, or neither for the whole day.");
   }
+}
+
+/** One screenrig.schedule/v1 window; `fail` names the file kind in the error. */
+export function scheduleWindow(value: unknown, path: string, fail: Fail = scheduleError): ScreenScheduleWindow {
+  const item = record(value);
+  if (!item) throw fail(path, "must be an object with days and optional start and end.");
+  const extra = Object.keys(item).find((key) => !["days", "start", "end"].includes(key));
+  if (extra !== undefined) throw fail(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: days, start, end.`);
+  const days = item.days;
+  if (!Array.isArray(days) || days.length < 1 || days.length > 7) throw fail(`${path}.days`, "must list 1 to 7 days.");
+  days.forEach((day, index) => {
+    if (typeof day !== "string" || !(DAYS as readonly string[]).includes(day)) {
+      throw fail(`${path}.days[${index}]`, `must be one of ${DAYS.join(", ")}.`);
+    }
+  });
+  if (new Set(days).size !== days.length) throw fail(`${path}.days`, "must not repeat a day.");
+  clockEdges(item, path, fail);
   return item as unknown as ScreenScheduleWindow;
+}
+
+/** A real calendar day written YYYY-MM-DD. */
+export function isCivilDate(value: unknown): value is string {
+  const match = typeof value === "string" ? CIVIL_DATE.exec(value) : null;
+  if (!match) return false;
+  const month = Number(match[2]);
+  return month >= 1 && month <= 12 && Number(match[3]) >= 1 && Number(match[3]) <= daysInMonth(Number(match[1]), month);
+}
+
+/** One monthly occurrence: day (1 to 31), or nth (1 to 4, -1 the last) and weekday, with optional start and end. */
+export function scheduleMonthly(value: unknown, path: string, fail: Fail = scheduleError): LevelMonthly {
+  const item = record(value);
+  if (!item) throw fail(path, "must be an object with day, or nth and weekday, and optional start and end.");
+  onlyKeys(item, ["day", "nth", "weekday", "start", "end"], path, fail);
+  if (item.day !== undefined) {
+    if (item.nth !== undefined || item.weekday !== undefined) throw fail(path, "must set either day, or nth and weekday, not both.");
+    if (typeof item.day !== "number" || !Number.isInteger(item.day) || item.day < 1 || item.day > 31) {
+      throw fail(`${path}.day`, "must be a day of the month from 1 to 31.");
+    }
+  } else {
+    if (item.nth === undefined && item.weekday === undefined) throw fail(path, "must set day, or nth and weekday.");
+    if (!NTHS.includes(item.nth)) throw fail(`${path}.nth`, "must be 1, 2, 3, 4 or -1 for the last, with weekday.");
+    if (typeof item.weekday !== "string" || !(DAYS as readonly string[]).includes(item.weekday)) {
+      throw fail(`${path}.weekday`, `must be one of ${DAYS.join(", ")}, with nth.`);
+    }
+  }
+  clockEdges(item, path, fail);
+  return {
+    ...(item.day !== undefined ? { day: item.day as number } : { nth: item.nth as LevelMonthly["nth"], weekday: item.weekday as ScreenScheduleDay }),
+    ...(item.start !== undefined ? { start: item.start as string, end: item.end as string } : {}),
+  };
+}
+
+/** One specific civil date with optional start and end. */
+export function scheduleDate(value: unknown, path: string, fail: Fail = scheduleError): LevelDate {
+  const item = record(value);
+  if (!item) throw fail(path, "must be an object with date and optional start and end.");
+  onlyKeys(item, ["date", "start", "end"], path, fail);
+  if (!isCivilDate(item.date)) throw fail(`${path}.date`, "must be a real civil date such as 2026-12-24.");
+  clockEdges(item, path, fail);
+  return { date: item.date, ...(item.start !== undefined ? { start: item.start as string, end: item.end as string } : {}) };
+}
+
+/** Exception dates: 1 to 100 real civil dates, each once; returned ascending, the order the server stores. */
+export function scheduleExcept(value: unknown, path: string, fail: Fail = scheduleError): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > SCHEDULE_EXCEPT_MAX) throw fail(path, `must list 1 to ${SCHEDULE_EXCEPT_MAX} dates.`);
+  value.forEach((date, index) => {
+    if (!isCivilDate(date)) throw fail(`${path}[${index}]`, "must be a real civil date such as 2026-12-25.");
+  });
+  const dates = [...value as string[]].sort();
+  const repeated = dates.find((date, index) => index > 0 && date === dates[index - 1]);
+  if (repeated !== undefined) throw fail(path, `must not repeat ${repeated}.`);
+  return dates;
+}
+
+/** A card-data condition: key, and optionally an RFC 6901 path and a scalar to equal. */
+export function scheduleData(value: unknown, path: string, fail: Fail = scheduleError): PageDataCondition {
+  const item = record(value);
+  if (!item) throw fail(path, "must be an object with key and optional path and equals.");
+  onlyKeys(item, ["key", "path", "equals"], path, fail);
+  if (typeof item.key !== "string" || !DATA_KEY.test(item.key) || item.key.startsWith("feed:")) {
+    throw fail(`${path}.key`, "must name card data (a project data key or card instance ID, or {screen.weather}), not a feed.");
+  }
+  const pointer = item.path;
+  if (pointer !== undefined && (typeof pointer !== "string" || Buffer.byteLength(pointer, "utf8") > 256 || (pointer !== "" && !pointer.startsWith("/"))
+    || /~(?:[^01]|$)/.test(pointer) || pointer.split("/").length > 17)) {
+    throw fail(`${path}.path`, "must be an RFC 6901 pointer of at most 256 bytes and 16 segments.");
+  }
+  if (Object.hasOwn(item, "equals")) {
+    const expected = item.equals;
+    if (expected !== null && typeof expected !== "string" && typeof expected !== "boolean" && !(typeof expected === "number" && Number.isFinite(expected))) {
+      throw fail(`${path}.equals`, "must be a string, number, boolean or null.");
+    }
+    if (typeof expected === "string" && Buffer.byteLength(expected, "utf8") > 1024) throw fail(`${path}.equals`, "must be at most 1024 bytes.");
+  }
+  return {
+    key: item.key,
+    ...(pointer !== undefined ? { path: pointer as string } : {}),
+    ...(Object.hasOwn(item, "equals") ? { equals: item.equals as PageDataCondition["equals"] } : {}),
+  };
+}
+
+/** Interaction: the level holds while someone uses the screen; idle_s is 5 to 3600 seconds (60 when omitted). */
+export function scheduleInteraction(value: unknown, path: string, fail: Fail = scheduleError): LevelInteraction {
+  const item = record(value);
+  if (!item) throw fail(path, "must be an object with an optional idle_s.");
+  onlyKeys(item, ["idle_s"], path, fail);
+  if (item.idle_s !== undefined && (typeof item.idle_s !== "number" || !Number.isInteger(item.idle_s) || item.idle_s < LEVEL_IDLE_MIN_S || item.idle_s > LEVEL_IDLE_MAX_S)) {
+    throw fail(`${path}.idle_s`, `must be a whole number of seconds from ${LEVEL_IDLE_MIN_S} to ${LEVEL_IDLE_MAX_S}.`);
+  }
+  return item.idle_s !== undefined ? { idle_s: item.idle_s } : {};
+}
+
+/** Video wall outputs: 1 to 12 unique whole numbers from 1 to 12; returned ascending. */
+export function scheduleDisplays(value: unknown, path: string, fail: Fail = scheduleError): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > LEVEL_DISPLAYS_MAX) throw fail(path, `must list 1 to ${LEVEL_DISPLAYS_MAX} displays.`);
+  value.forEach((display, index) => {
+    if (typeof display !== "number" || !Number.isInteger(display) || display < 1 || display > LEVEL_DISPLAYS_MAX) {
+      throw fail(`${path}[${index}]`, `must be a display number from 1 to ${LEVEL_DISPLAYS_MAX}.`);
+    }
+  });
+  if (new Set(value).size !== value.length) throw fail(path, "must not repeat a display.");
+  return [...value as number[]].sort((a, b) => a - b);
+}
+
+function memberList<T>(value: unknown, path: string, max: number, noun: string, each: (item: unknown, path: string) => T, fail: Fail): T[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > max) throw fail(path, `must list 1 to ${max} ${noun}.`);
+  return value.map((item, index) => each(item, `${path}[${index}]`));
+}
+
+/**
+ * The rule and placement members of a schedule entry (windows, monthly, dates,
+ * except, data, interaction, covers, displays, start), each checked and
+ * normalized; a member the item does not set stays absent. from and until are
+ * the caller's.
+ */
+export function scheduleLevelMembers(item: Record<string, unknown>, path: string, fail: Fail = scheduleError): LevelMembers {
+  const members: LevelMembers = {};
+  if (item.windows !== undefined) {
+    members.windows = memberList(item.windows, `${path}.windows`, SCHEDULE_WINDOWS_MAX, "windows", (window, windowPath) => {
+      const checked = scheduleWindow(window, windowPath, fail);
+      return { days: checked.days, ...(checked.start !== undefined ? { start: checked.start, end: checked.end } : {}) };
+    }, fail);
+  }
+  if (item.monthly !== undefined) members.monthly = memberList(item.monthly, `${path}.monthly`, SCHEDULE_MONTHLY_MAX, "monthly rules", (monthly, monthlyPath) => scheduleMonthly(monthly, monthlyPath, fail), fail);
+  if (item.dates !== undefined) members.dates = memberList(item.dates, `${path}.dates`, SCHEDULE_DATES_MAX, "dates", (date, datePath) => scheduleDate(date, datePath, fail), fail);
+  if (item.except !== undefined) members.except = scheduleExcept(item.except, `${path}.except`, fail);
+  if (item.data !== undefined) members.data = scheduleData(item.data, `${path}.data`, fail);
+  if (item.interaction !== undefined) members.interaction = scheduleInteraction(item.interaction, `${path}.interaction`, fail);
+  if (item.covers !== undefined) {
+    if (!COVERS.includes(item.covers)) throw fail(`${path}.covers`, "must be full, main, header, footer or side.");
+    members.covers = item.covers as LevelMembers["covers"];
+  }
+  if (item.displays !== undefined) members.displays = scheduleDisplays(item.displays, `${path}.displays`, fail);
+  if (item.start !== undefined) {
+    if (!STARTS.includes(item.start)) throw fail(`${path}.start`, "must be next_item or on_time.");
+    members.start = item.start as LevelMembers["start"];
+  }
+  return members;
 }
 
 function entry(value: unknown, path: string): ScreenScheduleEntryWrite {
   const item = record(value);
   if (!item) throw scheduleError(path, "must be an object.");
-  onlyKeys(item, ["id", "playlist_id", "from", "until", "windows"], path);
+  onlyKeys(item, ENTRY_KEYS, path);
   if (item.id !== undefined && (typeof item.id !== "string" || !ENTRY_ID.test(item.id))) {
     throw scheduleError(`${path}.id`, "must be 1 to 64 letters, digits, - or _.");
   }
@@ -81,12 +247,18 @@ function entry(value: unknown, path: string): ScreenScheduleEntryWrite {
   if (typeof item.from === "string" && typeof item.until === "string" && item.from >= item.until) {
     throw scheduleError(path, "from must be before until.");
   }
-  const windows = item.windows;
-  if (!Array.isArray(windows) || windows.length < 1 || windows.length > SCHEDULE_WINDOWS_MAX) {
-    throw scheduleError(`${path}.windows`, `must list 1 to ${SCHEDULE_WINDOWS_MAX} windows.`);
+  const members = scheduleLevelMembers(item, path);
+  // An entry holds while its rule members hold, so it needs at least one.
+  if (item.from === undefined && item.until === undefined && !["windows", "monthly", "dates", "except", "data", "interaction"].some((key) => item[key] !== undefined)) {
+    throw scheduleError(path, "must set at least one rule: windows, monthly, dates, except, from, until, data or interaction.");
   }
-  windows.forEach((item, index) => scheduleWindow(item, `${path}.windows[${index}]`));
-  return item as unknown as ScreenScheduleEntryWrite;
+  return {
+    ...(item.id !== undefined ? { id: item.id } : {}),
+    playlist_id: item.playlist_id,
+    ...(item.from !== undefined ? { from: item.from as string } : {}),
+    ...(item.until !== undefined ? { until: item.until as string } : {}),
+    ...members,
+  };
 }
 
 /**
@@ -116,13 +288,7 @@ export function scheduleEntries(document: unknown): ScreenScheduleEntryWrite[] {
   const parsed = entries.map((item, index) => entry(item, `entries[${index}]`));
   const ids = parsed.map((item) => item.id).filter((id): id is string => id !== undefined);
   if (new Set(ids).size !== ids.length) throw scheduleError("entries", "must not repeat an entry id.");
-  return parsed.map((item) => ({
-    ...(item.id !== undefined ? { id: item.id } : {}),
-    playlist_id: item.playlist_id,
-    ...(item.from !== undefined ? { from: item.from } : {}),
-    ...(item.until !== undefined ? { until: item.until } : {}),
-    windows: item.windows.map((w) => ({ days: w.days, ...(w.start !== undefined ? { start: w.start, end: w.end } : {}) })),
-  }));
+  return parsed;
 }
 
 /**
@@ -259,14 +425,68 @@ function windowText(item: ScreenScheduleWindow): string {
   return item.start !== undefined ? `${days} ${item.start}-${item.end}` : `${days} all day`;
 }
 
+const WEEKDAY_NAMES: Record<ScreenScheduleDay, string> = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
+const NTH_NAMES = new Map<number, string>([[1, "1st"], [2, "2nd"], [3, "3rd"], [4, "4th"], [-1, "last"]]);
+
+function timesText(item: { start?: string; end?: string }): string {
+  return item.start !== undefined && item.end !== undefined ? ` ${item.start}–${item.end}` : "";
+}
+
+/** A monthly rule in words: "day 15", "2nd Tuesday", "last Sunday 09:00–14:00". */
+export function monthlyText(item: LevelMonthly): string {
+  const what = item.day !== undefined
+    ? `day ${item.day}`
+    : `${NTH_NAMES.get(item.nth ?? 0) ?? String(item.nth)} ${item.weekday ? WEEKDAY_NAMES[item.weekday] ?? item.weekday : ""}`.trimEnd();
+  return `${what}${timesText(item)}`;
+}
+
+/** A specific date: "2026-12-24" or "2026-12-24 18:00–22:00". */
+export function dateText(item: LevelDate): string {
+  return `${item.date}${timesText(item)}`;
+}
+
+/** A card-data condition: "data {screen.weather} /condition = "rain"", or "data KEY exists" without equals. */
+export function dataConditionText(item: PageDataCondition): string {
+  return `data ${item.key}${item.path ? ` ${item.path}` : ""}${Object.hasOwn(item, "equals") ? ` = ${JSON.stringify(item.equals)}` : " exists"}`;
+}
+
+/** "on touch (idle 60 s)": the level holds while someone uses the screen. */
+export function interactionText(item: LevelInteraction): string {
+  return `on touch (idle ${item.idle_s ?? LEVEL_IDLE_DEFAULT_S} s)`;
+}
+
+/** The rule members beyond from, until and windows, as phrases: monthly, "on DATE", "except DATES", data, "on touch (idle N s)". */
+export function levelRuleParts(level: LevelMembers): string[] {
+  return [
+    ...(level.monthly ?? []).map(monthlyText),
+    ...(level.dates ?? []).map((item) => `on ${dateText(item)}`),
+    ...(level.except?.length ? [`except ${level.except.join(", ")}`] : []),
+    ...(level.data ? [dataConditionText(level.data)] : []),
+    ...(level.interaction ? [interactionText(level.interaction)] : []),
+  ];
+}
+
+/** Where and how a level plays when that is not the default: "covers header", "displays 1, 2", "starts on time". */
+export function levelPlacementParts(level: LevelMembers): string[] {
+  return [
+    ...(level.covers && level.covers !== "full" ? [`covers ${level.covers}`] : []),
+    ...(level.displays?.length ? [`displays ${level.displays.join(", ")}`] : []),
+    ...(level.start === "on_time" ? ["starts on time"] : []),
+  ];
+}
+
 export function scheduleTableLines(entries: ScreenScheduleEntry[] | undefined, timezone?: string | null): string[] {
   if (!entries?.length) return ["No playlist schedule"];
-  const zone = timezone === undefined ? [] : [`Windows and FROM/UNTIL are civil times (screen timezone ${timezone || "not set"}).`];
-  const rows = entries.map((item) => [
+  const rules = entries.map((item) => [...levelRuleParts(item), ...levelPlacementParts(item)].join("; "));
+  const withRules = rules.some((text) => text !== "");
+  const zone = timezone === undefined ? [] : [`${withRules ? "Windows, FROM/UNTIL and the monthly and date rules" : "Windows and FROM/UNTIL"} are civil times (screen timezone ${timezone || "not set"}).`];
+  const rows = entries.map((item, index) => [
     item.id ?? "", item.playlist_id ?? "", (item.windows ?? []).map(windowText).join("; "),
-    item.from ?? "", item.until ?? "",
+    item.from ?? "", item.until ?? "", ...(withRules ? [rules[index]!] : []),
   ]);
-  const header = ["ENTRY", "PLAYLIST", "WINDOWS", "FROM", "UNTIL"];
+  const header = ["ENTRY", "PLAYLIST", "WINDOWS", "FROM", "UNTIL", ...(withRules ? ["RULES"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]!.length)));
   const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
   return [...zone, render(header), ...rows.map(render)];
