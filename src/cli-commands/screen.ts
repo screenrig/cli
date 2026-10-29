@@ -2,9 +2,10 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
+import type { CommandHandler } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
-import { expiresInOption, identifyDurationOption, suspendMessageOption } from "../screen-commands.js";
+import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
 import { liveFrameIntervalOption } from "../screen-live-frame.js";
 import { untilOption } from "../screen-display.js";
@@ -355,10 +356,35 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandNotes(reboot, "Reboot:\n  The Player reboots the device, not just itself. Only a Player that declares\n  the reboot capability in its host report receives it; any other screen is\n  refused with reboot_unsupported (exit 5) and nothing is sent. A screen that\n  is online is sent the request at once (state sent); an offline screen holds\n  it queued (state queued) and is sent it when it comes online, for 24 hours by\n  default; --expires-in changes that, from 60s to 24h. A newer reboot\n  supersedes one still queued. screen show lists the screen's commands (a sent\n  reboot is done once the device reports it booted), and screen command cancel\n  ID COMMAND_ID cancels one still queued. Each screen accepts at most 2 reboots\n  per 10 minutes; a refused or failed request and an exact replay spend none. A\n  fleet (several ids or --tag) requires --yes: the CLI never prompts.");
   addCommandExamples(reboot, "screenrig screen reboot scr_LOBBY", "screenrig screen reboot scr_LOBBY --expires-in 2h", "screenrig screen reboot --tag Lobby --yes");
 
-  const commandGroup = screen.command("command").description("Manage the reboots and reloads asked of a screen");
-  commandGroup.command("cancel").description("Cancel a reboot or reload still queued for an offline screen")
+  // The three maintenance commands share reboot's shape: one screen, or a fleet
+  // behind --yes, queued for an offline screen, gated by the Player capability.
+  const maintenance = (spec: MaintenanceSpec, description: string, handler: CommandHandler, notes: string, examples: string[]) => {
+    const command = screen.command(spec.name).description(description)
+      .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+      .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+      .addOption(folderSelector())
+      .option("--yes", `Confirm ${spec.name} on several screens, --tag or --folder (required for a fleet)`)
+      .option("--expires-in <DURATION>", `How long the ${spec.name} waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)`, expiresInOption)
+      .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+      .action(bind(handler));
+    const shared = `A screen that is online is sent the request at once (state sent); an offline screen\n  holds it queued (state queued) and is sent it when it comes online, for 24 hours by\n  default; --expires-in changes that, from 60s to 24h. Only a Player that declares the\n  ${spec.type} capability in its host report (screen show lists host capabilities)\n  receives it; any other screen is refused with command_unsupported (exit 5) and\n  nothing is sent. The Player reports how it ended: screen show lists the screen's\n  commands, each done or failed with the cause the Player reported. A newer ${spec.name}\n  supersedes one still queued, and screen command cancel ID COMMAND_ID cancels one\n  still queued. Each screen accepts at most 2 clear-cache, restart-app and\n  update-software requests together per 10 minutes; a refused or failed request and\n  an exact replay spend none. A fleet (several ids, --tag or --folder) requires --yes:\n  the CLI never prompts.`;
+    addCommandNotes(command, `${spec.title}:\n  ${notes}\n  ${shared}`);
+    addCommandExamples(command, ...examples);
+  };
+  maintenance(MAINTENANCE["clear-cache"], "Clear a screen's Player caches, or a fleet's", handleScreenClearCache,
+    "The Player deletes its downloaded media, application packages and data caches,\n  keeps its pairing, identity and settings, then fetches the manifest and content\n  again; the screen can show its loading state while content refills. To refresh\n  content without clearing anything, run screen reload.",
+    ["screenrig screen clear-cache scr_LOBBY", "screenrig screen clear-cache scr_LOBBY --expires-in 2h", "screenrig screen clear-cache --tag Lobby --yes"]);
+  maintenance(MAINTENANCE["restart-app"], "Restart a screen's Player application, or a fleet's", handleScreenRestartApp,
+    "The Player restarts its application, not the device: the Player process restarts\n  (a web Player reloads its page) and reports from the restarted process. To restart\n  the device, run screen reboot.",
+    ["screenrig screen restart-app scr_LOBBY", "screenrig screen restart-app scr_LOBBY --expires-in 2h", "screenrig screen restart-app --tag Lobby --yes"]);
+  maintenance(MAINTENANCE["update-software"], "Update a screen's Player to the newest release, or a fleet's", handleScreenUpdateSoftware,
+    "The Player checks for the newest Player release now and installs it where its\n  platform lets the Player update itself (a web Player updates its service worker,\n  then reloads). done with cause up_to_date means the newest release already runs;\n  updated means a release was installed. A Player installed from a store or managed\n  by a device manager does not declare the capability and updates through that channel.",
+    ["screenrig screen update-software scr_LOBBY", "screenrig screen update-software scr_LOBBY --expires-in 2h", "screenrig screen update-software --tag Lobby --yes"]);
+
+  const commandGroup = screen.command("command").description("Manage the commands asked of a screen (reboot, reload, clear-cache, restart-app, update-software)");
+  commandGroup.command("cancel").description("Cancel a command still queued for an offline screen")
     .argument("<id>", "Screen identifier")
-    .argument("<command_id>", "Command id: an entry of commands in screen show, or the reboot_id or reload_id of the request's answer")
+    .argument("<command_id>", "Command id: an entry of commands in screen show, or the reboot_id, reload_id or command_id of the request's answer")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenCommandCancel));
 

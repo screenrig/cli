@@ -428,6 +428,174 @@ test("reboot and reload to an offline screen queue; show lists the commands; scr
   assert.equal((await cli(["--json", "screen", "command", "--help"], transport, env)).code, ExitCode.Success);
 });
 
+const MAINTENANCE_CASES = [
+  { name: "clear-cache", route: "/clear-cache", type: "clear_cache", title: "Clear cache accepted" },
+  { name: "restart-app", route: "/restart-app", type: "restart_app", title: "Restart app accepted" },
+  { name: "update-software", route: "/update", type: "update", title: "Update software accepted" },
+] as const;
+
+/** LOBBY (online) and DARK (offline) declare all three capabilities; PLAIN declares none; OLD is archived. */
+function maintenanceFleet(clock: { now: Date } = { now: START }): FakeTransport {
+  const transport = memoryBackend({ now: () => clock.now });
+  transport.putScreen!(screen(LOBBY, { host: host("clear_cache", "restart_app", "update") }));
+  transport.putScreen!(screen(DARK, { online: false, host: host("clear_cache", "restart_app", "update") }));
+  transport.putScreen!(screen(PLAIN, { host: host("reboot") }));
+  transport.putScreen!(screen(OLD, { state: "archived", host: host("clear_cache", "restart_app", "update") }));
+  transport.putScreen!(screen(NEW, { state: "pairing_pending" }));
+  return transport;
+}
+
+test("clear-cache, restart-app and update-software: one screen sent or queued, JSON and human answers, lifetime and revision guard", async () => {
+  const env = await enrolled();
+  for (const item of MAINTENANCE_CASES) {
+    const transport = maintenanceFleet();
+    const sent = await cli(["--json", "screen", item.name, LOBBY], transport, env);
+    assert.equal(sent.code, ExitCode.Success, sent.stdout);
+    assert.equal(posts(transport, item.route)[0]!.path, `/api/screens/${LOBBY}${item.route}`);
+    assert.equal(posts(transport, item.route)[0]!.body, undefined, "an empty body keeps the server's 24 hours");
+    assert.ok(posts(transport, item.route)[0]!.headers?.["idempotency-key"]);
+    assert.equal(sent.envelope.data.command, item.type);
+    assert.equal(sent.envelope.data.state, "sent");
+    assert.match(sent.envelope.data.command_id, /^cmd_\d{8}$/);
+    assert.equal(sent.envelope.data.expires_at, "2026-08-15T17:00:00.000Z");
+
+    const queued = await cli(["--human", "screen", item.name, DARK, "--expires-in", "2h", "--expect-rev", "3"], transport, env);
+    assert.equal(queued.code, ExitCode.Success, queued.stdout);
+    assert.deepEqual(posts(transport, item.route).at(-1)!.body, { expires_in_s: 7200 });
+    assert.equal(posts(transport, item.route).at(-1)!.headers?.["if-match"], '"3"');
+    assert.match(queued.stdout, new RegExp(`^${item.title}\\nscreen_id: ${DARK}\\ncommand_id: cmd_\\d{8}\\ncommand: ${item.type}\\nstate: queued\\nexpires_at: 2026-08-14T19:00:00\\.000Z\\n`, "m"));
+    assert.match(queued.stdout, new RegExp(`The screen is offline, so ${item.name} waits: it is sent when the screen comes online before expires_at, and screen show lists it under commands \\(done or failed, with the cause the Player reports\\)\\. Cancel it with screen command cancel ${DARK} cmd_\\d{8}\\.`));
+    const onlineHuman = await cli(["--human", "screen", item.name, LOBBY], transport, env);
+    assert.match(onlineHuman.stdout, /^state: sent$/m);
+    assert.match(onlineHuman.stdout, /screen show lists the result under commands \(done or failed, with the cause the Player reports\)\./);
+
+    const stale = await cli(["--json", "screen", item.name, LOBBY, "--expect-rev", "1"], transport, env);
+    assert.equal(stale.code, ExitCode.Precondition, stale.stdout);
+  }
+});
+
+test("a queued maintenance command shows in screen show, supersedes an older queued one of its type, and is cancelled by screen command cancel", async () => {
+  const env = await enrolled();
+  const transport = maintenanceFleet();
+  const first = await cli(["--json", "screen", "clear-cache", DARK], transport, env);
+  const second = await cli(["--json", "screen", "clear-cache", DARK], transport, env);
+  const restart = await cli(["--json", "screen", "restart-app", DARK], transport, env);
+  const shown = await cli(["--human", "screen", "show", DARK], transport, env);
+  assert.match(shown.stdout, new RegExp(`^clear_cache\\s+${first.envelope.data.command_id}\\s+superseded\\s+2026-08-15T17:00:00\\.000Z$`, "m"));
+  assert.match(shown.stdout, new RegExp(`^clear_cache\\s+${second.envelope.data.command_id}\\s+queued\\s+2026-08-15T17:00:00\\.000Z$`, "m"));
+  assert.match(shown.stdout, new RegExp(`^restart_app\\s+${restart.envelope.data.command_id}\\s+queued\\s+`, "m"));
+  const cancelled = await cli(["--json", "screen", "command", "cancel", DARK, restart.envelope.data.command_id], transport, env);
+  assert.equal(cancelled.code, ExitCode.Success, cancelled.stdout);
+  assert.equal(cancelled.envelope.data.commands.find((item: { id: string }) => item.id === restart.envelope.data.command_id).state, "cancelled");
+});
+
+test("clear-cache, restart-app and update-software refused for a Player without the capability: command_unsupported explained, nothing recorded", async () => {
+  const env = await enrolled();
+  for (const item of MAINTENANCE_CASES) {
+    const transport = maintenanceFleet();
+    const refused = await cli(["--json", "screen", item.name, PLAIN], transport, env);
+    assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+    assert.equal(refused.envelope.ok, false);
+    assert.equal(refused.envelope.error?.code, "command_unsupported");
+    assert.match(refused.envelope.error!.detail, new RegExp(`Nothing was sent\\. A Player that does not declare the ${item.type} capability in its host report \\(screen show lists host capabilities\\)`));
+    assert.equal(refused.envelope.error?.next?.command, `screenrig screen show ${PLAIN}`);
+    assert.match(refused.envelope.error?.next?.reason ?? "", new RegExp(`screen ${item.name} reaches only a Player that declares ${item.type}`));
+    const shown = await cli(["--json", "screen", "show", PLAIN], transport, env);
+    assert.equal(shown.envelope.data.commands, undefined, "a refused command is never recorded");
+
+    const archived = await cli(["--json", "screen", item.name, OLD], transport, env);
+    assert.equal(archived.code, ExitCode.Conflict, archived.stdout);
+    assert.equal(archived.envelope.error?.code, "screen_archived");
+    assert.equal(archived.envelope.error?.next?.command, `screenrig screen unarchive ${OLD}`);
+    const pending = await cli(["--json", "screen", item.name, NEW], transport, env);
+    assert.equal(pending.code, ExitCode.Conflict, pending.stdout);
+    assert.equal(pending.envelope.error?.code, "resource_conflict");
+    assert.equal(pending.envelope.error?.next?.command, `screenrig screen show ${NEW}`);
+    const missing = await cli(["--json", "screen", item.name, "scr_MISSINGAAAAAAAAAAAAAAAA"], transport, env);
+    assert.equal(missing.code, ExitCode.NotFound, missing.stdout);
+  }
+});
+
+test("a server problem hint on command_unsupported reaches the output", async () => {
+  const env = await enrolled();
+  const hint = "This screen's Player does not support this action (clear_cache, restart_app or update). Read the screen's host capabilities, or use screen reload to refresh content.";
+  const transport = new FakeTransport().on("POST", `/api/screens/${PLAIN}/clear-cache`, () => ({
+    status: 409, headers: { "content-type": "application/problem+json" },
+    body: { type: "https://screenrig.ai/problems/command-unsupported", title: "Screen cannot do this remotely", status: 409, code: "command_unsupported", detail: "The screen's Player does not declare clear_cache.", hint },
+  }));
+  const refused = await cli(["--json", "screen", "clear-cache", PLAIN], transport, env);
+  assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+  assert.equal(refused.envelope.error?.hint, hint);
+});
+
+test("maintenance fleet actions: --tag, --folder and ids behind --yes, per-screen results, partial failure follows the fleet exit rule", async () => {
+  const env = await enrolled();
+  for (const item of MAINTENANCE_CASES) {
+    const transport = maintenanceFleet();
+    const actions = () => transport.calls.filter((call) => call.path === "/api/screens/actions");
+    const bare = await cli(["--json", "screen", item.name, "--tag", "Lobby"], transport, env);
+    assert.equal(bare.code, ExitCode.Usage, bare.stdout);
+    assert.match(bare.envelope.error!.detail, new RegExp(`screen ${item.name} with several screens, --tag or --folder acts on every matching Player; add --yes to confirm\\.`));
+    assert.equal(bare.envelope.error?.next?.command, `screenrig screen ${item.name} --tag Lobby --yes`);
+    assert.equal(actions().length, 0, "an unconfirmed fleet never reaches the server");
+    const revision = await cli(["--json", "screen", item.name, "--tag", "Lobby", "--yes", "--expect-rev", "3"], transport, env);
+    assert.equal(revision.code, ExitCode.Usage, revision.stdout);
+    assert.equal(actions().length, 0);
+
+    const byTag = await cli(["--json", "screen", item.name, "--tag", "Lobby", "--yes", "--expires-in", "30m"], transport, env);
+    assert.deepEqual(actions().at(-1)?.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: item.type, expires_in_s: 1800 } });
+    assert.equal(byTag.envelope.data.action, item.type);
+    assert.notEqual(byTag.code, ExitCode.Success, "PLAIN declares no capability, so the fleet exit rule applies");
+    assert.ok(byTag.envelope.warnings?.some((warning) => warning.code === "fleet_partial_failure"));
+    const outcome = Object.fromEntries(byTag.envelope.data.results.map((entry: { screen_id: string; status: string; command?: { state: string; command: string }; problem?: { code: string } }) =>
+      [entry.screen_id, entry.status === "ok" ? `${entry.command?.command}:${entry.command?.state}` : entry.problem?.code]));
+    assert.deepEqual(outcome, { [LOBBY]: `${item.type}:sent`, [DARK]: `${item.type}:queued`, [PLAIN]: "command_unsupported" });
+
+    const byIds = await cli(["--human", "screen", item.name, LOBBY, DARK, "--yes", "--expires-in", "2h"], transport, env);
+    assert.equal(byIds.code, ExitCode.Success, byIds.stdout);
+    assert.deepEqual(actions().at(-1)?.body, { selector: { by: "ids", screen_ids: [LOBBY, DARK] }, action: { type: item.type, expires_in_s: 7200 } });
+    assert.match(byIds.stdout, new RegExp(`^Fleet ${item.name}: matched 2, succeeded 2, failed 0$`, "m"));
+    assert.match(byIds.stdout, new RegExp(`^${DARK}\\s+ok\\s+${item.type} queued, expires 2026-08-14T19:00:00\\.000Z$`, "m"));
+    assert.match(byIds.stdout, new RegExp(`^${LOBBY}\\s+ok\\s+${item.type} sent, expires 2026-08-14T19:00:00\\.000Z$`, "m"));
+
+    const byFolder = await cli(["--json", "screen", item.name, "--folder", "sfd_NORTH", "--yes"], transport, env);
+    assert.deepEqual(actions().at(-1)?.body, { selector: { by: "folder", folder_id: "sfd_NORTH" }, action: { type: item.type } }, "no expires_in_s unless --expires-in is given");
+    assert.equal(byFolder.code, ExitCode.Success, "an empty folder matches nothing");
+    assert.ok(byFolder.envelope.warnings?.some((warning) => warning.code === "fleet_no_match"));
+
+    const sentCalls = transport.calls.length;
+    for (const argv of [
+      ["screen", item.name],
+      ["screen", item.name, LOBBY, "--tag", "Lobby"],
+      ["screen", item.name, "--tag", "Lobby", "--folder", "sfd_NORTH", "--yes"],
+      ["screen", item.name, LOBBY, "--expires-in", "59s"],
+      ["screen", item.name, "--tag", "Lobby", "--yes", "--expires-in", "25h"],
+      ["screen", item.name, LOBBY, "--expires-in", "soon"],
+    ]) {
+      const result = await cli(["--json", ...argv], transport, env);
+      assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+    }
+    assert.equal(transport.calls.length, sentCalls, "usage errors must not reach the server");
+  }
+});
+
+test("a malformed maintenance answer is a local contract error", async () => {
+  const env = await enrolled();
+  for (const body of [
+    { status: "accepted" },
+    { command_id: "rbt_ABCDEFGH", command: "clear_cache", expires_at: "2026-08-15T17:00:00.000Z", state: "sent" },
+    { command_id: "cmd_ABCDEFGH", command: "update", expires_at: "2026-08-15T17:00:00.000Z", state: "sent" },
+    { command_id: "cmd_ABCDEFGH", command: "clear_cache", expires_at: "soon", state: "sent" },
+    { command_id: "cmd_ABCDEFGH", command: "clear_cache", expires_at: "2026-08-15T17:00:00.000Z" },
+    { command_id: "cmd_ABCDEFGH", command: "clear_cache", expires_at: "2026-08-15T17:00:00.000Z", state: "done" },
+  ]) {
+    const transport = new FakeTransport().on("POST", `/api/screens/${LOBBY}/clear-cache`, () => ({ status: 202, headers: {}, body }));
+    const result = await cli(["--json", "screen", "clear-cache", LOBBY], transport, env);
+    assert.notEqual(result.code, ExitCode.Success, JSON.stringify(body));
+    assert.match(result.envelope.error!.detail, /ScreenMaintenanceAccepted/);
+  }
+});
+
 test("--expires-in is expires_in_s on the single route and in the fleet action; omitted, nothing is sent", async () => {
   const env = await enrolled();
   const transport = fleet();
@@ -509,6 +677,21 @@ test("commandLines, suspensionLines and replacedByLines print only well-formed s
   assert.deepEqual(commandLines(undefined), []);
   assert.deepEqual(commandLines(screen(LOBBY)), []);
   assert.deepEqual(commandLines(screen(LOBBY, { commands: [] })), []);
+  // A result the Player reported adds the CAUSE column and a detail line; a table without causes keeps its columns.
+  assert.deepEqual(commandLines(screen(LOBBY, {
+    commands: [
+      { id: "cmd_CLEAR0001", type: "clear_cache", state: "done", requested_at: "2026-08-14T10:00:00Z", expires_at: "2026-08-15T10:00:00Z", sent_at: "2026-08-14T10:00:01Z", done_at: "2026-08-14T10:00:09Z", cause: "cleared" },
+      { id: "cmd_UPDATE001", type: "update", state: "failed", requested_at: "2026-08-14T11:00:00Z", expires_at: "2026-08-15T11:00:00Z", sent_at: "2026-08-14T11:00:01Z", done_at: "2026-08-14T11:00:40Z", cause: "download_failed", detail: "Release server unreachable\u001b[2J\nforged" },
+      { id: "cmd_RESTART01", type: "restart_app", state: "sent", requested_at: "2026-08-14T12:00:00Z", expires_at: "2026-08-15T12:00:00Z", sent_at: "2026-08-14T12:00:01Z", cause: "BAD CAUSE\n" },
+    ],
+  })), [
+    "Commands",
+    "TYPE         ID             STATE   EXPIRES               SENT                  DONE                  CAUSE",
+    "clear_cache  cmd_CLEAR0001  done    2026-08-15T10:00:00Z  2026-08-14T10:00:01Z  2026-08-14T10:00:09Z  cleared",
+    "update       cmd_UPDATE001  failed  2026-08-15T11:00:00Z  2026-08-14T11:00:01Z  2026-08-14T11:00:40Z  download_failed",
+    "restart_app  cmd_RESTART01  sent    2026-08-15T12:00:00Z  2026-08-14T12:00:01Z",
+    "cmd_UPDATE001 failed (download_failed): Release server unreachable [2J forged",
+  ]);
   assert.deepEqual(commandLines(screen(LOBBY, {
     commands: [
       { id: "rbt_ABCDEFGH", type: "reboot", state: "done", requested_at: "2026-08-14T10:00:00Z", expires_at: "2026-08-15T10:00:00Z", sent_at: "2026-08-14T10:05:00Z", done_at: "2026-08-14T10:06:30Z" },
@@ -560,6 +743,7 @@ test("commandLines, suspensionLines and replacedByLines print only well-formed s
   assert.equal(commandResultText("reload", { state: "maybe", expires_at: "2026-08-14T17:45:00Z" }), "reload expires 2026-08-14T17:45:00Z");
   assert.equal(commandResultText("reload", { state: "queued", expires_at: "later" }), undefined);
   assert.equal(commandResultText("reboot", undefined), undefined);
+  assert.equal(commandResultText("clear_cache", { state: "queued", expires_at: "2026-08-14T17:45:00Z" }), "clear_cache queued, expires 2026-08-14T17:45:00Z");
 });
 
 test("screen.suspended prints the notice once, as message; screen.resumed and screen.replaced add no repeated sentence", () => {
@@ -592,13 +776,21 @@ test("help names each new command's arguments, required options and the parity u
   assert.match(commandHelp(["screen", "identify"]).usage, /screen identify \[options\] <id>/);
   assert.match(commandHelp(["screen", "command", "cancel"]).usage, /screen command cancel \[options\] <id> <command_id>/);
   assert.equal(commandHelp(["screen", "command"]).kind, "group");
-  for (const name of ["reload", "reboot"]) {
+  for (const name of ["reload", "reboot", "clear-cache", "restart-app", "update-software"]) {
     const help = commandHelp(["screen", name]);
     assert.match(help.usage, new RegExp(`screen ${name} \\[options\\] \\[id\\.\\.\\.\\]`), "the usage line is unchanged");
     const option = help.options.find((item) => item.name === "--expires-in");
     assert.equal(option?.type, "value");
     assert.match(option?.description ?? "", /60s to 24h.*default 24h/);
   }
+  for (const [name, capability] of [["clear-cache", "clear_cache"], ["restart-app", "restart_app"], ["update-software", "update"]] as const) {
+    const help = commandHelp(["screen", name]);
+    assert.deepEqual(help.options.map((option) => option.name).filter((option) => option !== "--help"), ["--tag", "--folder", "--yes", "--expires-in", "--expect-rev"], name);
+    assert.match(help.usage, new RegExp(`declares the\\s+${capability} capability`), `${name} states the Player must support it`);
+    assert.match(help.usage, /command_unsupported/, name);
+    assert.match(help.usage, /screen show lists host capabilities/, name);
+    assert.ok(help.examples.length >= 3, name);
+  }
   assert.match(commandHelp(["screen", "reboot"]).usage, /an offline screen holds\s+it queued \(state queued\) and is sent it when it comes online, for 24 hours by\s+default/);
-  assert.match(commandHelp(["screen", "show"]).usage, /data\.commands lists the screen's recent reboots and reloads[\s\S]*data\.suspension[\s\S]*data\.replaced_by/);
+  assert.match(commandHelp(["screen", "show"]).usage, /data\.commands lists the screen's recent commands[\s\S]*clear_cache, restart_app and update[\s\S]*CAUSE column[\s\S]*data\.suspension[\s\S]*data\.replaced_by/);
 });

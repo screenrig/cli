@@ -20,7 +20,7 @@ import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLA
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
-import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
+import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "./screen-commands.js";
 import { flatFrameNote, frameRow, glassLines } from "./screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
@@ -116,6 +116,7 @@ import {
   type ScreenTakeoverWrite,
   type PlaybackPlay,
   type ScreenDisplayScheduleView,
+  type ScreenMaintenanceAccepted,
   type ScreenRebootAccepted,
   type ScreenPlayPageAccepted,
   type ScreenPlayPageWrite,
@@ -6584,13 +6585,13 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   };
 }, true);
 
-/** --expires-in as the expires_in_s of a reboot or reload; empty when the flag is absent, so the server's 24 hours applies. */
+/** --expires-in as the expires_in_s of a queued command; empty when the flag is absent, so the server's 24 hours applies. */
 function commandLifetime(args: ParsedArgs): ScreenCommandWrite {
   const value = flagString(args.flags, "expires-in");
   return value === undefined ? {} : { expires_in_s: expiresInSeconds(value) };
 }
 
-/** The state of a reboot or reload answer: absent from a server that predates queueing, else queued or sent. */
+/** The state of a queued command's answer: absent from a server that predates queueing, else queued or sent. */
 function validDelivery(state: unknown): boolean {
   return state === undefined || state === "queued" || state === "sent";
 }
@@ -6671,7 +6672,9 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
       fleetHumanLines(title, result, (item) => {
         if (Array.isArray(item.tags)) return `tags ${item.tags.filter((tag) => /^[A-Za-z0-9]{1,32}$/.test(tag)).join(",") || "(none)"}`;
         if (typeof item.revision === "number") return `revision ${item.revision}`;
-        const command = commandResultText("reload", item.reload) ?? commandResultText("reboot", item.reboot);
+        const maintenance = item.command && (item.command.command === "clear_cache" || item.command.command === "restart_app" || item.command.command === "update")
+          ? commandResultText(item.command.command, item.command) : undefined;
+        const command = commandResultText("reload", item.reload) ?? commandResultText("reboot", item.reboot) ?? maintenance;
         if (command) return command;
         if (item.toast && serverInstant(item.toast.expires_at)) return `toast expires ${item.toast.expires_at}`;
         return undefined;
@@ -10383,6 +10386,61 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
   };
 }, true);
 
+// clear-cache, restart-app and update-software: the reboot shape for the three
+// maintenance commands (docs/player-compatibility.md §6.5.1). One screen id uses
+// its single-screen route (revision guard allowed); several ids, --tag or
+// --folder use the fleet action of the same type behind --yes.
+function maintenanceHandler(spec: MaintenanceSpec) {
+  const command = `screen ${spec.name}`;
+  return commandHandler(async (args, runtime, resolved) => {
+    const target = screenTarget(args, command);
+    if (target.kind === "fleet") {
+      rejectFleetRevision(args, command);
+      // Noninteractive: a fleet action is never a side effect of a typo.
+      if (!flagBool(args.flags, "yes")) {
+        throw usageError(`${command} with several screens, --tag or --folder acts on every matching Player; add --yes to confirm.`, {
+          command: `screenrig ${command} ${selectorFlags(target.selector)} --yes`,
+          reason: `Check the matching screens with screen list first; ${spec.fleetWarning}`,
+        });
+      }
+    }
+    const lifetime = commandLifetime(args);
+    const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+    if (target.kind === "fleet") return screenFleetAction(client, runtime, `Fleet ${spec.name}`, target.selector, { type: spec.type, ...lifetime });
+    const id = target.id;
+    const revision = flagString(args.flags, "if-match");
+    let response;
+    try {
+      response = await client.call({
+        method: "POST", path: `/api/screens/${encodeURIComponent(id)}/${spec.route}`, idempotent: true,
+        ...(lifetime.expires_in_s === undefined ? {} : { body: lifetime }),
+        ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+      });
+    } catch (error) {
+      throw maintenanceProblem(error, id, spec);
+    }
+    const accepted = (response.body ?? {}) as Partial<ScreenMaintenanceAccepted>;
+    if (typeof accepted.command_id !== "string" || !/^cmd_[A-Za-z0-9_-]{8,64}$/.test(accepted.command_id) || accepted.command !== spec.type
+      || serverInstant(accepted.expires_at) === undefined || (accepted.state !== "queued" && accepted.state !== "sent")) {
+      throw usageError(`Screen ${spec.name} response does not match the generated ScreenMaintenanceAccepted contract.`);
+    }
+    return {
+      envelope: jsonBody(response, client.requestId),
+      exitCode: ExitCode.Success,
+      human: [
+        humanLines(`${spec.title} accepted`, [["screen_id", id], ["command_id", accepted.command_id], ["command", accepted.command], ["state", accepted.state], ["expires_at", accepted.expires_at]]),
+        accepted.state === "queued"
+          ? `The screen is offline, so ${spec.name} waits: it is sent when the screen comes online before expires_at, and screen show lists it under commands (done or failed, with the cause the Player reports). Cancel it with screen command cancel ${id} ${accepted.command_id}.`
+          : `${spec.effect} screen show lists the result under commands (done or failed, with the cause the Player reports).`,
+      ].join("\n"),
+    };
+  }, true);
+}
+
+export const handleScreenClearCache = maintenanceHandler(MAINTENANCE["clear-cache"]);
+export const handleScreenRestartApp = maintenanceHandler(MAINTENANCE["restart-app"]);
+export const handleScreenUpdateSoftware = maintenanceHandler(MAINTENANCE["update-software"]);
+
 // Start one page of the playlist a screen is playing now. Single screen only.
 export const handleScreenPlayPage = commandHandler(async (args, runtime, resolved) => {
   if (args.flags["page-id"] === true) throw usageError("--page-id requires a value, such as --page-id pg_WELCOME.");
@@ -10623,7 +10681,7 @@ export const handleScreenReplace = commandHandler(async (args, runtime, resolved
   };
 }, true);
 
-// Cancel a reboot or reload that is still queued for an offline screen.
+// Cancel a queued command (reboot, reload, clear_cache, restart_app or update) that is still waiting for an offline screen.
 export const handleScreenCommandCancel = commandHandler(async (args, runtime, resolved) => {
   // positionals are [screen, command, cancel, ID, COMMAND_ID].
   const id = args.positionals[3];
