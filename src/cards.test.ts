@@ -80,59 +80,6 @@ test("unknown cards preserve card_not_found and exit 4", async t => {
   assert.equal(result.code, 4); assert.equal(result.body.error.code, "card_not_found");
 });
 
-test("card-data get/list/delete use the project namespace, complete paging and quoted If-Match", async t => {
-  const f = await fixture(t);
-  const entry = { key: "menu/main", document: { sections: [] }, revision: 3 };
-  f.transport.on("GET", "/api/card-data/menu%2Fmain", () => ok(entry));
-  f.transport.on("GET", "/api/card-data", request => ok(request.query?.after ? { items: [{ key: "z", revision: 4 }], next_cursor: null } : { items: [{ key: "a", revision: 1 }], next_cursor: "a" }));
-  f.transport.on("DELETE", "/api/card-data/menu%2Fmain", request => {
-    assert.equal(request.headers?.["if-match"], '"3"'); assert.ok(request.headers?.["idempotency-key"]);
-    return { status: 204, headers: {}, body: undefined };
-  });
-  assert.deepEqual((await f.invoke(["card-data", "get", "menu/main"])).body.data, entry);
-  const list = await f.invoke(["card-data", "list"]);
-  assert.equal(list.code, 0); assert.deepEqual(list.body.data.items.map((item: any) => item.key), ["a", "z"]); assert.equal(list.body.data.next_cursor, null);
-  assert.equal((await f.invoke(["card-data", "delete", "menu/main", "--expect-rev", "3"])).code, 0);
-});
-
-test("card-data put reads files/stdin as document objects, supports If-Match alias and saved retry keys", async t => {
-  const f = await fixture(t);
-  const document = { sections: [{ title: "Lunch" }] };
-  await writeFile(f.dir + "/data.json", JSON.stringify(document));
-  let ambiguous = true;
-  f.transport.on("PUT", "/api/card-data/menu-main", request => {
-    assert.deepEqual(request.body, { document }); assert.equal(request.headers?.["if-match"], '"3"');
-    if (ambiguous) { ambiguous = false; throw networkError("Connection interrupted"); }
-    return ok({ key: "menu-main", document, revision: 4 });
-  });
-  const argv = ["card-data", "put", "menu-main", "--file", "data.json", "--if-match", "3"];
-  assert.equal((await f.invoke(argv)).code, 10);
-  assert.equal((await f.invoke(argv)).code, 0);
-  const writes = f.transport.calls.filter(call => call.method === "PUT");
-  assert.equal(writes[0]!.headers?.["idempotency-key"], writes[1]!.headers?.["idempotency-key"]);
-  assert.equal((await f.invoke(["card-data", "put", "menu-main", "--file", "-", "--expect-rev", "3"], JSON.stringify(document))).code, 0);
-  assert.doesNotMatch(await readFile(f.config, "utf8"), /sections|Lunch/);
-});
-
-test("card-data rejects invalid/nonobject/oversize input without writes or echoing content", async t => {
-  const f = await fixture(t);
-  for (const input of ["secret invalid JSON", "null", "[]", '"text"', JSON.stringify({ large: "x".repeat(1_048_576) })]) {
-    const result = await f.invoke(["card-data", "put", "key", "--file", "-"], input);
-    assert.equal(result.code, 2, result.stdout); assert.doesNotMatch(result.stdout, /secret invalid JSON/);
-  }
-  assert.equal(f.transport.calls.length, 0);
-});
-
-test("card-data server validation and revision refusals keep stable problem codes", async t => {
-  const f = await fixture(t);
-  for (const [status, code, exit] of [[409, "card_data_invalid", 5], [412, "revision_conflict", 6]] as const) {
-    const path = `/api/card-data/key${status}`;
-    f.transport.on("PUT", path, () => ({ status, headers: {}, body: { code, title: "Refused", status, errors: [{ field: "document.sections", card: "menu", major: 1, data_key: "key" }] } }));
-    const result = await f.invoke(["card-data", "put", `key${status}`, "--file", "-", "--expect-rev", "3"], "{}");
-    assert.equal(result.code, exit); assert.equal(result.body.error.code, code); assert.equal(result.body.error.errors[0].field, "document.sections");
-  }
-});
-
 test("feeds get covers each family, maps query names and returns fetchedAt/attribution", async t => {
   const f = await fixture(t);
   const doc = { schema: "screenrig.weather/v1", fetchedAt: "2026-10-15T11:58:00Z", attribution: { text: "Data provider" } };
@@ -282,14 +229,14 @@ test("family and revision validation/discovery agree; invalid feed input never r
     ["feeds", "get", "earthquakes", "--lat", "0", "--lon", "0", "--radius-km", "1"],
   ]) assert.equal((await f.invoke(argv)).code, 2);
   assert.equal(f.transport.calls.length, 0);
-  for (const argv of [["cards", "show", "../bad"], ["card-data", "delete", "key"], ["card-data", "get", "feed:weather.v1:x"], ["card-data", "put", "key"], ["feeds", "get", "unknown"], ["feeds", "get", "weather", "--lat", "0"]]) assert.throws(() => parseArgv(argv));
-  assert.ok(commandHelp(["card-data", "put"]).options.some(option => option.name === "--file"));
+  for (const argv of [["cards", "show", "../bad"], ["card", "data", "get", "key"], ["feeds", "get", "unknown"], ["feeds", "get", "weather", "--lat", "0"]]) assert.throws(() => parseArgv(argv));
+  assert.ok(commandHelp(["card", "data", "put"]).options.some(option => option.name === "--file"));
   assert.ok(commandHelp(["feeds", "get"]).relationships.some(group => group.kind === "together"));
 });
 
 test("card commands without enrollment fail not_enrolled and never enroll implicitly", async t => {
   const f = await fixture(t, false);
-  for (const argv of [["cards", "list"], ["cards", "show", "menu"], ["card-data", "list"], ["feeds", "get", "rates"]]) {
+  for (const argv of [["cards", "list"], ["cards", "show", "menu"], ["card", "list"], ["feeds", "get", "rates"]]) {
     const result = await f.invoke(argv); assert.equal(result.code, 3); assert.equal(result.body.error.code, "not_enrolled");
   }
   assert.equal(f.transport.calls.length, 0);
@@ -523,10 +470,10 @@ test("instance data preserves revision refusals and rejects nonobject input befo
   }
 });
 
-test("compatibility card-data commands surface server warning headers", async t => {
+test("card commands surface server warning headers", async t => {
   const f = await subsetFixture(t);
-  f.transport.on("GET", `${selectedPath}/card-data/old`, () => ok({ revision: 1 }, { warning: '299 screenrig "Use card instance data"', deprecation: "true" }));
-  const result = await f.invoke(["card-data", "get", "old"]);
+  f.transport.on("GET", `${instancePath}/data`, () => ok({ revision: 1 }, { warning: '299 screenrig "Use card instance data"', deprecation: "true" }));
+  const result = await f.invoke(["card", "data", "get", instanceId]);
   assert.equal(result.code, 0);
   assert.match(result.body.warnings[0].message, /Use card instance data/);
 });

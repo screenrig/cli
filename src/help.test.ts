@@ -37,7 +37,7 @@ test("root help is compact and every command is discoverable through immediate c
   assert.deepEqual(discovered.sort(), [
     "reports list", "reports show", "reports subscriptions list", "reports subscriptions show", "reports subscriptions create", "reports subscriptions update", "reports subscriptions delete", "reports subscriptions send", "project export",
     "project token", "card preview", "card create", "card list", "card show", "card params", "card delete", "card data get", "card data put",
-    "cards list", "cards show", "card-data get", "card-data put", "card-data list", "card-data delete", "feeds get",
+    "cards list", "cards show", "feeds get",
     "recovery list",
     "recovery show",
     "recovery reconcile",

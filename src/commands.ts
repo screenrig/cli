@@ -294,7 +294,7 @@ import {
   type NoteState,
 } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
-import { cardId, cardUid, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
+import { cardId, cardUid, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
 import { runApply, ONLY_KINDS, type ApplyOptions, type OnlyKind } from "./migrate/apply.js";
 import { chooseDir, describeVendor, findVendor, sortedVendors, vendorHttpFor, vendorLines } from "./migrate/cli.js";
 import { loadCredentials } from "./migrate/credentials.js";
@@ -697,7 +697,7 @@ export function commandHandler(
     // Sign-in reset is unauthenticated but still retains a durable retry key.
     const ordinary = (group === "dashboard" && action === "reset-sign-in")
       || Boolean(authenticated && resolved.token && (
-        ["kv", "card", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
+        ["kv", "card", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update", "rename"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "patch", "rename", "delete", "promote"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
@@ -7230,34 +7230,6 @@ export const handleCardInstanceDataPut = commandHandler(async (args, runtime, re
   const response = await client.call({ method: "PUT", path: `/api/cards/${id}/data`, body: { document, ...cardExpiry(args.flags) }, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${id}\nrevision: ${(response.body as { revision: number }).revision}` };
-});
-
-export const handleCardDataList = commandHandler(async (args, runtime, resolved) => {
-  return simpleList(args, runtime, resolved, "/api/card-data", "Card data");
-});
-
-export const handleCardDataGet = commandHandler(async (args, runtime, resolved) => {
-  return simpleGet(args, runtime, resolved, `/api/card-data/${encodeURIComponent(cardDataKey(args.positionals[2]!))}`, "Card data");
-});
-
-export const handleCardDataPut = commandHandler(async (args, runtime, resolved) => {
-  const key = cardDataKey(args.positionals[2]!);
-  const document = await readAuthoringJson(flagString(args.flags, "file")!, runtime);
-  if (!document || typeof document !== "object" || Array.isArray(document)) throw usageError("Card data must be a JSON object.");
-  if (Buffer.byteLength(JSON.stringify(document), "utf8") > 1_048_576) throw usageError("Card data must be at most 1 MiB.");
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const revision = flagString(args.flags, "if-match");
-  const response = await client.call({ method: "PUT", path: `/api/card-data/${encodeURIComponent(key)}`, body: { document, ...cardExpiry(args.flags) }, idempotent: true,
-    headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${key}\nrevision: ${(response.body as { revision: number }).revision}` };
-});
-
-export const handleCardDataDelete = commandHandler(async (args, runtime, resolved) => {
-  const key = cardDataKey(args.positionals[2]!);
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "DELETE", path: `/api/card-data/${encodeURIComponent(key)}`, idempotent: true,
-    headers: { "if-match": quotedRevision(flagString(args.flags, "if-match")!) } });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted card data: ${key}` };
 });
 
 export const handleFeedsGet = commandHandler(async (args, runtime, resolved) => {
