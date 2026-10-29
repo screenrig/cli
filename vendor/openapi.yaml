@@ -4544,6 +4544,219 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/clear-cache:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: clearScreenCache
+      x-rate-limit-policies:
+        - name: maintenance-project
+          quota: 600
+          windowSeconds: 60
+        - name: maintenance-screen
+          quota: 2
+          windowSeconds: 600
+        - name: maintenance-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Asks the screen's Player to clear its caches (docs/player-compatibility.md §6.5.1). The Player deletes its downloaded media, application packages and data caches, keeps its pairing, identity and settings, then fetches the manifest and content again. The optional body sets expires_in_s, how long the command stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.command_requested. A screen that is online is sent the per-screen runtime command player.clear_cache at once (details command_id, command, reason project, at, expires_at; never delivered after expires_at) and the command is recorded in Screen.commands as sent. A screen that is offline holds the command as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same command_id and expires_at, and the command becomes sent. The Player reports how it ended: the command becomes done or failed in Screen.commands with the cause the Player reported (cause, detail), and the project-only screen.command_result is appended. A sent command with no report stays sent. A newer command of the same type supersedes one still queued, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the clear_cache capability, else 409 command_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes across clear-cache, restart-app and update; a refused request (command_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenCommandWrite'
+      responses:
+        '202':
+          description: Accepted. state is sent when the command went to the online screen's Player, queued when it waits for the screen to come online. The command is actionable until expires_at. The ETag is the unchanged screen revision.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMaintenanceAccepted'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/restart-app:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: restartScreenApp
+      x-rate-limit-policies:
+        - name: maintenance-project
+          quota: 600
+          windowSeconds: 60
+        - name: maintenance-screen
+          quota: 2
+          windowSeconds: 600
+        - name: maintenance-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Asks the screen's Player to restart its application, not the device (docs/player-compatibility.md §6.5.1). The Player process restarts and reports from the new process. The optional body sets expires_in_s, how long the command stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.command_requested. A screen that is online is sent the per-screen runtime command player.restart_app at once (details command_id, command, reason project, at, expires_at; never delivered after expires_at) and the command is recorded in Screen.commands as sent. A screen that is offline holds the command as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same command_id and expires_at, and the command becomes sent. The Player reports how it ended: the command becomes done or failed in Screen.commands with the cause the Player reported (cause, detail), and the project-only screen.command_result is appended. A sent command with no report stays sent. A newer command of the same type supersedes one still queued, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the restart_app capability, else 409 command_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes across clear-cache, restart-app and update; a refused request (command_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenCommandWrite'
+      responses:
+        '202':
+          description: Accepted. state is sent when the command went to the online screen's Player, queued when it waits for the screen to come online. The command is actionable until expires_at. The ETag is the unchanged screen revision.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMaintenanceAccepted'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/update:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: updateScreenPlayer
+      x-rate-limit-policies:
+        - name: maintenance-project
+          quota: 600
+          windowSeconds: 60
+        - name: maintenance-screen
+          quota: 2
+          windowSeconds: 600
+        - name: maintenance-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Asks the screen's Player to check for the newest Player release now and install it (docs/player- compatibility.md §6.5.1). The result cause is up_to_date when the newest release already runs and updated when a release was installed; a store-managed or device-managed install declares no update capability. The optional body sets expires_in_s, how long the command stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.command_requested. A screen that is online is sent the per-screen runtime command player.update at once (details command_id, command, reason project, at, expires_at; never delivered after expires_at) and the command is recorded in Screen.commands as sent. A screen that is offline holds the command as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same command_id and expires_at, and the command becomes sent. The Player reports how it ended: the command becomes done or failed in Screen.commands with the cause the Player reported (cause, detail), and the project-only screen.command_result is appended. A sent command with no report stays sent. A newer command of the same type supersedes one still queued, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the update capability, else 409 command_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes across clear-cache, restart-app and update; a refused request (command_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenCommandWrite'
+      responses:
+        '202':
+          description: Accepted. state is sent when the command went to the online screen's Player, queued when it waits for the screen to come online. The command is actionable until expires_at. The ETag is the unchanged screen revision.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMaintenanceAccepted'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/commands:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -14887,6 +15100,67 @@ paths:
         '401':
           $ref: '#/components/responses/RuntimeProblem'
         '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/commands/{command_id}/result:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    post:
+      operationId: postRuntimeCommandResult
+      x-rate-limit-policies:
+        - name: runtime-command-result
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-command-result-ip
+          quota: 300
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'A paired Player reports how a command it was sent ended (docs/player-compatibility.md §6.5.1): done or failed, with a static cause token and an optional short detail. The command becomes done or failed in Screen.commands with done_at, cause and detail, and the project-only screen.command_result is appended. Only a sent command of the session''s screen takes a result: an id the screen does not list, or one not sent, is 404 not_found and the Player drops the report. An exact repeat of the recorded result is 202 and changes nothing; a different result for a finished command is 409 resource_conflict. A failed result requires cause. The path and body do not name the screen; the paired runtime session binds it. Auth is the runtime cookie or ScreenRig-Session. Anonymous and unpaired sessions are unauthorized; an archived screen is screen_archived. Prepaid remaining credit is not a gate.'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      parameters:
+        - name: command_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{8,64}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCommandResultWrite'
+      responses:
+        '202':
+          description: Stored, or an exact repeat of the stored result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '404':
           $ref: '#/components/responses/RuntimeProblem'
         '409':
           $ref: '#/components/responses/RuntimeProblem'
@@ -27008,6 +27282,7 @@ components:
         - {$ref: "#/components/schemas/ScreenActionDisplayClear"}
         - {$ref: "#/components/schemas/ScreenActionSetDisplaySchedule"}
         - {$ref: "#/components/schemas/ScreenActionClearDisplaySchedule"}
+        - {$ref: "#/components/schemas/ScreenActionMaintenance"}
       discriminator: {propertyName: type}
       description: >-
         One fleet action, discriminated by type. Each member carries only its own parameters; a member of another type is an unknown field and invalid_request.
@@ -27132,12 +27407,20 @@ components:
       description: Removes each screen's display schedule; a screen without one is ok and unchanged.
       properties:
         type: {type: string, enum: [clear_display_schedule]}
+    ScreenActionMaintenance:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: POST /api/screens/{id}/clear-cache, /restart-app or /update per screen; a screen whose host did not declare the capability fails alone with command_unsupported. An offline screen holds the command queued until it comes online (expires_in_s).
+      properties:
+        type: {type: string, enum: [clear_cache, restart_app, update]}
+        expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
     ScreenActionResult:
       type: object
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: {type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule]}
+        action: {type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, clear_cache, restart_app, update]}
         matched: {type: integer, minimum: 0}
         succeeded: {type: integer, minimum: 0}
         failed: {type: integer, minimum: 0}
@@ -27159,6 +27442,7 @@ components:
         reload: {$ref: "#/components/schemas/ScreenReloadAccepted"}
         toast: {$ref: "#/components/schemas/ScreenToastAccepted"}
         reboot: {$ref: "#/components/schemas/ScreenRebootAccepted"}
+        command: {$ref: "#/components/schemas/ScreenMaintenanceAccepted"}
         problem: {$ref: "#/components/schemas/Problem"}
     ScreenRecoveryPending:
       type: object
@@ -27484,23 +27768,44 @@ components:
     ScreenCommandWrite:
       type: object
       additionalProperties: false
-      description: The optional body of POST /api/screens/{id}/reboot and /reload. An empty body keeps the default.
+      description: The optional body of POST /api/screens/{id}/reboot, /reload, /clear-cache, /restart-app and /update. An empty body keeps the default.
       properties:
         expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400, description: "How long the command stays actionable, in seconds from the request. A queued command is sent only before it expires; a Player ignores one after expires_at."}
+    ScreenMaintenanceAccepted:
+      type: object
+      additionalProperties: false
+      required: [command_id, command, expires_at, state]
+      properties:
+        command_id: {type: string, pattern: "^cmd_[A-Za-z0-9_-]{8,64}$", description: "details.command_id of the player.clear_cache, player.restart_app or player.update event, and the id of the entry in Screen.commands. A Player acts on one command_id at most once and reports its result under it."}
+        command: {type: string, enum: [clear_cache, restart_app, update]}
+        expires_at: {type: string, format: date-time, description: Instant after which runtime scan does not deliver the command and a Player ignores it.}
+        state: {type: string, enum: [queued, sent], description: "sent: the screen was online and the event went to its Player at once. queued: the screen was offline; the event is appended when it comes online before expires_at."}
+    RuntimeCommandResultWrite:
+      type: object
+      additionalProperties: true
+      required: [state]
+      description: >-
+        The POST /screen/commands/{command_id}/result body. Unknown members are ignored (docs/player-compatibility.md §1.1).
+      properties:
+        state: {type: string, enum: [done, failed]}
+        cause: {type: string, pattern: "^[a-z0-9_]{1,40}$", description: "A static token: required when failed (clear_failed, restart_failed, update_check_failed, download_failed, install_failed, no_update_channel), optional when done (cleared, restarted, up_to_date, updated)."}
+        detail: {type: string, maxLength: 200, description: "A short sentence without control characters; never a URL with credentials, a token or a private path."}
     ScreenCommand:
       type: object
       additionalProperties: false
       required: [id, type, state, requested_at, expires_at]
       description: >-
-        One reboot or reload asked of a screen, in Screen.commands. A command sent to an online screen is stored sent. One asked of an offline screen is stored queued with no runtime event; the backend appends the event, with this id and expires_at, when it applies the screen's next online transition before expires_at, and the command becomes sent. Each command has exactly one runtime event, so a Player cannot see it twice. expired is derived on read for a queued command past expires_at. A newer command of the same type supersedes one still queued. A sent reboot becomes done when a health report with uptime_s puts the boot after sent_at; a reload never reaches done.
+        One reboot, reload, clear_cache, restart_app or update asked of a screen, in Screen.commands. A command sent to an online screen is stored sent. One asked of an offline screen is stored queued with no runtime event; the backend appends the event, with this id and expires_at, when it applies the screen's next online transition before expires_at, and the command becomes sent. Each command has exactly one runtime event, so a Player cannot see it twice. expired is derived on read for a queued command past expires_at. A newer command of the same type supersedes one still queued. A sent reboot becomes done when a health report with uptime_s puts the boot after sent_at; a reload never reaches done. A clear_cache, restart_app or update becomes done or failed when its Player reports, with cause and detail.
       properties:
-        id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "The reboot_id (rbt_) or reload_id (rld_) the 202 answer returned."}
-        type: {type: string, enum: [reboot, reload]}
-        state: {type: string, enum: [queued, sent, done, expired, cancelled, superseded]}
+        id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "The reboot_id (rbt_), reload_id (rld_) or command_id (cmd_) the 202 answer returned."}
+        type: {type: string, enum: [reboot, reload, clear_cache, restart_app, update]}
+        state: {type: string, enum: [queued, sent, done, failed, expired, cancelled, superseded]}
         requested_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         sent_at: {type: string, format: date-time, description: "When the runtime event was appended. Absent while the command is queued, and on one cancelled, expired or superseded before it was sent."}
-        done_at: {type: string, format: date-time, description: "The boot time a health report proved. Present only on a done reboot."}
+        done_at: {type: string, format: date-time, description: "The boot time a health report proved on a done reboot; when the Player reported on a done or failed clear_cache, restart_app or update."}
+        cause: {type: string, pattern: "^[a-z0-9_]{1,40}$", description: "Present on a clear_cache, restart_app or update the Player reported: the static cause token."}
+        detail: {type: string, maxLength: 200, description: "Present when the Player reported a short sentence with its result."}
     ScreenCommandPage:
       type: object
       additionalProperties: false
@@ -28535,12 +28840,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 10
+      maxItems: 12
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -31209,6 +31514,7 @@ x-problem-codes:
   - assignment_not_found
   - upgrade_required
   - reboot_unsupported
+  - command_unsupported
   - play_page_unsupported
   - identify_unsupported
   - page_not_on_screen

@@ -78,7 +78,7 @@ export function registerReportsCommands(root: Command, bind: CommandActionBinder
     .requiredOption("--name <NAME>", "Name, at most 100 characters")
     .addOption(new Option("--kind <KIND>", "fleet_health, uptime, publishing, alerts, alert_log or proof_of_play").makeOptionMandatory())
     .addOption(new Option("--format <FORMAT>", "Attachment: pdf, xlsx or csv").choices(REPORT_SUBSCRIPTION_FORMATS).makeOptionMandatory())
-    .requiredOption("--recipients <MEMBERS>", "Project members, comma-separated: a user id or a member's email address (at most 25)")
+    .requiredOption("--recipients <MEMBERS>", "Project members, comma-separated: a user id, a member's email address or owner (at most 25)")
     .option("--filter <NAME=VALUE>", "A report filter such as group_by=screen, folder_id=sfd_ID, tag=Lobby, advertiser=Acme (repeatable)", reportFilter);
   scheduleOptions(create, true);
   create.action(bind(handleReportSubscriptionsCreate));
