@@ -24,6 +24,7 @@ const MISSING = "cmp_MISSINGAAAAAAAAA";
 const A = "scr_AAAAAAAAAAAAAAAAAAAAAAAA";
 const B = "scr_BBBBBBBBBBBBBBBBBBBBBBBB";
 const C = "scr_CCCCCCCCCCCCCCCCCCCCCCCC";
+const FOLDER = "sfd_AAAAAAAAAAAAAAAAAAAAAAAA";
 
 interface Envelope {
   ok: boolean;
@@ -136,8 +137,10 @@ test("campaign create maps every audience flag onto the audience rule", async ()
     [["--any-tag", "Cafe,Patio", "--any-tag", "Bar"], { any: [{ tag: "Cafe" }, { tag: "Patio" }, { tag: "Bar" }] }],
     [["--screen-id", A], { screen_id: A }],
     [["--screen-id", `${A},${B}`, "--screen-id", C], { any: [{ screen_id: A }, { screen_id: B }, { screen_id: C }] }],
+    [["--folder", FOLDER], { folder: FOLDER }],
     [["--all-screens"], { all: [] }],
     [["--audience", nested], JSON.parse(nested)],
+    [["--audience", `{"all":[{"tag":"North"},{"folder":"${FOLDER}"}]}`], { all: [{ tag: "North" }, { folder: FOLDER }] }],
   ];
   for (const [flags, audience] of cases) {
     const created = await cli(["--json", "campaign", "create", "--name", "Menu", "--playlist-id", PLAYLIST, ...flags], transport, env);
@@ -191,10 +194,14 @@ test("campaign create refuses a bad input before any request", async () => {
     [["--name", "x".repeat(121), "--playlist-id", PLAYLIST, "--tag", "Lobby"], /1 to 120 characters/],
     [["--name", "Bad\u0007", "--playlist-id", PLAYLIST, "--tag", "Lobby"], /without controls/],
     [["--name", "Menu", "--playlist-id", A, "--tag", "Lobby"], /playlist id/],
-    [base, /exactly one of --tag or --any-tag or --screen-id or --all-screens or --audience/],
+    [base, /exactly one of --tag or --any-tag or --screen-id or --folder or --all-screens or --audience/],
     [[...base, "--tag", "Lobby", "--all-screens"], /cannot be used with/],
     [[...base, "--tag", "Lobby", "--audience", "{}"], /cannot be used with/],
     [[...base, "--any-tag", "Cafe", "--screen-id", A], /cannot be used with/],
+    [[...base, "--folder", FOLDER, "--tag", "Lobby"], /cannot be used with/],
+    [[...base, "--folder", FOLDER, "--audience", "{}"], /cannot be used with/],
+    [[...base, "--folder", "North"], /screen folder ID \(sfd_/],
+    [[...base, "--folder", "mfd_AAAAAAAAAAAAAAAAAAAAAAAA"], /screen folder ID \(sfd_/],
     [[...base, "--tag", "not a tag"], /1 to 32 letters or digits/],
     [[...base, "--tag", "x".repeat(33)], /1 to 32 letters or digits/],
     [[...base, "--tag", "Lobby", "--tag", "Lobby"], /more than once/],
@@ -305,6 +312,10 @@ test("campaign update sends only the changed members, null clears, and --expect-
   assert.match(human.stdout, /^Updated campaign cmp_\S+\. Every screen of its old and new audience re-resolves within a minute\.$/m);
   assert.match(human.stdout, /^audience: every screen$/m);
   assert.match(human.stdout, /^when: always$/m);
+  const folder = await cli(["--human", "campaign", "update", campaign.id, "--folder", FOLDER], transport, env);
+  assert.equal(folder.code, 0, folder.stderr);
+  assert.deepEqual(lastCall(transport).body, { audience: { folder: FOLDER } });
+  assert.match(folder.stdout, new RegExp(`^audience: folder ${FOLDER}$`, "m"));
 });
 
 test("campaign update needs a change and refuses conflicting options before any request", async () => {
@@ -316,6 +327,8 @@ test("campaign update needs a change and refuses conflicting options before any 
     [[], /Provide at least one of --name or --playlist-id/],
     [["--expect-rev", "1"], /Provide at least one of/],
     [["--tag", "Lobby", "--all-screens"], /cannot be used with/],
+    [["--folder", FOLDER, "--tag", "Lobby"], /cannot be used with/],
+    [["--folder", "North"], /screen folder ID \(sfd_/],
     [["--from", "2026-12-24T18:00", "--clear-from"], /cannot be used with/],
     [["--until", "2026-12-24T18:00", "--clear-until"], /cannot be used with/],
     [["--window", "sat", "--clear-windows"], /cannot be used with/],
@@ -451,6 +464,8 @@ test("campaign audiences read as text", () => {
   assert.equal(campaignAudienceText({ all: [] }), "every screen");
   assert.equal(campaignAudienceText({ tag: "Lobby" }), "tag Lobby");
   assert.equal(campaignAudienceText({ screen_id: A }), `screen ${A}`);
+  assert.equal(campaignAudienceText({ folder: FOLDER }), `folder ${FOLDER}`);
+  assert.equal(campaignAudienceText({ all: [{ tag: "a" }, { folder: FOLDER }] }), `tag a and folder ${FOLDER}`);
   assert.equal(campaignAudienceText({ all: [{ tag: "a" }, { tag: "b" }] }), "tag a and tag b");
   assert.equal(campaignAudienceText({ any: [{ tag: "a" }] }), "tag a");
   assert.equal(campaignAudienceText({ all: [{ tag: "North" }, { any: [{ tag: "Cafe" }, { tag: "Patio" }] }] }), "tag North and (tag Cafe or tag Patio)");
@@ -816,17 +831,19 @@ test("campaign help names the audience flags, the screens it schedules and how t
   assert.match(commandHelp(["campaign"]).usage, /It schedules your own screens: ads campaigns\s+buy ad time on other screens/);
 
   const create = commandHelp(["campaign", "create"]);
-  assert.deepEqual(create.relationships, [{ kind: "exactlyOne", options: ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience"] }]);
+  assert.deepEqual(create.relationships, [{ kind: "exactlyOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] }]);
   assert.match(create.usage, /Switches every screen in the audience to --playlist-id while the campaign holds, and back when it stops, within a minute\./);
   assert.match(create.usage, /campaign screens ID lists every screen's standing and campaign explain SCREEN_ID says why/);
   assert.match(create.usage, /DAYS or DAYS@HH:MM-HH:MM/);
   assert.match(create.options.find((option) => option.name === "--audience")!.description, /for stdin/);
-  assert.deepEqual(create.options.find((option) => option.name === "--tag")!.conflicts, ["--any-tag", "--screen-id", "--all-screens", "--audience"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--tag")!.conflicts, ["--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"]);
   for (const name of ["--name", "--playlist-id"]) assert.equal(create.options.find((option) => option.name === name)!.required, true, name);
 
   const update = commandHelp(["campaign", "update"]);
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
-  assert.deepEqual(update.relationships[1]!.options, ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience"]);
+  assert.deepEqual(update.relationships[1]!.options, ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--folder")!.conflicts, ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience"]);
+  assert.match(update.options.find((option) => option.name === "--folder")!.description, /screen folder \(sfd_\.\.\.\) and every folder inside it/);
   assert.deepEqual(update.options.find((option) => option.name === "--clear-from")!.conflicts, ["--from"]);
   assert.deepEqual(update.options.find((option) => option.name === "--window")!.conflicts, ["--clear-windows"]);
   for (const action of ["update", "pause", "resume", "delete"]) {

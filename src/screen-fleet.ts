@@ -2,7 +2,7 @@ import type { ParsedArgs } from "./command-input.js";
 import { flagString } from "./command-input.js";
 import type { Warning } from "./envelope.js";
 import { ExitCode, exitCodeForStatus } from "./exit-codes.js";
-import type { ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType } from "./adapters/protocol.js";
+import type { ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType, ScreenFolder } from "./adapters/protocol.js";
 import { normalizeProblem, usageError, unexpectedResponseError } from "./problems.js";
 
 /** Screen tags share the media tag grammar. */
@@ -29,22 +29,58 @@ export function screenTagList(value: string, flag: string): string[] {
   return tags;
 }
 
+/** Screen folder ids: sfd_ with an optional environment marker. */
+export const SCREEN_FOLDER_ID_PATTERN = /^(?:(?:stage|qa|development)_)?sfd_[A-Za-z0-9]{1,64}$/;
+
+/** A screen folder id, or a usage error naming `label`; screen folder list shows them. */
+export function screenFolderId(value: string | undefined, label: string): string {
+  if (!value || !SCREEN_FOLDER_ID_PATTERN.test(value)) {
+    throw usageError(`${label} must be a screen folder ID (sfd_...); screen folder list shows them.`);
+  }
+  return value;
+}
+
 /**
- * Resolve `<id>`, several `<id>`s, or `--tag TAG`. Exactly one screen id keeps
- * the single-screen route and its envelope; several ids or a tag select the
- * fleet actions route.
+ * Resolve `<id>`, several `<id>`s, `--tag TAG` or `--folder ID`. Exactly one
+ * screen id keeps the single-screen route and its envelope; several ids, a tag
+ * or a folder (with every folder inside it) select the fleet actions route.
  */
 export function screenTarget(args: ParsedArgs, command: string): ScreenTarget {
   const ids = args.positionals.slice(2);
   if (args.flags.tag === true) throw usageError("--tag requires a value, such as --tag Lobby.");
+  if (args.flags.folder === true) throw usageError("--folder requires a value, such as --folder sfd_NORTH.");
   const tag = flagString(args.flags, "tag");
-  if (tag !== undefined && ids.length) throw usageError(`${command} takes screen ids or --tag TAG, not both.`);
+  const folder = flagString(args.flags, "folder");
+  if ([ids.length > 0, tag !== undefined, folder !== undefined].filter(Boolean).length > 1) {
+    throw usageError(`${command} takes screen ids, --tag TAG or --folder ID; give only one.`);
+  }
   if (tag !== undefined) return { kind: "fleet", selector: { by: "tag", tag: screenTag(tag) } };
-  if (!ids.length) throw usageError(`${command} requires <id> or --tag TAG.`);
+  if (folder !== undefined) return { kind: "fleet", selector: { by: "folder", folder_id: screenFolderId(folder, "--folder") } };
+  if (!ids.length) throw usageError(`${command} requires <id>, --tag TAG or --folder ID.`);
   if (ids.some((id) => id.length < 1 || id.length > 200)) throw usageError(`${command} screen ids must be 1 to 200 characters.`);
   if (new Set(ids).size !== ids.length) throw usageError(`${command} lists a screen id more than once.`);
   if (ids.length === 1) return { kind: "single", id: ids[0]! };
   return { kind: "fleet", selector: { by: "ids", screen_ids: ids } };
+}
+
+/** The folder and every folder inside it, parents before children. */
+export function folderSubtree(items: readonly Pick<ScreenFolder, "id" | "parent_id">[], rootId: string): string[] {
+  const subtree = [rootId];
+  const seen = new Set(subtree);
+  for (let index = 0; index < subtree.length; index += 1) {
+    for (const item of items) {
+      if (item.parent_id === subtree[index] && !seen.has(item.id)) {
+        seen.add(item.id);
+        subtree.push(item.id);
+      }
+    }
+  }
+  return subtree;
+}
+
+/** The flags that reselect a fleet: --tag TAG, --folder ID or the ids. */
+export function selectorFlags(selector: ScreenActionSelector): string {
+  return selector.by === "tag" ? `--tag ${selector.tag}` : selector.by === "folder" ? `--folder ${selector.folder_id}` : selector.screen_ids.join(" ");
 }
 
 /** Revision guards are per screen; the fleet route has none. */

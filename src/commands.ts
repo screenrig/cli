@@ -7,7 +7,7 @@ import { apexHost } from "./apex-origin.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAuthoringJson, writeOutputFile } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
-import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, type FleetItem } from "./screen-fleet.js";
+import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, SCREEN_FOLDER_ID_PATTERN, screenFolderId, screenTag, screenTagList, screenTarget, selectorFlags, folderSubtree, SCREEN_TAGS_MAX, type FleetItem } from "./screen-fleet.js";
 import { canonicalPairingCode } from "./pairing-code.js";
 import { playlistAnswerWarnings, playlistWarnings, hasFramingRefusal, withoutAnswerWarnings } from "./playlist-warnings.js";
 import { editablePlaylist, isAdSlotPage, preparePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
@@ -36,7 +36,7 @@ import {
   triggerHoldSeconds, triggerId, triggerLines, triggerMapping, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerSigningWarning, triggerStyle,
   triggerTableLines, triggerTag,
 } from "./triggers.js";
-import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
+import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
@@ -94,6 +94,7 @@ import {
   type ScreenAction,
   type ScreenActionRequest,
   type ScreenActionSelector,
+  type ScreenFolder,
   type ScreenCommandWrite,
   type ScreenIdentifyAccepted,
   type ScreenIdentifyWrite,
@@ -3668,8 +3669,16 @@ function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | "audio" |
 function screenListQuery(args: ParsedArgs): { query: Record<string, string>; repeated?: Record<string, string[]> } {
   const state = screenListStateFromArgs(args);
   const tag = screenListTagFromArgs(args);
+  const folder = screenListFolderFromArgs(args);
   const facts = screenListFacts(args.flags);
-  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...facts.query }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
+  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...(folder ? { folder } : {}), ...facts.query }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
+}
+
+/** --folder: a screen folder ID, or root for the screens outside every folder. */
+function screenListFolderFromArgs(args: ParsedArgs): string | undefined {
+  requireFlagValue(args, "folder", "sfd_NORTH");
+  const folder = flagString(args.flags, "folder");
+  return folder === undefined || folder === "root" ? folder : screenFolderId(folder, "--folder");
 }
 
 function screenListTagFromArgs(args: ParsedArgs): string | undefined {
@@ -3682,6 +3691,17 @@ function screenListTagFromArgs(args: ParsedArgs): string | undefined {
 function screenTags(screen: Screen | undefined): string[] {
   const tags = screen?.tags;
   return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string" && /^[A-Za-z0-9]{1,32}$/.test(tag)) : [];
+}
+
+/** The screen folder holding a screen, when it sits in one; only an id-shaped value is printed. */
+function screenFolderCell(screen: Screen | undefined): string {
+  const folder = screen?.folder_id;
+  return typeof folder === "string" && SCREEN_FOLDER_ID_PATTERN.test(folder) ? folder : "";
+}
+
+function screenFolderLine(screen: Screen | undefined): string[] {
+  const folder = screenFolderCell(screen);
+  return folder ? [`Folder: ${folder} (screen folder show ${folder})`] : [];
 }
 
 function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
@@ -5718,6 +5738,8 @@ function screenTableLines(items: Screen[], now: Date): string[] {
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const withTags = items.some((screen) => screenTags(screen).length > 0);
+  // Only when a listed screen sits in a screen folder, so a fleet without folders keeps its table.
+  const withFolder = items.some((screen) => screenFolderCell(screen) !== "");
   // Only when a listed screen carries fields or a location, so plain fleets keep their table.
   const withFields = items.some((screen) => screenFieldsCell(screen) !== "");
   const withLocation = items.some((screen) => screenLocationCell(screen) !== "");
@@ -5733,6 +5755,7 @@ function screenTableLines(items: Screen[], now: Date): string[] {
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
+    ...(withFolder ? [screenFolderCell(screen)] : []),
     ...(withFields ? [screenFieldsCell(screen)] : []),
     ...(withLocation ? [screenLocationCell(screen)] : []),
     ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
@@ -5741,7 +5764,7 @@ function screenTableLines(items: Screen[], now: Date): string[] {
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withFields ? ["FIELDS"] : []), ...(withLocation ? ["LOCATION"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withFolder ? ["FOLDER"] : []), ...(withFields ? ["FIELDS"] : []), ...(withLocation ? ["LOCATION"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -6071,6 +6094,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
+      ...screenFolderLine(screen),
       ...screenFactsLines(screen),
       ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
       ...screenLinkSummaryLines(screen?.link),
@@ -7208,6 +7232,21 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
     const active = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string");
     ids = active.map((screen) => screen.id);
     // The list already says which screens are offline; do not wait out their captures.
+    for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
+    if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
+  } else if (selector.by === "folder") {
+    // The folder and every folder inside it; GET /api/screens?folder lists only the screens directly in one folder.
+    await client.call({ method: "GET", path: `/api/screen-folders/${selector.folder_id}` });
+    const folders = ((await client.call({ method: "GET", path: "/api/screen-folders" })).body as { items?: ScreenFolder[] } | undefined)?.items;
+    if (!Array.isArray(folders)) throw usageError("Screen folder list response does not match the generated ScreenFolderList contract.");
+    const active: Screen[] = [];
+    for (const folderId of folderSubtree(folders, selector.folder_id)) {
+      const listed = await client.listAll("/api/screens", { folder: folderId }, { uncapped: true });
+      const items = (listed.body as { items?: Screen[] } | undefined)?.items;
+      if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
+      active.push(...items.filter((screen) => screen?.state === "active" && typeof screen.id === "string"));
+    }
+    ids = active.map((screen) => screen.id);
     for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
     if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
   } else {
@@ -9832,21 +9871,24 @@ function campaignRevisionHeaders(args: ParsedArgs): Record<string, string> | und
 
 /**
  * The audience the flags name, or undefined when none is given: --tag (every
- * listed tag), --any-tag (at least one), --screen-id, --all-screens, or
- * --audience (a raw rule: inline JSON, @FILE, or - for stdin).
+ * listed tag), --any-tag (at least one), --screen-id, --folder (a screen
+ * folder and every folder inside it), --all-screens, or --audience (a raw
+ * rule: inline JSON, @FILE, or - for stdin).
  */
 async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime): Promise<CampaignAudience | undefined> {
   const tags = flagString(args.flags, "tag");
   const anyTags = flagString(args.flags, "any-tag");
   const screenIds = flagString(args.flags, "screen-id");
+  const folder = flagString(args.flags, "folder");
   const raw = flagString(args.flags, "audience");
   const all = flagBool(args.flags, "all-screens");
-  if ([tags, anyTags, screenIds, raw].filter((value) => value !== undefined).length + (all ? 1 : 0) > 1) {
-    throw usageError("Provide at most one of --tag, --any-tag, --screen-id, --all-screens or --audience.");
+  if ([tags, anyTags, screenIds, folder, raw].filter((value) => value !== undefined).length + (all ? 1 : 0) > 1) {
+    throw usageError("Provide at most one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.");
   }
   if (tags !== undefined) return campaignTagAudience(tags.split(","));
   if (anyTags !== undefined) return campaignAnyTagAudience(anyTags.split(","));
   if (screenIds !== undefined) return campaignScreenAudience(screenIds.split(","));
+  if (folder !== undefined) return campaignFolderAudience(campaignFolder(folder));
   if (all) return campaignAllScreensAudience();
   if (raw === undefined) return undefined;
   const source = raw.trim();
@@ -9868,7 +9910,7 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
   const name = campaignName(flagString(args.flags, "name") ?? "");
   const playlistId = campaignPlaylistId(flagString(args.flags, "playlist-id") ?? "");
   const audience = await campaignAudienceFlag(args, runtime);
-  if (!audience) throw usageError("campaign create takes exactly one of --tag, --any-tag, --screen-id, --all-screens or --audience.");
+  if (!audience) throw usageError("campaign create takes exactly one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.");
   const from = flagString(args.flags, "from");
   const until = flagString(args.flags, "until");
   campaignBounds(from, until);
@@ -9936,7 +9978,7 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, or --priority.");
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, or --priority.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, {
@@ -10118,7 +10160,7 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
 
 export const handleScreenTakeover = commandHandler(async (args, runtime, resolved) => {
   const playlistId = flagString(args.flags, "playlist-id");
-  if (!playlistId) throw usageError("screen takeover requires <id> or --tag TAG, and --playlist-id.");
+  if (!playlistId) throw usageError("screen takeover requires <id>, --tag TAG or --folder ID, and --playlist-id.");
   const target = nestedScreenTarget(args, "screen takeover");
   if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover");
   const forValue = flagString(args.flags, "for");
@@ -10194,7 +10236,7 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
     // Noninteractive: a fleet reboot is never a side effect of a typo.
     if (!flagBool(args.flags, "yes")) {
       throw usageError("screen reboot with several screens or --tag reboots every matching device; add --yes to confirm.", {
-        command: `screenrig screen reboot ${target.selector.by === "tag" ? `--tag ${target.selector.tag}` : target.selector.screen_ids.join(" ")} --yes`,
+        command: `screenrig screen reboot ${selectorFlags(target.selector)} --yes`,
         reason: "Check the matching screens with screen list first; each rebooted device is dark until it restarts.",
       });
     }

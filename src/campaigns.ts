@@ -12,7 +12,7 @@ import type {
 } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
 import { effectivePlaylistText, instantInZone, scheduleWindow } from "./screen-control.js";
-import { SCREEN_TAG_PATTERN } from "./screen-fleet.js";
+import { SCREEN_TAG_PATTERN, screenFolderId } from "./screen-fleet.js";
 
 /** Backend Campaign.id shape (vendor/openapi.yaml). Advertising campaigns share the cmp_ prefix but are a different resource. */
 export const CAMPAIGN_ID_PATTERN = /^(?:(?:stage|qa|development)_)?cmp_[A-Za-z0-9_-]+$/;
@@ -151,6 +151,16 @@ export function campaignScreenAudience(ids: readonly string[]): CampaignAudience
   return ids.length === 1 ? { screen_id: ids[0]! } : { any: ids.map((id) => ({ screen_id: id })) };
 }
 
+/** --folder: one screen folder (sfd_...); the audience is its screens and those of every folder inside it. */
+export function campaignFolder(value: string): string {
+  return screenFolderId(value, "--folder");
+}
+
+/** --folder ID → {"folder": ID}. */
+export function campaignFolderAudience(id: string): CampaignAudience {
+  return { folder: id };
+}
+
 /** --all-screens: {"all": []}, every screen of the project. */
 export function campaignAllScreensAudience(): CampaignAudience {
   return { all: [] };
@@ -165,7 +175,7 @@ export function campaignAudienceJson(text: string): CampaignAudience {
     throw usageError('--audience is not valid JSON. Pass a rule such as {"tag":"Lobby"}, @FILE to read it from a file, or - for stdin.');
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw usageError('--audience must be a JSON object with exactly one of all, any, tag or screen_id, such as {"all":[{"tag":"Lobby"},{"tag":"Floor2"}]}; {"all":[]} is every screen.');
+    throw usageError('--audience must be a JSON object with exactly one of all, any, tag, screen_id or folder, such as {"all":[{"tag":"Lobby"},{"folder":"sfd_NORTH"}]}; {"all":[]} is every screen.');
   }
   return parsed as CampaignAudience;
 }
@@ -367,7 +377,7 @@ function clip(text: string, width: number): string {
   return characters.length <= width ? text : `${characters.slice(0, width - 1).join("")}…`;
 }
 
-/** "every screen", "tag Lobby", "tag Lobby and tag Floor2", "screen scr_A or screen scr_B". */
+/** "every screen", "tag Lobby", "tag Lobby and tag Floor2", "screen scr_A or screen scr_B", "folder sfd_NORTH". */
 export function campaignAudienceText(audience: CampaignAudience | undefined, nested = false): string {
   if (!audience) return "";
   const group = (rules: CampaignAudience[], word: string): string => {
@@ -379,6 +389,7 @@ export function campaignAudienceText(audience: CampaignAudience | undefined, nes
   if (audience.any) return group(audience.any, "or");
   if (audience.tag !== undefined) return `tag ${audience.tag}`;
   if (audience.screen_id !== undefined) return `screen ${audience.screen_id}`;
+  if (audience.folder !== undefined) return `folder ${audience.folder}`;
   return JSON.stringify(audience);
 }
 

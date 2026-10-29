@@ -1254,7 +1254,7 @@ export function memoryBackend(options: {
   // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
   transport.on("POST", "/api/screens/actions", (req): TransportResponse => {
-    const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
+    const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string } | { by: "folder"; folder_id: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
     // Like the server, a fleet takeover's until is checked once before fan-out.
     const fleetUntil = (body.action as { until?: unknown }).until;
     if (body.action.type === "takeover" && typeof fleetUntil === "string") {
@@ -1263,9 +1263,13 @@ export function memoryBackend(options: {
         : ahead > 7 * 24 * 60 * 60 * 1000 ? "until: must be at most 7 days ahead; use null to hold until cleared" : undefined;
       if (detail) return { status: 400, headers: { "content-type": "application/problem+json" }, body: controlProblem(400, "invalid_request", detail) };
     }
-    const ids = body.selector.by === "ids"
-      ? body.selector.screen_ids
-      : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes((body.selector as { tag: string }).tag)).map((screen) => screen.id);
+    // The fake keeps no folder tree: a folder selector matches the screens directly inside it.
+    const selector = body.selector;
+    const ids = selector.by === "ids"
+      ? selector.screen_ids
+      : selector.by === "folder"
+        ? [...screens.values()].filter((screen) => screen.state === "active" && screen.folder_id === selector.folder_id).map((screen) => screen.id)
+        : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes(selector.tag)).map((screen) => screen.id);
     const results = ids.map((id) => {
       const screen = screens.get(id);
       if (!screen) {
@@ -2657,11 +2661,12 @@ export function memoryBackend(options: {
   };
   const campaignAudienceProblem = (value: unknown, path = "audience", depth = 1): TransportResponse | undefined => {
     const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
-    if (entries.length !== 1) return campaignInvalid(path, "must be an object with exactly one of all, any, tag or screen_id");
+    if (entries.length !== 1) return campaignInvalid(path, "must be an object with exactly one of all, any, tag, screen_id or folder");
     const [key, member] = entries[0]!;
     if (key === "tag") return typeof member === "string" && /^[A-Za-z0-9]{1,32}$/.test(member) ? undefined : campaignInvalid(`${path}.tag`, "must match ^[A-Za-z0-9]{1,32}$");
     if (key === "screen_id") return typeof member === "string" && member ? undefined : campaignInvalid(`${path}.screen_id`, "must be an ID");
-    if (key !== "all" && key !== "any") return campaignInvalid(`${path}.${key}`, "is not allowed; use all, any, tag or screen_id");
+    if (key === "folder") return typeof member === "string" && /^(?:(?:stage|qa|development)_)?sfd_[A-Za-z0-9]{1,64}$/.test(member) ? undefined : campaignInvalid(`${path}.folder`, "must be a screen folder ID");
+    if (key !== "all" && key !== "any") return campaignInvalid(`${path}.${key}`, "is not allowed; use all, any, tag, screen_id or folder");
     if (depth > 3) return campaignInvalid(path, "nests deeper than 3 levels");
     if (!Array.isArray(member)) return campaignInvalid(`${path}.${key}`, "must be an array of rules");
     if (member.length === 0 && (key === "any" || depth > 1)) return campaignInvalid(`${path}.${key}`, "must list at least one rule");
@@ -2675,6 +2680,8 @@ export function memoryBackend(options: {
     if (Array.isArray(audience.all)) return audience.all.every((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
     if (Array.isArray(audience.any)) return audience.any.some((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
     if (typeof audience.tag === "string") return (screen.tags ?? []).includes(audience.tag);
+    // The fake keeps no folder tree: a folder leaf matches the screens directly inside it.
+    if (typeof audience.folder === "string") return screen.folder_id === audience.folder;
     return audience.screen_id === screen.id;
   };
   const campaignsInOrder = (): Record<string, unknown>[] => [...campaigns.values()]

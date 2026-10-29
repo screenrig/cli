@@ -388,7 +388,7 @@ test("screen takeover validates its inputs locally", async () => {
     [[A, "--playlist-id", "pl_X", "--until", "2026-08-15T18:00:00"], /and an offset/],
     [[A, "--playlist-id", "pl_X", "--for", "1h", "--until", "none"], /--until cannot be used with --for|--for cannot be used with --until/],
     [[A, "--playlist-id", "pl_X", "--reason", "x".repeat(121)], /at most 120 characters/],
-    [[A, "--playlist-id", "pl_X", "--tag", "Lobby"], /not both/],
+    [[A, "--playlist-id", "pl_X", "--tag", "Lobby"], /give only one/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", "screen", "takeover", ...args], transport, env);
     assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);

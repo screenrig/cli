@@ -2681,7 +2681,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listScreens
-      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2690,6 +2690,7 @@ paths:
         - $ref: '#/components/parameters/ScreenTagQuery'
         - $ref: '#/components/parameters/ScreenFieldQuery'
         - $ref: '#/components/parameters/ScreenNearQuery'
+        - $ref: '#/components/parameters/ScreenFolderQuery'
         - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -2698,6 +2699,164 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScreenList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screen-folders:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenFolders
+      description: >-
+        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder. A screen's folder is Screen.folder_id.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Screen folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolderList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createScreenFolder
+      description: >-
+        Creates one screen folder at the project root (parent_id null or absent) or inside parent_id. Names are trimmed, hold 1 to 100 Unicode characters with no controls, are not "." or "..", and are unique among their siblings (resource_conflict). A project holds at most 1000 folders (quota_exceeded) nested at most 10 deep (invalid_request). default_playlist_id, when set, must name an approved playlist (playlist_not_approved). Emits screen.folder_created.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenFolderCreate'
+      responses:
+        '201':
+          description: Created folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screen-folders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenFolder
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One screen folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateScreenFolder
+      description: >-
+        Renames a folder (name), moves it with everything inside (parent_id, null for the project root) or sets the default playlist its screens without their own show (default_playlist_id, null clears it). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). A move or a default change re-resolves the screens inside within about 15 seconds, and the response's levels name the campaigns and folder defaults those screens gain or lose. A change advances the folder revision and emits screen.folder_updated; the same values are a no-op. If-Match optionally guards the revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenFolderPatch'
+      responses:
+        '200':
+          description: Updated folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteScreenFolder
+      description: >-
+        Deletes one folder. Nothing inside is deleted: its screens and folders move up into the deleted folder's parent (the project root when it had none), each moved folder advancing its revision, and those screens re-resolve. Refused with resource_conflict while a campaign audience names the folder, so no schedule loses its screens silently: change or delete those campaigns first. Emits screen.folder_deleted. If-Match optionally guards the revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted; its contents now sit in its parent.
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/move:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: moveScreens
+      description: >-
+        Moves screens (screen_ids) and folders (folder_ids) into one folder (folder_id), or to the project root when folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items already in the destination are left as they are; each moved screen and folder advances its revision. Moved screens re-resolve their playlist within about 15 seconds: levels names the campaigns whose folder audience they enter or leave and the folder default playlists they gain or lose. Emits screen.moved.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenMove'
+      responses:
+        '200':
+          description: How many screens and folders moved, and the levels the moved screens gain or lose.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMoveResult'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -17869,7 +18028,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listScreensInProject
-      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
       parameters:
@@ -17877,6 +18036,7 @@ paths:
         - $ref: '#/components/parameters/ScreenTagQuery'
         - $ref: '#/components/parameters/ScreenFieldQuery'
         - $ref: '#/components/parameters/ScreenNearQuery'
+        - $ref: '#/components/parameters/ScreenFolderQuery'
         - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -17885,6 +18045,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScreenList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screen-folders:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listScreenFoldersInProject
+      description: >-
+        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder. A screen's folder is Screen.folder_id.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: Screen folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolderList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createScreenFolderInProject
+      description: >-
+        Creates one screen folder at the project root (parent_id null or absent) or inside parent_id. Names are trimmed, hold 1 to 100 Unicode characters with no controls, are not "." or "..", and are unique among their siblings (resource_conflict). A project holds at most 1000 folders (quota_exceeded) nested at most 10 deep (invalid_request). default_playlist_id, when set, must name an approved playlist (playlist_not_approved). Emits screen.folder_created.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenFolderCreate'
+      responses:
+        '201':
+          description: Created folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens/move:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: write
+      operationId: moveScreensInProject
+      description: >-
+        Moves screens (screen_ids) and folders (folder_ids) into one folder (folder_id), or to the project root when folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items already in the destination are left as they are; each moved screen and folder advances its revision. Moved screens re-resolve their playlist within about 15 seconds: levels names the campaigns whose folder audience they enter or leave and the folder default playlists they gain or lose. Emits screen.moved.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenMove'
+      responses:
+        '200':
+          description: How many screens and folders moved, and the levels the moved screens gain or lose.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMoveResult'
         default:
           $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/project/browser-links/claim:
@@ -20826,6 +21070,7 @@ components:
     ScreenshotCaptureIDHeader: {name: ScreenRig-Capture-Id, in: header, required: true, schema: {$ref: "#/components/schemas/ScreenshotCaptureID"}}
     ScreenListState: {name: state, in: query, required: false, schema: {type: string, enum: [archived]}, description: Omit for pairing_pending and active. Pass archived to list archived screens only.}
     ScreenTagQuery: {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: Exact screen tag. Untagged screens are omitted when this filter is present.}
+    ScreenFolderQuery: {name: folder, in: query, required: false, schema: {type: string, pattern: "^(root|([a-z]+_)?sfd_[A-Za-z0-9]{1,64})$"}, description: "A screen folder ID keeps only the screens directly inside that folder, not those of its subfolders; root keeps only the screens outside every folder. Omitted lists every screen."}
     ScreenFieldQuery: {name: field, in: query, required: false, style: form, explode: true, schema: {type: array, maxItems: 32, items: {type: string, pattern: "^[a-z0-9_]{1,32}:.{1,200}$"}}, description: "NAME:VALUE, split at the first colon: only screens whose field NAME holds exactly VALUE. Repeat the parameter for several fields; every one must match, and a name may be given once. A malformed or repeated one is invalid_request naming field."}
     ScreenNearQuery: {name: near, in: query, required: false, schema: {type: string, pattern: "^-?[0-9]+(\\.[0-9]+)?(,-?[0-9]+(\\.[0-9]+)?){2}$"}, description: "LAT,LON,KM in decimal degrees and kilometres, for example 47.6062,-122.3321,25: only screens whose location lies within KM kilometres of the point. Latitude is -90 to 90, longitude -180 to 180 and KM above 0 and at most 20038. Screens with no location are omitted. A malformed value is invalid_request naming near."}
     SecFetchSite: {name: Sec-Fetch-Site, in: header, required: false, schema: {type: string, enum: [same-origin, same-site, cross-site, none]}}
@@ -23016,9 +23261,9 @@ components:
         application_file_bytes: {type: integer, enum: [33554432]}
         application_path_depth: {type: integer, enum: [16]}
         application_path_bytes: {type: integer, enum: [255]}
-        media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies dimensions up to 8192 pixels per axis and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
+        media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies each image is at most 16383 pixels wide and 16383 tall and at most 67,108,864 pixels (8192 by 8192) in one frame, so an ultra-wide canvas such as 12000 by 540 or 9216 by 2160 uploads, and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
-        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload, 500000000 bytes, 500 MB. It is a byte-only gate rejected with invalid_request before any byte is transferred."}
+        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload, 500000000 bytes, 500 MB. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
         playlist_max_pages: {type: integer, enum: [100]}
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
@@ -25110,15 +25355,84 @@ components:
         until: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
         reason: {type: string}
         set_at: {type: string, format: date-time}
+    ScreenFolder:
+      type: object
+      additionalProperties: false
+      required: [id, name, parent_id, revision, created_at, updated_at]
+      description: One screen folder. A screen sits in at most one folder (Screen.folder_id); a folder targets its screens and those of every folder inside it.
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}
+        name: {type: string, minLength: 1, maxLength: 100}
+        parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the project root."}
+        default_playlist_id: {type: string, description: "The playlist this folder's screens show when they have no playlist of their own, unless a folder nearer the screen sets one. Absent when unset."}
+        screens: {type: integer, minimum: 0, description: "Live screens directly inside this folder. Present in the list."}
+        levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "Present in the response of a PATCH that moved the folder or changed its default playlist."}
+        revision: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ScreenFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/ScreenFolder"}}}}
+    ScreenFolderCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .., unique among its siblings."}
+        parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the project root."}
+        default_playlist_id: {type: string, minLength: 1, description: An approved playlist for the folder's screens without their own.}
+    ScreenFolderPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .., unique among its siblings."}
+        parent_id: {anyOf: [{type: string}, {type: "null"}], description: "Move the folder into this one; null for the project root."}
+        default_playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "An approved playlist for the folder's screens without their own; null clears it."}
+    ScreenMove:
+      type: object
+      additionalProperties: false
+      required: [folder_id]
+      description: At least one id across screen_ids and folder_ids, at most 1000 in all.
+      properties:
+        folder_id: {anyOf: [{type: string}, {type: "null"}], description: "Destination folder; null for the project root."}
+        screen_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string}}
+        folder_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string}}
+    ScreenMoveResult:
+      type: object
+      additionalProperties: false
+      required: [screens, folders, levels]
+      properties:
+        screens: {type: integer, minimum: 0, description: Screens that moved; screens already in the destination are not counted.}
+        folders: {type: integer, minimum: 0, description: Folders that moved.}
+        levels: {$ref: "#/components/schemas/ScreenLevelChanges"}
+    ScreenLevelChanges:
+      type: object
+      additionalProperties: false
+      required: [gained, lost]
+      description: >-
+        What a folder change does to the schedules of the screens it moves or re-parents: the campaigns whose folder audience they enter (gained) or leave (lost), and the folder default playlists that start or stop being their default. screens counts the affected screens per level. Campaigns matched by tag or screen id are unaffected and not listed.
+      properties:
+        gained: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
+        lost: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
+    ScreenLevelChange:
+      type: object
+      additionalProperties: false
+      required: [source, id, playlist_id, screens]
+      properties:
+        source: {type: string, enum: [campaign, folder], description: "campaign: a campaign (id) whose audience the screens enter or leave. folder: the default playlist of folder id."}
+        id: {type: string}
+        name: {type: string}
+        playlist_id: {type: string}
+        screens: {type: integer, minimum: 1}
     ScreenEffectivePlaylist:
       type: object
       additionalProperties: false
       required: [id, source]
       description: >-
-        The playlist the screen's runtime manifest is built from: the takeover, else the first campaign that applies (entry_id is the campaign id), else the first matching playlist schedule entry (entry_id), else the assigned default. until is the next instant this is known to change (takeover end or the next schedule boundary within eight days), absent when nothing time-based changes it. The boundary worker applies a change at most 60 seconds late. A takeover or entry whose playlist cannot be shown is skipped. Absent when the screen shows no playlist.
+        The playlist the screen's runtime manifest is built from: the takeover, else the first campaign that applies (entry_id is the campaign id), else the first matching playlist schedule entry (entry_id), else the assigned default, else the default playlist of the nearest folder holding the screen (source folder, entry_id the folder id). until is the next instant this is known to change (takeover end or the next schedule boundary within eight days), absent when nothing time-based changes it. The boundary worker applies a change at most 60 seconds late. A takeover or entry whose playlist cannot be shown is skipped. Absent when the screen shows no playlist.
       properties:
         id: {type: string}
-        source: {type: string, enum: [takeover, campaign, schedule, default]}
+        source: {type: string, enum: [takeover, campaign, schedule, default, folder]}
         entry_id: {type: string}
         until: {type: string, format: date-time}
     ScreenPlayerIdentity:
@@ -25154,6 +25468,7 @@ components:
         effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
         timezone_source: {type: string, enum: [screen, device, unknown]}
         wall: {$ref: "#/components/schemas/ScreenWall", description: "The video wall the screen's Player lays out. Absent when none. Set by ScreenPatch; changing it remints the manifest revision."}
+        folder_id: {type: string, description: "The screen folder holding this screen (GET /api/screen-folders); absent at the project root. Move screens with POST /api/screens/move."}
         tags: {$ref: "#/components/schemas/ScreenTags"}
         fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "The project's own values for this screen, such as a store number or a region. Absent when none are set. Set by ScreenPatch; changing them remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens. Never authorization."}
         location: {$ref: "#/components/schemas/ScreenLocation", description: "Where the screen is. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token. Never authorization."}
@@ -25287,6 +25602,7 @@ components:
       oneOf:
         - {$ref: "#/components/schemas/ScreenActionSelectorIds"}
         - {$ref: "#/components/schemas/ScreenActionSelectorTag"}
+        - {$ref: "#/components/schemas/ScreenActionSelectorFolder"}
       discriminator: {propertyName: by}
     ScreenActionSelectorIds:
       type: object
@@ -25303,6 +25619,14 @@ components:
       properties:
         by: {type: string, enum: [tag]}
         tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}
+    ScreenActionSelectorFolder:
+      type: object
+      additionalProperties: false
+      required: [by, folder_id]
+      description: Every active screen in the screen folder and every folder inside it, in creation order. There is no screen-count cap.
+      properties:
+        by: {type: string, enum: [folder]}
+        folder_id: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}
     ScreenAction:
       oneOf:
         - {$ref: "#/components/schemas/ScreenActionAssign"}
@@ -27205,12 +27529,13 @@ components:
       minProperties: 1
       maxProperties: 1
       description: >-
-        Which screens a campaign targets: exactly one of all (every rule matches), any (at least one matches), tag (the screen carries the tag) or screen_id (that screen). Rules nest at most 3 deep and an audience has at most 500 rules. {"all": []} is every screen of the project; elsewhere all and any list at least one rule.
+        Which screens a campaign targets: exactly one of all (every rule matches), any (at least one matches), tag (the screen carries the tag), screen_id (that screen) or folder (the screens in that screen folder and every folder inside it, GET /api/screen-folders; the folder must exist). Rules nest at most 3 deep and an audience has at most 500 rules. {"all": []} is every screen of the project; elsewhere all and any list at least one rule.
       properties:
         all: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
         any: {type: array, minItems: 1, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
         tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}
         screen_id: {type: string, minLength: 1, maxLength: 200}
+        folder: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}
     Campaign:
       type: object
       additionalProperties: false

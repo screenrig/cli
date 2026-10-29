@@ -849,6 +849,8 @@ export interface Screen {
   comments?: Record<string, unknown>;
   /** The fleet link that created this screen. Read-only; it stays after the link is deleted. */
   fleet_link_id?: string;
+  /** The screen folder holding this screen (screen folder list); absent at the project root. Moved with POST /api/screens/move. */
+  folder_id?: string;
   /**
    * The project's own values for this screen, such as a store number or a
    * region: up to 32 fields, names matching ^[a-z0-9_]{1,32}$, values of 1 to
@@ -969,10 +971,11 @@ export interface ScreenLocation {
 
 export type ScreenTags = string[];
 
-/** POST /api/screens/actions selector: explicit ids (any state) or every active screen with a tag. */
+/** POST /api/screens/actions selector: explicit ids (any state), every active screen with a tag, or every active screen in a folder and the folders inside it. */
 export type ScreenActionSelector =
   | { by: "ids"; screen_ids: string[] }
-  | { by: "tag"; tag: string };
+  | { by: "tag"; tag: string }
+  | { by: "folder"; folder_id: string };
 
 /** One fleet action, discriminated by type. New action types are additive. */
 export type ScreenAction =
@@ -2005,10 +2008,74 @@ export interface ScreenTakeoverWrite {
 
 export interface ScreenEffectivePlaylist {
   id: string;
-  source: "takeover" | "campaign" | "schedule" | "default";
-  /** The campaign id for source campaign, the schedule entry id for source schedule. */
+  source: "takeover" | "campaign" | "schedule" | "default" | "folder";
+  /** The campaign id for source campaign, the schedule entry id for source schedule, the folder id for source folder. */
   entry_id?: string;
   until?: string;
+}
+
+/** A screen folder: screens sit in at most one (Screen.folder_id), and a folder targets its screens and those of every folder inside it. */
+export interface ScreenFolder {
+  project_id?: string;
+  id: string;
+  name: string;
+  /** The folder holding this one; null at the project root. */
+  parent_id: string | null;
+  /** The playlist this folder's screens show when they have none of their own, unless a nearer folder sets one. Absent when unset. */
+  default_playlist_id?: string;
+  /** Live screens directly inside this folder. Present in the list. */
+  screens?: number;
+  /** Present in the answer of a PATCH that moved the folder or changed its default playlist. */
+  levels?: ScreenLevelChanges;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScreenFolderList {
+  items: ScreenFolder[];
+}
+
+export interface ScreenFolderCreate {
+  name: string;
+  parent_id?: string | null;
+  default_playlist_id?: string;
+}
+
+export interface ScreenFolderPatch {
+  name?: string;
+  /** null moves the folder to the project root. */
+  parent_id?: string | null;
+  /** null clears the default playlist. */
+  default_playlist_id?: string | null;
+}
+
+/** One campaign (source campaign) or folder default playlist (source folder, id the folder) that screens enter or leave by moving. */
+export interface ScreenLevelChange {
+  source: "campaign" | "folder";
+  id: string;
+  name?: string;
+  playlist_id: string;
+  screens: number;
+}
+
+export interface ScreenLevelChanges {
+  gained: ScreenLevelChange[];
+  lost: ScreenLevelChange[];
+}
+
+/** POST /api/screens/move: at least one id across screen_ids and folder_ids, at most 1000 in all. */
+export interface ScreenMove {
+  /** Destination folder; null for the project root. */
+  folder_id: string | null;
+  screen_ids?: string[];
+  folder_ids?: string[];
+}
+
+export interface ScreenMoveResult {
+  screens: number;
+  folders: number;
+  levels: ScreenLevelChanges;
 }
 
 /**
@@ -2020,6 +2087,8 @@ export interface CampaignAudience {
   any?: CampaignAudience[];
   tag?: string;
   screen_id?: string;
+  /** The screens in this screen folder and every folder inside it. */
+  folder?: string;
 }
 
 /** GET /api/campaigns/{id}: a content campaign. from and until are civil YYYY-MM-DDTHH:MM in each screen's timezone. */

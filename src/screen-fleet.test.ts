@@ -261,8 +261,8 @@ test("screen tag validates modes, tags, and targets before any request", async (
     [["screen", "tag", A, "--set", "Lob by"], /comma-separated tags of 1 to 32/],
     [["screen", "tag", A, "--add", "a,,b"], /comma-separated tags/],
     [["screen", "tag", A, "--set", Array.from({ length: 17 }, (_, index) => `T${index}`).join(",")], /at most 16/],
-    [["screen", "tag", "--add", "Spring"], /requires <id> or --tag TAG/],
-    [["screen", "tag", A, "--tag", "Lobby", "--add", "Spring"], /screen ids or --tag TAG, not both/],
+    [["screen", "tag", "--add", "Spring"], /requires <id>, --tag TAG or --folder ID/],
+    [["screen", "tag", A, "--tag", "Lobby", "--add", "Spring"], /screen ids, --tag TAG or --folder ID; give only one/],
     [["screen", "tag", "--tag", "Lobby", "--add", "Spring", "--expect-rev", "3"], /does not take --expect-rev/],
     [["screen", "tag", A, B, "--clear", "--expect-rev", "3"], /does not take --expect-rev/],
     [["screen", "tag", A, A, "--clear"], /more than once/],
@@ -351,12 +351,12 @@ test("fleet assign and toast send one typed action; toast text rules still apply
   const before = transport.calls.length;
   for (const [argv, detail] of [
     [["screen", "toast", "--tag", "Lobby", "--text", "x".repeat(121)], /1 to 120 characters/],
-    [["screen", "toast", "--text", "Hello"], /requires <id> or --tag TAG/],
-    [["screen", "toast"], /requires <id> or --tag TAG, and --text/],
-    [["screen", "assign", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA"], /requires <id> or --tag TAG/],
+    [["screen", "toast", "--text", "Hello"], /requires <id>, --tag TAG or --folder ID/],
+    [["screen", "toast"], /requires <id>, --tag TAG or --folder ID, and --text/],
+    [["screen", "assign", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA"], /requires <id>, --tag TAG or --folder ID/],
     [["screen", "assign", A, B, "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2"], /revision guards are per screen/],
     [["screen", "reload", "--tag", "Lobby", "--expect-rev", "2"], /revision guards are per screen/],
-    [["screen", "reload", A, "--tag", "Lobby"], /not both/],
+    [["screen", "reload", A, "--tag", "Lobby"], /give only one/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", ...argv], transport, env);
     assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.stdout}`);
@@ -493,7 +493,7 @@ test("screen screenshot fan-out validates output, concurrency, and idempotency b
     [["screen", "screenshot", "--tag", "Lobby", "--output", "taken.webp"], /must be a directory/],
     [["screen", "screenshot", A, B, "--concurrency", "9"], /--concurrency must be a whole number from 1 to 8/],
     [["screen", "screenshot", "--tag", "Lobby", "--idempotency-key", "idem_fleetAAAAAAAAAAAAAAAA"], /does not take --idempotency-key/],
-    [["screen", "screenshot"], /requires <id> or --tag TAG/],
+    [["screen", "screenshot"], /requires <id>, --tag TAG or --folder ID/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", ...argv], transport, env);
     assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.stdout}`);

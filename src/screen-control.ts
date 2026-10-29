@@ -236,6 +236,10 @@ export function effectivePlaylistText(effective: ScreenEffectivePlaylist | undef
   if (effective.source === "schedule") {
     return `${effective.id} (schedule${effective.entry_id ? ` entry ${effective.entry_id}` : ""}${until})`;
   }
+  // No playlist of its own: the default of the nearest screen folder holding the screen (entry_id is that folder).
+  if (effective.source === "folder") {
+    return `${effective.id} (folder${effective.entry_id ? ` ${effective.entry_id}` : ""} default${until ? `, a campaign or schedule changes it${until}` : ""})`;
+  }
   return `${effective.id} (default${until ? `, a campaign or schedule changes it${until}` : ""})`;
 }
 

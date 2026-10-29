@@ -7,7 +7,7 @@ import {
   handleCampaignScreens, handleCampaignShow, handleCampaignUpdate,
 } from "../commands.js";
 import {
-  campaignAnyTags, campaignAudienceOption, campaignExplainTime, campaignInstant, campaignName, campaignPlaylistId, campaignPriority, campaignScreenIds,
+  campaignAnyTags, campaignAudienceOption, campaignExplainTime, campaignFolder, campaignInstant, campaignName, campaignPlaylistId, campaignPriority, campaignScreenIds,
   campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,
 } from "../campaigns.js";
 
@@ -15,20 +15,21 @@ const nameOption = (value: string): string => { campaignName(value); return valu
 
 /** The audience options, each conflicting with the others; `verb` words the help for create or update. */
 function audienceOptions(command: Command, verb: "Audience" | "Replace the audience"): void {
-  const others = (own: string) => ["tag", "anyTag", "screenId", "allScreens", "audience"].filter((name) => name !== own);
+  const others = (own: string) => ["tag", "anyTag", "screenId", "folder", "allScreens", "audience"].filter((name) => name !== own);
   command
     .addOption(new Option("--tag <TAG>", `${verb}: screens that carry this tag; repeat or comma-separate to require every listed tag`).argParser(campaignTags).conflicts(others("tag")))
     .addOption(new Option("--any-tag <TAG>", `${verb}: screens that carry at least one of these tags (repeatable, or comma-separated)`).argParser(campaignAnyTags).conflicts(others("anyTag")))
     .addOption(new Option("--screen-id <ID>", `${verb}: these screens (repeatable, or comma-separated)`).argParser(campaignScreenIds).conflicts(others("screenId")))
+    .addOption(new Option("--folder <ID>", `${verb}: the screens in this screen folder (sfd_...) and every folder inside it`).argParser(campaignFolder).conflicts(others("folder")))
     .addOption(new Option("--all-screens", `${verb}: every screen in the project`).conflicts(others("allScreens")))
     .addOption(new Option("--audience <RULE>", `${verb}: a rule as JSON such as {"all":[{"tag":"North"},{"tag":"Cafe"}]}, @FILE to read it from a file, or - for stdin`).argParser(campaignAudienceOption).conflicts(others("audience")));
 }
 
-const AUDIENCE_FLAGS = ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience"];
+const AUDIENCE_FLAGS = ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"];
 
 export function registerCampaignCommands(root: Command, bind: CommandActionBinder): void {
   const campaign = root.command("campaign").description("Schedule your screens; ads campaigns buy ad time on other screens");
-  addCommandNotes(campaign, "Campaigns:\n  A campaign switches every screen in its audience to one playlist while its\n  from and until dates and weekly windows hold, and back when they stop; with\n  none of them it holds always. It schedules your own screens: ads campaigns\n  buy ad time on other screens and are a different resource. The audience is a\n  rule over screen tags or ids. from, until and windows are civil times read in\n  each screen's own timezone. Per screen, a takeover wins, then the first\n  campaign that holds (priority 0 to 100, higher first, then the newest), then\n  the screen's playlist schedule, then its default playlist. Screens switch\n  within a minute. campaign screens shows each screen's standing and campaign\n  explain says why a campaign plays on a screen or not. A project has at most\n  100 campaigns.");
+  addCommandNotes(campaign, "Campaigns:\n  A campaign switches every screen in its audience to one playlist while its\n  from and until dates and weekly windows hold, and back when they stop; with\n  none of them it holds always. It schedules your own screens: ads campaigns\n  buy ad time on other screens and are a different resource. The audience is a\n  rule over screen tags, ids or screen folders. from, until and windows are civil times read in\n  each screen's own timezone. Per screen, a takeover wins, then the first\n  campaign that holds (priority 0 to 100, higher first, then the newest), then\n  the screen's playlist schedule, then its default playlist. Screens switch\n  within a minute. campaign screens shows each screen's standing and campaign\n  explain says why a campaign plays on a screen or not. A project has at most\n  100 campaigns.");
 
   campaign.command("list").description("List this project's campaigns in the order screens read them")
     .action(bind(handleCampaignList));
