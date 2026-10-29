@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { ScreenWallArrangement } from "./adapters/protocol.js";
 import { requireToken } from "./client.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import {
@@ -9,6 +10,7 @@ import { quotedRevision } from "./if-match.js";
 import { readAuthoringJson } from "./authoring-input.js";
 import { CliError, usageError } from "./problems.js";
 import { pendingReviewOf } from "./reviews.js";
+import { wallSize } from "./screen-wall.js";
 
 /**
  * One page of a playlist at a time (`playlist page add|replace|remove`): the
@@ -58,14 +60,14 @@ export function civilTime(value: string, edge: "from" | "until", flag: string): 
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}T00:00`;
 }
 
-/** The canvas of a video wall format: a tile is 1920 x 1080, or 1080 x 1920 in portrait, and a row is that many tiles wide, a column that many high. */
+/** The canvas of a video wall format: a tile is 1920 x 1080, or 1080 x 1920 in portrait, and a row is that many tiles wide, a column that many high, a grid its columns wide. */
 export function formatCanvas(format: unknown): { width: number; height: number } | undefined {
   if (!isObject(format)) return undefined;
   const displays = Number(format.displays);
   if (!Number.isInteger(displays) || displays < 2) return undefined;
-  const portrait = format.orientation === "portrait";
-  const [tileWidth, tileHeight] = portrait ? [1080, 1920] : [1920, 1080];
-  return format.arrangement === "column" ? { width: tileWidth, height: tileHeight * displays } : { width: tileWidth * displays, height: tileHeight };
+  const columns = Number(format.columns);
+  if (format.arrangement === "grid" && !(Number.isInteger(columns) && columns > 0 && displays % columns === 0)) return undefined;
+  return wallSize(displays, format.arrangement as ScreenWallArrangement, format.orientation === "portrait", columns);
 }
 
 /** The first page of a playlist that is an ordinary page (not an ad slot). */

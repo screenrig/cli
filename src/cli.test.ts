@@ -7,7 +7,7 @@ import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine, selectorPreviewLines } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";
@@ -6845,10 +6845,31 @@ test("playback list, media filters, media update, and app --name bind the consum
     const selectorFile = path.join(configDir, "selector.json");
     const selector = { by: "tag", tags: { all: ["Summer", "Drinks"], none: ["Expired"] }, batch_size: 3 };
     await writeFile(selectorFile, JSON.stringify(selector));
-    transport.on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { matched_count: 40, candidates: [], selector } }));
+    const weighted = { by: "tag", tag: "Sponsor", order: "weighted", one_at_a_time: true, fit: "aspect", weights: { "tag:Acme": 60, "tag:Bolt": 40 } };
+    transport.on("POST", "/api/selectors/preview", (request) => ({ status: 200, headers: {}, body: JSON.stringify(request.body).includes("weighted") ? {
+      matched_count: 2, cycle: 10, selector: weighted,
+      candidates: [{ media_id: "med_a", filename: "a.png", tags: ["Acme"], weight: 6, share_percent: 60 }, { media_id: "med_b", filename: "b.png", tags: ["Bolt"], weight: 4, share_percent: 40 }],
+      excluded: [{ media_id: "med_c", filename: "c.png", tags: [], reason: "aspect_mismatch" }],
+    } : { matched_count: 40, candidates: [], selector } }));
     const preview = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "video"], transport, { fs: fsLike });
     assert.equal(preview.code, ExitCode.Success, preview.stdout);
     assert.deepEqual(transport.calls.filter(c => c.path === "/api/selectors/preview").at(-1)?.body, { primitive: "video", selector });
+
+    // A weighted, aspect-fitted selector: --rect goes to the server, expected shares and left-out files print.
+    await writeFile(selectorFile, JSON.stringify(weighted));
+    const shares = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "image", "--rect", "1080x1920"], transport, { fs: fsLike });
+    assert.equal(shares.code, ExitCode.Success, shares.stdout);
+    assert.deepEqual(transport.calls.filter(c => c.path === "/api/selectors/preview").at(-1)?.body, { primitive: "image", selector: weighted, rect: { width: 1080, height: 1920 } });
+    const sharesData = JSON.parse(shares.stdout).data;
+    assert.equal(sharesData.cycle, 10);
+    assert.equal(sharesData.candidates[0].share_percent, 60);
+    assert.equal(sharesData.excluded[0].reason, "aspect_mismatch");
+    assert.deepEqual(selectorPreviewLines([{ page_id: "p", primitive_id: "i", matched_count: 2, cycle: 10,
+      items: [{ media_id: "med_a", filename: "a.png", weight: 6, share_percent: 60 }],
+      excluded: [{ media_id: "med_c", filename: "c.png", reason: "aspect_mismatch" }] }]),
+    ["selector p/i: 2 file(s), one cycle is 10 plays", "  60%\ta.png\tmed_a", "  left out (aspect_mismatch)\tc.png\tmed_c"]);
+    const badRect = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "image", "--rect", "wide"], transport, { fs: fsLike });
+    assert.equal(badRect.code, ExitCode.Usage, badRect.stdout);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

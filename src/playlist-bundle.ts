@@ -653,10 +653,12 @@ export async function snapshotBundleSelectors(client: ApiClient, input: unknown)
       if (!selector || !["all", "tag", "folder"].includes(String(selector.by))) { primitives.push(primitive); continue; }
       const category = stringField(primitive, "primitive", "Playlist primitive");
       if (selector.batch_size !== undefined && selector.one_at_a_time !== true) throw usageError("Static bundle export cannot retain a runtime batch cursor; remove batch_size or use explicit ids.");
-      const key = JSON.stringify([category, selector]);
+      // A bundle pins the files that fit now; it keeps neither weights nor fit.
+      const rect = selector.fit === "aspect" ? record(primitive.rect, "Playlist primitive rect") : undefined;
+      const key = JSON.stringify([category, selector, rect?.width, rect?.height]);
       let ids = catalogs.get(key);
       if (!ids) {
-        const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: category, selector } });
+        const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: category, selector, ...(rect ? { rect: { width: rect.width, height: rect.height } } : {}) } });
         const preview = record(response.body, "Selector preview");
         if (!Array.isArray(preview.candidates) || preview.candidates.length > 1024) throw usageError("Selector preview must contain at most 1024 candidates.");
         ids = preview.candidates.map(item => stringField(record(item, "Selector candidate"), "media_id", "Selector candidate"));
