@@ -13891,7 +13891,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to three surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
+      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -23785,19 +23785,20 @@ components:
       additionalProperties: false
       required: [displays, arrangement, orientation]
       description: >-
-        The video wall a playlist is authored for: displays tiles, each 1920 x 1080 (landscape) or 1080 x 1920 (portrait), laid out in a row or a column. The canvas of n tiles of width w and height h is (n * w, h) for a row and (w, n * h) for a column, for example 5760 x 1080 for 3 landscape displays in a row and 1080 x 3840 for 2 portrait displays in a column. Every ordinary page's canvas width and height must equal it exactly, else 400 invalid_request at pages[i].canvas. Card scale on such a playlist is the tile's min(width, height) / 1080 = 1. A playlist with a format may be bound only to a screen whose wall has the same shape (displays = number of outputs, arrangement, portrait if and only if rotation is 90 or 270), else 409 playlist_format_mismatch: assignment, fleet assignment, schedule entries and takeover. A playlist without a format binds to any screen.
+        The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait), laid out in a row, a column or a grid. A row has the displays as columns and one row, a column one column and the displays as rows, a grid columns and displays / columns rows. Display n sits at column (n - 1) mod columns and row floor((n - 1) / columns): left to right, then top to bottom. The canvas of c columns and r rows of tiles of width w and height h is (c * w, r * h), for example 5760 x 1080 for 3 landscape displays in a row, 1080 x 3840 for 2 portrait displays in a column and 7680 x 3240 for 12 landscape displays in a grid of 4 columns. Every ordinary page's canvas width and height must equal it exactly, else 400 invalid_request at pages[i].canvas. Card scale on such a playlist is the tile's min(width, height) / 1080 = 1. A playlist with a format may be bound only to a screen whose wall has the same shape (displays = number of outputs, arrangement, columns, portrait if and only if rotation is 90 or 270), else 409 playlist_format_mismatch: assignment, fleet assignment, schedule entries and takeover. A playlist without a format binds to any screen.
       properties:
-        displays: {type: integer, enum: [2, 3]}
-        arrangement: {type: string, enum: [row, column]}
+        displays: {type: integer, minimum: 2, maximum: 12}
+        arrangement: {type: string, enum: [row, column, grid]}
         orientation: {type: string, enum: [landscape, portrait]}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Displays per row of a grid. Required for arrangement grid and not allowed otherwise; displays divided by columns is at least 2. Echoed for a grid only."}
     PlaylistDisplays:
       type: array
       minItems: 1
-      maxItems: 3
+      maxItems: 12
       uniqueItems: true
-      items: {type: integer, minimum: 1, maximum: 3}
+      items: {type: integer, minimum: 1, maximum: 12}
       description: >-
-        Playlists with a format only. The displays a primitive covers: ascending contiguous 1-based display numbers within 1..format.displays, such as [2], [1, 2] or [1, 2, 3]. The server derives rect as the union of those tiles; rect is omitted or exactly the derived value. Stored and echoed on read.
+        Playlists with a format only. The displays a primitive covers: ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2], [1, 2] or, on a grid of 4 columns, [2, 3, 6, 7]. In a row or a column they are contiguous. The server derives rect as the bounding box of those tiles; rect is omitted or exactly the derived value. Stored and echoed on read.
     PlaylistWrite:
       type: object
       additionalProperties: false
@@ -25207,10 +25208,11 @@ components:
       additionalProperties: false
       required: [outputs, arrangement]
       description: >-
-        The video wall a screen's Player lays out: two or three outputs that show one canvas. Setting it needs a Player that declared the display.wall host capability (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans it.
+        The video wall a screen's Player lays out: two to twelve outputs that show one canvas. Setting it needs a Player that declared the display.wall host capability (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans it.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 3, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right for row, top to bottom for column."}
-        arrangement: {type: string, enum: [row, column]}
+        outputs: {type: array, minItems: 2, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right, then top to bottom."}
+        arrangement: {type: string, enum: [row, column, grid]}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
     ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {type: string}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}}}
     ScreenLocation:
@@ -25862,7 +25864,7 @@ components:
         Player-reported playback surface. Absent on Screen until the first accepted PUT /screen/observation. Read-only on the project API; ScreenPatch, PairScreen, pairing bodies, session bodies, canvas, runtime manifest, and POST /screen/reports cannot write it.
       properties:
         observed_at: {type: string, format: date-time, description: Player clock at the observation. Last write wins; an identical surfaces tuple ignores a later timestamp.}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to three surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
     ScreenObservationSurface:
       type: object
       additionalProperties: false
@@ -25881,7 +25883,7 @@ components:
       description: details object on a durable screen.surface_changed project event. Pixels are not present. This type is not a runtime audience command and is not delivered on GET /screen/events.
       properties:
         observed_at: {type: string, format: date-time}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/ScreenObservationSurface"}}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}}
     RuntimeObservationWrite:
       type: object
       additionalProperties: true
@@ -25890,7 +25892,7 @@ components:
         The PUT /screen/observation body. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the project ScreenObservation.
       properties:
         observed_at: {type: string, format: date-time}
-        surfaces: {type: array, minItems: 1, maxItems: 3, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to three surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
     RuntimeObservationSurfaceWrite:
       type: object
       additionalProperties: true
@@ -28707,7 +28709,7 @@ components:
         major: {type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins."}
         params: {type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>. A string may carry {screen.name}, {screen.timezone} and {screen.field.NAME}, and a location param may be the string {screen.location}; the backend expands them for each screen."}
         data: {type: string, pattern: '^(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]+\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]+\}){0,255}$', description: "Card data key holding the dynamic properties. May not start with feed:. {screen.field.NAME} in the key reads a per-screen document, for example menu-{screen.field.store_number}: the backend fills in each screen's own field."}
-        displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending contiguous 1-based display numbers within 1..format.displays, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
+        displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
         rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required for layout free. For every other layout omit it or send the rect the server derives; left and right strips are the band on that edge (120 units wide, canvas high), which the Player draws as a horizontal strip turned 90 degrees."}
         layer: {type: integer, minimum: 0, maximum: 1024, description: "Required for layout free. Fixed for every other layout (full 10, center and wide 20, strip, header and footer 30, corner 40, chip 50): omit it or send that value."}
         content_fit: {type: string, enum: [fill]}
@@ -29429,10 +29431,11 @@ components:
       description: >-
         The screen's video wall as its Player lays it out (docs/player-compatibility.md §6.8). Emitted only when the screen has a wall. Unknown members are ignored.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 3, items: {type: string}, description: "Output names in physical order: left to right for row, top to bottom for column."}
-        arrangement: {type: string, enum: [row, column]}
+        outputs: {type: array, minItems: 2, maxItems: 12, items: {type: string}, description: "Output names in physical order: left to right, then top to bottom."}
+        arrangement: {type: string, enum: [row, column, grid]}
         rotation: {type: integer, enum: [0, 90, 180, 270], description: "Clockwise degrees applied to every output."}
         span: {type: boolean, description: "true when the manifest's playlist has a format (it then matches the wall). false is an ordinary playlist that every output mirrors."}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid; present for arrangement grid only."}
     RuntimeDisplay:
       type: object
       additionalProperties: true
