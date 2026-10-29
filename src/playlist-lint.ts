@@ -1,19 +1,19 @@
 /** Geometry lint for a playlist document: what `playlist validate` reports beside schema validity. */
 
-export const LINT_CODES = [
+const LINT_CODES = [
   "collision",
   "motion_overuse",
   "adjacent_repeat",
   "safe_margin",
 ] as const;
 
-export type LintCode = (typeof LINT_CODES)[number];
+type LintCode = (typeof LINT_CODES)[number];
 
 const COLLISION_OVERLAP = 0.2;
 const FULL_BLEED_COVERAGE = 0.95;
 const SAFE_MARGIN = 0.04;
 
-export interface Box {
+interface Box {
   x: number;
   y: number;
   width: number;
@@ -27,7 +27,7 @@ export interface LintFinding {
   message: string;
 }
 
-export function sortLint(findings: LintFinding[], pageOrder: string[]): LintFinding[] {
+function sortLint(findings: LintFinding[], pageOrder: string[]): LintFinding[] {
   const order = new Map(pageOrder.map((id, index) => [id, index]));
   const codeOrder = new Map(LINT_CODES.map((code, index) => [code, index]));
   return [...findings].sort((left, right) => {

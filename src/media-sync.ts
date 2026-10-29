@@ -214,7 +214,7 @@ export function accountLines(account: MediaSyncAccount | undefined): string[] {
   ];
 }
 
-export function accountTableLines(items: MediaSyncAccount[]): string[] {
+function accountTableLines(items: MediaSyncAccount[]): string[] {
   if (!items.length) return ["No media sync accounts"];
   return table(["ID", "NAME", "TENANT", "SECRET", "TEST"], items.map((item) => [
     item.id, item.name,
