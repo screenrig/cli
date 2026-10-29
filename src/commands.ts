@@ -229,6 +229,7 @@ import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.
 import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
+import { assertWirePages } from "./playlist-write-validation.js";
 import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import {
   lintComposedPage,
@@ -252,11 +253,6 @@ import {
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
 import { isSensitiveKey, isSensitiveValue, redactEvent, redactText } from "./redact.js";
-import {
-  expandPlaylistPages,
-  formatTemplateCatalog,
-  playlistTemplateCatalog,
-} from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
 import { composeAndWrite, defaultComposeOutDir, rejectImageLikeOutput } from "./compose/compose.js";
 import {
@@ -968,7 +964,8 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime, resol
   let parsed: Record<string, unknown>;
   try { parsed = await readAuthoringJson(file, runtime); }
   catch { throw usageError("Cannot read playlist JSON."); }
-  const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) assertWirePages(parsed.pages);
+  const body = parsed;
   assertPlaylistValid(body);
   const lint = playlistLint(body);
   const shortApplication = shortApplicationPageWarning(body);
@@ -1025,16 +1022,6 @@ export const handleComposeBatch = commandHandler(async (args, runtime, resolved)
 }, false);
 
 export const handleComposeRender = commandHandler(composeRender, false);
-
-export const handlePlaylistTemplates = commandHandler(async (args, runtime, resolved) => {
-
-  const catalog = playlistTemplateCatalog();
-  return {
-    envelope: successEnvelope(catalog),
-    exitCode: ExitCode.Success,
-    human: formatTemplateCatalog(catalog),
-  };
-}, false);
 
 export const handleDoctor = commandHandler(doctor, false);
 
@@ -5528,7 +5515,8 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (extra.length > 0) {
     throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
   }
-  const pages = expandPlaylistPages(parsed.pages);
+  const pages = parsed.pages;
+  assertWirePages(pages);
   const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), pages };
   assertPlaylistValid(body);
   await validatePlaylistCards(client, body);
@@ -5597,7 +5585,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
   }
   if (Object.hasOwn(body, "pages")) {
     if (!Array.isArray(body.pages) || body.pages.length === 0) throw usageError("pages must be a non-empty array.");
-    body.pages = expandPlaylistPages(body.pages);
+    assertWirePages(body.pages);
   }
   if (body.audio !== undefined && body.audio !== null && (typeof body.audio !== "object" || Array.isArray(body.audio))) {
     throw usageError("audio must be a soundtrack object or null.");
@@ -8722,7 +8710,8 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
 
 export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {
   const parsed = await readAuthoringJson(args.positionals[3]!, runtime);
-  const document = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.pages)) assertWirePages(parsed.pages);
+  const document = parsed;
   assertPlaylistValid(document);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const json = !flagBool(args.flags, "human");

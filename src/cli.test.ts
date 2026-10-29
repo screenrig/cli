@@ -6439,136 +6439,13 @@ test("app update publishes to the existing application with revision and release
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist templates --json lists the fifteen closed ids without enrolling", async () => {
-  const transport = memoryBackend();
-  const { code, stdout, configDir } = await withRuntime(["--json", "playlist", "templates"], transport);
-  assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }>; compose: { wire_primitives: string[] } } };
-  assert.deepEqual(envelope.data.templates.map((template) => template.id), [
-    "slide-intro",
-    "slide-text-only-1",
-    "slide-text-only-2",
-    "slide-text-photo-1",
-    "slide-text-photo-2",
-    "slide-text-photo-3",
-    "slide-half-bleed-1",
-    "slide-half-bleed-2",
-    "slide-quote",
-    "slide-callout",
-    "slide-bullets",
-    "slide-stat-grid",
-    "slide-three-up",
-    "slide-photo",
-    "slide-full-bleed",
-  ]);
-  assert.deepEqual(envelope.data.compose.wire_primitives, ["image", "video", "iframe", "application", "stream", "card"]);
-  const catalog = envelope.data as {
-    templates: Array<{ id: string }>;
-    compose: { wire_primitives: string[] };
-    transition: { type: string; duration_ms: number };
-    transition_types: string[];
-    swipe_duration_ms: number;
-    enter_types: string[];
-  };
-  assert.deepEqual(catalog.transition, { type: "crossfade", duration_ms: 200 });
-  assert.deepEqual(catalog.transition_types, [
-    "crossfade",
-    "swipe-left",
-    "swipe-right",
-    "swipe-up",
-    "swipe-down",
-    "dip",
-    "wipe-left",
-    "wipe-right",
-    "wipe-up",
-    "wipe-down",
-    "slide-left",
-    "slide-right",
-    "slide-up",
-    "slide-down",
-    "stinger",
-  ]);
-  assert.equal(catalog.swipe_duration_ms, 600);
-  assert.deepEqual(catalog.enter_types, [
-    "fade-up",
-    "fade-down",
-    "fade-left",
-    "fade-right",
-    "fade-in",
-    "zoom-in",
-    "zoom-out",
-  ]);
-  assert.equal(transport.calls.length, 0);
-  await rm(configDir, { recursive: true, force: true });
-});
-
 test("playlist help lists extended transitions and their authoring rules", () => {
-  for (const path of [["playlist", "validate"], ["playlist", "templates"]]) {
+  for (const path of [["playlist", "validate"]]) {
     const help = commandHelp(path).usage;
     for (const type of ["crossfade", "swipe-left", "swipe-right", "swipe-up", "swipe-down", "dip", "wipe-left", "wipe-right", "wipe-up", "wipe-down", "slide-left", "slide-right", "slide-up", "slide-down", "stinger"]) assert.ok(help.includes(type), type);
     assert.match(help, /2000 through 6000/);
     assert.match(help, /60% of duration_ms/);
-    assert.match(help, /200 ms crossfade/);
   }
-});
-
-test("playlist create expands a picture template and forwards a full page unchanged", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("playlist-templates-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(
-    path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
-    fsLike,
-  );
-  const fullPage = {
-    id: "poster",
-    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
-    transition: { type: "crossfade", duration_ms: 200 },
-    advance: { mode: "duration", after_ms: 8000 },
-    primitives: [
-      {
-        id: "hero",
-        primitive: "image",
-        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
-        rect: { x: 0, y: 0, width: 1920, height: 1080 },
-        layer: 0,
-        content_fit: "contain",
-      },
-    ],
-  };
-  const file = path.join(configDir, "playlist.json");
-  await writeFile(
-    file,
-    JSON.stringify({
-      name: "Lobby",
-      pages: [
-        {
-          id: "hero",
-          template: "slide-full-bleed",
-          slots: {
-            picture: { primitive: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
-          },
-        },
-        fullPage,
-      ],
-    }),
-  );
-  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Success, result.stdout);
-  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists");
-  const body = posted?.body as { pages: Array<Record<string, unknown>> };
-  assert.equal(body.pages.length, 2);
-  assert.equal("template" in body.pages[0]!, false);
-  assert.equal("slots" in body.pages[0]!, false);
-  const introPrimitives = body.pages[0]!.primitives as Array<{ id: string; primitive: string }>;
-  assert.deepEqual(introPrimitives.map((primitive) => primitive.id), ["picture"]);
-  assert.ok(introPrimitives.every((primitive) => primitive.primitive === "image"));
-  assert.deepEqual(body.pages[1], fullPage);
-  assert.deepEqual(body.pages[0]!.transition, { type: "crossfade", duration_ms: 200 });
-  const heroPrimitives = body.pages[0]!.primitives as Array<Record<string, unknown>>;
-  assert.ok(heroPrimitives.every((primitive) => !("enter" in primitive)));
-  await rm(configDir, { recursive: true, force: true });
 });
 
 test("playlist create forwards swipe transition and object enter on a full page", async () => {
@@ -6615,7 +6492,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create refuses a templated page that would emit text", async () => {
+test("playlist create refuses a text primitive and points at compose", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-text-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -6629,81 +6506,16 @@ test("playlist create refuses a templated page that would emit text", async () =
     file,
     JSON.stringify({
       name: "Lobby",
-      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } } }],
+      pages: [{ id: "intro", primitives: [{ id: "title", primitive: "text", text: "Welcome" }] }],
     }),
   );
   const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Usage, result.stdout);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /compose render/);
+  assert.match(envelope.error.detail, /Compose copy and chrome locally/);
   assert.equal(envelope.error.next?.command, "screenrig compose catalog");
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("playlist create accepts a linear canvas.background on a picture template and a full page", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("playlist-gradient-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(
-    path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
-    fsLike,
-  );
-  const wash = {
-    type: "linear",
-    stops: [
-      { at: 0, color: "#1b2632ff" },
-      { at: 1, color: "#eee9dfff" },
-    ],
-  };
-  const fullPage = {
-    id: "poster",
-    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: { ...wash, stops: wash.stops.map((stop) => ({ ...stop, color: stop.color.toUpperCase() })) } },
-    transition: { type: "crossfade", duration_ms: 200 },
-    advance: { mode: "duration", after_ms: 8000 },
-    primitives: [
-      {
-        id: "hero",
-        primitive: "image",
-        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
-        rect: { x: 0, y: 0, width: 1920, height: 1080 },
-        layer: 0,
-        content_fit: "contain",
-      },
-    ],
-  };
-  const file = path.join(configDir, "playlist.json");
-  await writeFile(
-    file,
-    JSON.stringify({
-      name: "Lobby",
-      pages: [
-        {
-          id: "hero",
-          template: "slide-full-bleed",
-          canvas: { background: wash },
-          slots: {
-            picture: { primitive: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
-          },
-        },
-        fullPage,
-      ],
-    }),
-  );
-  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Success, result.stdout);
-  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists");
-  const body = posted?.body as { pages: Array<{ canvas: { background: unknown } }> };
-  assert.deepEqual(body.pages[0]!.canvas.background, {
-    type: "linear",
-    stops: [
-      { at: 0, color: "#1B2632FF" },
-      { at: 1, color: "#EEE9DFFF" },
-    ],
-  });
-  assert.deepEqual(body.pages[1], fullPage);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -6852,32 +6664,6 @@ test("playback list, media filters, media update, and app --name bind the consum
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
-});
-
-test("playlist create refuses a mixed template-and-primitives page before the write", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("playlist-mixed-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(
-    path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
-    fsLike,
-  );
-  const file = path.join(configDir, "playlist.json");
-  await writeFile(
-    file,
-    JSON.stringify({
-      name: "Lobby",
-      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } }, primitives: [] }],
-    }),
-  );
-  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Usage, result.stdout);
-  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
-  assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /mixes template and primitives/);
-  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
-  await rm(configDir, { recursive: true, force: true });
 });
 
 for (const argv of [

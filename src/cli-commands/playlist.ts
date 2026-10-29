@@ -1,7 +1,7 @@
 import { addValueAlias } from "./aliases.js";
 import { NOTE_HELP, nonnegativeInteger, positiveInteger, reviewNoteOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
@@ -44,9 +44,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--timezone <ZONE>", "Render cards in this IANA timezone")
     .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistPreview)), LOOK_AT_THE_CONTACT_SHEET);
-
-  playlist.command("templates").description("Browse playlist templates")
-    .action(bind(handlePlaylistTemplates));
 
   playlist.command("create").description("Create a playlist from a file")
     .argument("<file>", "Playlist JSON file, or - for stdin")

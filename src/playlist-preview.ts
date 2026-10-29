@@ -16,7 +16,7 @@ import {
 export { LOOK_AT_THE_CONTACT_SHEET };
 import { ffmpegLookup, inputGuardArgs, runProcessFor, sniffedDemuxer } from "./media/ffmpeg.js";
 import { assertPlaylistValid } from "./playlist-validate.js";
-import { expandPlaylistPages } from "./playlist-templates.js";
+import { assertWirePages } from "./playlist-write-validation.js";
 import { usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 
@@ -213,7 +213,8 @@ function normalizePlaylist(input: unknown): { name: string; audio?: unknown; for
     throw usageError("Playlist JSON must be an object with name and pages.");
   }
   const raw = input as Record<string, unknown>;
-  const pages = Array.isArray(raw.pages) ? expandPlaylistPages(raw.pages) : undefined;
+  const pages = Array.isArray(raw.pages) ? raw.pages : undefined;
+  if (pages) assertWirePages(pages);
   if (typeof raw.name !== "string" || !pages) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }

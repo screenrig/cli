@@ -1,9 +1,27 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
-import { PLAYLIST_TRANSITION_TYPES } from "./playlist-templates.js";
+import { WIRE_PRIMITIVES } from "./compose/catalog.js";
 
 interface JsonRecord { [key: string]: unknown }
+
+const PLAYLIST_TRANSITION_TYPES = [
+  "crossfade",
+  "swipe-left",
+  "swipe-right",
+  "swipe-up",
+  "swipe-down",
+  "dip",
+  "wipe-left",
+  "wipe-right",
+  "wipe-up",
+  "wipe-down",
+  "slide-left",
+  "slide-right",
+  "slide-up",
+  "slide-down",
+  "stinger",
+] as const;
 
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const MEDIA_ID_PATTERN = RESOURCE_ID_PATTERNS.media;
@@ -500,4 +518,47 @@ export function validatePlaylistWrite(
   }
   if (unscheduled === 0) throw usageError("Every playlist must keep at least one page with no visibility field.");
   return referenced;
+}
+
+function pageLabel(page: JsonRecord, index: number): string {
+  return typeof page.id === "string" && page.id.length > 0 ? `Page ${page.id}` : `pages[${index}]`;
+}
+
+const COMPOSE_NEXT = {
+  command: "screenrig compose catalog",
+  reason: "List the local compose catalog, then run compose render and media upload.",
+};
+
+/**
+ * Wire-shape checks every page gets before a write or a preview: primitives are
+ * the closed wire kinds (copy and chrome are composed locally into images), and
+ * an image or video names its media in `selector`.
+ */
+export function assertWirePages(pages: unknown[]): void {
+  for (const [index, page] of pages.entries()) {
+    if (!page || typeof page !== "object" || Array.isArray(page)) continue;
+    const owner = page as JsonRecord;
+    if (!Array.isArray(owner.primitives)) continue;
+    const label = pageLabel(owner, index);
+    for (const [primitiveIndex, primitive] of owner.primitives.entries()) {
+      if (!primitive || typeof primitive !== "object" || Array.isArray(primitive)) continue;
+      const wire = primitive as JsonRecord;
+      const category = wire.primitive;
+      if (typeof category !== "string" || !(WIRE_PRIMITIVES as readonly string[]).includes(category)) {
+        throw usageError(`${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Compose copy and chrome locally.`, COMPOSE_NEXT);
+      }
+      if (category === "image" || category === "video") {
+        const selector = wire.selector;
+        if (!selector || typeof selector !== "object" || Array.isArray(selector) ||
+          !["id", "ids", "all", "tag", "folder"].includes(String((selector as JsonRecord).by))) {
+          throw usageError(`${label} primitives[${primitiveIndex}] ${category} requires a selector with by id|ids|all|tag|folder.`);
+        }
+        for (const retired of ["query", "filter", "items", "media_id", "media_ids"]) {
+          if (retired in wire) throw usageError(`${label} primitives[${primitiveIndex}] puts media selection in selector, not ${retired}.`);
+        }
+      } else if ("selector" in wire) {
+        throw usageError(`${label} primitives[${primitiveIndex}] ${category} does not take a selector.`);
+      }
+    }
+  }
 }

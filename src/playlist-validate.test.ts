@@ -1,11 +1,42 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  OBJECT_MOTION_GUIDANCE,
-  PANNING_BACKGROUND_EXAMPLE_PAGE,
-  SPINNING_BADGE_EXAMPLE_PAGE,
-} from "./playlist-templates.js";
 import { assertPlaylistValid, playlistIssues } from "./playlist-validate.js";
+
+const PANNING_BACKGROUND_PAGE = {
+  id: "pan",
+  canvas: { width: 1920, height: 1080, viewport_fit: "contain" as const, background: "#000000FF" },
+  transition: { type: "crossfade" as const, duration_ms: 200 },
+  advance: { mode: "duration" as const, after_ms: 8000 },
+  primitives: [
+    {
+      id: "background",
+      primitive: "image" as const,
+      selector: { by: "id" as const, media_id: "med_background" },
+      rect: { x: 0, y: 0, width: 2400, height: 1080 },
+      layer: 0,
+      content_fit: "cover" as const,
+      motion: { type: "path" as const, points: [{ x: -480, y: 0 }], rate: 40, loop: "loop" as const },
+    },
+  ],
+};
+
+const SPINNING_BADGE_PAGE = {
+  id: "badge",
+  canvas: { width: 1920, height: 1080, viewport_fit: "contain" as const, background: "#1B2632FF" },
+  transition: { type: "crossfade" as const, duration_ms: 200 },
+  advance: { mode: "duration" as const, after_ms: 8000 },
+  primitives: [
+    {
+      id: "badge",
+      primitive: "image" as const,
+      selector: { by: "id" as const, media_id: "med_badge" },
+      rect: { x: 1640, y: 80, width: 200, height: 200 },
+      layer: 1,
+      content_fit: "contain" as const,
+      motion: { type: "spin" as const, direction: "cw" as const, speed: "slow" as const },
+    },
+  ],
+};
 
 function playlist(primitive: Record<string, unknown> = {}) {
   return { name: "Local preflight", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [{ id: "media", primitive: "image", selector: { by: "all", one_at_a_time: true }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain", ...primitive }] }] };
@@ -27,12 +58,9 @@ test("local entry diagnostics name only the invalid fields on the selected branc
   assert.deepEqual(issues.map((issue) => issue.path), ["/pages/0/primitives/0/enter/duration_ms", "/pages/0/primitives/0/enter/delay_ms"]);
   assert.ok(issues.every((issue) => issue.message.includes("keep only type")));
 });
-test("local canonical validation accepts the panning background and spinning badge examples", () => {
-  assert.doesNotThrow(() => assertPlaylistValid({ name: "Pan", pages: [PANNING_BACKGROUND_EXAMPLE_PAGE] }));
-  assert.doesNotThrow(() => assertPlaylistValid({ name: "Badge", pages: [SPINNING_BADGE_EXAMPLE_PAGE] }));
-  assert.equal(PANNING_BACKGROUND_EXAMPLE_PAGE.primitives[0]?.motion.loop, "loop");
-  assert.equal(SPINNING_BADGE_EXAMPLE_PAGE.primitives[0]?.motion.speed, "slow");
-  assert.match(OBJECT_MOTION_GUIDANCE, /one moving element per page is the norm/);
+test("local canonical validation accepts a panning background and a spinning badge", () => {
+  assert.doesNotThrow(() => assertPlaylistValid({ name: "Pan", pages: [PANNING_BACKGROUND_PAGE] }));
+  assert.doesNotThrow(() => assertPlaylistValid({ name: "Badge", pages: [SPINNING_BADGE_PAGE] }));
 });
 
 test("local canonical validation accepts enter stagger 0 through 8", () => {
@@ -80,7 +108,7 @@ test("off-canvas bleed rectangles remain valid under the canvas clipping contrac
 });
 
 test("local canonical validation rejects a path with 65 points", () => {
-  const page = structuredClone(PANNING_BACKGROUND_EXAMPLE_PAGE);
+  const page = structuredClone(PANNING_BACKGROUND_PAGE);
   page.primitives[0]!.motion.points = Array.from({ length: 65 }, (_, index) => ({ x: index, y: 0 }));
   const issues = playlistIssues({ name: "Overflow", pages: [page] });
   assert.ok(issues.some((issue) => issue.path === "/pages/0/primitives/0/motion/points"));
