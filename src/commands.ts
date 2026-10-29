@@ -1770,14 +1770,6 @@ async function enrollForCommand(
   if (!alreadyEnrolled && (email === undefined) === (claim === undefined)) {
     throw usageError("agent enroll requires --email ADDRESS or --agentid-claim CODE.");
   }
-    requireFlagValue(args, "project-name", "Screens");
-    const projectName = flagString(args.flags, "project-name")?.trim();
-    if (projectName !== undefined && (!projectName || [...projectName].length > 60 || /[\p{Cc}\p{Cf}]/u.test(projectName))) {
-      throw usageError("agent enroll --project-name must contain 1–60 characters.");
-    }
-    if (!resolved.token && !resolved.enrollment && projectName !== undefined && projectName !== "Screens") {
-      throw usageError("Enrollment creates Screens. Use project create NAME for another named project.");
-    }
     const organizationFlag = flagString(args.flags, "organization");
     const organization = organizationFlag !== undefined ? validateDisplayName(organizationFlag, "Organization name") : resolved.enrollment?.organization;
     if (!resolved.token && !resolved.enrollment && !organization) throw usageError("agent enroll requires --organization NAME.");
@@ -1785,7 +1777,6 @@ async function enrollForCommand(
       resolved,
       ...(email !== undefined ? { enrollmentEmail: email } : {}),
       ...(claim !== undefined ? { enrollmentAgentIdClaim: claim } : {}),
-      ...(projectName !== undefined && resolved.enrollment ? { enrollmentProjectName: projectName } : {}),
       ...(organization !== undefined ? { enrollmentOrganization: organization } : {}),
       ...(options.intent ? { enrollmentIntent: options.intent } : {}),
       ...(options.setupCode !== undefined ? { enrollmentSetupCode: options.setupCode } : {}),

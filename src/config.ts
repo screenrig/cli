@@ -43,7 +43,7 @@ import { isResourceID } from "./generated/resource-ids.js";
          * resume redeems the identical claim. Never printed in errors or JSON.
          */
         agentid_claim?: string;
-        /** Exact project-name input bound to this enrollment's idempotency key. */
+        /** Project name bound to this enrollment's idempotency key by an earlier CLI; read when resuming, no longer set. */
         project_name?: string;
         organization?: string;
         /**
