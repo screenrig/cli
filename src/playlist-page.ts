@@ -7,7 +7,7 @@ import {
 import { isResourceID } from "./generated/resource-ids.js";
 import { quotedRevision } from "./if-match.js";
 import { readAuthoringJson } from "./authoring-input.js";
-import { usageError } from "./problems.js";
+import { CliError, usageError } from "./problems.js";
 import { pendingReviewOf } from "./reviews.js";
 
 /**
@@ -93,6 +93,35 @@ export function pageTransition(playlist: unknown): unknown {
   return isObject(first?.transition) ? first.transition : { ...DEFAULT_TRANSITION };
 }
 
+/** The media a stinger transition shows as its logo (`media:med_...`), undefined for any other transition. */
+export function stingerLogo(transition: unknown): string | undefined {
+  const stinger = isObject(transition) && transition.type === "stinger" && isObject(transition.stinger) ? transition.stinger : undefined;
+  const logo = stinger?.logo;
+  return typeof logo === "string" && logo.startsWith("media:") ? logo.slice("media:".length) : undefined;
+}
+
+/**
+ * The transition a new media page takes: the playlist's own, unless it is a
+ * stinger whose logo this credential cannot read. An uploader's page may show
+ * only media of its folders, and a stinger's logo is media, so that page gets
+ * the 600 ms crossfade instead of a refusal.
+ */
+async function transitionFor(client: ReturnType<typeof clientFor>, playlist: unknown): Promise<unknown> {
+  const transition = pageTransition(playlist);
+  const logo = stingerLogo(transition);
+  if (logo === undefined) return transition;
+  try {
+    await client.call({ method: "GET", path: `/api/media/${encodeURIComponent(logo)}` });
+    return transition;
+  } catch (error) {
+    const code = error instanceof CliError ? error.problem.code : undefined;
+    if (code === "outside_upload_scope" || code === "not_found") return { ...DEFAULT_TRANSITION };
+    // A credential that may not read media at all is no uploader's: the playlist's transition stays.
+    if (code === "forbidden" || code === "insufficient_access") return transition;
+    throw error;
+  }
+}
+
 export interface MediaPageInput {
   id: string;
   mediaId: string;
@@ -100,6 +129,8 @@ export interface MediaPageInput {
   fit: "contain" | "cover";
   seconds: number;
   playlist: unknown;
+  /** The page's transition; absent takes the playlist's (pageTransition). */
+  transition?: unknown;
   from?: string;
   until?: string;
 }
@@ -119,7 +150,7 @@ export function buildMediaPage(input: MediaPageInput): JSONObject {
   };
   if (input.kind === "video") primitive.muted = true;
   const page: JSONObject = {
-    id: input.id, canvas, transition: pageTransition(input.playlist),
+    id: input.id, canvas, transition: input.transition ?? pageTransition(input.playlist),
     advance: input.kind === "image" ? { mode: "duration", after_ms: Math.round(input.seconds * 1000) } : { mode: "media_end" },
     primitives: [primitive],
   };
@@ -135,6 +166,18 @@ export function visibilityOf(existing: unknown, from?: string, until?: string): 
   if (until !== undefined) base.until = until;
   const bounded = base.from !== undefined || base.until !== undefined || base.windows !== undefined || base.data !== undefined;
   return bounded ? base : undefined;
+}
+
+/**
+ * The visibility with its dates (`from` and `until`) removed: whether the page is
+ * switched off, its weekly windows and its data condition stay as the project
+ * set them. Undefined when nothing else limits the page, and a page that is
+ * switched off stays off.
+ */
+export function withoutDates(existing: unknown): JSONObject | undefined {
+  if (!isObject(existing)) return undefined;
+  const { from: _from, until: _until, ...rest } = existing;
+  return rest.windows !== undefined || rest.data !== undefined || rest.enabled === false ? rest : undefined;
 }
 
 /** The authoring form of a stored page: what the server resolved is not sent back, nor are the comments an agent attached. */
@@ -170,7 +213,8 @@ export interface ReplaceMediaInput {
  * The stored page with its media swapped: the same media kind keeps every other
  * member, dates included. A different kind (an image for a video) is rebuilt as
  * a media page on the playlist's canvas, keeping the stored dates and id. A
- * date flag changes only its bound; `always` removes the dates.
+ * date flag changes only its bound; `always` removes the dates and keeps the
+ * rest of the visibility the project set.
  */
 export function replaceMedia(input: ReplaceMediaInput): JSONObject {
   const page = authoringPage(input.stored);
@@ -191,7 +235,9 @@ export function replaceMedia(input: ReplaceMediaInput): JSONObject {
     result = { ...page, advance: rebuilt.advance, primitives: rebuilt.primitives };
   }
   if (input.always) {
-    delete result.visibility;
+    const visibility = withoutDates(page.visibility);
+    if (visibility) result.visibility = visibility;
+    else delete result.visibility;
     return result;
   }
   const visibility = visibilityOf(page.visibility, input.from, input.until);
@@ -298,7 +344,8 @@ export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolv
   } else {
     const kind = await mediaOf(client, media!);
     const { playlist } = await playlistOf(client, id);
-    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}) });
+    const transition = await transitionFor(client, playlist);
+    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, transition, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}) });
   }
   const response = await pageWrite(client, args, { method: "POST", path: pagesPath(id), body: { page, ...(before !== undefined ? { before } : {}) } });
   return pageResult(response, client.requestId, `Page ${String(page.id)} added to ${id}.`);
@@ -321,8 +368,11 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
     page = await pageFromFile(file, runtime);
     if (page.id !== undefined && page.id !== pageId) throw usageError(`The page file's id ${String(page.id)} is not ${pageId}; a replace keeps the page's id.`);
     page.id = pageId;
-    if (when.always) delete page.visibility;
-    else {
+    if (when.always) {
+      const visibility = withoutDates(page.visibility);
+      if (visibility) page.visibility = visibility;
+      else delete page.visibility;
+    } else {
       const visibility = visibilityOf(page.visibility, when.from, when.until);
       if (visibility) page.visibility = visibility;
     }

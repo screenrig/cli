@@ -6,7 +6,7 @@ import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { ExitCode } from "./exit-codes.js";
 import { processRuntime, run } from "./main.js";
-import { buildMediaPage, civilTime, formatCanvas, newPageId, pageCanvas, replaceMedia, visibilityOf } from "./playlist-page.js";
+import { buildMediaPage, civilTime, formatCanvas, newPageId, pageCanvas, replaceMedia, stingerLogo, visibilityOf, withoutDates } from "./playlist-page.js";
 import { normalizeProblem } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -320,4 +320,79 @@ test("service-client create --uploader sends the scope and holds the capabilitie
     assert.equal((await invoke(argv)).code, ExitCode.Usage, argv.join(" "));
   }
   assert.equal(bodies.length, before);
+});
+
+test("--always removes the dates and keeps what else the project set: switched off, weekly windows, a data condition", () => {
+  assert.equal(withoutDates(undefined), undefined);
+  assert.equal(withoutDates({ enabled: true, from: "2026-12-01T00:00", until: "2026-12-25T00:00" }), undefined, "only dates: always shown");
+  assert.deepEqual(withoutDates({ enabled: false, from: "2026-12-01T00:00" }), { enabled: false }, "a page the project switched off stays off");
+  const windows = [{ days: ["mon", "tue"], from: "09:00", until: "17:00" }];
+  assert.deepEqual(withoutDates({ enabled: true, from: "2026-12-01T00:00", windows }), { enabled: true, windows });
+  const data = { key: "open", equals: true };
+  assert.deepEqual(withoutDates({ enabled: true, until: "2026-12-25T00:00", data }), { enabled: true, data });
+
+  const playlist = playlistBody();
+  const weekly = replaceMedia({ stored: storedImagePage({ visibility: { enabled: true, from: "2026-12-01T00:00", until: "2026-12-25T00:00", windows } }), playlist, always: true });
+  assert.deepEqual(weekly.visibility, { enabled: true, windows }, "the dates go, the windows stay");
+  const off = replaceMedia({ stored: storedImagePage({ visibility: { enabled: false, until: "2026-12-25T00:00" } }), mediaId: IMAGE, kind: "image", playlist, always: true });
+  assert.deepEqual(off.visibility, { enabled: false }, "--always does not switch a page back on");
+  const plain = replaceMedia({ stored: storedImagePage({ visibility: { enabled: true, from: "2026-12-01T00:00" } }), playlist, always: true });
+  assert.equal("visibility" in plain, false);
+});
+
+test("playlist page replace --file --always drops the file page's dates alone", async (t) => {
+  const bodies: Record<string, unknown>[] = [];
+  const transport = new FakeTransport().on("PUT", `/api/playlists/${PLAYLIST}/pages/custom`, (request) => { bodies.push(request.body as never); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+  const windows = [{ days: ["sat", "sun"] }];
+  const page = { id: "custom", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "cut", duration_ms: 0 }, advance: { mode: "duration", after_ms: 5000 }, primitives: [],
+    visibility: { enabled: false, from: "2026-12-01T00:00", until: "2026-12-25T00:00", windows } };
+  assert.equal((await invoke(["playlist", "page", "replace", PLAYLIST, "custom", "--file", "-", "--always"], JSON.stringify(page))).code, ExitCode.Success);
+  assert.deepEqual(bodies[0]!.visibility, { enabled: false, windows });
+  const dated = { ...page, visibility: { enabled: true, from: "2026-12-01T00:00" } };
+  assert.equal((await invoke(["playlist", "page", "replace", PLAYLIST, "custom", "--file", "-", "--always"], JSON.stringify(dated))).code, ExitCode.Success);
+  assert.equal("visibility" in bodies[1]!, false);
+});
+
+const STINGER_LOGO = "med_LLLLLLLLLLLLLLLLLLLLLLLL";
+const stingerPage = () => storedImagePage({ transition: { type: "stinger", duration_ms: 2500, stinger: { title: "Sale", logo: `media:${STINGER_LOGO}` } } });
+
+test("a stinger's logo is the media it names", () => {
+  assert.equal(stingerLogo({ type: "stinger", duration_ms: 2500, stinger: { logo: `media:${STINGER_LOGO}` } }), STINGER_LOGO);
+  assert.equal(stingerLogo({ type: "stinger", duration_ms: 2500, stinger: { title: "Sale" } }), undefined);
+  assert.equal(stingerLogo({ type: "dip", duration_ms: 300 }), undefined);
+  assert.equal(stingerLogo(undefined), undefined);
+});
+
+test("playlist page add --media copies the first page's stinger when its logo can be read, and takes the crossfade when it is outside the uploader's scope", async (t) => {
+  const writes: { page: Record<string, unknown> }[] = [];
+  let logoRead: () => { status: number; headers: Record<string, string>; body: unknown } = () => ({ status: 200, headers: {}, body: { id: STINGER_LOGO, primitive: "image" } });
+  const transport = new FakeTransport()
+    .on("GET", `/api/media/${IMAGE}`, () => media("image"))
+    .on("GET", `/api/media/${STINGER_LOGO}`, () => logoRead())
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([stingerPage()]) }))
+    .on("POST", `/api/playlists/${PLAYLIST}/pages`, (request) => { writes.push(request.body as never); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+  assert.equal((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
+  assert.deepEqual(writes[0]!.page.transition, { type: "stinger", duration_ms: 2500, stinger: { title: "Sale", logo: `media:${STINGER_LOGO}` } }, "a logo the caller can read is copied");
+
+  const problem = (code: string, status: number) => ({ status, headers: { "content-type": "application/problem+json" }, body: { request_id: "req_TEST", instance: "urn:screenrig:request:req_TEST", errors: [{ status, code, type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, detail: "refused",
+    ...(code === "outside_upload_scope" ? { upload_scope: { playlist_ids: [PLAYLIST], folder_ids: [FOLDER] } } : {}) }] } });
+  logoRead = () => problem("outside_upload_scope", 403);
+  assert.equal((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
+  assert.deepEqual(writes[1]!.page.transition, { type: "crossfade", duration_ms: 600 }, "a logo outside the uploader's folders is not carried");
+
+  logoRead = () => problem("not_found", 404);
+  assert.equal((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
+  assert.deepEqual(writes[2]!.page.transition, { type: "crossfade", duration_ms: 600 }, "a logo that is gone is not carried");
+
+  // A credential that may not read media at all is no uploader: the playlist's transition stays.
+  logoRead = () => problem("forbidden", 403);
+  assert.equal((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
+  assert.equal((writes[3]!.page.transition as { type: string }).type, "stinger");
+
+  // Any other failure is the caller's to see.
+  logoRead = () => problem("internal_error", 500);
+  assert.notEqual((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
+  assert.equal(writes.length, 4);
 });

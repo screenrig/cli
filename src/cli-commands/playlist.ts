@@ -167,7 +167,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--fit <FIT>", "How the media fits the canvas").choices(["contain", "cover"]))
     .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
     .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
-    .option("--always", "Remove the page's dates: it is shown always")
+    .option("--always", "Remove the page's dates (from and until); a switch-off or weekly windows the project set stay")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistPageReplace));
