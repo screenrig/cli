@@ -1,4 +1,4 @@
-import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaChange, ReviewMediaFields, ReviewMediaPlaylist, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
+import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaChange, ReviewMediaFields, ReviewMediaFile, ReviewMediaPlaylist, ReviewMediaReplace, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
 import type { ProblemNext, Warning } from "./envelope.js";
 import { accessLabel } from "./oauth.js";
 import { unexpectedResponseError, usageError } from "./problems.js";
@@ -91,10 +91,12 @@ function kindLabel(kind: string): string {
 /**
  * A selector_refresh review approves one pending media item (subject type
  * media): a new upload, or a change of approved media's tags or folder
- * (media_change.before is what was last approved).
+ * (media_change.before is what was last approved). A media_replace review
+ * (subject type media too) approves a new file for media that keeps its id.
  */
 function reviewLabel(review: Pick<Review, "kind" | "subject" | "playlist_change">): string {
   if (review.subject?.type !== "media") return kindLabel(review.kind);
+  if (review.playlist_change?.operation === "media_replace") return review.playlist_change.media_replace?.source === "restore" ? "Media restore" : "Media replacement";
   return review.playlist_change?.media_change?.before ? "Media change" : "New media";
 }
 
@@ -143,6 +145,8 @@ function count(items: string[] | undefined): number {
 export function playlistChangeText(change: NonNullable<Review["playlist_change"]>): string {
   const diff = change.diff;
   const operation = change.operation === "create" ? "new playlist"
+    : change.operation === "media_replace"
+      ? `${change.media_replace?.source === "restore" ? "restore of an earlier file" : "replacement file"} for media that playlists and schedules already play`
     : change.operation === "selector_refresh"
       ? `${change.media_change?.before ? "changed tags or folder of approved media" : "new media"} for the tag, folder or all selectors of approved playlists`
     : `update of revision ${change.base_revision}`;
@@ -238,6 +242,27 @@ function mediaPlaylistText(playlist: ReviewMediaPlaylist): string {
   return `${plainText(playlist.name)} (${playlist.id}, ${screensText(playlist.screens)})${changes.length ? `: ${changes.join("; ")}` : ""}`;
 }
 
+function fileText(file: ReviewMediaFile | undefined): string {
+  if (!file) return "-";
+  const size = typeof file.width === "number" && typeof file.height === "number" ? ` ${file.width}x${file.height}` : "";
+  const duration = typeof file.duration_ms === "number" ? ` ${(file.duration_ms / 1000).toFixed(1)} s` : "";
+  return `${plainText(file.content_type)}${size}${duration}, ${file.bytes} bytes, sha256 ${plainText(file.sha256).slice(0, 12)}`;
+}
+
+/** A media_replace review's change: the file now in service, the file approving puts in service, and what plays it. */
+export function mediaReplaceLines(change: ReviewMediaReplace): string[] {
+  const playlists = Array.isArray(change.playlists) ? change.playlists : [];
+  return [
+    `file: ${plainText(change.filename)} (${change.media_id})`,
+    `source: ${change.source === "restore" ? `restore of version ${change.restored_from ?? "?"}` : "replacement"}; becomes version ${change.version}`,
+    ...(change.note === undefined ? [] : [`note: ${plainText(change.note)}`]),
+    `before: ${fileText(change.before)}`,
+    `after: ${fileText(change.after)}`,
+    ...(change.aspect_changed ? ["aspect ratio: changed, so check how the playlists below look"] : []),
+    ...(playlists.length ? [`playlists: ${playlists.map((playlist) => `${plainText(playlist.name)} (${playlist.id})`).join(", ")}`] : []),
+  ];
+}
+
 /** Human detail of one review (reviews show, withdraw). */
 export function reviewDetailLines(review: Review): string[] {
   // A list value prints as indented lines under its key.
@@ -251,6 +276,7 @@ export function reviewDetailLines(review: Review): string[] {
     ["impact", typeof review.impact?.screens === "number" ? `approving changes ${screensText(review.impact.screens)}` : undefined],
     ["change", review.playlist_change ? playlistChangeText(review.playlist_change) : undefined],
     ["media_change", review.playlist_change?.media_change ? mediaChangeText(review.playlist_change.media_change) : undefined],
+    ["media_replace", review.playlist_change?.media_replace ? mediaReplaceLines(review.playlist_change.media_replace) : undefined],
     ["applied_revision", review.playlist_change?.applied_revision === undefined ? undefined : String(review.playlist_change.applied_revision)],
     ["creative", review.ad_creative ? `${review.ad_creative.creative_id} revision ${review.ad_creative.creative_revision}` : undefined],
     ["media_playlists", review.playlist_change?.media_playlists?.length ? review.playlist_change.media_playlists.map(mediaPlaylistText) : undefined],
@@ -276,7 +302,8 @@ export function reviewListLines(list: ReviewList): string[] {
   return [
     `Reviews (${items.length}; ${list.pending_count ?? 0} pending)`,
     ...items.map((review) => [review.id, review.kind, review.state, subjectText(review.subject) ?? "-", review.created_at,
-      ...(review.playlist_change?.media_change ? [mediaChangeText(review.playlist_change.media_change)] : [])].join("  ")),
+      ...(review.playlist_change?.media_change ? [mediaChangeText(review.playlist_change.media_change)] : []),
+      ...(review.playlist_change?.media_replace ? [`${review.playlist_change.media_replace.source === "restore" ? "restore" : "replacement"} becomes version ${review.playlist_change.media_replace.version}`] : [])].join("  ")),
   ];
 }
 

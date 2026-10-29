@@ -869,7 +869,7 @@ export function commandHandler(
         (group === "app" && ["upload", "update", "rename"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "patch", "rename", "delete", "promote"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
-        (group === "media" && ["update", "delete"].includes(action ?? "")) ||
+        (group === "media" && ["update", "delete", "restore", "version"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
         group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "source" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
@@ -3481,7 +3481,7 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
 }
 
 /** Name a missing or unusable input file before any tool or request runs on it. */
-async function requireInputFile(resolved: string, given: string): Promise<void> {
+export async function requireInputFile(resolved: string, given: string): Promise<void> {
   let info;
   try {
     info = await stat(resolved);
@@ -4826,7 +4826,7 @@ export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
     preset: preset === "signage-1080p30" || preset === "signage-4k30" ? preset : undefined, noAudio };
 }
 
-function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressReporter {
+export function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressReporter {
   if (flagBool(args.flags, "no-progress")) {
     return silentProgressReporter();
   }

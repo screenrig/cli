@@ -2255,8 +2255,24 @@ export interface ReviewMediaPlaylist { id: string; name: string; screens: number
 export interface ReviewMediaFields { tags: string[]; folder_id: string }
 /** A media review's change: before is what was last approved, null for a new upload. */
 export interface ReviewMediaChange { media_id: string; filename: string; before: ReviewMediaFields | null; after: ReviewMediaFields }
+/** One side of a media_replace review: the file as stored. */
+export interface ReviewMediaFile { sha256: string; bytes: number; content_type: string; width?: number; height?: number; duration_ms?: number }
+/** A media_replace review's change: the media keeps its current file until approval. */
+export interface ReviewMediaReplace {
+  media_id: string;
+  filename: string;
+  source: "replace" | "restore";
+  restored_from?: number;
+  note?: string;
+  /** The version number the file gets on approval. */
+  version: number;
+  before: ReviewMediaFile;
+  after: ReviewMediaFile;
+  aspect_changed: boolean;
+  playlists: Array<{ id: string; name: string }>;
+}
 export interface ReviewPlaylistChange {
-  operation: "create" | "update" | "selector_refresh";
+  operation: "create" | "update" | "selector_refresh" | "media_replace";
   base_revision: number;
   applied_revision?: number;
   proposed: Record<string, unknown>;
@@ -2264,6 +2280,8 @@ export interface ReviewPlaylistChange {
   media_playlists?: ReviewMediaPlaylist[];
   /** selector_refresh only. */
   media_change?: ReviewMediaChange;
+  /** media_replace only. */
+  media_replace?: ReviewMediaReplace;
   previously_rejected_media?: string[];
 }
 export interface ReviewScreenChange {

@@ -1,4 +1,5 @@
-import { positiveInteger, positiveNumber, revision } from "./options.js";
+import { positiveInteger, positiveNumber, revision, reviewNoteOption } from "./options.js";
+import { handleMediaReplace, handleMediaRestore, handleMediaVersionDelete, handleMediaVersions } from "../media-versions.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../commands.js";
 import { type Command, Option } from "commander";
@@ -11,6 +12,7 @@ import {
   mediaSyncAccountOption, mediaSyncClientId, mediaSyncDesign, mediaSyncEvery, mediaSyncFolderOption, mediaSyncName, mediaSyncPages, mediaSyncTenant, mediaSyncUrl,
 } from "../media-sync.js";
 
+const REPLACE_NOTE_HELP = "Note kept with the new version and shown to a person who reviews it (at most 280 characters)";
 const SECRET_FILE = "Read the client secret's value from this file, or - for stdin (never an argument)";
 
 export function registerMediaCommands(root: Command, bind: CommandActionBinder): void {
@@ -46,6 +48,43 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .addOption(new Option("--preset <PRESET>", "Choose a transcoding preset").choices(["signage-1080p30", "signage-4k30"]).conflicts(["transcode"]))
     .addOption(new Option("--no-audio", "Remove the audio track when transcoding").conflicts(["transcode"]))
     .action(bind(handleMediaUpload));
+
+  media.command("replace").description("Replace a media item's file in place; its id, playlists and schedules keep working")
+    .argument("<id>", "Media identifier (med_...)")
+    .argument("<file>", "Local input file, the same kind as the media (image, video or audio)")
+    .option("--expect-rev <REVISION>", "Optionally require this media revision", revision)
+    .option("--note <TEXT>", REPLACE_NOTE_HELP, reviewNoteOption)
+    .option("--content-type <TYPE>", "Declare the content MIME type")
+    .option("--no-wait", "Return after acceptance without waiting for processing")
+    .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
+    .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
+    .addOption(new Option("--codec <h264|hevc>", "Choose the video codec").choices(["h264", "hevc"]).default("h264").conflicts(["transcode"]))
+    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
+    .addOption(new Option("--max-edge <PIXELS>", "Limit the longest video edge").argParser(positiveInteger("max-edge")).conflicts(["transcode"]))
+    .addOption(new Option("--webp-quality <1-100>", "Set WebP quality").argParser(positiveInteger("webp-quality")).conflicts(["transcode"]))
+    .option("--no-progress", "Suppress stderr progress")
+    .addOption(new Option("--preset <PRESET>", "Choose a transcoding preset").choices(["signage-1080p30", "signage-4k30"]).conflicts(["transcode"]))
+    .addOption(new Option("--no-audio", "Remove the audio track when transcoding").conflicts(["transcode"]))
+    .action(bind(handleMediaReplace));
+
+  media.command("versions").description("List a media item's versions, the file in service first")
+    .argument("<id>", "Media identifier (med_...)")
+    .option("--limit <N>", "Read one page of this many versions, 1 to 100", positiveInteger("limit"))
+    .option("--cursor <CURSOR>", "Read the page after the data.next_cursor of the previous page")
+    .action(bind(handleMediaVersions));
+
+  media.command("restore").description("Put a past version back in service, as a new version")
+    .argument("<id>", "Media identifier (med_...)")
+    .requiredOption("--number <N>", "Version number to put back, as media versions lists it (required; --version N means the same)", positiveInteger("number"))
+    .option("--expect-rev <REVISION>", "Optionally require this media revision", revision)
+    .option("--note <TEXT>", REPLACE_NOTE_HELP, reviewNoteOption)
+    .action(bind(handleMediaRestore));
+
+  const version = media.command("version").description("Manage one stored version of a media item");
+  version.command("delete").description("Delete a past version and its stored bytes")
+    .argument("<id>", "Media identifier (med_...)")
+    .requiredOption("--number <N>", "Version number to delete, as media versions lists it (required; --version N means the same)", positiveInteger("number"))
+    .action(bind(handleMediaVersionDelete));
 
   media.command("upload-batch").description("Upload a manifest with resumable state")
     .argument("<manifest.json>", "Upload manifest file")
