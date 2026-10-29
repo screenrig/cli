@@ -109,7 +109,6 @@ test("root help is compact and every command is discoverable through immediate c
     "billing balance",
     "billing statement",
     "agent enroll",
-    "agent connect",
     "agent status",
     "agent disconnect",
     "agent revoke-identity",
@@ -428,14 +427,9 @@ test("unknown help paths fail rather than silently showing root help", () => {
   });
 });
 
-test("compatibility aliases resolve canonical help", () => {
-  assert.deepEqual(commandHelp(["playlist", "get"]), commandHelp(["playlist", "show"]));
-  assert.deepEqual(commandHelp(["playlist", "show"]).aliases, [["playlist", "get"]]);
-});
-
 test("help appended to an invocation resolves the command without echoing argument values", () => {
   assert.deepEqual(invoke(["screen", "assign", "scr_TEST", "--help"]), invoke(["screen", "assign", "--help"]));
-  assert.deepEqual(invoke(["playlist", "get", "pl_TEST", "--help"]), invoke(["playlist", "show", "--help"]));
+  assert.deepEqual(invoke(["playlist", "show", "pl_TEST", "--help"]), invoke(["playlist", "show", "--help"]));
 });
 
 test("negative switches are documented as booleans without value placeholders", () => {
@@ -531,8 +525,8 @@ test("canonical vocabulary keeps legacy invocations equivalent without rewriting
     assert.deepEqual(parseArgv([...prefix, `${canonical}=${value}`, ...suffix]), parseArgv([...prefix, `${legacy}=${value}`, ...suffix]));
     assert.throws(() => parseArgv([...prefix, `${canonical}=${value}`, `${legacy}=${value}`, ...suffix]), /only once/);
   }
-  assert.deepEqual(parseArgv(["operations", "get", "op_TEST"]), parseArgv(["operations", "show", "op_TEST"]));
-  assert.deepEqual(commandHelp(["operations", "get"]), commandHelp(["operations", "show"]));
+  assert.throws(() => parseArgv(["operations", "get", "op_TEST"]), /operations has no command get/);
+  assert.throws(() => parseArgv(["playlist", "get", "pl_TEST"]), /playlist has no command get/);
   const selector = commandHelp(["kv", "get"]).options.find(option => option.name === "--app-id");
   assert.equal(selector?.required, true);
   assert.deepEqual(selector?.aliases, ["--application-id"]);

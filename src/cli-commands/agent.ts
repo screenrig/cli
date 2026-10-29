@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity, handleLogin, handleLogout } from "../commands.js";
+import { handleAgentEnroll, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity, handleLogin, handleLogout } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { ACCESS_LEVELS } from "../oauth.js";
@@ -31,16 +31,6 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   // Mutually exclusive credential sources. A new enrollment must supply exactly
   // one; a pending enrollment resumes without either flag.
   requireOptionGroup(enroll, "atMostOne", ["--email", "--agentid-claim"]);
-
-  addCommandNotes(agent.command("connect").description("Alias of screenrig login, kept for one release")
-    .option("--target-project-id <ID>", "Suggest the project the person approves (screenrig login --project)")
-    .option("--name <NAME>", "Set this agent installation name")
-    .addOption(new Option("--print-url", "Return the sign-in URL in the pending result").hideHelp())
-    .option("--wait", "Wait for dashboard approval")
-    .option("--no-wait", "Print the sign-in URL and code with a resume handle, and return (default)")
-    .addOption(new Option("--cancel", "Clear this installation's pending sign-in")
-      .conflicts(["targetProjectId", "name", "printUrl", "wait"]))
-    .action(bind(handleAgentConnect)), "Runs screenrig login and adds a command_renamed warning naming it. Without --wait it returns pending with a login_ resume handle; screenrig login --resume ID finishes it. The person approving the sign-in in the dashboard chooses the project, Read only, Propose or Manage, and the capabilities.");
 
   agent.command("status").description("Inspect this agent's connection and access")
     .action(bind(handleAgentStatus));

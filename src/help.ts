@@ -20,7 +20,6 @@ export interface HelpOption {
 
 export interface HelpDocument {
   path: string[];
-  aliases: string[][];
   kind: "group" | "command";
   usage: string;
   synopsis: string[];
@@ -34,7 +33,7 @@ export interface HelpDocument {
   notes: string[];
 }
 
-/** Canonical and alias paths of every visible descendant leaf, in tree order; hidden commands stay out of discovery. */
+/** Paths of every visible descendant leaf, in tree order; hidden commands stay out of discovery. */
 export function leafCommandPaths(command: Command): string[] {
   const paths: string[] = [];
   const children = (node: Command): Command[] => node.createHelp().visibleCommands(node);
@@ -46,7 +45,6 @@ export function leafCommandPaths(command: Command): string[] {
     const path = commandPath(node);
     if (!path.length) return;
     paths.push(path.join(" "));
-    for (const alias of node.aliases()) paths.push([...path.slice(0, -1), alias].join(" "));
   };
   children(command).forEach(visit);
   return paths;
@@ -78,7 +76,6 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   });
   return {
     path,
-    aliases: command.aliases().map((alias) => [...path.slice(0, -1), alias]),
     kind: command.commands.length ? "group" : "command",
     usage: [command.helpInformation().trimEnd(), inventory, ...notes, ...(examples.length ? [`Examples:\n${examples.map((example) => `  ${example}`).join("\n")}`] : [])].filter((part): part is string => part !== undefined).join("\n\n"),
     synopsis: [helper.commandUsage(command)],

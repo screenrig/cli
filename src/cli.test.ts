@@ -48,13 +48,6 @@ async function withRuntime(
   transport: FakeTransport,
   extra?: Partial<CliRuntime>,
 ): Promise<{ code: number; stdout: string; stderr: string; configDir: string }> {
-  if (argv.includes("connect")) {
-    transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: {
-      id: "prj_CONNECTEDAAAAAAAAAAAAAAA", name: "Screens",
-      organization_id: "org_CONNECTEDAAAAAAAAAAAAAAA", organization_name: "Connected organization",
-      revision: 1, status: "active", screen_count: 0, used_bytes: 0, reserved_bytes: 0,
-    } }));
-  }
   const configDir = extra?.fs ? "" : await testTemp("cfg-");
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -1673,7 +1666,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
       request_id: "req_AAAAAAAAAAAAAAAAAAAAAAAA",
       current_revision: 8,
       next: {
-        command: "screenrig playlist get pl_01 --json",
+        command: "screenrig playlist show pl_01 --json",
         reason: "Fetch revision 8, reapply the intended edit, and retry.",
       },
     },
@@ -1690,7 +1683,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
   assert.equal(code, ExitCode.Precondition);
   const envelope = JSON.parse(stdout) as { ok: false; error: { code: string; next: { command: string } } };
   assert.equal(envelope.error.code, "revision_conflict");
-  assert.equal(envelope.error.next.command, "screenrig playlist get pl_01 --json");
+  assert.equal(envelope.error.next.command, "screenrig playlist show pl_01 --json");
   await rm(configDir, { recursive: true, force: true });
 });
 

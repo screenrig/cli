@@ -42,8 +42,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     });
   }
   command.on(`option:${option.name()}`, () => {
-    const repeatable = (name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
-      || (command.name() === "create" && command.parent?.name() === "service-client")))
+    const repeatable = (name === "capability" && command.name() === "create" && command.parent?.name() === "service-client")
       || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
       || (name === "field" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
       || (["set", "clear"].includes(name) && command.parent?.name() === "playlist" && ["create", "fields"].includes(command.name()))

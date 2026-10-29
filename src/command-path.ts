@@ -9,7 +9,7 @@ export function commandPath(command: Command): string[] {
 export function findCommand(root: Command, path: readonly string[]): Command | undefined {
   let command = root;
   for (const word of path) {
-    const child = command.commands.find((candidate) => candidate.name() === word || candidate.aliases().includes(word));
+    const child = command.commands.find((candidate) => candidate.name() === word);
     if (!child) return undefined;
     command = child;
   }
@@ -40,7 +40,7 @@ export function commandFromArgv(root: Command, argv: readonly string[]): Command
       if (takesValue) index += 1;
       continue;
     }
-    const child = command.commands.find((candidate) => candidate.name() === token || candidate.aliases().includes(token));
+    const child = command.commands.find((candidate) => candidate.name() === token);
     if (!child) break;
     command = child;
   }

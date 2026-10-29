@@ -41,7 +41,7 @@ test("supported values, aliases, empty byte payload, and help paths remain valid
     ["screen", "update", "scr_TEST", "--name=Lobby=North", "--expect-rev", '"1"'],
     ["screen", "screenshot", "scr_TEST", "--timeout", "0"],
     ["events", "follow", "--timeout", "0"],
-    ["playlist", "get", "pl_TEST"],
+    ["playlist", "show", "pl_TEST"],
     ["app", "pack", "--", "--directory"],
     ["kv", "set", "key", "--application-id", "app_TEST", "--value-base64=", "--content-type", "text/plain"],
     ["--help"], ["--version"], ["screen"], ["comment", "show"],

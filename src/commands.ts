@@ -581,7 +581,7 @@ type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 const serviceCredentials = new WeakMap<CliRuntime, ServiceClientCredentials>();
 
 /** Commands that act as an agent installation; a service-client run has none. */
-const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "project token", "agent enroll", "agent connect", "agent disconnect", "agent revoke-identity"]);
+const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "project token", "agent enroll", "agent disconnect", "agent revoke-identity"]);
 
 /**
  * SCREENRIG_CLIENT_ID mode: the run authenticates as a service client. Its
@@ -806,36 +806,6 @@ export const handleAppPack = commandHandler(appPack, false);
 
 export const handleAgentStatus = commandHandler(agentStatus, false);
 
-/** `agent connect` is an alias of `screenrig login` for one release. */
-const AGENT_CONNECT_ALIAS: Warning = {
-  code: "command_renamed",
-  message: "agent connect is now screenrig login; this alias is kept for one release. Run screenrig login.",
-};
-
-export const handleAgentConnect = commandHandler(async (args, runtime, resolved) => {
-  return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, async () => {
-    if (flagBool(args.flags, "cancel")) {
-      const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
-      if (!stored?.login) {
-        throw usageError("This installation has no pending sign-in to cancel; nothing was sent.", {
-          command: "screenrig agent status", reason: "Shows this installation's credential state.",
-        });
-      }
-      await new DeviceLogin(oauthSessionFor(runtime, resolved), resolved.configPath, sessionRuntime(runtime)).clear(stored.login.id);
-      const result: CommandResult = { envelope: successEnvelope({ status: "cancelled" }), exitCode: ExitCode.Success, human: "Pending sign-in cancelled." };
-      return { ...result, envelope: { ...result.envelope, warnings: [AGENT_CONNECT_ALIAS] } };
-    }
-    const warnings: Warning[] = [AGENT_CONNECT_ALIAS];
-    return login(args, runtime, resolved, {
-      project: flagString(args.flags, "target-project-id"),
-      access: "manage",
-      // agent connect returns pending by default; --wait waits for approval.
-      wait: flagBool(args.flags, "wait"),
-      warnings,
-    });
-  });
-}, false);
-
 export const handleLogin = commandHandler(async (args, runtime, resolved) => {
   return loggerOf(runtime).withLocal({ op: "login", message: "login" }, () => {
     const access = (flagString(args.flags, "access") ?? "manage") as AccessLevel;
@@ -845,7 +815,6 @@ export const handleLogin = commandHandler(async (args, runtime, resolved) => {
       access,
       wait: !flagBool(args.flags, "no-wait"),
       resume: flagString(args.flags, "resume"),
-      warnings: [],
     });
   });
 }, false);
@@ -1026,7 +995,7 @@ export const handleServiceClientRevoke = commandHandler(async (args, runtime, re
 
 /** The device sign-in. */
 async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig,
-  request: { project?: string; access: AccessLevel; wait: boolean; resume?: string; warnings: Warning[] }): Promise<CommandResult> {
+  request: { project?: string; access: AccessLevel; wait: boolean; resume?: string }): Promise<CommandResult> {
   if (request.project !== undefined && !isResourceID(request.project, "project")) throw usageError("login --project must be a project ID (prj_...).");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("login --name is at most 80 characters.");
@@ -1057,7 +1026,7 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
         access: pending.access,
         ...(pending.project_id ? { project_id: pending.project_id } : {}),
         next: { command: `screenrig ${resume.join(" ")}`, argv: resume, reason: "After the person approves the sign-in, this stores its tokens." },
-      }, { warnings: request.warnings }),
+      }),
       exitCode: ExitCode.Success,
       human: humanLines(outcome.resumed ? "Sign-in pending" : "Sign-in started", [
         ["open", pending.verification_uri_complete],
@@ -1086,7 +1055,7 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
       ...levels.data,
       identity: outcome.scope.includes(SCOPE_IDENTITY),
       ...(outcome.agentId ? { agent_id: outcome.agentId } : {}),
-    }, { request_id: client.requestId, warnings: request.warnings }),
+    }, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
     human: humanLines("Signed in", [
       ["project", `${context.organization.name} / ${context.project.name} (${context.project.id})`],
@@ -5196,7 +5165,7 @@ export const handlePlaylistList = commandHandler(async (args, runtime, resolved)
 export const handlePlaylistShow = commandHandler(async (args, runtime, resolved) => {
 
   const id = args.positionals[2];
-  if (!id) throw usageError("playlist get requires an id.");
+  if (!id) throw usageError("playlist show requires an id.");
   const output = flagString(args.flags, "output");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await callPlaylist(client, { method: "GET", id });

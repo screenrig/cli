@@ -125,7 +125,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--output <FILE>", "Create an editable playlist file; report its revision on stdout")
     .option("--editable", "Return an editable document and revision in the JSON envelope")
     .option("--overwrite", "Replace an existing output file atomically")
-    .alias("get")
     .argument("<id>", "Playlist identifier")
     .action(bind(handlePlaylistShow));
   addCommandExamples(show, 'screenrig playlist show pl_PLAYLIST --output playlist.json',
