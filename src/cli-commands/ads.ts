@@ -45,7 +45,7 @@ import {
 } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
-import { decisionNoteOption, nonnegativeNumber, positiveInteger, revision, vastTagUrl } from "./options.js";
+import { decisionNoteOption, nonnegativeNumber, positiveInteger, reportFormatOption, reportOutputOption, revision, vastTagUrl } from "./options.js";
 import { playsInstantOption } from "../playback-export.js";
 
 /**
@@ -236,8 +236,8 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .argument("<campaign-id>", "Direct campaign identifier")
     .option("--from <TIME>", "Inclusive start: RFC 3339, now, or an age such as 7d, 12h, 30m (default: the start of the flight)", playsInstantOption("--from"))
     .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default: the end of the flight)", playsInstantOption("--to"))
-    .addOption(new Option("--format <FORMAT>", "json (default) or csv").choices(["json", "csv"]))
-    .addOption(new Option("--output <FILE>", "CSV file to write (with --format csv; default ./direct-report-CAMPAIGN_ID.csv); - writes the CSV to stdout instead of the envelope"))
+    .addOption(new Option("--format <FORMAT>", "json (default), csv, xlsx or pdf").choices(["json", "csv", "xlsx", "pdf"]))
+    .addOption(new Option("--output <FILE>", "File to write (with --format csv, xlsx or pdf; default ./direct-report-CAMPAIGN_ID.FORMAT); - writes a CSV to stdout instead of the envelope"))
     .action(bind(handleAdsDirectReport));
   const directAvailability = direct.command("availability").description("Estimate the plays still available for a targeting and flight")
     .argument("<file>", "Availability query JSON file, or - for stdin")
@@ -277,14 +277,20 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   const reports = ads.command("reports").description("Read delivery and spend for this project");
   const reportSpend = reports.command("spend").description("Read buyer ad spend for one campaign")
     .requiredOption("--campaign-id <ID>", "Campaign to report")
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("ad-spend.FORMAT"))
     .action(bind(handleAdsReportsSpend));
   const reportDelivery = reports.command("delivery").description("Read seller delivery and gross/fee/net for a period")
     .requiredOption("--from <TIMESTAMP>", "Inclusive RFC 3339 start of the reporting period")
     .requiredOption("--to <TIMESTAMP>", "Exclusive RFC 3339 end of the reporting period")
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("ad-delivery.FORMAT"))
     .action(bind(handleAdsReportsDelivery));
   const reportFill = reports.command("fill").description("Read how this seller's ad slots were filled")
     .option("--from <TIME>", "Inclusive start: RFC 3339, now, or an age such as 7d, 12h, 30m (default 7 days before --to)", playsInstantOption("--from"))
     .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default now); at most 35 days after --from", playsInstantOption("--to"))
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("ad-fill.FORMAT"))
     .action(bind(handleAdsReportsFill));
   addCommandNotes(reportFill, "Fill statistics count this project's ad-slot occurrences over up to 35 days: how many were filled by direct campaigns, marketplace campaigns and the slot's VAST tag, how many stayed unfilled and why (no_demand, ineligible, separated, capped), the fill_rate, and the same by day.");
   addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings; estimated_impressions appears when a screen carries an impressions estimate.");

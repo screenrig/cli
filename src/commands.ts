@@ -245,6 +245,11 @@ import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
 import { formatBytes } from "./media/progress.js";
+import {
+  reportCatalogLines, reportFilters, reportKind, reportQuery, reportRecipients, reportSchedule, reportSubscriptionId, reportTableLines, subscriptionLines, subscriptionListLines,
+} from "./reports.js";
+import { runProjectExport, type ExportApi } from "./project-export.js";
+import { downloadReportFile, downloadToFile, reportFileResult, reportFormat, wantsReportFile, type ReportFormat } from "./report-export.js";
 import { isPlayerScreenPath, validateProvisioningUrls } from "./provisioning-url.js";
 import { aspectMismatchWarnings } from "./aspect-mismatch.js";
 import {
@@ -3072,6 +3077,8 @@ function reportLines(title: string, body: unknown, fields: readonly string[], ro
 }
 
 export const handleAdsReportsSpend = commandHandler(async (args, runtime, resolved) => {
+  const spendFile = await reportFileOf(args, runtime, resolved, "/api/advertising/reports/spend", { campaign_id: flagString(args.flags, "campaign-id") }, "ad-spend", "ad spend report");
+  if (spendFile) return spendFile;
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
@@ -3088,6 +3095,8 @@ export const handleAdsReportsSpend = commandHandler(async (args, runtime, resolv
 });
 
 export const handleAdsReportsDelivery = commandHandler(async (args, runtime, resolved) => {
+  const deliveryFile = await reportFileOf(args, runtime, resolved, "/api/advertising/reports/delivery", { from: flagString(args.flags, "from"), to: flagString(args.flags, "to") }, "ad-delivery", "ad delivery report");
+  if (deliveryFile) return deliveryFile;
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
@@ -3240,8 +3249,10 @@ function directValueLine(value: unknown): string | undefined {
 export const handleAdsDirectReport = commandHandler(async (args, runtime, resolved) => {
   const target = directCampaignPath(args, "report");
   const id = args.positionals[3]!;
-  const format = playbackFormat(args, "ads direct report");
   const window = adsWindow(args, runtime);
+  const directFile = await reportFileOf(args, runtime, resolved, `${target}/report`, window, `direct-report-${id}`, "direct campaign report", true);
+  if (directFile) return directFile;
+  const format = playbackFormat(args, "ads direct report");
   const toStdout = flagString(args.flags, "output") === "-";
   const outputPath = format === "csv" && !toStdout
     ? await resolveDownloadOutput(runtime.cwd(), `./direct-report-${id}.csv`, args.flags)
@@ -3306,6 +3317,8 @@ export const handleAdsDirectReport = commandHandler(async (args, runtime, resolv
 
 export const handleAdsReportsFill = commandHandler(async (args, runtime, resolved) => {
   const window = adsWindow(args, runtime, FILL_MAX_RANGE_MS);
+  const fillFile = await reportFileOf(args, runtime, resolved, "/api/advertising/reports/fill", window, "ad-fill", "ad fill report");
+  if (fillFile) return fillFile;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({ method: "GET", path: "/api/advertising/reports/fill", query: window });
   requirePrivateNoStore(response.headers, "Advertising report response");
@@ -3593,6 +3606,46 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   };
 }
 
+/** The report commands that also write their route's rows as a file (--format csv, xlsx or pdf), by command and file name stem. */
+const REPORT_FILE_COMMANDS: Record<string, string> = {
+  "project uptime": "project-uptime",
+  "project health-trend": "health-trend",
+  "screen uptime": "screen-uptime",
+  "screen health-history": "screen-health-history",
+  "playback totals": "play-totals",
+  "playback completeness": "play-completeness",
+};
+
+/**
+ * `--format csv|xlsx|pdf` of a report command: the server writes the file (the
+ * route's format member, every page of it) and this saves it to --output, by
+ * default ./<name>.<format>; - is not accepted for a binary file. json (the
+ * default) stays the command envelope. nativeCsv leaves csv to a command that
+ * streams its own.
+ */
+async function reportFileOf(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+  pathName: string,
+  query: Record<string, string | undefined> | undefined,
+  stem: string,
+  what: string,
+  nativeCsv = false,
+): Promise<CommandResult | undefined> {
+  requireFlagValue(args, "format", "xlsx");
+  const format: ReportFormat = reportFormat(args);
+  if (!wantsReportFile(format, nativeCsv)) {
+    if (format === "json" && args.flags.output !== undefined) throw usageError("--output applies to --format csv, xlsx or pdf. JSON is the command envelope on stdout.");
+    return undefined;
+  }
+  if (flagString(args.flags, "output") === "-") throw usageError("--output - writes only a CSV stream; give a file path.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const file = await downloadReportFile(client, { path: pathName, query, format, output: flagString(args.flags, "output"), stem, cwd: runtime.cwd(), what });
+  const result = reportFileResult(file);
+  return { envelope: result.envelope, exitCode: ExitCode.Success, human: result.human };
+}
+
 async function simpleGet(
   args: ParsedArgs,
   runtime: CliRuntime,
@@ -3602,6 +3655,11 @@ async function simpleGet(
   query?: Record<string, string | undefined>,
   paged: boolean | ListAllOptions = false,
 ): Promise<CommandResult> {
+  const stem = REPORT_FILE_COMMANDS[args.command.slice(0, 2).join(" ")];
+  if (stem !== undefined) {
+    const file = await reportFileOf(args, runtime, resolved, pathName, query, stem, title.toLowerCase());
+    if (file) return file;
+  }
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = paged
@@ -4467,6 +4525,8 @@ async function playbackList(
     throw usageError("Use --day for one UTC day, or --day-from/--day-to for a range, not both.");
   }
   const query = { screen_id: screenId, media_id: mediaId, day, ...days };
+  const aggregateFile = await reportFileOf(args, runtime, resolved, "/api/playback", query, "play-aggregates", "playback aggregates", true);
+  if (aggregateFile) return aggregateFile;
   if (playbackFormat(args, "playback list") === "csv") {
     return playbackCsvExport(args, runtime, resolved, {
       path: "/api/playback", query, what: "playback aggregates", defaultFile: "./playback-aggregates.csv",
@@ -4497,10 +4557,12 @@ async function playbackPlays(
   const limit = limitValue === undefined ? undefined : playsLimit(limitValue);
   if (args.flags.all !== undefined && args.flags.all !== true) throw usageError("--all takes no value.");
   const all = flagBool(args.flags, "all");
-  const format = playbackFormat(args, "playback plays");
   const range = playsRange(flagString(args.flags, "from"), flagString(args.flags, "to"), runtime.now());
   const filters = { screen_id: screenId, media_id: mediaId, tag };
   const query = { from: range.from, to: range.to, ...filters };
+  const playsFile = await reportFileOf(args, runtime, resolved, "/api/playback/plays", query, "plays", "plays", true);
+  if (playsFile) return playsFile;
+  const format = playbackFormat(args, "playback plays");
   // The server never returns the newest 5 seconds: report the effective end.
   const now = runtime.now().getTime();
   const reported = { from: range.from, to: Date.parse(range.to) > now - PLAYS_SETTLE_MS ? new Date(now - PLAYS_SETTLE_MS).toISOString().replace(/\.000Z$/, "Z") : range.to };
@@ -9349,15 +9411,18 @@ export const handleAlertsList = commandHandler(async (args, runtime, resolved) =
   const screenId = flagString(args.flags, "screen-id");
   const before = flagString(args.flags, "before");
   const limit = flagString(args.flags, "limit");
+  const alertQuery = {
+    ...(state !== undefined ? { state } : {}),
+    ...(screenId !== undefined ? { screen_id: alertScreenId(screenId) } : {}),
+    ...(before !== undefined ? { before: alertsCursor(before) } : {}),
+    ...(limit !== undefined ? { limit: alertsLimit(limit) } : {}),
+  };
+  const file = await reportFileOf(args, runtime, resolved, ALERTS_PATH, alertQuery, "alerts", "alerts");
+  if (file) return file;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await alertCall(client, {
     method: "GET", path: ALERTS_PATH,
-    query: {
-      ...(state !== undefined ? { state } : {}),
-      ...(screenId !== undefined ? { screen_id: alertScreenId(screenId) } : {}),
-      ...(before !== undefined ? { before: alertsCursor(before) } : {}),
-      ...(limit !== undefined ? { limit: alertsLimit(limit) } : {}),
-    },
+    query: alertQuery,
   });
   return {
     envelope: jsonBody(response, client.requestId),
@@ -10968,3 +11033,170 @@ export const handleMigratePair = commandHandler(async (args, runtime, resolved) 
   });
   return { envelope: successEnvelope(result.data, { request_id: client.requestId }), exitCode: ExitCode.Success, human: result.human };
 }, true);
+
+// Reports: GET /api/reports builds rollups and statements from the project's
+// aggregates (folder, screen and tag groups, alert history, proof of play) and
+// writes any of them as JSON, CSV, XLSX or PDF. Report subscriptions mail a
+// report to project members on a schedule.
+const REPORTS_PATH = "/api/reports";
+const REPORT_SUBSCRIPTIONS_PATH = "/api/report-subscriptions";
+
+export const handleReportsList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: REPORTS_PATH });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportCatalogLines(response.body as Parameters<typeof reportCatalogLines>[0]).join("\n"),
+  };
+});
+
+export const handleReportsShow = commandHandler(async (args, runtime, resolved) => {
+  const kind = reportKind(args.positionals[2], "reports show");
+  const query = reportQuery(args);
+  const file = await reportFileOf(args, runtime, resolved, `${REPORTS_PATH}/${kind}`, query, `${kind.replaceAll("_", "-")}${query.to ? `-${query.to}` : ""}`, `${kind} report`);
+  if (file) return file;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `${REPORTS_PATH}/${kind}`, query });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportTableLines(response.body as Parameters<typeof reportTableLines>[0]).join("\n"),
+  };
+});
+
+export const handleReportSubscriptionsList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: REPORT_SUBSCRIPTIONS_PATH });
+  const body = response.body as { items?: Parameters<typeof subscriptionListLines>[0] } | undefined;
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: subscriptionListLines(body?.items).join("\n") };
+});
+
+export const handleReportSubscriptionsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = reportSubscriptionId(args.positionals[3], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `${REPORT_SUBSCRIPTIONS_PATH}/${id}` });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: subscriptionLines(response.body as Parameters<typeof subscriptionLines>[0]).join("\n") };
+});
+
+/** The write body the subscription flags name: only the members given. */
+function reportSubscriptionBody(args: ParsedArgs): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const name = flagString(args.flags, "name");
+  const format = flagString(args.flags, "format");
+  const recipients = flagString(args.flags, "recipients");
+  const filters = reportFilters(flagString(args.flags, "filter"));
+  const schedule = reportSchedule(args);
+  if (name !== undefined) body.name = name;
+  if (format !== undefined) body.format = format;
+  if (recipients !== undefined) body.recipients = reportRecipients(recipients);
+  if (filters !== undefined) body.filters = filters;
+  if (schedule !== undefined) body.schedule = schedule;
+  if (flagBool(args.flags, "pause")) body.enabled = false;
+  if (flagBool(args.flags, "resume")) body.enabled = true;
+  return body;
+}
+
+export const handleReportSubscriptionsCreate = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const body = { ...reportSubscriptionBody(args), kind: reportKind(flagString(args.flags, "kind"), "reports subscriptions create --kind") };
+  const response = await client.call({ method: "POST", path: REPORT_SUBSCRIPTIONS_PATH, body, idempotent: true });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: ["Created", ...subscriptionLines(response.body as Parameters<typeof subscriptionLines>[0])].join("\n") };
+});
+
+export const handleReportSubscriptionsUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = reportSubscriptionId(args.positionals[3], "update");
+  const body = reportSubscriptionBody(args);
+  if (Object.keys(body).length === 0) throw usageError("reports subscriptions update needs at least one change: --name, --cadence, --format, --recipients, --filter, --pause or --resume.");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "PATCH", path: `${REPORT_SUBSCRIPTIONS_PATH}/${id}`, body, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: ["Updated", ...subscriptionLines(response.body as Parameters<typeof subscriptionLines>[0])].join("\n") };
+});
+
+export const handleReportSubscriptionsDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = reportSubscriptionId(args.positionals[3], "delete");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "DELETE", path: `${REPORT_SUBSCRIPTIONS_PATH}/${id}`, idempotent: true });
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted report subscription ${id}. Nothing more is sent.`,
+  };
+});
+
+export const handleReportSubscriptionsSend = commandHandler(async (args, runtime, resolved) => {
+  const id = reportSubscriptionId(args.positionals[3], "send");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: `${REPORT_SUBSCRIPTIONS_PATH}/${id}/send`, idempotent: true });
+  const sent = response.body as Parameters<typeof subscriptionLines>[0];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [sent?.last_status === "delivered" ? "Sent now" : "Not delivered", ...subscriptionLines(sent)].join("\n"),
+  };
+});
+
+/**
+ * `project export DIR`: every read route a project has, written to a directory
+ * in open formats (src/project-export.ts). Progress goes to stderr; the envelope
+ * lists the sections, every file with its SHA-256 and the media counts.
+ */
+export const handleProjectExport = commandHandler(async (args, runtime, resolved) => {
+  const directory = args.positionals[2];
+  if (!directory) throw usageError("project export requires a directory: screenrig project export ./export.");
+  const since = flagString(args.flags, "since");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const api: ExportApi = {
+    get: async (pathName, query) => (await client.call({ method: "GET", path: pathName, query })).body,
+    list: async (pathName, query) => {
+      const response = await client.listAll(pathName, query, { uncapped: true });
+      const items = (response.body as { items?: unknown[] } | undefined)?.items;
+      return Array.isArray(items) ? items : [];
+    },
+    file: async (pathName, query, target, contentType) => {
+      await downloadToFile(client, { path: pathName, query, target, contentType, what: pathName });
+    },
+    append: async (pathName, offset, target) => {
+      const response = await client.download({ method: "GET", path: pathName, headers: offset > 0 ? { range: `bytes=${offset}-` } : undefined });
+      if (!response.body) throw usageError(`${pathName} returned no body.`);
+      // A server that ignored the range sent the whole object: start the file over.
+      const handle = await open(target, offset > 0 && response.status === 206 ? "a" : "w", 0o600);
+      try {
+        for await (const chunk of response.body) {
+          let written = 0;
+          while (written < chunk.byteLength) written += (await handle.write(chunk, written, chunk.byteLength - written)).bytesWritten;
+        }
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    },
+  };
+  const result = await runProjectExport(api, {
+    directory: path.resolve(runtime.cwd(), directory), media: !flagBool(args.flags, "no-media"), since, now: runtime.now(),
+    progress: (line) => runtime.stderr.write(`${line}\n`),
+  });
+  const warnings: Warning[] = result.sections.filter((section) => section.status !== "ok").map((section) => ({
+    code: section.status === "failed" ? "export_section_failed" : "export_section_skipped",
+    message: `${section.name}: ${section.detail ?? section.status}`,
+  }));
+  const data = {
+    directory: result.directory, complete: result.failed === 0, sections: result.sections, media: result.media,
+    files: result.files.length, bytes: result.files.reduce((sum, file) => sum + file.bytes, 0),
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings }),
+    exitCode: ExitCode.Success,
+    human: [
+      `Project exported to ${result.directory}`,
+      `  files: ${data.files} (${formatBytes(data.bytes)}), listed in export.json with their SHA-256`,
+      `  media: ${result.media.listed} listed, ${result.media.downloaded} downloaded, ${result.media.kept} already complete, ${result.media.failed} failed`,
+      ...result.sections.filter((section) => section.status !== "ok").map((section) => `  ${section.status}: ${section.name}: ${section.detail ?? ""}`),
+      result.failed > 0 ? "  Run the same command again to continue: finished files are kept." : "  Run the same command again at any time to refresh the copy.",
+    ].join("\n"),
+  };
+});

@@ -1,5 +1,6 @@
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
+import { reportFormatOption, reportOutputOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import {
   handleAlertsAck, handleAlertsList, handleAlertsMute, handleAlertsMutes, handleAlertsShow, handleAlertsSnooze, handleAlertsUnmute,
@@ -34,6 +35,8 @@ export function registerAlertsCommands(root: Command, bind: CommandActionBinder)
     .option("--screen-id <ID>", "Only this screen's alerts", alertScreenId)
     .option("--before <CURSOR>", "Continue from the data.next_cursor of the previous page", alertsCursor)
     .option("--limit <N>", "Alerts per page, 1 to 200 (server default 100)", alertsLimit)
+    .addOption(reportFormatOption())
+    .addOption(reportOutputOption("alerts.FORMAT"))
     .action(bind(handleAlertsList));
 
   alerts.command("show").description("Inspect one alert")

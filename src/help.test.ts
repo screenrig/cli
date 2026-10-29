@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources and bi add twelve immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 61);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources, bi, schedule and reports add fourteen immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 64);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -35,6 +35,7 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), [
+    "reports list", "reports show", "reports subscriptions list", "reports subscriptions show", "reports subscriptions create", "reports subscriptions update", "reports subscriptions delete", "reports subscriptions send", "project export",
     "project token", "card preview", "card create", "card list", "card show", "card params", "card delete", "card data get", "card data put",
     "cards list", "cards show", "card-data get", "card-data put", "card-data list", "card-data delete", "feeds get",
     "recovery list",
@@ -215,6 +216,8 @@ test("root help is compact and every command is discoverable through immediate c
     "campaign delete",
     "campaign screens",
     "campaign explain",
+    "schedule import",
+    "schedule template",
     "screen update",
     "screen list",
     "screen live frame",
