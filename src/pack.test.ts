@@ -68,6 +68,13 @@ test("packs the pinned runtime with fail-closed production and localhost origin 
   assert.doesNotMatch(packedIndex?.data?.toString("utf8") ?? "", /<script\b[^>]*\b(?:async|defer)\b[^>]*data-screenrig-sdk/);
 });
 
+test("the pinned runtime carries screenrig.skip, so a repacked release can skip its page", async () => {
+  const source = (await readFile(fileURLToPath(new URL("../assets/screenrig.runtime.js", import.meta.url)))).toString("utf8");
+  assert.match(source, /async skip\(/);
+  assert.match(source, /"page\.skip"/);
+  assert.match(source, /skip_after_ready/);
+});
+
 test("injector rejects duplicate, incompatible, and reserved-path collisions", async () => {
   const injector = new ArchiveSdkInjector(Buffer.from("window.screenrig = {};"));
   const entry = (html: string) => [{ path: "index.html", type: "file" as const, data: Buffer.from(html), size: Buffer.byteLength(html) }];
