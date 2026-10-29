@@ -12,10 +12,13 @@ import { table } from "./webhooks.js";
 /** Backend Source.id (vendor/openapi.yaml). */
 export const SOURCE_ID_PATTERN = /^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$/;
 /** SourceKind: where the data comes from. `ics` reads iCalendar and webcal:// addresses. */
-export const SOURCE_KINDS = ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify"] as const;
-/** SourceCreate.refresh_seconds: one minute to one day. */
-export const SOURCE_REFRESH_MIN_S = 60;
+export const SOURCE_KINDS = ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify", "momentus"] as const;
+/** SourceCreate.refresh_seconds: half a minute to one day (a kind sets its own floor). */
+export const SOURCE_REFRESH_MIN_S = 30;
 export const SOURCE_REFRESH_MAX_S = 86_400;
+/** SourceStaleAfter: one minute to seven days, or none. */
+export const SOURCE_STALE_MIN_S = 60;
+export const SOURCE_STALE_MAX_S = 604_800;
 const SECRET_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 /** Config, secrets and files a command reads are bounded like the request the server accepts. */
 const INPUT_MAX_BYTES = 1 << 20;
@@ -30,6 +33,10 @@ export interface SourceStatus {
   last_change_at: string | null;
   next_run_at: string | null;
   failures: number;
+  /** True while the source is failing and the data it last wrote has expired. */
+  stale: boolean;
+  /** When the data the last good run wrote stops being served; null without a stale period. */
+  data_expires_at: string | null;
   error: SourceError | null;
   warnings: string[];
   stats: Record<string, number>;
@@ -43,12 +50,31 @@ export interface Source {
   config: Record<string, unknown>;
   secrets: Record<string, SourceSecretView>;
   refresh_seconds: number;
+  /** How long the card keeps the last good data when the source cannot refresh; null keeps it until the next refresh. */
+  stale_after_seconds: number | null;
   revision: number;
   status: SourceStatus;
   created_at: string;
   updated_at: string;
 }
 export interface SourceList { items: Source[]; next_cursor: string | null }
+export interface SourceRoomRef { id: string; name: string }
+export interface SourceRoom {
+  key: string; code?: string; name?: string; floor?: string; area?: string; capacity?: number;
+  status: "mapped" | "unmapped" | ""; screens: SourceRoomRef[];
+}
+export interface SourceArea { key: string; name: string; rooms: number; status: "mapped" | "unmapped" | ""; screens: SourceRoomRef[] }
+export interface SourceRoomScreen {
+  id: string; name: string; kind: "room" | "area"; field: string; value: string | null;
+  status: "mapped" | "missing" | "unknown"; key?: string; suggestion?: string;
+}
+export interface SourceRooms {
+  source_id: string;
+  room_field: string; room_key_prefix: string; area_field: string; area_key_prefix: string;
+  rooms_as_of: string | null;
+  summary: { rooms: number; unmapped_rooms: number; areas: number; unmapped_areas: number; screens: number; missing_screens: number; unknown_screens: number };
+  rooms: SourceRoom[]; areas: SourceArea[]; screens: SourceRoomScreen[]; warnings: string[];
+}
 export interface SourceTestResult {
   document: Record<string, unknown>;
   valid: boolean;
@@ -78,14 +104,34 @@ export function sourceName(value: string): string {
   return trimmed;
 }
 
-/** `--refresh`: one minute to 24 hours, as `90s`, `5m`, `1h` or `1h30m`. Returns the whole seconds. */
-export function sourceRefreshSeconds(value: string): number {
-  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(value.trim());
-  const seconds = match && value.trim() !== ""
-    ? Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0)
+/** A duration as `90s`, `5m`, `1h` or `1h30m`, in whole seconds; NaN when it is not one. */
+function durationSeconds(value: string): number {
+  const match = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(value.trim());
+  return match && value.trim() !== ""
+    ? Number(match[1] ?? 0) * 86_400 + Number(match[2] ?? 0) * 3600 + Number(match[3] ?? 0) * 60 + Number(match[4] ?? 0)
     : NaN;
+}
+
+/** `--stale-after`: one minute to 7 days, or `none` (null: keep the last good data until the next refresh). */
+export function sourceStaleAfterSeconds(value: string): number | null {
+  if (value.trim().toLowerCase() === "none") return null;
+  const seconds = durationSeconds(value);
+  if (!Number.isSafeInteger(seconds) || seconds < SOURCE_STALE_MIN_S || seconds > SOURCE_STALE_MAX_S) {
+    throw usageError("--stale-after takes 1m to 7d, such as 30m, 2h or 1d, or none.");
+  }
+  return seconds;
+}
+
+export function sourceStaleAfterOption(value: string): string {
+  sourceStaleAfterSeconds(value);
+  return value;
+}
+
+/** `--refresh`: half a minute to 24 hours, as `30s`, `5m`, `1h` or `1h30m`. Returns the whole seconds. */
+export function sourceRefreshSeconds(value: string): number {
+  const seconds = /\d+d/.test(value) ? NaN : durationSeconds(value);
   if (!Number.isSafeInteger(seconds) || seconds < SOURCE_REFRESH_MIN_S || seconds > SOURCE_REFRESH_MAX_S) {
-    throw usageError("--refresh takes 1m to 24h, such as 90s, 5m, 1h or 1h30m.");
+    throw usageError("--refresh takes 30s to 24h, such as 30s, 5m, 1h or 1h30m.");
   }
   return seconds;
 }
@@ -270,6 +316,8 @@ export function sourceProblem(error: unknown, id?: string): unknown {
     }
     case "source_limit_reached":
       return withNext("screenrig source list", "A project has at most 200 data sources. Delete one with screenrig source delete SOURCE_ID, then rerun create. Nothing was created.");
+    case "source_has_no_rooms":
+      return withNext("screenrig source list", "Only a source that reads a booking system's rooms (kind momentus) has a room mapping. Pick one of that kind.");
     case "source_busy":
       return withNext(id ? `screenrig source show ${id}` : "screenrig source list", "A scheduled sync is running. Wait for the retry interval, then refresh again; the sync updates the status on its own.");
     case "revision_conflict":
@@ -314,8 +362,11 @@ export function sourceLines(source: Source | undefined): string[] {
     `card_id: ${source.target?.card_id}`,
     `enabled: ${source.enabled}`,
     `refresh: ${refreshText(source.refresh_seconds)}`,
+    `stale_after: ${source.stale_after_seconds === null || source.stale_after_seconds === undefined ? "none (the last good data stays until the next refresh)" : refreshText(source.stale_after_seconds)}`,
     `revision: ${source.revision}`,
     `state: ${status.state}`,
+    ...(status.stale ? ["stale: true (the data has expired on screens; pages that depend on it have fallen back)"] : []),
+    ...(status.data_expires_at ? [`data_expires_at: ${status.data_expires_at}`] : []),
     ...(status.last_attempt_at ? [`last_attempt_at: ${status.last_attempt_at}`] : []),
     ...(status.last_success_at ? [`last_success_at: ${status.last_success_at}`] : []),
     ...(status.last_change_at ? [`last_change_at: ${status.last_change_at}`] : []),
@@ -388,6 +439,7 @@ export const handleSourceShow = commandHandler(async (args, runtime, resolved) =
 export const handleSourceCreate = commandHandler(async (args, runtime, resolved) => {
   const inputs = new Inputs(runtime);
   const refresh = flagString(args.flags, "refresh");
+  const staleAfter = flagString(args.flags, "stale-after");
   const config = await mergedConfig(args, inputs, async () => ({}));
   const secrets = await secretsFrom(accumulated(args.flags, "secret"), [], inputs);
   const body = {
@@ -397,6 +449,7 @@ export const handleSourceCreate = commandHandler(async (args, runtime, resolved)
     config: config ?? {},
     ...(secrets ? { secrets } : {}),
     ...(refresh !== undefined ? { refresh_seconds: sourceRefreshSeconds(refresh) } : {}),
+    ...(staleAfter !== undefined ? { stale_after_seconds: sourceStaleAfterSeconds(staleAfter) } : {}),
     ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -415,7 +468,8 @@ export const handleSourceUpdate = commandHandler(async (args, runtime, resolved)
   const name = flagString(args.flags, "name");
   const card = flagString(args.flags, "card");
   const refresh = flagString(args.flags, "refresh");
-  const expect = flagString(args.flags, "if-match");
+  const staleAfter = flagString(args.flags, "stale-after");
+  const expect = flagString(args.flags, "expect-rev");
   // --set edits the saved config: the whole config is read, merged and sent,
   // guarded by the revision read unless --expect-rev names another.
   let readRevision: number | undefined;
@@ -432,11 +486,12 @@ export const handleSourceUpdate = commandHandler(async (args, runtime, resolved)
     ...(config !== undefined ? { config } : {}),
     ...(secrets ? { secrets } : {}),
     ...(refresh !== undefined ? { refresh_seconds: sourceRefreshSeconds(refresh) } : {}),
+    ...(staleAfter !== undefined ? { stale_after_seconds: sourceStaleAfterSeconds(staleAfter) } : {}),
     ...(flagBool(args.flags, "enable") ? { enabled: true } : {}),
     ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
   };
   if (!Object.keys(body).length) {
-    throw usageError("source update requires at least one change: --name, --card, --settings, --set, --secret, --unset-secret, --refresh, --enable or --disable.");
+    throw usageError("source update requires at least one change: --name, --card, --settings, --set, --secret, --unset-secret, --refresh, --stale-after, --enable or --disable.");
   }
   const response = await sourceCall(client, {
     method: "PATCH", path: `${SOURCES_PATH}/${id}`, idempotent: true, body,
@@ -501,11 +556,56 @@ export const handleSourceRefresh = commandHandler(async (args, runtime, resolved
   };
 });
 
+/** The room mapping report as text: what no screen shows, and screens whose field names no room. */
+export function sourceRoomsLines(report: SourceRooms | undefined): string[] {
+  if (!report) return [];
+  const summary = report.summary;
+  const lines = [
+    `source_id: ${report.source_id}`,
+    ...(report.rooms_as_of ? [`rooms_as_of: ${report.rooms_as_of}`] : []),
+    ...(report.room_key_prefix ? [`rooms: screens name a room in the ${report.room_field} field; a card's data key is ${report.room_key_prefix}{screen.field.${report.room_field}}`] : []),
+    ...(report.area_key_prefix ? [`areas: screens name an area in the ${report.area_field} field; a card's data key is ${report.area_key_prefix}{screen.field.${report.area_field}}`] : []),
+    `rooms ${summary.rooms} (${summary.unmapped_rooms} no screen shows), areas ${summary.areas} (${summary.unmapped_areas} no screen shows), screens ${summary.screens} (${summary.missing_screens} without a value, ${summary.unknown_screens} naming no room or area)`,
+    ...(report.warnings.length ? ["warnings:", ...report.warnings.map((warning) => `  - ${warning}`)] : []),
+  ];
+  const unmappedRooms = report.rooms.filter((room) => room.status === "unmapped");
+  if (unmappedRooms.length) {
+    lines.push("", "Rooms no screen shows", ...table(["KEY", "NAME", "CODE", "AREA"], unmappedRooms.map((room) => [room.key, clip(room.name ?? "", 30), room.code ?? "", room.area ?? ""])));
+  }
+  const unmappedAreas = report.areas.filter((area) => area.status === "unmapped");
+  if (unmappedAreas.length) {
+    lines.push("", "Areas no screen shows", ...table(["KEY", "NAME", "ROOMS"], unmappedAreas.map((area) => [area.key, clip(area.name, 30), String(area.rooms)])));
+  }
+  const problems = report.screens.filter((screen) => screen.status !== "mapped");
+  if (problems.length) {
+    lines.push("", "Screens to fix", ...table(["SCREEN", "NAME", "FIELD", "VALUE", "PROBLEM", "SUGGESTION"], problems.map((screen) => [
+      screen.id, clip(screen.name, 30), screen.field, screen.value ?? "", screen.status === "missing" ? "no value" : "no such " + screen.kind, screen.suggestion ?? "",
+    ])));
+  }
+  if (!unmappedRooms.length && !unmappedAreas.length && !problems.length) lines.push("", "Every room is shown and every screen names one.");
+  return lines;
+}
+
+export const handleSourceRooms = commandHandler(async (args, runtime, resolved) => {
+  const id = sourceId(args.positionals[2], "rooms");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await sourceCall(client, { method: "GET", path: `${SOURCES_PATH}/${id}/rooms` }, id);
+  const report = response.body as SourceRooms | undefined;
+  const warnings: Warning[] = [];
+  if (report && report.summary.unmapped_rooms > 0) warnings.push({ code: "source_rooms_unmapped", message: `${report.summary.unmapped_rooms} room(s) of the source are shown by no screen.` });
+  if (report && report.summary.missing_screens + report.summary.unknown_screens > 0) warnings.push({ code: "source_screens_unmapped", message: `${report.summary.missing_screens + report.summary.unknown_screens} screen(s) read a room or area and have no room the source offers. Fix them with screen update SCREEN_ID --field NAME=VALUE.` });
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: ["Room mapping", ...sourceRoomsLines(report)].join("\n"),
+  };
+});
+
 export const handleSourceDelete = commandHandler(async (args, runtime, resolved) => {
   const id = sourceId(args.positionals[2], "delete");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await sourceCall(client, {
-    method: "DELETE", path: `${SOURCES_PATH}/${id}`, idempotent: true, headers: revisionHeaders(flagString(args.flags, "if-match")),
+    method: "DELETE", path: `${SOURCES_PATH}/${id}`, idempotent: true, headers: revisionHeaders(flagString(args.flags, "expect-rev")),
   }, id);
   return {
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),

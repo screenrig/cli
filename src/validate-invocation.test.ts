@@ -24,9 +24,7 @@ const invalid = [
   ["media", "upload", "poster.png", "--no-transcode", "--codec", "h264"],
   ["media", "update", "med_TEST", "--tag", "x", "--clear-tag", "--expect-rev", "1"],
   ["feedback", "bug", "Title", "--body", "x", "--body-file", "x.md"],
-  ["kv", "set", "key", "--application-id", "app_TEST", "--json-value", "{}", "--file", "x"],
-  ["compose", "render", "page.json", "--target-width", "1920"],
-  ["events", "list", "--after", "a", "--cursor", "b"],
+  ["kv", "set", "key", "--app-id", "app_TEST", "--json-value", "{}", "--file", "x"],
   ["playlist", "import", "bundle", "--expect-rev", "1"],
 ];
 
@@ -37,14 +35,14 @@ for (const [index, argv] of invalid.entries()) {
   });
 }
 
-test("supported values, aliases, empty byte payload, and help paths remain valid", () => {
+test("supported values, empty byte payload, and help paths remain valid", () => {
   for (const argv of [
     ["screen", "update", "scr_TEST", "--name=Lobby=North", "--expect-rev", '"1"'],
     ["screen", "screenshot", "scr_TEST", "--timeout", "0"],
     ["events", "follow", "--timeout", "0"],
-    ["playlist", "get", "pl_TEST"],
+    ["playlist", "show", "pl_TEST"],
     ["app", "pack", "--", "--directory"],
-    ["kv", "set", "key", "--application-id", "app_TEST", "--value-base64=", "--content-type", "text/plain"],
+    ["kv", "set", "key", "--app-id", "app_TEST", "--value-base64=", "--content-type", "text/plain"],
     ["--help"], ["--version"], ["screen"], ["comment", "show"],
     ["screen", "assign", "--help"], ["help", "comment", "show", "screen"], ["help", "help"],
   ]) assert.doesNotThrow(() => parseArgv(argv), JSON.stringify(argv));
@@ -53,7 +51,7 @@ test("supported values, aliases, empty byte payload, and help paths remain valid
 
 test("a lone - is accepted wherever the help documents stdin, and only there", () => {
   for (const [argv, name] of [
-    [["kv", "set", "key", "--application-id", "app_TEST", "--file", "-"], "file"],
+    [["kv", "set", "key", "--app-id", "app_TEST", "--file", "-"], "file"],
     [["screen", "schedule", "set", "scr_TEST", "--file", "-"], "file"],
     [["screen", "display-schedule", "set", "scr_TEST", "--file", "-"], "file"],
     [["media", "generate", "--prompt-file", "-"], "prompt-file"],

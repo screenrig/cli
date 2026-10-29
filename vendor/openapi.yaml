@@ -10344,6 +10344,43 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/sources/{source_id}/rooms:
+    parameters:
+      - $ref: '#/components/parameters/SourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getSourceRooms
+      description: >-
+        The room mapping of a data source that reads a booking system's rooms (kind momentus): which rooms it offers that no screen shows (summary.unmapped_rooms), and which screens read a room or area document without a value that names one (screens with status missing or unknown, with a suggestion when the value is a room written another way). The rooms are those of the source's last good refresh; nothing is fetched. A kind with no rooms answers source_has_no_rooms.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The room mapping report.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceRooms'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: source_has_no_rooms.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/sources/{source_id}/refresh:
     parameters:
       - $ref: '#/components/parameters/SourceID'
@@ -26896,10 +26933,10 @@ components:
       required: [rows]
       properties:
         name: {type: string, minLength: 1, maxLength: 80, description: "Identifies the import; the same name updates the levels it made (default import)."}
-        source: {type: string, maxLength: 200, description: The file the rows came from.}
-        timezone: {type: string, description: The IANA zone the times are written in when a row has no timezone.}
-        code_field: {type: string, description: Read a screen code only from this screen field.}
-        fingerprint: {type: string, description: The preview's fingerprint; required by the commit.}
+        source: {type: string, maxLength: 200, description: "The file the rows came from."}
+        timezone: {type: string, description: "The IANA zone the times are written in when a row has no timezone."}
+        code_field: {type: string, description: "Read a screen code only from this screen field."}
+        fingerprint: {type: string, description: "The preview's fingerprint; required by the commit."}
         rows:
           type: array
           minItems: 1
@@ -26913,7 +26950,7 @@ components:
       additionalProperties: false
       required: [code, message]
       properties:
-        column: {type: string, description: The column of the cell; absent for a problem of the whole row.}
+        column: {type: string, description: "The column of the cell; absent for a problem of the whole row."}
         code: {type: string, description: "required, unknown_screen, ambiguous_screen, unknown_folder, ambiguous_folder, unknown_tag, unknown_file, ambiguous_file, not_playable, invalid_time, reversed_times, past_end, no_timing, invalid_value, timezone, screen_not_ready, overlap or limit; outranked and open_end are warnings."}
         message: {type: string}
     ScheduleImportResolved:
@@ -26924,22 +26961,22 @@ components:
         kind: {type: string, description: "screen, folder, tag or list for a target; file or playlist for content."}
         id: {type: string}
         name: {type: string}
-        screens: {type: integer, minimum: 0, description: The screens a target reaches.}
+        screens: {type: integer, minimum: 0, description: "The screens a target reaches."}
     ScheduleImportRow:
       type: object
       additionalProperties: false
       required: [row, status]
       properties:
-        row: {type: integer, minimum: 2, description: The row's place in the file; the header is row 1.}
+        row: {type: integer, minimum: 2, description: "The row's place in the file; the header is row 1."}
         status: {type: string, enum: [ok, error]}
         cells: {type: object, additionalProperties: {type: string}, description: "The row's cells by column as the sheet gave them (target, content, start, end, timezone, days, daily_start, daily_end, priority, name, display); send them again, with corrections, as rows."}
         errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
         warnings: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}}
         target: {$ref: "#/components/schemas/ScheduleImportResolved"}
         content: {$ref: "#/components/schemas/ScheduleImportResolved"}
-        from: {type: string, description: The start as written, 'YYYY-MM-DDTHH:MM.': ''}
-        until: {type: string, description: The end as written, exclusive: '', 'YYYY-MM-DDTHH:MM.': ''}
-        level: {type: string, description: The key of the level the row feeds.}
+        from: {type: string, description: "The start as written, YYYY-MM-DDTHH:MM."}
+        until: {type: string, description: "The end as written, exclusive, YYYY-MM-DDTHH:MM."}
+        level: {type: string, description: "The key of the level the row feeds."}
     ScheduleImportLevel:
       type: object
       additionalProperties: false
@@ -26949,9 +26986,9 @@ components:
         action: {type: string, enum: [create, update, unchanged]}
         home: {type: string, enum: [screen, shared], description: "screen is an entry of one screen's own schedule; shared is a campaign over an audience."}
         screen_id: {type: string}
-        entry_id: {type: string, description: The entry (imp_ then the import and level keys) the level is or will be.}
-        campaign_id: {type: string, description: The campaign a stored shared level already is.}
-        name: {type: string, description: The shared level's campaign name.}
+        entry_id: {type: string, description: "The entry (imp_ then the import and level keys) the level is or will be."}
+        campaign_id: {type: string, description: "The campaign a stored shared level already is."}
+        name: {type: string, description: "The shared level's campaign name."}
         content: {$ref: "#/components/schemas/ScheduleImportResolved"}
         screens: {type: integer, minimum: 0}
         priority: {type: integer, minimum: 0, maximum: 100}
@@ -26980,8 +27017,8 @@ components:
         updates: {type: integer}
         unchanged: {type: integer}
         removes: {type: integer}
-        screens: {type: integer, description: The screens whose own schedules a commit writes.}
-        playlists: {type: integer, description: The one-file playlists a commit makes for the files the sheet names.}
+        screens: {type: integer, description: "The screens whose own schedules a commit writes."}
+        playlists: {type: integer, description: "The one-file playlists a commit makes for the files the sheet names."}
     ScheduleImportPreview:
       type: object
       additionalProperties: false
@@ -26990,16 +27027,16 @@ components:
         name: {type: string}
         source: {type: string}
         timezone: {type: string}
-        columns: {type: array, items: {type: string}, description: The columns the sheet had.}
-        ignored_columns: {type: array, items: {type: string}, description: Headers nothing reads.}
-        valid: {type: boolean, description: No row has an error; only then can the import commit.}
+        columns: {type: array, items: {type: string}, description: "The columns the sheet had."}
+        ignored_columns: {type: array, items: {type: string}, description: "Headers nothing reads."}
+        valid: {type: boolean, description: "No row has an error; only then can the import commit."}
         fingerprint: {type: string}
         summary: {$ref: "#/components/schemas/ScheduleImportSummary"}
-        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: Problems of the whole file.}
+        errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: "Problems of the whole file."}
         rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}}
         levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}}
         removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}}
-        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: The stacks of the screens the import changes, as they would be after a commit.: ''}
+        calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: "The stacks of the screens the import changes, as they would be after a commit."}
     ScheduleImportCommitted:
       type: object
       additionalProperties: false
@@ -28182,14 +28219,14 @@ components:
     FeedPending: {type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: {key: {type: string}, state: {type: string, enum: [pending]}, retry_after_seconds: {type: integer}}}
     CardDataSummary: {type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}}}
     CardDataList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/CardDataSummary"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
-    SourceKind: {type: string, enum: [ics, sheets, csv, json, microsoft365, google_calendar, square, shopify], description: "Where the data comes from. ics reads iCalendar and webcal:// addresses (the other kinds are described in /docs/sources). A kind that is not available answers invalid_request at kind."}
+    SourceKind: {type: string, enum: [ics, sheets, csv, json, microsoft365, google_calendar, square, shopify, momentus], description: "Where the data comes from. ics reads iCalendar and webcal:// addresses (the other kinds are described in /docs/sources). A kind that is not available answers invalid_request at kind."}
     SourceTarget: {type: object, additionalProperties: false, required: [card_id], properties: {card_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$", description: "The card instance whose dynamic properties the source writes. One source writes one card."}}}
     SourceSecretView: {type: object, additionalProperties: false, required: [set, hint, updated_at], properties: {set: {type: boolean, enum: [true]}, hint: {type: string, description: "A masked hint: the last characters of a token, or the scheme and host of an address. The value is never returned."}, updated_at: {type: string, format: date-time}}}
     SourceError: {type: object, additionalProperties: false, required: [code, message, at], properties: {code: {type: string, enum: [unreachable, timeout, too_large, http_status, auth_failed, not_shared, parse_failed, rate_limited, mapping_failed, card_data_invalid, target_missing, payment_required, config_invalid, internal], description: "Branch on the code; the message is fixed text that names no address and no secret."}, message: {type: string}, upstream_status: {type: integer, description: "The HTTP status the address answered, when it answered one."}, at: {type: string, format: date-time}}}
     SourceStatus:
       type: object
       additionalProperties: false
-      required: [state, last_attempt_at, last_success_at, last_change_at, next_run_at, failures, error, warnings, stats]
+      required: [state, last_attempt_at, last_success_at, last_change_at, next_run_at, failures, stale, data_expires_at, error, warnings, stats]
       description: >-
         What the last runs did. state is pending (not run yet), ok (the last fetch succeeded and the card accepted the document), error (the last run failed and the card kept its last good document) or disabled. ok does not judge whether the upstream data is right or current, nor whether any screen shows the card.
       properties:
@@ -28199,13 +28236,15 @@ components:
         last_change_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When a run last wrote a document that differed from the stored one."}
         next_run_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: Null while disabled.}
         failures: {type: integer, minimum: 0, description: Consecutive failed runs.}
+        stale: {type: boolean, description: "True while the source is failing and the data it last wrote has expired (see stale_after_seconds): the card shows no data and pages that depend on it have fallen back."}
+        data_expires_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the data the last good run wrote stops being served on screens; null for a source with no stale period or no good run."}
         error: {anyOf: [{$ref: "#/components/schemas/SourceError"}, {type: "null"}]}
         warnings: {type: array, items: {type: string}, description: "What the last successful run noticed and worked around: a time zone it could not place, events cut at a limit."}
         stats: {type: object, additionalProperties: {type: integer}, description: "Counts from the last successful run, such as calendars and events."}
     Source:
       type: object
       additionalProperties: false
-      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, revision, status, created_at, updated_at]
+      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, stale_after_seconds, revision, status, created_at, updated_at]
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}
         name: {type: string, minLength: 1, maxLength: 80}
@@ -28214,7 +28253,8 @@ components:
         enabled: {type: boolean}
         config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources."}
         secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         revision: {type: integer, minimum: 1}
         status: {$ref: "#/components/schemas/SourceStatus"}
         created_at: {type: string, format: date-time}
@@ -28230,7 +28270,8 @@ components:
         target: {$ref: "#/components/schemas/SourceTarget"}
         config: {type: object, additionalProperties: true, description: "The kind's settings (/docs/sources). For ics: calendars (1 to 60, each with a key), days, time_zone, private_title."}
         secrets: {type: object, additionalProperties: {type: string, writeOnly: true}, description: "Credentials by name, stored sealed. For ics: calendar_url.<key>, the calendar's address (webcal://, https:// or http://), one per calendar."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60)."}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60; momentus: 60, at least 30)."}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean, default: true}
     SourceUpdate:
       type: object
@@ -28240,8 +28281,80 @@ components:
         target: {$ref: "#/components/schemas/SourceTarget"}
         config: {type: object, additionalProperties: true, description: Replaces the whole config.}
         secrets: {type: object, additionalProperties: {anyOf: [{type: string, writeOnly: true}, {type: "null"}]}, description: "Merged into the stored secrets: a string sets or replaces one, null removes it."}
-        refresh_seconds: {type: integer, minimum: 60, maximum: 86400}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
+        stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean}
+    SourceStaleAfter:
+      anyOf: [{type: integer, minimum: 60, maximum: 604800}, {type: "null"}]
+      description: >-
+        How long the card keeps the source's last good data when it cannot refresh, in seconds. The source writes its documents to expire that long after the last good refresh, so when it keeps failing they blank on every screen (offline ones included) and pages whose visibility depends on the data fall back to the pages after them; a source that is not failing renews the deadline as it refreshes. At least twice refresh_seconds. null keeps the last good data until the source refreshes again (the default for every kind but momentus, whose default is 1800 when the member is omitted on create). A failing source that passes the period is stale (status.stale) and appends source.stale.
+    SourceRoomRef: {type: object, additionalProperties: false, required: [id, name], properties: {id: {type: string}, name: {type: string}}}
+    SourceRoom:
+      type: object
+      additionalProperties: false
+      required: [key, status, screens]
+      properties:
+        key: {type: string, description: "What a screen's room field says to show this room."}
+        code: {type: string, description: "The room's identifier in the source system (a Momentus space code)."}
+        name: {type: string}
+        floor: {type: string}
+        area: {type: string}
+        capacity: {type: integer}
+        status: {type: string, enum: [mapped, unmapped, ""], description: "mapped when a screen shows the room, unmapped when none does; empty when the source writes no room documents."}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomRef"}}
+    SourceArea:
+      type: object
+      additionalProperties: false
+      required: [key, name, rooms, status, screens]
+      properties:
+        key: {type: string, description: "The value a screen's area field says: the area's name in lower case with other characters as hyphens."}
+        name: {type: string}
+        rooms: {type: integer}
+        status: {type: string, enum: [mapped, unmapped, ""]}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomRef"}}
+    SourceRoomScreen:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, field, value, status]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        kind: {type: string, enum: [room, area]}
+        field: {type: string, description: The screen field read.}
+        value: {anyOf: [{type: string}, {type: "null"}]}
+        status: {type: string, enum: [mapped, missing, unknown], description: "mapped: the value reaches a room or area. missing: the screen's playlist reads the field and the screen has no value. unknown: the value names nothing the source offers."}
+        key: {type: string, description: The room or area a mapped screen shows.}
+        suggestion: {type: string, description: "The key an unknown value probably meant: the same letters in another case, or the room's code or name."}
+    SourceRoomsSummary:
+      type: object
+      additionalProperties: false
+      required: [rooms, unmapped_rooms, areas, unmapped_areas, screens, missing_screens, unknown_screens]
+      properties:
+        rooms: {type: integer}
+        unmapped_rooms: {type: integer, description: Rooms no screen shows.}
+        areas: {type: integer}
+        unmapped_areas: {type: integer}
+        screens: {type: integer}
+        missing_screens: {type: integer, description: Screens that read a room or area document and have no value for its field.}
+        unknown_screens: {type: integer, description: Screens whose value names no room or area the source offers.}
+    SourceRooms:
+      type: object
+      additionalProperties: false
+      required: [source_id, room_field, room_key_prefix, area_field, area_key_prefix, rooms_as_of, summary, rooms, areas, screens, warnings]
+      description: >-
+        The room mapping of a data source that writes a document for each room or area: the rooms the source offered at its last good refresh against the screens that read them. A screen belongs to the report for a field when it has a value for it, or when its own playlist places a card whose data key is the key prefix followed by {screen.field.NAME}; a playlist it reaches through a folder, campaign or schedule level is not followed.
+      properties:
+        source_id: {type: string}
+        room_field: {type: string, description: "The screen field that names a room; empty when the source writes no room documents."}
+        room_key_prefix: {type: string, description: "A card's data key for a room is this followed by {screen.field.<room_field>}."}
+        area_field: {type: string}
+        area_key_prefix: {type: string}
+        rooms_as_of: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The last good refresh the room list is from; null before one."}
+        summary: {$ref: "#/components/schemas/SourceRoomsSummary"}
+        rooms: {type: array, items: {$ref: "#/components/schemas/SourceRoom"}}
+        areas: {type: array, items: {$ref: "#/components/schemas/SourceArea"}}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomScreen"}}
+        warnings: {type: array, items: {type: string}}
     SourceTestRequest:
       type: object
       additionalProperties: false
@@ -31445,6 +31558,7 @@ x-problem-codes:
   - source_target_unsupported
   - source_target_taken
   - source_busy
+  - source_has_no_rooms
   - source_secret_required
   - source_test_failed
   - card_media_invalid

@@ -12,12 +12,11 @@ import { CliError, usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 import { table } from "./webhooks.js";
 
-// Media sync: a SharePoint or OneDrive for work folder, or a Canva design, kept in
-// step with a media folder. /api/media-sync-accounts holds the project's own
-// Microsoft Entra app (its client secret is sealed by the server and never
-// returned) or one person's Canva connection (made by a person opening a link in a
-// browser, which the CLI only prints); /api/media-syncs is one source. A folder
-// selector on the media folder plays what the sync imports.
+// Media sync: a SharePoint or OneDrive for work folder kept in step with a media
+// folder. /api/media-sync-accounts holds the project's own Microsoft Entra app
+// (its client secret is sealed by the server and never returned);
+// /api/media-syncs is one source. A folder selector on the media folder plays
+// what the sync imports.
 
 const ACCOUNTS_PATH = "/api/media-sync-accounts";
 const SYNCS_PATH = "/api/media-syncs";
@@ -33,21 +32,16 @@ export const MEDIA_SYNC_EVERY_MAX_S = 86_400;
 const SECRET_FILE_MAX_BYTES = 8192;
 const NAME_MAX = 80;
 const URL_MAX = 4096;
-const DESIGN_ID_PATTERN = /^[A-Za-z0-9_-]{4,64}$/;
-const DESIGN_PAGES_MAX = 1000;
-export const CANVA_FORMATS = ["png", "mp4"] as const;
 
 export interface MediaSyncCheck { name: string; ok: boolean; warn?: boolean; detail?: string }
 export interface MediaSyncTest { at: string; ok: boolean; checks: MediaSyncCheck[] }
 export interface MediaSyncAccount {
   id: string; project_id?: string; kind: string; name: string;
-  config: { tenant_id?: string; client_id?: string; canva_user_id?: string; team_id?: string; display_name?: string };
+  config: { tenant_id?: string; client_id?: string };
   secret: { set: boolean; hint: string };
   state: string; last_test?: MediaSyncTest | null;
-  authorize_url?: string; authorize_expires_at?: string;
   revision: number; created_at?: string; updated_at?: string;
 }
-export interface MediaSyncDesign { id: string; title: string; updated_at?: string; page_count?: number; thumbnail_url?: string; view_url?: string }
 export interface MediaSyncSkipped { name: string; reason: string; detail?: string }
 export interface MediaSyncRun {
   at: string; status: string; added: number; updated: number; removed: number; pending_delete: number;
@@ -56,7 +50,7 @@ export interface MediaSyncRun {
 export interface MediaSync {
   id: string; project_id?: string; account_id: string; provider: string; name: string; folder_id: string;
   every_s: number; state: string;
-  source: { web_url?: string; drive_id?: string; item_id?: string; design_id?: string; title?: string; pages?: number[]; format?: string; page_count?: number; design_updated_at?: string };
+  source: { web_url?: string; drive_id?: string; item_id?: string };
   next_run_at: string; last_run?: MediaSyncRun | null; revision: number; created_at?: string; updated_at?: string;
 }
 interface Page<T> { items: T[]; next_cursor: string | null }
@@ -142,42 +136,6 @@ export function mediaSyncUrl(value: string): string {
   return text;
 }
 
-/** --design: a Canva design id, or its address (canva.com/design/ID/...). The server reads the id out of either. */
-export function mediaSyncDesign(value: string): string {
-  const text = value.trim();
-  let address: URL | undefined;
-  try {
-    address = new URL(text);
-  } catch {
-    address = undefined;
-  }
-  const host = address?.hostname.toLowerCase() ?? "";
-  const addressOk = address !== undefined && address.protocol === "https:" && !address.username && (host === "canva.com" || host.endsWith(".canva.com"))
-    && /^\/design\/[A-Za-z0-9_-]{4,64}(?:\/|$)/.test(address.pathname);
-  if (!DESIGN_ID_PATTERN.test(text) && !addressOk) {
-    throw usageError("--design takes a Canva design id (such as DAF...) or its address (https://www.canva.com/design/ID/...).", {
-      command: "screenrig media sync account designs", reason: "List the designs the connected Canva account can see, with their ids.",
-    });
-  }
-  return text;
-}
-
-/** --pages: 1,3-5 is pages 1, 3, 4 and 5; the answer is the ascending list "1,3,4,5". Without the option a sync takes every page. */
-export function mediaSyncPages(value: string): string {
-  const pages = new Set<number>();
-  for (const part of value.split(",")) {
-    const range = /^\s*(\d{1,6})(?:\s*-\s*(\d{1,6}))?\s*$/.exec(part);
-    const first = range ? Number(range[1]) : 0;
-    const last = range ? Number(range[2] ?? range[1]) : 0;
-    if (!range || first < 1 || last < first || last - first >= DESIGN_PAGES_MAX) {
-      throw usageError("--pages takes page numbers from 1 and ranges, such as 1,3-5. Leave it out to sync every page.");
-    }
-    for (let page = first; page <= last; page++) pages.add(page);
-    if (pages.size > DESIGN_PAGES_MAX) throw usageError(`--pages names too many pages (at most ${DESIGN_PAGES_MAX}). Leave it out to sync every page.`);
-  }
-  return [...pages].sort((a, b) => a - b).join(",");
-}
-
 /** --every: seconds between runs, as 15m, 1h30m, 2h, 900s or plain seconds; 5 minutes through 24 hours. */
 export function mediaSyncEvery(value: string): string {
   const text = value.trim();
@@ -205,14 +163,10 @@ export function mediaSyncProblem(error: unknown, id?: string): unknown {
   const account = id !== undefined && MEDIA_SYNC_ACCOUNT_ID_PATTERN.test(id);
   if (problem.code === "media_sync_source_refused") {
     return withNext(account ? `screenrig media sync account test ${id}` : "screenrig media sync account list",
-      "Fix what the detail says, then test the account and run the command again. Microsoft: the app's Sites.Selected grant on the site, or Files.Read.All, with admin consent, and a current client secret. Canva: the design's address, and that the connected person can open the design.");
+      "Fix what the detail says, then test the account and run the command again. Microsoft: the app's Sites.Selected grant on the site, or Files.Read.All, with admin consent, and a current client secret.");
   }
   if (problem.code === "media_sync_source_unavailable") {
-    return withNext("screenrig media sync list", "Microsoft or Canva could not be reached. Nothing was changed; run the same command again in a moment.");
-  }
-  if (problem.code === "canva_reconnect_required") {
-    return withNext(account ? `screenrig media sync account connect ${id}` : "screenrig media sync account list",
-      "Make a new link and send it to the person who owns the Canva account; they open it in a browser signed in to Canva. Then run media sync account show until its state is ready.");
+    return withNext("screenrig media sync list", "Microsoft could not be reached. Nothing was changed; run the same command again in a moment.");
   }
   if (problem.code === "resource_conflict" && account) {
     return withNext("screenrig media sync list", "Delete the syncs the detail names (media sync delete ID), then delete the account.");
@@ -243,39 +197,16 @@ function checkLines(checks: MediaSyncCheck[] | undefined): string[] {
   return (checks ?? []).map((check) => `  ${!check.ok ? "failed" : check.warn ? "warning" : "ok"} ${check.name}${check.detail ? `: ${check.detail}` : ""}`);
 }
 
-function canvaPerson(account: MediaSyncAccount): string {
-  const config = account.config ?? {};
-  if (!account.secret?.set) return "not connected yet";
-  return `${config.display_name ?? "a Canva account"}${config.canva_user_id ? ` (user ${config.canva_user_id}${config.team_id ? `, team ${config.team_id}` : ""})` : ""}`;
-}
-
-/** The sentence that goes with a consent link: the CLI prints it and never opens a browser. */
-export function consentLines(account: MediaSyncAccount | undefined): string[] {
-  if (!account?.authorize_url) return [];
-  return [
-    "",
-    "Open this link in a browser signed in to Canva (send it to the person who owns the Canva account), then run",
-    `\`screenrig media sync account show ${account.id}\` until its state is ready.`,
-    `link: ${account.authorize_url}`,
-    ...(account.authorize_expires_at ? [`The link works once, until ${account.authorize_expires_at}.`] : []),
-  ];
-}
-
 export function accountLines(account: MediaSyncAccount | undefined): string[] {
   if (!account) return [];
   const test = account.last_test;
-  const canva = account.kind === "canva";
   return [
     `id: ${account.id}`,
     `name: ${account.name}`,
     `kind: ${account.kind}`,
-    ...(canva
-      ? [`canva account: ${canvaPerson(account)}`]
-      : [
-        `tenant: ${dash(account.config?.tenant_id)}`,
-        `client: ${dash(account.config?.client_id)}`,
-        `secret: ${account.secret?.set ? `set${account.secret.hint ? ` (ends ${account.secret.hint})` : ""}` : "not set"}`,
-      ]),
+    `tenant: ${dash(account.config?.tenant_id)}`,
+    `client: ${dash(account.config?.client_id)}`,
+    `secret: ${account.secret?.set ? `set${account.secret.hint ? ` (ends ${account.secret.hint})` : ""}` : "not set"}`,
     `state: ${account.state}`,
     `last test: ${test ? `${test.ok ? "ok" : "failed"} at ${test.at}` : "never"}`,
     ...(test ? checkLines(test.checks) : []),
@@ -283,19 +214,14 @@ export function accountLines(account: MediaSyncAccount | undefined): string[] {
   ];
 }
 
-export function accountTableLines(items: MediaSyncAccount[]): string[] {
+function accountTableLines(items: MediaSyncAccount[]): string[] {
   if (!items.length) return ["No media sync accounts"];
-  return table(["ID", "NAME", "TENANT / CANVA", "SECRET", "TEST"], items.map((item) => [
+  return table(["ID", "NAME", "TENANT", "SECRET", "TEST"], items.map((item) => [
     item.id, item.name,
-    item.kind === "canva" ? `canva: ${item.config?.display_name ?? "-"}` : dash(item.config?.tenant_id),
-    item.kind === "canva" ? (item.secret?.set ? "connected" : "not connected") : item.secret?.set ? `…${item.secret.hint}` : "not set",
+    dash(item.config?.tenant_id),
+    item.secret?.set ? `…${item.secret.hint}` : "not set",
     item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
   ]));
-}
-
-export function designTableLines(items: MediaSyncDesign[]): string[] {
-  if (!items.length) return ["No designs"];
-  return table(["ID", "TITLE", "PAGES", "CHANGED"], items.map((item) => [item.id, item.title, item.page_count ? String(item.page_count) : "-", dash(item.updated_at)]));
 }
 
 function everyText(seconds: number): string {
@@ -314,15 +240,6 @@ function runLines(run: MediaSyncRun | null | undefined): string[] {
   return lines;
 }
 
-function canvaSourceLines(sync: MediaSync): string[] {
-  const source = sync.source ?? {};
-  return [
-    `design: ${dash(source.design_id)}${source.title ? ` (${source.title})` : ""}`,
-    `export: ${source.format === "mp4" ? "one video" : "one image per page"}${source.pages?.length ? `, pages ${source.pages.join(",")}` : ", every page"}`,
-    ...(source.design_updated_at ? [`exported design time: ${source.design_updated_at}`] : []),
-  ];
-}
-
 export function syncLines(sync: MediaSync | undefined): string[] {
   if (!sync) return [];
   return [
@@ -331,7 +248,6 @@ export function syncLines(sync: MediaSync | undefined): string[] {
     `provider: ${sync.provider}`,
     `account: ${sync.account_id}`,
     `source: ${dash(sync.source?.web_url)}`,
-    ...(sync.provider === "canva" ? canvaSourceLines(sync) : []),
     `media folder: ${sync.folder_id}`,
     `every: ${everyText(sync.every_s)}`,
     `state: ${sync.state}`,
@@ -369,7 +285,7 @@ async function allPages<T>(client: ApiClient, path: string, query?: Record<strin
 }
 
 function revisionHeader(args: ParsedArgs): Record<string, string> | undefined {
-  const revision = flagString(args.flags, "if-match");
+  const revision = flagString(args.flags, "expect-rev");
   return revision ? { "if-match": quotedRevision(revision) } : undefined;
 }
 
@@ -394,51 +310,6 @@ export const handleMediaSyncAccountAdd = commandHandler(async (args, runtime, re
     envelope: jsonBody(response, api.requestId),
     exitCode: ExitCode.Success,
     human: [`Created media sync account ${created?.id ?? ""}`.trimEnd(), ...accountLines(created), "", `Next: screenrig media sync account test ${created?.id ?? "ID"}`].join("\n"),
-  };
-});
-
-export const handleMediaSyncAccountAddCanva = commandHandler(async (args, runtime, resolved) => {
-  const name = flagString(args.flags, "name");
-  if (name === undefined) throw usageError("media sync account add canva requires --name.");
-  const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, { method: "POST", path: ACCOUNTS_PATH, idempotent: true, body: { kind: "canva", name: mediaSyncName(name) } });
-  const created = response.body as MediaSyncAccount | undefined;
-  return {
-    envelope: jsonBody(response, api.requestId),
-    exitCode: ExitCode.Success,
-    human: [`Created media sync account ${created?.id ?? ""}`.trimEnd(), ...accountLines(created), ...consentLines(created)].join("\n"),
-  };
-});
-
-export const handleMediaSyncAccountConnect = commandHandler(async (args, runtime, resolved) => {
-  const id = mediaSyncAccountId(args.positionals[4], "connect");
-  const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, { method: "POST", path: `${ACCOUNTS_PATH}/${id}/connect`, idempotent: true }, id);
-  const connecting = response.body as MediaSyncAccount | undefined;
-  return {
-    envelope: jsonBody(response, api.requestId),
-    exitCode: ExitCode.Success,
-    human: [`New connect link for media sync account ${id}`, ...accountLines(connecting), ...consentLines(connecting)].join("\n"),
-  };
-});
-
-export const handleMediaSyncAccountDesigns = commandHandler(async (args, runtime, resolved) => {
-  const id = mediaSyncAccountId(args.positionals[4], "designs");
-  const query = flagString(args.flags, "query");
-  const continuation = flagString(args.flags, "continuation");
-  const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, {
-    method: "GET", path: `${ACCOUNTS_PATH}/${id}/designs`,
-    ...(query !== undefined || continuation !== undefined ? { query: { ...(query !== undefined ? { query } : {}), ...(continuation !== undefined ? { continuation } : {}) } } : {}),
-  }, id);
-  const page = response.body as { items?: MediaSyncDesign[]; continuation?: string | null } | undefined;
-  const items = page?.items ?? [];
-  return {
-    envelope: jsonBody(response, api.requestId),
-    exitCode: ExitCode.Success,
-    human: [`Canva designs (${items.length}), most recently changed first`, ...designTableLines(items),
-      ...(page?.continuation ? ["", `More: screenrig media sync account designs ${id}${query !== undefined ? ` --query ${JSON.stringify(query)}` : ""} --continuation ${page.continuation}`] : []),
-      ...(items.length ? ["", `Next: screenrig media sync create canva --account-id ${id} --design ${items[0]!.id}`] : [])].join("\n"),
   };
 });
 
@@ -536,37 +407,6 @@ export const handleMediaSyncCreate = commandHandler(async (args, runtime, resolv
   };
 });
 
-export const handleMediaSyncCreateCanva = commandHandler(async (args, runtime, resolved) => {
-  const accountId = flagString(args.flags, "account-id");
-  const design = flagString(args.flags, "design");
-  if (accountId === undefined || design === undefined) throw usageError("media sync create canva requires --account-id and --design.");
-  const pages = flagString(args.flags, "pages");
-  const format = flagString(args.flags, "format");
-  const folderId = flagString(args.flags, "folder-id");
-  const every = flagString(args.flags, "every");
-  const name = flagString(args.flags, "name");
-  const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, {
-    method: "POST", path: SYNCS_PATH, idempotent: true,
-    body: {
-      provider: "canva", account_id: mediaSyncAccountOption(accountId), design: mediaSyncDesign(design),
-      ...(pages !== undefined ? { pages: mediaSyncPages(pages).split(",").map(Number) } : {}),
-      ...(format !== undefined ? { format } : {}),
-      ...(folderId !== undefined ? { folder_id: mediaSyncFolderOption(folderId) } : {}),
-      ...(every !== undefined ? { every: Number(mediaSyncEvery(every)) } : {}),
-      ...(name !== undefined ? { name: mediaSyncName(name) } : {}),
-    },
-  }, accountId);
-  const created = response.body as MediaSync | undefined;
-  return {
-    envelope: jsonBody(response, api.requestId),
-    exitCode: ExitCode.Success,
-    human: [`Created media sync ${created?.id ?? ""}`.trimEnd(), ...syncLines(created), "",
-      `The first run starts within about 30 seconds. ${FOLDER_HINT.replace("FOLDER", created?.folder_id ?? "FOLDER")}`,
-      `Next: screenrig media sync show ${created?.id ?? "ID"}`].join("\n"),
-  };
-});
-
 export const handleMediaSyncList = commandHandler(async (args, runtime, resolved) => {
   const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const { items, response } = await allPages<MediaSync>(api, SYNCS_PATH);
@@ -617,13 +457,12 @@ export const handleMediaSyncUpdate = commandHandler(async (args, runtime, resolv
 
 export const handleMediaSyncRun = commandHandler(async (args, runtime, resolved) => {
   const id = mediaSyncId(args.positionals[3], "run");
-  const force = flagBool(args.flags, "force");
   const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, { method: "POST", path: `${SYNCS_PATH}/${id}/run`, idempotent: true, ...(force ? { query: { force: "true" } } : {}) }, id);
+  const response = await syncCall(api, { method: "POST", path: `${SYNCS_PATH}/${id}/run`, idempotent: true }, id);
   return {
     envelope: jsonBody(response, api.requestId),
     exitCode: ExitCode.Success,
-    human: [`Media sync ${id} is due now; it runs within about 30 seconds${force ? " and exports the design even if Canva reports it unchanged" : ""}.`, "", `Next: screenrig media sync show ${id}`].join("\n"),
+    human: [`Media sync ${id} is due now; it runs within about 30 seconds.`, "", `Next: screenrig media sync show ${id}`].join("\n"),
   };
 });
 

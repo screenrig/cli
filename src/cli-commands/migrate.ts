@@ -1,5 +1,5 @@
 import { type Command, Option } from "commander";
-import { handleMigrateApply, handleMigratePair, handleMigrateScan, handleMigrateVendors } from "../commands.js";
+import { handleMigrateApply, handleMigratePair, handleMigrateScan, handleMigrateVendors } from "../handlers/migrate.js";
 import { usageError } from "../problems.js";
 import { ONLY_KINDS } from "../migrate/apply.js";
 import { sortedVendors } from "../migrate/cli.js";

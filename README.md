@@ -15,9 +15,7 @@ source layout, build and verification commands.
 
 Requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+ (excluding 23.x and 25.x). `media upload` needs `ffmpeg` and `ffprobe`
 (`--no-transcode` uploads the accepted bytes unchanged); `screenrig doctor`
-checks them. `compose` and `playlist preview` draw with a native renderer that
-the first render downloads once per machine and checks against the package's
-integrity lock; other commands never load it.
+checks them.
 
 ## Output
 
@@ -50,7 +48,6 @@ production availability from the independent monitor without credentials
 
 - Existing file: `media upload`, then a playlist and `screen assign`.
 - Anything presentable: `media generate` as the whole page.
-- Slide-deck-like: local, unbilled `compose render`.
 - Live weather, clocks, menus and boards: a built-in card (`screenrig cards list`).
   Touch, peripherals, pushed data or an exact look no card has: an application.
 - Live video or an existing web page: playlist primitives.

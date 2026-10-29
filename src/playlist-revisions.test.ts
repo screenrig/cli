@@ -4,23 +4,20 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { processRuntime, run } from "./main.js";
 import { networkError } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";
 
 const PLAYLIST = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
-const SCREEN = "scr_AAAAAAAAAAAAAAAAAAAAAAAA";
 
-/** A CLI with a stored credential, or none (`enrolled: false`) to prove a command needs no sign-in. */
-async function revisionsCli(t: TestContext, transport: FakeTransport, enrolled = true) {
+/** A CLI with a stored credential. */
+async function revisionsCli(t: TestContext, transport: FakeTransport) {
   const directory = await mkdtemp(path.join(tmpdir(), "playlist-revisions-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const config = path.join(directory, "config.json");
-  if (enrolled) {
-    await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
-      organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
-  }
+  await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
   return async (argv: string[]) => {
     let output = "";
     const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, env: {}, transport,
@@ -126,7 +123,7 @@ test("playlist promote copies a revision forward with the revision guard and a s
   assert.equal(seen[0]?.match, '"9"');
   assert.ok(seen[0]?.key);
   assert.equal(JSON.parse(json.output).data.revision, 10);
-  const human = await invoke(["--human", "playlist", "promote", PLAYLIST, "--revision", "3", "--if-match", "9"]);
+  const human = await invoke(["--human", "playlist", "promote", PLAYLIST, "--revision", "3", "--expect-rev", "9"]);
   assert.equal(human.code, 0, human.output);
   assert.match(human.output, new RegExp(`^Promoted revision 3 of ${PLAYLIST}: it is now the current revision 10\\. The name is unchanged and every screen showing the playlist updates\\.$`, "m"));
 });
@@ -203,32 +200,4 @@ test("help for the revision commands states scope, recovery and the next page", 
   assert.equal(show.options.find((option) => option.name === "--revision")?.required, true);
   assert.ok(show.examples.length > 0);
   assert.deepEqual(commandHelp(["playlist", "revision"]).commands.map((child) => child.name), ["show"]);
-});
-
-test("the removed screen changes and screen revert stay hidden and only name their replacement", async t => {
-  const transport = new FakeTransport();
-  // No stored credential: the commands never reach configuration or the network.
-  const invoke = await revisionsCli(t, transport, false);
-  const revert = await invoke(["--json", "screen", "revert", SCREEN, "--change-id", "man_TEST", "--expect-rev", "7"]);
-  assert.equal(revert.code, 2, revert.output);
-  const reverted = JSON.parse(revert.output).error;
-  assert.equal(reverted.code, "usage_error");
-  assert.ok(reverted.detail.includes("screen revert was removed: list the playlist's revisions with `screenrig playlist revisions PLAYLIST_ID` and make one current with `screenrig playlist promote PLAYLIST_ID --revision N --expect-rev CURRENT`"));
-  assert.equal(reverted.next.command, `screenrig screen show ${SCREEN}`);
-  const changes = await invoke(["--json", "screen", "changes", SCREEN]);
-  assert.equal(changes.code, 2, changes.output);
-  const listed = JSON.parse(changes.output).error;
-  assert.equal(listed.code, "usage_error");
-  assert.match(listed.detail, /^screen changes was removed: .*`screenrig playlist revisions PLAYLIST_ID`.*`screenrig playlist revision show PLAYLIST_ID --revision N`/);
-  const bare = await invoke(["--json", "screen", "revert"]);
-  assert.equal(bare.code, 2, bare.output);
-  assert.equal(JSON.parse(bare.output).error.next.command, "screenrig playlist revisions --help");
-  assert.equal(transport.calls.length, 0);
-  const screen = commandHelp(["screen"], true);
-  for (const name of ["changes", "revert"]) {
-    assert.equal(screen.commands.some((child) => child.name === name), false, name);
-    assert.equal(screen.allCommands?.includes(`screen ${name}`), false, name);
-    assert.doesNotMatch(screen.usage, new RegExp(`^  screen ${name}$`, "m"));
-  }
-  assert.doesNotMatch(commandHelp([], true).usage, /^  screen (changes|revert)$/m);
 });

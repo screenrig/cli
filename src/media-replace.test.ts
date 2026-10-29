@@ -5,7 +5,7 @@ import { Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { writeConfigAtomic } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run } from "./main.js";
 import type { SignedRawPut } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
@@ -279,12 +279,6 @@ test("media restore puts a version back (200) with the revision guard and note",
   assert.equal(bare.code, 0, JSON.stringify(bare.envelope));
   assert.equal(transport.calls[1]!.body, undefined);
   assert.equal(header(transport.calls[1]!, "if-match"), undefined);
-  // --version N names the same version; the root's own --version flag does not take it.
-  const spelled = await cli.invoke(["media", "restore", MEDIA, "--version", "2"], transport);
-  assert.equal(spelled.code, 0, JSON.stringify(spelled.envelope));
-  assert.equal(transport.calls[2]!.path, `/api/media/${MEDIA}/versions/2/restore`);
-  const equalsForm = await cli.invoke(["media", "restore", MEDIA, "--version=2"], transport);
-  assert.equal(equalsForm.code, 0, JSON.stringify(equalsForm.envelope));
 });
 
 test("media restore under Propose answers pending_review as a success", async (t) => {

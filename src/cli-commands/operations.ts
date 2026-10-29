@@ -1,12 +1,12 @@
 import { positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleOperationsGet, handleOperationsWait, handleOperationsCancel } from "../commands.js";
+import { handleOperationsGet, handleOperationsWait, handleOperationsCancel } from "../handlers/operations.js";
 import type { Command } from "commander";
 
 export function registerOperationsCommands(root: Command, bind: CommandActionBinder): void {
   const operations = root.command("operations").description("Inspect, wait for, or cancel operations");
 
-  operations.command("show").alias("get").description("Inspect an operation")
+  operations.command("show").description("Inspect an operation")
     .argument("<id>", "Operation identifier")
     .action(bind(handleOperationsGet));
 

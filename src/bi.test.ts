@@ -8,7 +8,7 @@ import {
   type BiConnection, type BiView,
 } from "./bi.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";

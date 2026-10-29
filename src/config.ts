@@ -43,7 +43,7 @@ import { isResourceID } from "./generated/resource-ids.js";
          * resume redeems the identical claim. Never printed in errors or JSON.
          */
         agentid_claim?: string;
-        /** Exact project-name input bound to this enrollment's idempotency key. */
+        /** Project name bound to this enrollment's idempotency key by an earlier CLI; read when resuming, no longer set. */
         project_name?: string;
         organization?: string;
         /**
@@ -580,11 +580,9 @@ import { isResourceID } from "./generated/resource-ids.js";
       const file = await readConfigFile(configPath, options.fs, { repair: options.repair });
       const flagApi = typeof options.flags["api-url"] === "string" ? options.flags["api-url"] : undefined;
       const envApi = options.fs.env.SCREENRIG_API_URL;
-      const flagToken = options.flags.token;
-      const envToken = options.fs.env.SCREENRIG_TOKEN;
-      if (flagToken !== undefined || envToken) {
+      if (options.fs.env.SCREENRIG_TOKEN) {
         throw configError(
-          "Token flags and SCREENRIG_TOKEN are not supported. screenrig login and agent enroll store this installation's sign-in in the user config.",
+          "SCREENRIG_TOKEN is not supported. screenrig login and agent enroll store this installation's sign-in in the user config.",
         );
       }
 

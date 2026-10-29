@@ -1,9 +1,8 @@
-import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import type { CommandHandler } from "../commands.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
@@ -14,7 +13,6 @@ import { playsInstantOption } from "../playback-export.js";
 import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } from "../screen-link.js";
 import { handleScreenFolderCreate, handleScreenFolderDelete, handleScreenFolderList, handleScreenFolderShow, handleScreenFolderUpdate, handleScreenMove, screenFolderIdOption, screenFolderName, screenFolderPlaylistOption, screenListFolderOption } from "../screen-folders.js";
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
-import { handleScreenCompositionRemoved } from "../playlist-revisions.js";
 import { type Command, Option } from "commander";
 
 /** --folder on a fleet command: the same fleet as --tag, chosen by screen folder (with every folder inside it). */
@@ -25,14 +23,6 @@ function folderSelector(verb: "Target" | "Capture" = "Target"): Option {
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
   const screen = root.command("screen").description("Pair, configure, and inspect screens");
-
-  // Removed with per-screen composition history, kept one release as hidden commands that only name their replacement.
-  for (const name of ["changes", "revert"]) {
-    screen.command(name, { hidden: true })
-      .argument("[args...]")
-      .allowUnknownOption()
-      .action(bind(handleScreenCompositionRemoved));
-  }
 
   screen.command("publish").description("Publish a prepared playlist after rendering and inspecting its local preview")
     .argument("<id>", "Screen identifier")
@@ -46,11 +36,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   screen.command("pair").description("Claim a Player pairing code")
     .argument("<code...>", "Player pairing code as shown; spaces and dashes are ignored")
+    .option("--name <NAME>", "Set the screen name")
     .action(bind(handleScreenPair));
 
   screen.command("provision").description("Create a screen and browser handoff")
     .addOption(new Option("--open", "Open the browser Player handoff").conflicts(["printUrl"]))
     .option("--print-url", "Return the browser handoff URL")
+    .option("--name <NAME>", "Set the screen name")
     .action(bind(handleScreenProvision));
 
   screen.command("update").description("Update a screen")
@@ -435,7 +427,6 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "clear")!,
     "screenrig screen display-schedule clear scr_LOBBY", "screenrig screen display-schedule clear --tag Cafe");
-  for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
   const update = screen.commands.find(command => command.name() === "update")!;
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);

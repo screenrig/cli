@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleReviewsList, handleReviewsShow, handleReviewsWithdraw } from "../commands.js";
+import { handleReviewsList, handleReviewsShow, handleReviewsWithdraw } from "../handlers/reviews.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger } from "./options.js";

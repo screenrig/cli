@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiClient } from "../client.js";
 import { parseArgv } from "../argv.js";
-import { commandHelp } from "../help.js";
+import { commandHelp } from "../help-tree.js";
 import { preserveLogSocket, readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs } from "../config.js";
 import { ensureCredential } from "../enrollment.js";
 import { run, type CliRuntime } from "../main.js";

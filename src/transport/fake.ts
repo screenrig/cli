@@ -1981,7 +1981,7 @@ export function memoryBackend(options: {
     if (added.length) notifications.set(id, { ...stored, unsubscribed: [...listed, ...added], revision: (stored.revision as number) + 1 });
   };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },

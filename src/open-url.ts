@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { childEnv } from "./child-env.js";
 
 export type OpenUrl = (url: string) => Promise<boolean>;
-export type OpenPath = (filePath: string) => Promise<boolean>;
 
 /** How long an opener may run before it counts as having launched something. */
 const OPENER_SETTLE_MS = 2000;
@@ -43,17 +42,5 @@ export const openExternalUrl: OpenUrl = async (url) => {
     : process.platform === "win32"
       ? ["rundll32.exe", ["url.dll,FileProtocolHandler", target.href]]
       : ["xdg-open", [target.href]];
-  return spawnDetached(command, argv);
-};
-
-/** Open a local filesystem path. Refuses a NUL byte. Does not accept URLs. */
-export const openLocalPath: OpenPath = async (filePath) => {
-  if (filePath.includes("\0")) return false;
-  if (!hasDesktop()) return false;
-  const [command, argv] = process.platform === "darwin"
-    ? ["open", [filePath]]
-    : process.platform === "win32"
-      ? ["cmd", ["/c", "start", "", filePath]]
-      : ["xdg-open", [filePath]];
   return spawnDetached(command, argv);
 };

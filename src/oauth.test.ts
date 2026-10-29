@@ -825,24 +825,6 @@ test("login from a signed-in installation extends its grant and selects the appr
   }
 });
 
-test("agent connect runs screenrig login with a warning naming it", async () => {
-  const h = await harness({ api_url: API });
-  const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/device_authorization", () => json(200, { device_code: "F".repeat(43), user_code: "BCDF-GHJK",
-      verification_uri: "https://screenrig.ai/dashboard/connect", verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK",
-      expires_in: 600, interval: 5 }));
-  try {
-    const result = await h.cli(["--json", "agent", "connect", "--capability", "screens"], transport);
-    assert.equal(result.code, 0, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { data: { status: string }; warnings: Array<{ code: string; message: string }> };
-    assert.equal(envelope.data.status, "pending");
-    assert.ok(envelope.warnings.some((warning) => warning.code === "command_renamed" && warning.message.includes("screenrig login")));
-    assert.ok(envelope.warnings.some((warning) => warning.code === "capability_chosen_at_approval"));
-  } finally {
-    await h.done();
-  }
-});
-
 test("the sign-in issuer is bound apart from the API origin", async () => {
   const h = await harness(grantConfig({ oauth: { issuer: "https://api.elsewhere.example", client_id: "screenrig-cli", refresh_token: refresh(1) } }, access()));
   try {

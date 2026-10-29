@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleDashboard, handleSignInReset } from "../commands.js";
+import { handleDashboard, handleSignInReset } from "../handlers/dashboard.js";
 import type { Command } from "commander";
 
 export function registerDashboardCommands(root: Command, bind: CommandActionBinder): void {

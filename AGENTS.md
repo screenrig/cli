@@ -19,11 +19,17 @@ is not required to contribute.
   pins their bytes, including the built `assets/screenrig.runtime.js`. The
   OpenAPI is backend's public document (`api/public/`), which leaves out the
   staff routes; `check:public` fails on any staff route in the tree.
-- `scripts/package-release.sh` builds the deterministic `screenrig-cli.tgz`: one
-  minified `dist/bin.js` with the runtime dependencies inside (except the
-  `@napi-rs/canvas-*` platform packages, fetched on first render per
-  `runtime-dependencies.lock.json`). `scripts/check-release-artifact.mjs` states
-  its inventory.
+- `scripts/package-release.sh` builds the deterministic `screenrig-cli.tgz`:
+  minified `dist/bin.js` and the flat `dist/*.js` chunks it loads per command
+  bundle, with the runtime dependencies inside (recorded in
+  `runtime-dependencies.lock.json`), plus `assets/`. No bundled file may exceed
+  256 KiB (the Claude plugin directory reads no more), and the bundler fails on
+  one. `scripts/check-release-artifact.mjs` states its inventory.
+- Commands load on demand: `src/cli-commands/index.ts` maps each top-level
+  command to a bundle in `src/bundles/`, which registers its commands and
+  imports their handlers from `src/handlers/`; `src/commands.ts` keeps what
+  bundles share. A new registration module joins a bundle there (the catalog
+  test fails otherwise); help guidance loads only for help.
 - `.github/workflows/ci.yml` runs the public, test, package and secret gates;
   `npm-release.yml` is the only npm publication path. Never publish from a laptop.
 
@@ -33,8 +39,7 @@ is not required to contribute.
   `src/generated/`; refresh them from the workspace root with
   `rig contracts sync cli`. `npm run vendor:check` is the offline gate and
   `rig contracts check cli` compares against backend origin/main.
-- Read `assets/` only through `src/assets.ts` and load `@napi-rs/canvas` only
-  through `src/canvas.ts`; commands that do not draw never load it.
+- Read `assets/` only through `src/assets.ts`.
 - Preserve unrelated work. Do not commit, push, tag or publish unless asked.
 - Never PATH-swap a local checkout into an installed agent, and never
   `npm i -g screenrig` as the agent path.
@@ -51,7 +56,9 @@ is not required to contribute.
   display names use `--name`, selectors use `--screen-id`, `--app-id`,
   `--playlist-id`, `--release-id`, revision guards use `--expect-rev`, event
   cursors use `--after`. The group is `app`; prose says "application".
-  Keep existing aliases working and never rename backend fields to match flags.
+  Aliases and compatibility shims for old spellings or old servers are removed,
+  not kept; only code that reads credentials or config files saved by released
+  CLIs stays. Never rename backend fields to match flags.
 - Declare option relationships with `requireOptionGroup` so human help, JSON
   help and preflight validation agree. Every command gets a working example, and
   help states write scope, waiting and recovery where relevant. Document stdin
@@ -73,12 +80,11 @@ is not required to contribute.
 - `doctor` check status is `pass`, `warn` or `fail`; only `fail` moves the exit
   code. A missing credential is `warn` with `next.command`.
 - Playlist authoring: existing file, `media upload`; presentable page, `media
-  generate` as the whole page; slide-deck-like, local `compose render`; live
-  objects, playlist primitives. Never emit native `text`, `box` or `line`.
+  generate` as the whole page; live text, built-in cards; live objects,
+  playlist primitives. Never emit native `text`, `box` or `line`.
 - Server admission decides whether billed work (`media generate`) proceeds, not
   the displayed balance; respect `payment_required`. Add no pay, Stripe or x402
-  commands. Compose is local and unauthenticated and never writes PNG bytes to
-  stdout.
+  commands.
 - Optional `log_socket` lives in the 0600 user config; there is no flag or env
   override, and a connect failure never fails the command.
 

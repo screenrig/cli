@@ -36,19 +36,11 @@ function validCardDataKey(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value) && !value.startsWith("feed:");
 }
 
-export function cardDataKey(value: string): string {
-  if (!validCardDataKey(value)) {
-    throw usageError("Card data key must follow the K/V key grammar and may not start with feed:.");
-  }
-  return value;
-}
-
 /**
  * A placement's data key: a card data key, or a template whose
  * {screen.field.NAME} tokens each stand for one value of the screen's field
  * (menu-{screen.field.store_number}). A template is checked with each token as
- * the letter x; card-data get, put and delete name concrete keys and use
- * cardDataKey.
+ * the letter x.
  */
 export function cardDataKeyTemplate(value: string): string {
   if (!validCardDataKey(screenKeyPlaceholder(value))) {
@@ -167,7 +159,7 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
         cardDataKeyTemplate(item.data);
         const dynamic = Object.keys(cardProperties(card).dynamic);
         for (const name of dynamic) {
-          if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic; write it to the bound data document with card-data put, or use a card instance (card create, then card data put crd_ID).`);
+          if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic and comes from the bound data document; leave it out of params, or use a card instance (card create, then card data put crd_ID).`);
           delete schema.properties?.[name];
         }
         schema.required = (schema.required ?? []).filter((name: string) => !dynamic.includes(name));

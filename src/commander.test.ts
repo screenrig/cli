@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { CliError } from "./problems.js";
 
 const usage = (error: unknown) => error instanceof CliError && error.problem.code === "usage_error";
@@ -70,10 +70,8 @@ test("Commander errors use one secret-safe envelope and never raw output", () =>
   }
 });
 
-test("agent connect waits only when explicitly requested", () => {
-  assert.equal(parseArgv(["agent", "connect"]).flags.wait, undefined);
-  assert.equal(parseArgv(["agent", "connect", "--wait"]).flags.wait, true);
-  assert.equal(parseArgv(["agent", "connect", "--wait"]).flags["no-wait"], undefined);
-  assert.equal(parseArgv(["agent", "connect", "--no-wait"]).flags.wait, undefined);
-  assert.equal(parseArgv(["agent", "connect", "--no-wait"]).flags["no-wait"], true);
+test("login waits for approval unless --no-wait is given, and agent connect is gone", () => {
+  assert.equal(parseArgv(["login"]).flags["no-wait"], undefined);
+  assert.equal(parseArgv(["login", "--no-wait"]).flags["no-wait"], true);
+  assert.throws(() => parseArgv(["agent", "connect"]), /agent has no command connect/);
 });

@@ -98,7 +98,7 @@ test("kv webhook create sends the key and description, prints the secret once, a
   assert.ok(events.length > 0, "the operation log recorded the request");
   assert.doesNotMatch(JSON.stringify(events), /srkw_[A-Za-z0-9_-]{43}/, "the secret never reaches the operation log");
 
-  const legacy = await cli(["--json", "kv", "webhook", "create", "prices", "--application-id", APP], transport, env);
+  const legacy = await cli(["--json", "kv", "webhook", "create", "prices", "--app-id", APP], transport, env);
   assert.equal(legacy.code, 0, legacy.stdout);
   assert.deepEqual(webhookCalls(transport).at(-1)!.body, { key: "prices" });
 

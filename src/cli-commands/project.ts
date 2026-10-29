@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete, handleProjectUptime, handleProjectHealthTrend, handleProjectExport } from "../commands.js";
+import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete, handleProjectUptime, handleProjectHealthTrend, handleProjectExport } from "../handlers/project.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger, projectSubset, reportFormatOption, reportOutputOption } from "./options.js";

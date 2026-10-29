@@ -3,10 +3,10 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { formatEventLine } from "./commands.js";
+import { formatEventLine } from "./handlers/events.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { commandHelp } from "./help.js";
+import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
 import { durationMs, effectivePlaylistText, scheduleEntries, scheduleTableLines, takeoverUntil } from "./screen-control.js";
 import { testTemp } from "./test-temp.js";
