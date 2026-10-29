@@ -690,7 +690,7 @@ export function jsonBody(
 }
 
 /** The --note of a review-class write as its request header. */
-function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
+export function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
   return reviewNoteHeaders(flagString(args.flags, "note"));
 }
 
@@ -698,7 +698,7 @@ function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
  * A review-class write that became a review under Propose access (HTTP 202
  * pending_review): a success, exit 0, data is the answer plus next.
  */
-function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
+export function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
   const lifted = playlistAnswerWarnings(response.body);
   return {
     envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, requestId, { ...extra, next: reviewNext(pending.review.id) }, [pendingReviewWarning(pending.review), ...lifted]),
@@ -1092,6 +1092,7 @@ interface ServiceClientView {
   keys: Array<{ kid: string; alg: string }>;
   secrets: Array<{ id: string; hint: string }>;
   last_used_at?: string;
+  upload_scope?: { playlist_ids: string[]; folder_ids: string[] };
 }
 
 function serviceClientId(args: ParsedArgs, verb: string): string {
@@ -1110,6 +1111,7 @@ function serviceClientLines(client: ServiceClientView): Array<[string, string | 
     ["keys", client.keys.map((key) => `${key.kid} (${key.alg})`).join(", ") || undefined],
     ["secrets", client.secrets.map((secret) => `${secret.id} (…${secret.hint})`).join(", ") || undefined],
     ["last_used_at", client.last_used_at],
+    ...(client.upload_scope ? [["uploader", `folders ${client.upload_scope.folder_ids.join(", ")}; playlists ${client.upload_scope.playlist_ids.join(", ") || "none"}`] as [string, string]] : []),
   ];
 }
 
@@ -1201,9 +1203,19 @@ export const handleServiceClientCreate = commandHandler(async (args, runtime, re
   }
   const capabilities = flagString(args.flags, "capability")?.split(",");
   const access = flagString(args.flags, "access");
+  const uploader = flagBool(args.flags, "uploader");
+  if (!uploader && (flagString(args.flags, "folder-id") !== undefined || flagString(args.flags, "playlist-id") !== undefined)) {
+    throw usageError("--folder-id and --playlist-id require --uploader.");
+  }
+  if (uploader && capabilities?.some((capability) => capability !== "content" && capability !== "playlists")) {
+    throw usageError("An uploader client holds the content and playlists capabilities only.");
+  }
+  // The client's own access applies to an uploader client (Propose unless chosen), so --access is not part of the scope.
+  const scope = uploader ? uploadScopeFromArgs(args, "service-client create --uploader", false) : undefined;
   const secretFile = await reserveSecretFile(args, runtime);
   return serviceClientWrite(args, runtime, resolved, { path: "/api/service-clients", title: "Service client created", body: {
     name, ...(capabilities ? { capabilities } : {}), ...(access ? { access } : {}), ...(key ? { key } : {}), ...(secretFile ? { secret: true } : {}),
+    ...(scope ? { upload_scope: scope } : {}),
   } }, secretFile);
 });
 
@@ -2681,7 +2693,19 @@ export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolve
 });
 
 /** Link URLs are an explicit one-time output, never logging or recovery metadata. */
+/** The scope an uploader invitation or service client carries: the folders and playlists it works in. */
+function uploadScopeFromArgs(args: ParsedArgs, subject: string, withAccess: boolean): { playlist_ids: string[]; folder_ids: string[]; access?: string } {
+  const folders = adsListOption(flagString(args.flags, "folder-id"), "folder-id");
+  const playlists = adsListOption(flagString(args.flags, "playlist-id"), "playlist-id");
+  if (!folders.length) throw usageError(`${subject} needs at least one --folder-id MFD_ID (comma-separated): an uploader works in media folders. media folder list shows them.`);
+  for (const id of folders) mediaFolderId(id, "--folder-id");
+  for (const id of playlists) if (!RESOURCE_ID_PATTERNS.playlist.test(id)) throw usageError("--playlist-id takes playlist IDs (pl_...); playlist list shows them.");
+  const access = withAccess ? flagString(args.flags, "access") : undefined;
+  return { playlist_ids: playlists, folder_ids: folders, ...(access !== undefined ? { access } : {}) };
+}
+
 export const handleInvitationsCreate = commandHandler(async (args, runtime, resolved) => {
+  const uploader = flagString(args.flags, "kind") === "uploader";
   const kind = flagString(args.flags, "kind") === "ad-buyer" ? "ad_buyer" : "project_member";
   const link = flagBool(args.flags, "link");
   // A link names no recipient (the server refuses emails with it), so never accept and drop an address.
@@ -2695,6 +2719,11 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
   if (kind === "project_member" && (screenIds.length || slotIds.length || policy !== undefined)) {
     throw usageError("Advertising scope and policy require --kind ad-buyer.");
   }
+  if (!uploader && (flagString(args.flags, "folder-id") !== undefined || flagString(args.flags, "playlist-id") !== undefined || flagString(args.flags, "access") !== undefined)) {
+    throw usageError("--folder-id, --playlist-id and --access require --kind uploader.");
+  }
+  const uploadScope = uploader ? uploadScopeFromArgs(args, "invitations create --kind uploader", true) : undefined;
+  if (uploadScope?.access !== undefined && uploadScope.access !== "propose" && uploadScope.access !== "manage") throw usageError("--access takes propose or manage.");
   if (kind === "ad_buyer" && !screenIds.length && !slotIds.length) {
     throw usageError("Ad-buyer invitations require at least one --screen-id or --slot-id.");
   }
@@ -2703,6 +2732,7 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
     method: "POST", path: "/api/invitations", idempotent: true,
     body: { kind, delivery: link ? "link" : "email",
       ...(!link ? { emails } : {}),
+      ...(uploadScope ? { upload_scope: uploadScope } : {}),
       ...(kind === "ad_buyer" ? { advertising: { screen_ids: screenIds, slot_ids: slotIds, policy: policy ?? "trusted" } } : {}),
     },
   });
@@ -3357,6 +3387,7 @@ function validateInvitation(value: unknown): Invitation {
     project_id: invitation.project_id, created_at: invitation.created_at!, expires_at: invitation.expires_at!,
     ...(invitation.recipient_email ? { recipient_email: invitation.recipient_email } : {}),
     ...(invitation.advertising ? { advertising: invitation.advertising } : {}),
+    ...(invitation.upload_scope ? { upload_scope: invitation.upload_scope } : {}),
   };
 }
 
@@ -3733,13 +3764,6 @@ async function uploadFolderFromArgs(args: ParsedArgs, client: ApiClient): Promis
   const id = mediaFolderId(folder, "--folder");
   await client.call({ method: "GET", path: `/api/media-folders/${id}` });
   return id;
-}
-
-/** Uploads land at the library root; --folder moves what the command uploaded, in requests of at most 1000 IDs. */
-async function moveIntoMediaFolder(client: ApiClient, folderId: string, mediaIds: string[]): Promise<void> {
-  for (let start = 0; start < mediaIds.length; start += 1000) {
-    await client.call({ method: "POST", path: "/api/media/move", idempotent: true, body: { folder_id: folderId, media_ids: mediaIds.slice(start, start + 1000) } });
-  }
 }
 
 export const handleMediaFolderList = commandHandler(async (args, runtime, resolved) =>
@@ -4789,9 +4813,6 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   // Validate unconditionally so a typo such as --webp-quality 500 is rejected
   // whether or not transcoding runs. The result is unused under --no-transcode.
   const transcodeOptions = transcodeOptionsFromArgs(args);
-  if (flagString(args.flags, "folder") !== undefined && flagBool(args.flags, "no-wait")) {
-    throw usageError("--folder needs the media ID, so it cannot be used with --no-wait; after the upload is ready run media move ID --folder ID.");
-  }
   const folderId = await uploadFolderFromArgs(args, client);
   const uploaded = await uploadMediaFile({
     runtime,
@@ -4799,6 +4820,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     sourcePath,
     explicitContentType,
     tag: mediaTagFromArgs(args),
+    ...(folderId ? { folderId } : {}),
     transcodeOptions,
     noTranscode: flagBool(args.flags, "no-transcode"),
     reporter: progressReporterFor(args, runtime),
@@ -4808,10 +4830,9 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     resumable: flagString(args.flags, "idempotency-key") !== undefined,
   });
   const mediaId = uploaded.mediaId;
-  if (folderId && mediaId) await moveIntoMediaFolder(client, folderId, [mediaId]);
   const data = {
     ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
-    ...(folderId && mediaId ? { folder_id: folderId } : {}),
+    ...(folderId ? { folder_id: folderId } : {}),
     operation: uploaded.operation,
     reused: uploaded.reused,
     upload: uploaded.upload,
@@ -4833,7 +4854,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       ["source_filename", uploaded.upload.source_filename],
       ["content_type", uploaded.upload.content_type],
       ["tag", uploaded.upload.tag],
-      ["folder_id", folderId && mediaId ? folderId : undefined],
+      ["folder_id", folderId],
       ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
       ["sha256", uploaded.upload.sha256],
       ["timing", Object.entries(uploaded.timing).map(([stage, ms]) => `${stage.replace(/_ms$/, "")} ${ms} ms`).join(", ")],
@@ -4876,6 +4897,7 @@ async function mediaUploadBatch(
     projectId: resolved.projectId,
     concurrency,
     defaultTag: mediaTagFromArgs(args),
+    ...(folderId ? { folderId } : {}),
     transcodeOptions,
     noTranscode: flagBool(args.flags, "no-transcode"),
     reporter: progressReporterFor(args, runtime),
@@ -4884,8 +4906,6 @@ async function mediaUploadBatch(
     timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
   });
-  const movable = result.data.items.flatMap((item) => (item.media_id ? [item.media_id] : []));
-  if (folderId && movable.length) await moveIntoMediaFolder(client, folderId, movable);
   return {
     envelope: successEnvelope(folderId ? { ...result.data, folder_id: folderId } : result.data, {
       request_id: client.requestId,
@@ -8520,8 +8540,13 @@ async function doctor(
         });
       }
     } catch (err) {
-      const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
       const name = route === "/api/capabilities" ? "capabilities" : route.slice(2);
+      // An uploader works only in its playlists and folders: that answer is the credential doing its job.
+      if (err instanceof CliError && err.problem.code === "outside_upload_scope") {
+        checks.push({ name, status: "pass", detail: "uploader: these playlists and folders" });
+        continue;
+      }
+      const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
       checks.push({ name, status: "fail", detail });
     }
   }

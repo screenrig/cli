@@ -2468,6 +2468,102 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/playlists/{id}/pages:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: review
+      operationId: addPlaylistPage
+      description: >-
+        Adds one page to an approved playlist without sending the others: at the end, or in front of the page named by before. The pages the playlist already holds are kept as stored and checked again with the new one in a single pass, so the rules across pages (1 to 100 pages, one ordinary page with no visibility, 16 ad slot pages, 1024 media references) see the result: a rule broken is invalid_request with field (page.id when the id is taken, before when it names no page). The page validity of the playlist is the page's own visibility (from, until, windows, data), in each screen's timezone, until exclusive. Review class: under Propose the change becomes a review (202); a later page change of the same playlist extends that pending review while it is based on the live revision, so successive changes do not supersede each other, and approval applies them all or none (review_stale when the playlist moved on). With Manage, or from a dashboard session of the owner or a member who can approve (approver_required otherwise), it is live. If-Match is optional: when present it must be the live revision. A playlist no person approved yet is playlist_not_approved (409). An uploader (docs/uploaders.md) adds only a media page of its folders to one of its playlists (outside_upload_scope otherwise); an uploader member at Propose is the review's proposer (kind person).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistPageAdd'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/playlists/{id}/pages/{page_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/PlaylistPageID'
+    put:
+      x-screenrig-access: review
+      operationId: replacePlaylistPage
+      description: >-
+        Replaces one page of an approved playlist, in place, without sending the others. The body is the page and its id is page_id. An unknown page is not_found. Everything else is as for addPlaylistPage: validated with the kept pages in one pass, review class (202 under Propose, chained onto a pending page-change review), live with Manage or from an approving person, If-Match optional, playlist_not_approved for a playlist no person approved. An uploader replaces only a media page of its folders, for another media page of its folders.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistPageWriteV2'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: review
+      operationId: removePlaylistPage
+      description: >-
+        Removes one page of an approved playlist. The playlist keeps 1 to 100 pages and one ordinary page with no visibility (invalid_request otherwise). An unknown page is not_found. Everything else is as for replacePlaylistPage. An uploader removes only a media page of its folders.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: The updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/comment/playlist/{id}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -2974,7 +3070,7 @@ paths:
     patch:
       operationId: patchScreenTags
       description: >-
-        A signed-in person sets a screen's tags. tags is the complete new set: an empty array clears it, and a malformed or repeated tag is invalid_request at tags[i]. It is the tag change updateScreen makes, on the dashboard session: the screen revision moves by one, screen.updated carries details.tags and the person as its actor, and the manifest revision never changes. A pairing_pending, active or archived screen accepts it. The body has no other member, so a session cannot change a screen's name, playlist or timezone here. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents change tags with updateScreen or a set_tags, add_tags or remove_tags fleet action. listScreens with tag finds the screen by its new tags.
+        A signed-in person sets a screen's tags. tags is the complete new set: an empty array clears it, and a malformed or repeated tag is invalid_request at tags[i]. It is the tag change updateScreen makes, on the dashboard session: the screen revision moves by one, screen.updated carries details.tags and the person as its actor, and the manifest revision never changes. A pairing_pending, active or archived screen accepts it. The body has no other member: a session renames a screen with patchScreenName and assigns its playlist with patchScreenPlaylist, and cannot change its timezone. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents change tags with updateScreen or a set_tags, add_tags or remove_tags fleet action. listScreens with tag finds the screen by its new tags.
       security:
         - dashboardSession: []
       parameters:
@@ -3068,6 +3164,47 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ScreenLocationPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/name:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenName
+      description: >-
+        A signed-in person renames a screen with updateScreen's name. The name is trimmed and must be 1 to 120 characters without control characters, else invalid_request at name (so is a missing or null name). The screen revision moves by one and the event is screen.manifest_changed, addressed to the screen, with the person as its actor; the manifest revision stays, so playback is untouched and Players refresh the name from the changed ETag. A rename to the same name still moves the revision and appends screen.updated. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenNamePatch'
       responses:
         '200':
           description: The screen as stored now; ETag carries its revision.
@@ -16867,6 +17004,63 @@ paths:
                 $ref: '#/components/schemas/DashboardMember'
         default:
           $ref: '#/components/responses/Problem'
+  /api/members/{user_id}/upload-scope:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: setDashboardMemberUploadScope
+      description: >-
+        Makes a member an uploader, or replaces the scope of one (docs/uploaders.md): the playlists they change pages of and the media folders they upload into. In one transaction it also stops them approving reviews, ends the agents they brought to the project (agent.disconnected, as removing them would) and appends project.member_upload_scope_changed (details user_id, upload_scope, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row is resource_conflict; a non-member is not_found; an id that is not a live playlist or media folder of the project is invalid_request at upload_scope.playlist_ids[i] or upload_scope.folder_ids[i]. access propose (the default) sends the uploader's changes to review; manage publishes them.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberUploadScopeUpdate'
+      responses:
+        '200':
+          description: The member, with upload_scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMember'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: clearDashboardMemberUploadScope
+      description: >-
+        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: The project the caller means; a session whose selection has changed is refused with resource_conflict.
+      responses:
+        '200':
+          description: The member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMember'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/advertising/reviews/{id}/request-changes:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -20412,6 +20606,29 @@ components:
       properties:
         can_approve: {type: boolean}
         project_id: {type: string, minLength: 1, maxLength: 200, description: "The project the caller means; a session whose selection has changed is refused with resource_conflict."}
+    UploadScope:
+      type: object
+      additionalProperties: false
+      required: [playlist_ids, folder_ids]
+      description: "What an uploader may use (docs/uploaders.md): the playlists it changes pages of and the media folders it uploads into. Folders are exactly the listed ones, never their subfolders. An id that names no live object of the project when written is invalid_request at its position; a later deletion leaves a dead id, which grants nothing. The scope is read on each request, so a change applies to the next one."
+      properties:
+        playlist_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string}, description: "May be empty: such an uploader fills folders that the owner's by:folder pages play."}
+        folder_ids: {type: array, minItems: 1, maxItems: 1000, uniqueItems: true, items: {type: string}}
+        access: {type: string, enum: [propose, manage], description: "Members and member invitations only: propose (default) sends the uploader's changes to review, manage publishes them. Absent on a service client, whose own access applies."}
+    PlaylistPageAdd:
+      type: object
+      additionalProperties: false
+      required: [page]
+      properties:
+        page: {$ref: "#/components/schemas/PlaylistPageWriteV2"}
+        before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "The page it goes in front of; omitted appends it."}
+    MemberUploadScopeUpdate:
+      type: object
+      additionalProperties: false
+      required: [upload_scope]
+      properties:
+        upload_scope: {$ref: "#/components/schemas/UploadScope"}
+        project_id: {type: string, minLength: 1, maxLength: 200, description: "As on MemberApproverUpdate."}
     ReviewPerson:
       type: object
       additionalProperties: false
@@ -20424,7 +20641,7 @@ components:
       additionalProperties: false
       required: [kind]
       properties:
-        kind: {type: string, enum: [agent, client, buyer]}
+        kind: {type: string, enum: [agent, client, buyer, person], description: "person is an uploader member at Propose access (docs/uploaders.md); its person is the uploader, and the owner or a member who approves decides the review."}
         agent_id: {type: string}
         agent_name: {type: string}
         client_id: {type: string}
@@ -20478,16 +20695,26 @@ components:
           type: object
           additionalProperties: false
           required: [name, pages]
-          description: The write body as the proposer sent it (PlaylistWriteV2).
+          description: The write body as the proposer sent it (PlaylistWriteV2). A page-change review (addPlaylistPage, replacePlaylistPage, removePlaylistPage) carries page_edits, and its pages are the proposed pages as materialized, for reading; approval replays page_edits on the live playlist and never sends pages again.
           properties:
             name: {type: string}
             pages: {type: array, items: {type: object, additionalProperties: true}}
             audio: {type: object, additionalProperties: true}
             format: {$ref: "#/components/schemas/PlaylistFormat"}
+            page_edits: {type: array, minItems: 1, maxItems: 200, items: {$ref: "#/components/schemas/ReviewPageEdit"}, description: "The ordered page changes of a page-change review. A later page change of the same playlist extends the pending review's edits while it is based on the live revision, so successive uploads do not supersede each other."}
         diff: {$ref: "#/components/schemas/ReviewPlaylistDiff"}
         media_playlists: {type: array, items: {$ref: "#/components/schemas/ReviewMediaPlaylist"}, description: "The playlists whose tag, folder or all selectors approving this review's pending media would make start or stop playing it: for a selector_refresh (a media review) every playlist with an approved version, plus every playlist with an open create or update review whose proposed selectors would, one entry per playlist; for a create or update the approved playlists beside its subject. impact.screens includes their screens."}
         media_change: {$ref: "#/components/schemas/ReviewMediaChange"}
         previously_rejected_media: {type: array, items: {type: string}, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media."}
+    ReviewPageEdit:
+      type: object
+      additionalProperties: false
+      required: [op, page_id]
+      properties:
+        op: {type: string, enum: [add, replace, remove]}
+        page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
+        page: {$ref: "#/components/schemas/PlaylistPageWriteV2", description: "The page an add or replace writes, as the proposer sent it."}
+        before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "An add's neighbour: the page it goes in front of."}
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
@@ -21396,6 +21623,9 @@ components:
           type: string
           format: date-time
           description: The time of this member's latest activity in the project other than a refused sign-in (listMemberActivity). Present only where the viewer may read that activity (themself; every member for the owner, an organization admin or a staff shadow) and the member has any.
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "Present for an uploader: the playlists and folders the member is limited to (docs/uploaders.md). An uploader never approves reviews (can_approve is false)."
     MemberActivityKind:
       type: string
       enum: [sign_in, sign_in_failed, sign_out, project_switched, credential_changed, reauthenticated, mutation]
@@ -21788,6 +22018,9 @@ components:
           maxItems: 50
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "project_member only (invalid_request otherwise). The person who accepts becomes an uploader of the project with this scope, and cannot approve reviews. access manage needs an inviter who could grant Manage (a person who can approve reviews, or an agent at Manage); approver_required otherwise. A new uploader invitation to an address that already has one outstanding reuses it and replaces its scope. A person who is already a member keeps their role."
       description: Email delivery requires emails. Link delivery is project_member only and omits emails and advertising. ad_buyer requires advertising. At most 50 outstanding member and buyer invitations per project; an outstanding email invitation of the same kind and address is reused.
       oneOf:
         - properties:
@@ -21833,6 +22066,9 @@ components:
           required:
             - emails
             - advertising
+          not:
+            required:
+              - upload_scope
     Invitation:
       type: object
       additionalProperties: false
@@ -21869,6 +22105,8 @@ components:
           type: string
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
         created_at:
           type: string
           format: date-time
@@ -21911,6 +22149,8 @@ components:
           type: string
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
         created_at:
           type: string
           format: date-time
@@ -22730,6 +22970,7 @@ components:
         tokens_issued: {type: integer}
         revoked_at: {type: string, format: date-time}
         revoke_reason: {type: string}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "Present on an uploader client (docs/uploaders.md): it works only in these playlists and folders. Its capabilities are content and playlists only."}
     ServiceClientList:
       type: object
       additionalProperties: false
@@ -22755,6 +22996,7 @@ components:
         access: {type: string, enum: [read, propose, manage], description: "Manage needs a person who can approve reviews (403 approver_required)."}
         key: {type: object, additionalProperties: true, description: "A public JWK: OKP Ed25519, EC P-256 or RSA of at least 2048 bits."}
         secret: {type: boolean, description: "Generate a secret (creation only)."}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "Creation makes an uploader client: capabilities default to, and must be a subset of, content and playlists, and access defaults to propose. A later change replaces the scope of a client that has one, and applies to its next request; a client without a scope cannot get one, and a scope cannot be removed (invalid_request: create a new client)."}
     OAuthError:
       type: object
       additionalProperties: true
@@ -24441,6 +24683,14 @@ components:
         location:
           anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
           description: "Where the screen is: the object replaces the whole location and null clears it."
+    ScreenNamePatch:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: >-
+        A screen's new name (patchScreenName). The body has no other member.
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120, description: "The screen's name, trimmed; 1 to 120 characters after trimming, without control characters."}
     ScreenPlaylistPatch:
       type: object
       additionalProperties: false
@@ -25828,7 +26078,7 @@ components:
         quality: {type: string, enum: [low, medium, high]}
         credits: {type: integer, minimum: 1}
         usd: {type: string}
-    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}
+    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
     MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
@@ -27952,6 +28202,9 @@ components:
           description: The current project is one the staff member shadows, without a membership. Reads grant no writes. Current-project mutations require an explicit active staff_write_mode approval.
         staff_write_mode:
           $ref: '#/components/schemas/DashboardStaffWriteMode'
+        upload_scope:
+          $ref: '#/components/schemas/UploadScope'
+          description: "Present when the person is an uploader of the session's project (docs/uploaders.md): the dashboard then offers only the upload view. Read on each request, so a change by the owner shows on the next GET /api/session."
         passkey_enrollment_required:
           type: boolean
           description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /api/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
@@ -28514,6 +28767,7 @@ components:
         field: {type: string, description: "The request member this error is about, when one is to blame."}
         retryable: {type: boolean, description: "Present on every 5xx error and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable."}
         current_revision: {type: integer, description: "The resource's current revision, on revision_conflict."}
+        upload_scope: {$ref: "#/components/schemas/UploadScope", description: "On outside_upload_scope: the playlists and media folders the caller does work in (docs/uploaders.md). An id outside them and an id that does not exist get the same answer."}
         access_limited_by: {type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request."}
         next: {$ref: "#/components/schemas/NextAction"}
     RuntimeProblem:
@@ -28561,6 +28815,7 @@ x-problem-codes:
   - client_update_required
   - forbidden
   - insufficient_access
+  - outside_upload_scope
   - approver_required
   - review_not_pending
   - review_stale

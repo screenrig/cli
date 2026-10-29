@@ -5,14 +5,17 @@ import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { INVITATION_HELP } from "../help-text.js";
 
 export function registerInvitationCommands(root: Command, bind: CommandActionBinder): void {
-  const invitations = root.command("invitations").description("Invite project members and advertising buyers");
+  const invitations = root.command("invitations").description("Invite project members, uploaders and advertising buyers");
   const create = invitations.command("create").description("Create member or ad-buyer invitations")
     .addOption(new Option("--email <ADDRESS[,ADDRESS]>", "Comma-separated recipient addresses to email").conflicts("link"))
-    .addOption(new Option("--kind <KIND>", "Invitation kind").choices(["member", "ad-buyer"]).default("member"))
+    .addOption(new Option("--kind <KIND>", "Invitation kind").choices(["member", "uploader", "ad-buyer"]).default("member"))
     .addOption(new Option("--link", "Print one member invitation URL instead of emailing; it names no recipient, so deliver it only to the intended person").conflicts("email"))
     .option("--screen-id <ID>", "Comma-separated screen identifiers allowed for an ad-buyer")
     .option("--slot-id <ID>", "Comma-separated slot identifiers allowed for an ad-buyer")
     .addOption(new Option("--policy <POLICY>", "Ad-buyer creative review policy").choices(["trusted", "review_required"]))
+    .option("--folder-id <ID[,ID]>", "Comma-separated media folders (mfd_...) an uploader uploads into; required with --kind uploader")
+    .option("--playlist-id <ID[,ID]>", "Comma-separated playlists (pl_...) an uploader changes pages of")
+    .addOption(new Option("--access <LEVEL>", "An uploader's level: propose sends its changes to review (default), manage publishes them").choices(["propose", "manage"]))
     .action(bind(handleInvitationsCreate));
   addCommandNotes(create, INVITATION_HELP);
   requireOptionGroup(create, "exactlyOne", ["--email", "--link"]);

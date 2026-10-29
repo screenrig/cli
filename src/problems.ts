@@ -210,6 +210,16 @@ function foreignBodyHint(status: number): string {
   return "The answer did not come from the screenRIG API, so the request was probably not processed. Check --api-url and any proxy with screenrig doctor, then retry; if it keeps happening, report the request_id with screenrig feedback bug.";
 }
 
+/** The scope an outside_upload_scope answer names: lists of ids, kept only when they are. */
+function uploadScopeOf(value: unknown): NormalizedProblem["upload_scope"] {
+  const scope = asRecord(value);
+  const ids = (list: unknown): string[] | undefined => Array.isArray(list) && list.every((id) => typeof id === "string") ? list as string[] : undefined;
+  const playlists = ids(scope?.playlist_ids), folders = ids(scope?.folder_ids);
+  if (!playlists || !folders) return undefined;
+  const access = scope?.access === "propose" || scope?.access === "manage" ? scope.access : undefined;
+  return { playlist_ids: playlists, folder_ids: folders, ...(access ? { access } : {}) };
+}
+
 export function normalizeProblem(
   input: unknown,
   fallback: { status?: number; request_id?: string; bodyText?: string } = {},
@@ -241,6 +251,7 @@ export function normalizeProblem(
   const retryable = typeof rec?.retryable === "boolean" ? rec.retryable : undefined;
   const traceId = asString(rec?.trace_id);
   const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
+  const uploadScope = uploadScopeOf(rec?.upload_scope);
   return {
     type: asString(rec?.type) ?? problemType(code),
     title,
@@ -254,6 +265,7 @@ export function normalizeProblem(
     operation_id: asString(rec?.operation_id),
     current_revision: asNumber(rec?.current_revision),
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
+    ...(uploadScope ? { upload_scope: uploadScope } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
     // A valid server next action wins over local guidance; asNext drops any that is not a plain screenrig command.
@@ -315,6 +327,9 @@ export function renderProblem(problem: NormalizedProblem): string {
   }
   if (problem.access_limited_by) {
     lines.push(`access_limited_by: ${problem.access_limited_by}`);
+  }
+  if (problem.upload_scope) {
+    lines.push(`upload_scope: folders ${problem.upload_scope.folder_ids.join(", ") || "none"}; playlists ${problem.upload_scope.playlist_ids.join(", ") || "none"}`);
   }
   if (typeof problem.retryable === "boolean") {
     lines.push(`retryable: ${problem.retryable}`);
@@ -480,6 +495,7 @@ const DEFAULT_HINTS: Record<string, string> = {
   forbidden: "This credential is not allowed to do this. Do not retry it unchanged; screenrig agent status lists the granted capabilities.",
   insufficient_access: "Read only access changes nothing; Propose access uploads media, writes notes and proposes playlist and screen changes for review, but cannot delete, control screens or spend credit. Ask a person to approve Manage access, or leave the change to a credential that has it.",
   approver_required: "Only the project owner or a member who can approve may do this. Ask the project owner to turn on Can approve for that person.",
+  outside_upload_scope: "This uploader works only in the playlists and media folders upload_scope lists (screenrig playlist list, screenrig media folder list). Ask the project owner to add the playlist or folder, or leave this to a full member.",
   review_not_pending: "Someone already decided, withdrew or replaced this review. Read it again with screenrig reviews show ID for its current state.",
   review_stale: "The live playlist moved on after the change was proposed. Read the playlist again and propose the change on top of it.",
   review_blocked: "This screen change uses a playlist that has no approved version yet. The playlist's review is decided first.",

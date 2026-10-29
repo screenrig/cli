@@ -116,6 +116,8 @@ export interface RunMediaUploadBatchInput {
   projectId?: string;
   concurrency: number;
   defaultTag?: string;
+  /** The media folder every item is declared into (folder_id at declare). */
+  folderId?: string;
   transcodeOptions: TranscodeOptions;
   noTranscode: boolean;
   reporter: ProgressReporter;
@@ -747,6 +749,7 @@ async function uploadPendingItem(
     sourcePath: item.sourcePath,
     explicitContentType: item.content_type,
     tag: item.tag,
+    ...(input.folderId ? { folderId: input.folderId } : {}),
     transcodeOptions: input.transcodeOptions,
     noTranscode: input.noTranscode,
     reporter: input.noProgress ? silentProgressReporter() : input.reporter,
