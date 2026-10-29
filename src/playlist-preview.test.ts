@@ -18,7 +18,9 @@ import {
   PREVIEW_STATES,
   contactSheetSize,
   previewPlaylist,
+  previewSelectors,
 } from "./playlist-preview.js";
+import { ApiClient } from "./client.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -309,4 +311,26 @@ test("file preview without local media or login names every placeholder", async 
   assert.deepEqual(localEnvelope.warnings, []);
   assert.deepEqual(await centerPixel(localEnvelope.data.pages[0]!.files.rest!), [0xcc, 0x33, 0x00, 255]);
   await rm(cwdDir, { recursive: true, force: true });
+});
+
+test("selector previews skip per-screen tag selectors, keep the rest, and pass the timezone only when given", async () => {
+  const fit = (selector: Record<string, unknown>, id: string) => ({ id, primitive: "image", selector: { order: "filename", fit: "aspect", ...selector }, rect: { x: 0, y: 0, width: 1080, height: 1920 } });
+  const pages = [{ id: "page", primitives: [
+    fit({ by: "tag", tag: "Store{screen.field.store_no}" }, "per-field"),
+    fit({ by: "tag", tag: "{screen.id}" }, "per-id"),
+    fit({ by: "tag", tags: { all: ["Lobby", "Region{screen.field.region}"] } }, "per-group"),
+    fit({ by: "tag", tag: "Lobby" }, "plain"),
+  ] }];
+  const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({
+    status: 200, headers: {},
+    body: { matched_count: 1, candidates: [{ media_id: "med_a", filename: "a.png" }], excluded: [{ media_id: "med_b", filename: "b.png", reason: "outside_window" }] },
+  }));
+  const client = new ApiClient({ transport, token: "token" });
+  const entries = await previewSelectors(pages, client);
+  assert.deepEqual(entries.map((entry) => entry.primitive_id), ["plain"]);
+  assert.equal(entries[0]?.excluded[0]?.reason, "outside_window");
+  assert.equal(transport.calls.length, 1);
+  assert.equal("timezone" in (transport.calls[0]!.body as object), false, "no timezone unless the caller has one");
+  await previewSelectors(pages, client, "America/New_York");
+  assert.equal((transport.calls[1]!.body as { timezone?: string }).timezone, "America/New_York");
 });

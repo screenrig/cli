@@ -1,7 +1,7 @@
 import { positiveInteger, positiveNumber, revision, reviewNoteOption } from "./options.js";
 import { handleMediaReplace, handleMediaRestore, handleMediaVersionDelete, handleMediaVersions } from "../media-versions.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../commands.js";
+import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaAvailability, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { CREDIT_HELP } from "../help-text.js";
@@ -122,9 +122,10 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<selector.json>", "JSON all/tag selector file, or stdin (-)")
     .addOption(new Option("--primitive <image|video>", "Media primitive to match (required)").choices(["image", "video"]).makeOptionMandatory())
     .option("--rect <WxH>", "Size of the primitive's rect, for example 1080x1920; required when the selector has fit aspect")
+    .option("--timezone <IANA>", "Time zone the files' availability rules are read in, for example America/New_York (default UTC)")
     .action(bind(handleSelectorPreview));
-  addCommandExamples(selectorPreview, 'screenrig media selector-preview selector.json --primitive video');
-  addCommandNotes(selectorPreview, "The file holds one playlist media selector: {\"by\": \"all\"}, {\"by\": \"tag\", \"tag\": \"Lobby\"}, {\"by\": \"id\", \"media_id\": \"med_...\"} or {\"by\": \"ids\", \"media_ids\": [\"med_...\"]}; all, tag and folder also take order (filename, random or weighted), batch_size and one_at_a_time. Order weighted rotates one item per visit by weights, a map keyed by media id or tag:NAME to an integer 1 to 1000 (up to 64 keys; one_at_a_time or batch_size 1 is required): an item's weight is its media-id key, else the first tag:NAME key it carries (alphabetically), that weight split equally among the items sharing it, else 1. The preview returns each item's expected share of plays and the cycle length. fit aspect keeps only files whose aspect ratio is within 5% of the primitive's rect (--rect WxH); the others return in excluded with reason aspect_mismatch. Reads current project-owned ready matches in filename order. Does not advance a Player cursor. Random order is a per-pass playback policy; see the returned normalized selector. Catalog changes take effect at the next loop refresh.");
+  addCommandExamples(selectorPreview, 'screenrig media selector-preview selector.json --primitive video', 'screenrig media selector-preview selector.json --primitive image --timezone America/New_York');
+  addCommandNotes(selectorPreview, "The file holds one playlist media selector: {\"by\": \"all\"}, {\"by\": \"tag\", \"tag\": \"Lobby\"}, {\"by\": \"id\", \"media_id\": \"med_...\"} or {\"by\": \"ids\", \"media_ids\": [\"med_...\"]}; all, tag and folder also take order (filename, random or weighted), batch_size and one_at_a_time. Order weighted rotates one item per visit by weights, a map keyed by media id or tag:NAME to an integer 1 to 1000 (up to 64 keys; one_at_a_time or batch_size 1 is required): an item's weight is its media-id key, else the first tag:NAME key it carries (alphabetically), that weight split equally among the items sharing it, else 1. The preview returns each item's expected share of plays and the cycle length. fit aspect keeps only files whose aspect ratio is within 5% of the primitive's rect (--rect WxH); the others return in excluded with reason aspect_mismatch. A tag or tags entry may be {screen.field.NAME} or {screen.id}, which a screen fills with its own value; the server cannot fill them, so such a selector cannot be previewed. A file whose availability rule (media availability) does not hold now, read in --timezone, returns in excluded with reason outside_window. Reads current project-owned ready matches in filename order. Does not advance a Player cursor. Random order is a per-pass playback policy; see the returned normalized selector. Catalog changes take effect at the next loop refresh.");
 
   media.command("update").description("Replace media tags")
     .argument("<id>", "Media identifier")
@@ -133,6 +134,14 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .addOption(new Option("--tags <TAGS>", "Replace the tag set with comma-separated tags").conflicts(["tag", "clearTag"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaUpdate));
+
+  const availability = media.command("availability").description("Set or clear when dynamic selectors may play a media file")
+    .argument("<id>", "Media identifier (med_...)")
+    .option("--file <RULE.json>", "Read the availability rule from this JSON file, or - for stdin")
+    .option("--clear", "Remove the rule: the file is always available")
+    .option("--expect-rev <REVISION>", "Require this media revision (default: the current revision, read first)", revision)
+    .action(bind(handleMediaAvailability));
+  requireOptionGroup(availability, "exactlyOne", ["--file", "--clear"]);
 
   media.command("delete").description("Delete media")
     .argument("<id>", "Media identifier")

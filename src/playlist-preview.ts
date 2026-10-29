@@ -19,6 +19,7 @@ import { assertPlaylistValid } from "./playlist-validate.js";
 import { assertWirePages } from "./playlist-write-validation.js";
 import { usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
+import { selectorHasScreenTokens } from "./selector-tokens.js";
 
 export const PREVIEW_STATES = ["rest", "entry", "motion-mid"] as const;
 export type PreviewState = (typeof PREVIEW_STATES)[number];
@@ -130,7 +131,7 @@ export interface SelectorPreviewEntry {
   /** Plays after which every item has played exactly its weight (weighted order). */
   cycle?: number;
   items: Array<{ media_id: string; filename: string; weight?: number; share_percent?: number }>;
-  /** Matches left out by fit aspect. */
+  /** Matches left out: aspect_mismatch (fit aspect) or outside_window (the file's availability rule does not hold now). */
   excluded: Array<{ media_id: string; filename: string; reason: string }>;
 }
 
@@ -148,8 +149,12 @@ export interface PlaylistPreviewResult {
   selector_previews?: SelectorPreviewEntry[];
 }
 
-/** Asks the server what each weighted or aspect-fitted selector of the pages matches now. */
-export async function previewSelectors(pages: unknown[], client: ApiClient): Promise<SelectorPreviewEntry[]> {
+/**
+ * Asks the server what each weighted or aspect-fitted selector of the pages matches now.
+ * Selectors with a per-screen tag are not previewed (the server cannot fill them); `timezone`
+ * is the IANA zone the availability rules of the files are read in (the server defaults to UTC).
+ */
+export async function previewSelectors(pages: unknown[], client: ApiClient, timezone?: string): Promise<SelectorPreviewEntry[]> {
   const entries: SelectorPreviewEntry[] = [];
   for (const rawPage of pages) {
     const page = recordOf(rawPage);
@@ -159,10 +164,12 @@ export async function previewSelectors(pages: unknown[], client: ApiClient): Pro
       const selector = recordOf(primitive.selector);
       const dynamic = selector.by === "all" || selector.by === "tag" || selector.by === "folder";
       if ((primitive.primitive !== "image" && primitive.primitive !== "video") || !dynamic || (selector.order !== "weighted" && selector.fit !== "aspect")) continue;
+      if (selectorHasScreenTokens(selector)) continue;
       const rect = recordOf(primitive.rect);
       const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: {
         primitive: primitive.primitive, selector,
         ...(selector.fit === "aspect" ? { rect: { width: rect.width, height: rect.height } } : {}),
+        ...(timezone ? { timezone } : {}),
       } });
       const body = recordOf(response.body);
       const list = (value: unknown) => (Array.isArray(value) ? value : []).map(recordOf);
@@ -237,7 +244,7 @@ export async function previewPlaylist(options: {
     if (!options.lintOnly) await writeFile(contact_sheet, sheet.png);
   }
   const soundtrack = soundtrackOf(body.audio);
-  const selectorPreviews = options.client ? await previewSelectors(body.pages, options.client) : [];
+  const selectorPreviews = options.client ? await previewSelectors(body.pages, options.client, options.timezone) : [];
   return {
     output: options.outputDirectory,
     viewport,

@@ -42,7 +42,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--frame-ms <MS>", "Select the preview frame time", nonnegativeInteger("frame-ms"))
     .option("--contact-sheet", "Include a contact sheet")
     .option("--now <ISO>", "Freeze card clocks at this instant")
-    .option("--timezone <ZONE>", "Render cards in this IANA timezone")
+    .option("--timezone <ZONE>", "Render cards in this IANA timezone, which also reads the files' availability windows in selector previews")
     .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistPreview)), LOOK_AT_THE_CONTACT_SHEET);
 
