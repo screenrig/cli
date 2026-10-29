@@ -559,6 +559,55 @@ test("reviews show renders a media review, blockers with their state, and a flee
   }
 });
 
+test("reviews show renders a media replacement and a restore: before and after file, version, note and playlists", async () => {
+  const env = await enrolled();
+  try {
+    const base = { url: "https://screenrig.ai/dashboard/reviews/x", proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent" }, created_at: "2026-10-29T15:00:00Z", updated_at: "2026-10-29T15:00:00Z" };
+    const diff = { name_changed: false, pages_added: [], pages_removed: [], pages_changed: [], soundtrack_changed: false, media_added: [], media_removed: [] };
+    const replacement = (id: string, extra: Record<string, unknown>) => ({
+      ...base, id, kind: "playlist_change", state: "pending", subject: { type: "media", id: "med_MENU", name: "menu.png" }, impact: { screens: 6 },
+      playlist_change: {
+        operation: "media_replace", base_revision: 0, proposed: {}, diff,
+        media_replace: {
+          media_id: "med_MENU", filename: "menu.png", source: "replace", version: 4, note: "Spring menu",
+          before: { sha256: "a".repeat(64), bytes: 120000, content_type: "image/webp", width: 1920, height: 1080 },
+          after: { sha256: "b".repeat(64), bytes: 98000, content_type: "image/webp", width: 1080, height: 1920 },
+          aspect_changed: true, playlists: [{ id: "pl_LOBBY", name: "Lobby" }, { id: "pl_CAFE", name: "Cafe" }], ...extra,
+        },
+      },
+    });
+    const replace = replacement("rvw_REPLACE", {});
+    const restore = replacement("rvw_RESTORE", { source: "restore", restored_from: 2, note: undefined, aspect_changed: false, playlists: [] });
+    const transport = new FakeTransport()
+      .on("GET", "/api/reviews/rvw_REPLACE", () => json(200, replace))
+      .on("GET", "/api/reviews/rvw_RESTORE", () => json(200, restore))
+      .on("GET", "/api/reviews", () => json(200, { items: [replace, restore], next_cursor: null, pending_count: 2 }));
+
+    const shown = await cli(["--human", "reviews", "show", "rvw_REPLACE"], transport, env);
+    assert.equal(shown.code, ExitCode.Success, shown.stdout);
+    assert.match(shown.stdout, /Review rvw_REPLACE: Media replacement, pending/);
+    assert.match(shown.stdout, /change: replacement file for media that playlists and schedules already play/);
+    assert.match(shown.stdout, /\nmedia_replace:\n {2}file: menu\.png \(med_MENU\)\n {2}source: replacement; becomes version 4\n {2}note: Spring menu\n/);
+    assert.match(shown.stdout, /\n {2}before: image\/webp 1920x1080, 120000 bytes, sha256 aaaaaaaaaaaa\n {2}after: image\/webp 1080x1920, 98000 bytes, sha256 bbbbbbbbbbbb\n/);
+    assert.match(shown.stdout, /\n {2}aspect ratio: changed, so check how the playlists below look\n {2}playlists: Lobby \(pl_LOBBY\), Cafe \(pl_CAFE\)\n/);
+    assert.match(shown.stdout, /impact: approving changes 6 screens/);
+    const asJson = await cli(["--json", "reviews", "show", "rvw_REPLACE"], transport, env);
+    assert.equal(asJson.envelope.data.playlist_change.media_replace.version, 4);
+
+    const restored = await cli(["--human", "reviews", "show", "rvw_RESTORE"], transport, env);
+    assert.match(restored.stdout, /Review rvw_RESTORE: Media restore, pending/);
+    assert.match(restored.stdout, /change: restore of an earlier file for media that playlists and schedules already play/);
+    assert.match(restored.stdout, /source: restore of version 2; becomes version 4/);
+    assert.doesNotMatch(restored.stdout, /aspect ratio:|playlists:/);
+
+    const listed = await cli(["--human", "reviews", "list"], transport, env);
+    assert.match(listed.stdout, /rvw_REPLACE {2}playlist_change {2}pending {2}media menu\.png \(med_MENU\) {2}2026-10-29T15:00:00Z {2}replacement becomes version 4\n/);
+    assert.match(listed.stdout, /rvw_RESTORE {2}playlist_change {2}pending {2}media menu\.png \(med_MENU\) {2}2026-10-29T15:00:00Z {2}restore becomes version 4\n/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
 test("a Propose tag change of media waits for review: pending media with warning media_review_pending and next reviews list", async () => {
   const env = await enrolled();
   try {
