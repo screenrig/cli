@@ -979,11 +979,11 @@ test("campaign clock text covers every rule member", () => {
   assert.equal(campaignWhenText({ data: { key: "queue" } }), "data queue exists");
   assert.equal(campaignWhenText({ from: "2026-12-01T00:00", windows: [{ days: ["sat", "sun"] }], monthly: [{ day: 1 }], except: ["2026-12-06"] }), "from 2026-12-01T00:00; sat,sun; day 1; except 2026-12-06");
   const lines = campaignLines({
-    id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, revision: 4, created_at: "c", updated_at: "u",
+    id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, reserved: false, revision: 4, created_at: "c", updated_at: "u",
     covers: "header", displays: [2], start: "next_item",
   });
   assert.deepEqual(lines.filter((line) => /^(when|covers|displays|start):/.test(line)), ["when: always", "covers: header", "displays: 2", "start: next item"]);
-  assert.ok(campaignTableLines([{ id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, revision: 4, created_at: "c", updated_at: "u", monthly: [{ nth: -1, weekday: "sun" }] }])[1]!.includes("last Sunday"));
+  assert.ok(campaignTableLines([{ id: "cmp_X", name: "N", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, priority: 3, paused: false, reserved: false, revision: 4, created_at: "c", updated_at: "u", monthly: [{ nth: -1, weekday: "sun" }] }])[1]!.includes("last Sunday"));
 });
 
 test("campaign create refuses a bad level member before any request", async () => {

@@ -220,6 +220,19 @@ function uploadScopeOf(value: unknown): NormalizedProblem["upload_scope"] {
   return { playlist_ids: playlists, folder_ids: folders, ...(access ? { access } : {}) };
 }
 
+/** A ScreenScope in an answer (an outside_screen_scope problem, the agent's status): two lists of ids, or undefined when it is not one. */
+export function screenScopeOf(value: unknown): NormalizedProblem["screen_scope"] {
+  const scope = asRecord(value);
+  const ids = (list: unknown): string[] | undefined => Array.isArray(list) && list.every((id) => typeof id === "string") ? list as string[] : undefined;
+  const folders = ids(scope?.folder_ids), screens = ids(scope?.screen_ids);
+  return folders && screens ? { folder_ids: folders, screen_ids: screens } : undefined;
+}
+
+/** "folders sfd_A, sfd_B; screens scr_X": a scope for a line of output. */
+export function screenScopeText(scope: { folder_ids: string[]; screen_ids: string[] }): string {
+  return `folders ${scope.folder_ids.join(", ") || "none"}; screens ${scope.screen_ids.join(", ") || "none"}`;
+}
+
 export function normalizeProblem(
   input: unknown,
   fallback: { status?: number; request_id?: string; bodyText?: string } = {},
@@ -252,6 +265,7 @@ export function normalizeProblem(
   const traceId = asString(rec?.trace_id);
   const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
   const uploadScope = uploadScopeOf(rec?.upload_scope);
+  const screenScope = screenScopeOf(rec?.screen_scope);
   return {
     type: asString(rec?.type) ?? problemType(code),
     title,
@@ -266,6 +280,7 @@ export function normalizeProblem(
     current_revision: asNumber(rec?.current_revision),
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
     ...(uploadScope ? { upload_scope: uploadScope } : {}),
+    ...(screenScope ? { screen_scope: screenScope } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
     // A valid server next action wins over local guidance; asNext drops any that is not a plain screenrig command.
@@ -330,6 +345,9 @@ export function renderProblem(problem: NormalizedProblem): string {
   }
   if (problem.upload_scope) {
     lines.push(`upload_scope: folders ${problem.upload_scope.folder_ids.join(", ") || "none"}; playlists ${problem.upload_scope.playlist_ids.join(", ") || "none"}`);
+  }
+  if (problem.screen_scope) {
+    lines.push(`screen_scope: ${screenScopeText(problem.screen_scope)}`);
   }
   if (typeof problem.retryable === "boolean") {
     lines.push(`retryable: ${problem.retryable}`);
@@ -451,6 +469,20 @@ export function withOverbookingGuidance(problem: NormalizedProblem): NormalizedP
   });
 }
 
+/**
+ * outside_screen_scope names the way back in its hint; add the command that
+ * shows the agent's own scope unless the server already supplied a next action.
+ */
+export function withScreenScopeGuidance(problem: NormalizedProblem): NormalizedProblem {
+  if (problem.code !== "outside_screen_scope") return problem;
+  return withGuidance(problem, {
+    next: {
+      command: "screenrig agent status",
+      reason: "Shows screen_scope, the folders and screens this agent is limited to, and person_screen_scope, its responsible person's; the agent acts on what both allow. Only the project owner widens a scope, in the dashboard.",
+    },
+  });
+}
+
 /** Both 402 codes: prepaid credit is spent, or eligible credit cannot cover this debit. */
 const PAYMENT_CODES = new Set(["payment_required", "insufficient_credits"]);
 
@@ -497,7 +529,11 @@ const DEFAULT_HINTS: Record<string, string> = {
   approver_required: "Only the project owner or a member who can approve may do this. Ask the project owner to turn on Can approve for that person.",
   outside_upload_scope: "This uploader works only in the playlists and media folders upload_scope lists (screenrig playlist list, screenrig media folder list). Ask the project owner to add the playlist or folder, or leave this to a full member.",
   review_not_pending: "Someone already decided, withdrew or replaced this review. Read it again with screenrig reviews show ID for its current state.",
-  review_stale: "The live playlist moved on after the change was proposed. Read the playlist again and propose the change on top of it.",
+  review_stale: "What the change was proposed against moved on (the playlist, campaign, screen folder or screens), so it can no longer be applied as reviewed. Read it again and propose the change again on top of what is there now.",
+  outside_screen_scope: "This agent, or the person responsible for it, works only on the screen folders and screens screen_scope lists, and everything inside those folders (screenrig agent status, screenrig screen list, screenrig screen folder list). Ask the project owner to widen the scope in the dashboard, or leave this to a member of the whole project.",
+  protected_target: "This change reaches a screen in a protected screen folder and has no review form. Propose clearing protection on the protected folder (screenrig screen folder update ID --unprotect): a second approver decides that review. Then make the change and have an approver protect the folder again.",
+  second_approver_required: "Changes that reach a protected screen folder are decided by an approver other than the person who proposed them or who is responsible for the agent that did. Ask another approver to decide the review, or ask the project owner to let another member approve reviews.",
+  reserved_item: "A reserved campaign is changed, paused, deleted or un-reserved only by a person who can approve reviews on the screens it reaches; an agent never is. Ask an approver to make the change or to clear the reserved flag in the dashboard.",
   review_blocked: "This screen change uses a playlist that has no approved version yet. The playlist's review is decided first.",
   playlist_not_approved: "This playlist is waiting for review and cannot reach a screen until a person approves it. Check it with screenrig reviews list, or choose an approved playlist.",
   capability_required: "This project does not have the capability this command needs. Do not retry; tell the user, who can change the project's purpose in the dashboard.",

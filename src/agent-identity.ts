@@ -1,6 +1,6 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import type { AccessLevel, Agent, AgentSelfStatus } from "./adapters/protocol.js";
-import { usageError } from "./problems.js";
+import { screenScopeOf, usageError } from "./problems.js";
 
 const AGENT_ID = RESOURCE_ID_PATTERNS.agent;
 
@@ -39,11 +39,15 @@ export function validateAgentSelfStatus(value: unknown, expectedState?: Agent["s
   const access = level(status.access);
   const effective = level(status.effective_access);
   const limitedBy = status.access_limited_by === "project" || status.access_limited_by === "person" ? status.access_limited_by : undefined;
+  const screenScope = screenScopeOf(status.screen_scope);
+  const personScope = screenScopeOf(status.person_screen_scope);
   return {
     agent: validateAgent(status.agent, expectedState),
     connection_ready: status.connection_ready,
     ...(access ? { access } : {}),
     ...(effective ? { effective_access: effective } : {}),
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
+    ...(screenScope ? { screen_scope: screenScope } : {}),
+    ...(personScope ? { person_screen_scope: personScope } : {}),
   };
 }

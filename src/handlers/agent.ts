@@ -13,7 +13,7 @@ import { DeviceLogin, type LoginOutcome } from "../login.js";
 import { ensureCredential } from "../enrollment.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { CliError, configError, usageError } from "../problems.js";
+import { CliError, configError, screenScopeText, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { installSource } from "../install-source.js";
 import { redactText } from "../redact.js";
@@ -275,7 +275,12 @@ export async function agentStatus(
     const notes = selfNotesField(response.body);
     const levels = accessFields(self);
     return withNotesHint({
-      envelope: successEnvelope({ status, connection_ready: self.connection_ready, ...levels.data, agent: safeAgentSummary(agent), ...(notes ? { notes } : {}) }, { request_id: client.requestId }),
+      envelope: successEnvelope({
+        status, connection_ready: self.connection_ready, ...levels.data,
+        ...(self.screen_scope ? { screen_scope: self.screen_scope } : {}),
+        ...(self.person_screen_scope ? { person_screen_scope: self.person_screen_scope } : {}),
+        agent: safeAgentSummary(agent), ...(notes ? { notes } : {}),
+      }, { request_id: client.requestId }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
@@ -283,6 +288,8 @@ export async function agentStatus(
         ["name", agent.name],
         ["agent_type", agent.agent_type],
         ...levels.lines,
+        ["screen_scope", self.screen_scope ? screenScopeText(self.screen_scope) : undefined],
+        ["person_screen_scope", self.person_screen_scope ? screenScopeText(self.person_screen_scope) : undefined],
         ["capabilities", agent.capabilities.join(", ")],
         ["platform", agent.platform],
         ["version", agent.version],

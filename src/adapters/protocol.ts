@@ -61,6 +61,8 @@ export interface Invitation {
   advertising?: InvitationAdvertising;
   /** An uploader invitation: the scope the accepting person receives. */
   upload_scope?: UploadScope;
+  /** A scoped member invitation: the screens the accepting person is limited to. */
+  screen_scope?: ScreenScope;
   created_at: string;
   delivery: "email" | "link";
   expires_at: string;
@@ -74,6 +76,7 @@ export interface Invitation {
 export interface InvitationCreate {
   advertising?: InvitationAdvertising;
   upload_scope?: UploadScope;
+  screen_scope?: ScreenScope;
   delivery?: "email" | "link";
   emails?: string[];
   kind: "project_member" | "ad_buyer";
@@ -191,9 +194,19 @@ export type AccessLevel = "read" | "propose" | "manage";
 /** Why effective_access is lower than the credential's access. */
 export type AccessLimitedBy = "project" | "person";
 
+/** What a caller limited to screens may act on: the screens in these folders (each with every folder inside it) and these single screens. */
+export interface ScreenScope {
+  folder_ids: string[];
+  screen_ids: string[];
+}
+
 export interface AgentSelfStatus {
   agent: Agent;
   connection_ready: boolean;
+  /** This agent's own scope in the project; absent for the whole project. */
+  screen_scope?: ScreenScope;
+  /** The scope of the person responsible for this agent; the agent acts on the screens both scopes allow. */
+  person_screen_scope?: ScreenScope;
   /** The credential's access level. */
   access?: AccessLevel;
   /** The level this credential acts with now, after the project and person caps. */
@@ -1080,10 +1093,14 @@ export interface Comments {
 export interface PairScreen {
   code: string;
   label?: string;
+  /** Required of a caller limited to screens, and a folder of its scope. */
+  folder_id?: string;
 }
 
 export interface ProvisionScreen {
   label?: string;
+  /** Required of a caller limited to screens, and a folder of its scope. */
+  folder_id?: string;
 }
 
 export interface ScreenProvisioning {
@@ -2145,6 +2162,8 @@ export interface ScreenFolder {
   parent_id: string | null;
   /** The playlist this folder's screens show when they have none of their own, unless a nearer folder sets one. Absent when unset. */
   default_playlist_id?: string;
+  /** A protected folder and every folder inside it make each change reaching their screens a review a second approver decides. */
+  protected?: boolean;
   /** Live screens directly inside this folder. Present in the list. */
   screens?: number;
   /** Present in the answer of a PATCH that moved the folder or changed its default playlist. */
@@ -2170,6 +2189,8 @@ export interface ScreenFolderPatch {
   parent_id?: string | null;
   /** null clears the default playlist. */
   default_playlist_id?: string | null;
+  /** Sent alone. Only a person who can approve protects a folder; clearing it is a review a second approver decides. */
+  protected?: boolean;
 }
 
 /** One campaign (source campaign) or folder default playlist (source folder, id the folder) that screens enter or leave by moving. */
@@ -2222,6 +2243,10 @@ export interface Campaign extends LevelMembers {
   audience: CampaignAudience;
   priority: number;
   paused: boolean;
+  /** Changed, paused, deleted or un-reserved only by a person who can approve. */
+  reserved: boolean;
+  /** Present for a caller limited to screens: false means the campaign reaches screens outside its scope and is read-only to it. */
+  editable?: boolean;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -2237,6 +2262,7 @@ export interface CampaignWrite extends LevelMembers {
   audience: CampaignAudience;
   priority?: number;
   paused?: boolean;
+  reserved?: boolean;
 }
 
 /** null clears a level member (from, until, windows, monthly, dates, except, data, interaction, displays); null covers is the full page and null start is next_item. */
@@ -2246,6 +2272,7 @@ export interface CampaignPatch extends Nullable<LevelMembers> {
   audience?: CampaignAudience;
   priority?: number;
   paused?: boolean;
+  reserved?: boolean;
 }
 
 type Nullable<T> = { [K in keyof T]?: T[K] | null };
@@ -2337,10 +2364,10 @@ export interface ProjectCreate { name: string; organization_id?: string; organiz
 export type CreatedProject = ProjectContext;
 
 /** Reviews: playlist and screen changes proposed under Propose access, and ad creatives. */
-export type ReviewKind = "playlist_change" | "screen_change" | "ad_creative";
+export type ReviewKind = "playlist_change" | "screen_change" | "ad_creative" | "protected_change";
 export type ReviewState = "pending" | "approved" | "rejected" | "changes_requested" | "withdrawn" | "superseded" | "stale";
 /** media is the pending media item of a selector_refresh review. */
-export interface ReviewSubject { type: "playlist" | "screen" | "creative" | "media"; id: string; name: string }
+export interface ReviewSubject { type: "playlist" | "screen" | "creative" | "media" | "campaign" | "screen_folder"; id: string; name: string }
 export interface ReviewImpact { screens: number }
 export interface ReviewPerson { user_id: string; name: string }
 export interface ReviewProposer {
@@ -2398,6 +2425,16 @@ export interface ReviewPlaylistChange {
   media_replace?: ReviewMediaReplace;
   previously_rejected_media?: string[];
 }
+/** A campaign, screen folder or move write that reaches a protected screen, held for a second approver. */
+export interface ReviewProtectedChange {
+  subkind: "campaign_create" | "campaign_update" | "campaign_delete" | "folder_create" | "folder_update" | "folder_delete" | "folder_unprotect" | "screens_move";
+  /** campaign_*: the request body as sent (absent on a delete). */
+  campaign?: { id?: string; body?: Record<string, unknown>; base_revision?: number };
+  /** folder_*: what the change sets. */
+  folder?: { id?: string; name?: string; move?: boolean; parent_id?: string; set_default?: boolean; default_playlist_id?: string; base_revision?: number };
+  /** screens_move: the body of the move; null when it names no screen or no folder. */
+  move?: { folder_id: string; screen_ids: string[] | null; folder_ids: string[] | null };
+}
 export interface ReviewScreenChange {
   action: "assign" | "set_playlist_schedule" | "clear_playlist_schedule" | "takeover" | "takeover_clear";
   screens: { ids?: string[]; tag?: string; count_at_request: number };
@@ -2430,11 +2467,14 @@ export interface Review {
   impact: ReviewImpact;
   playlist_change?: ReviewPlaylistChange;
   screen_change?: ReviewScreenChange;
+  protected_change?: ReviewProtectedChange;
+  /** Decided by a second approver: never the proposer, nor the person responsible for the proposing agent. */
+  protected?: boolean;
   ad_creative?: { creative_id: string; creative_revision: number; campaign_id?: string; buyer_project_id?: string; content_path: string };
   preview?: { live: Record<string, unknown> | null; proposed: Record<string, unknown> };
 }
 export interface ReviewList { items: Review[]; next_cursor: string | null; pending_count: number }
-export interface ReviewSummary { id: string; kind: "playlist_change" | "screen_change"; state: "pending"; url: string; subject: ReviewSubject; impact: ReviewImpact }
+export interface ReviewSummary { id: string; kind: "playlist_change" | "screen_change" | "protected_change"; state: "pending"; url: string; subject: ReviewSubject; impact: ReviewImpact }
 /** HTTP 202 from a review-class write under Propose access: the change is not on glass. */
 export interface ReviewPending { status: "pending_review"; review: ReviewSummary; playlist?: Record<string, unknown>;
   /** A playlist write's warnings (PlaylistWarning items); the CLI lifts them into the envelope. */

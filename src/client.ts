@@ -20,6 +20,7 @@ import {
   withPaymentGuidance,
   withQuotaGuidance,
   withRetryAfter,
+  withScreenScopeGuidance,
 } from "./problems.js";
 import type { Transport, TransportDownloadResponse, TransportRequest, TransportResponse } from "./transport/types.js";
 import type { Operation } from "./adapters/protocol.js";
@@ -116,6 +117,7 @@ function refusedSession(response: { status: number }, token: string | undefined)
  * by signing in again, so it says what a person changes instead.
  */
 function withAccessGuidance(problem: NormalizedProblem): NormalizedProblem {
+  if (problem.code === "outside_screen_scope") return withScreenScopeGuidance(problem);
   if (problem.code !== "insufficient_access" || problem.next) return problem;
   if (problem.access_limited_by) return { ...problem, hint: accessLimitHint(problem.access_limited_by) };
   return { ...problem, next: { command: "screenrig login --access manage", argv: ["login", "--access", "manage"], reason: "This sign-in's access level cannot do this. A person approves Manage access in the dashboard." } };
