@@ -568,7 +568,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
       ...(screen?.playlist_schedule?.entries?.length
-        ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
+        ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"}${screen.playlist_schedule.entries.some((entry) => entry.paused) ? `, ${screen.playlist_schedule.entries.filter((entry) => entry.paused).length} draft` : ""} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
       ...glassLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),

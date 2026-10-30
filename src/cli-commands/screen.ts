@@ -2,6 +2,8 @@ import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes
 import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import type { CommandHandler } from "../commands.js";
+import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
+import { calendarInstantOption } from "../change-control.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
@@ -311,6 +313,23 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenScheduleClear));
 
+  schedule.command("revisions").description("List a screen's playlist schedule revisions, newest first, one page at a time")
+    .argument("<id>", "Screen identifier")
+    .option("--after <CURSOR>", "Continue from the data.next_cursor of the previous page")
+    .action(bind(handleScreenScheduleRevisions));
+  schedule.command("restore").description("Put an earlier revision's schedule back on a screen by copying it forward")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--revision <N>", "Revision to copy forward, as screen schedule revisions numbers it (required)", positiveInteger("revision"))
+    .option("--expect-rev <REVISION>", "Require this current screen revision (default: the revision read just before the write)", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handleScreenScheduleRestore));
+  schedule.command("preview").description("Show what replacing a screen's playlist schedule would change, without making it")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--file <FILE>", "Schedule JSON {\"entries\": [...]}, or - for stdin (required)")
+    .addOption(new Option("--calendar-from <INSTANT>", "Start the calendars at this instant with a zone, such as 2026-12-01T00:00:00Z (default: now)").argParser(calendarInstantOption("--calendar-from")))
+    .addOption(new Option("--calendar-to <INSTANT>", "End the calendars at this instant with a zone, at most 93 days after the start (default: a week after it)").argParser(calendarInstantOption("--calendar-to")))
+    .action(bind(handleScreenSchedulePreview));
+
   const takeover = screen.command("takeover").description("Put a playlist ahead of campaigns, the schedule and assignment, or clear it");
   takeover.command("set", { isDefault: true }).description("Take over a screen or a fleet with one playlist (default: screen takeover ID ...)")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
@@ -335,6 +354,9 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen schedule set scr_LOBBY --file dayparts.json --expect-rev 4",
     "screenrig screen schedule set --tag Cafe --file dayparts.json");
   addCommandExamples(schedule.commands.find((command) => command.name() === "clear")!, "screenrig screen schedule clear scr_LOBBY", "screenrig screen schedule clear --tag Cafe");
+  addCommandExamples(schedule.commands.find((command) => command.name() === "revisions")!, "screenrig screen schedule revisions scr_LOBBY", "screenrig screen schedule revisions scr_LOBBY --after CURSOR");
+  addCommandExamples(schedule.commands.find((command) => command.name() === "restore")!, "screenrig screen schedule restore scr_LOBBY --revision 4", "screenrig screen schedule restore scr_LOBBY --revision 4 --expect-rev 9");
+  addCommandExamples(schedule.commands.find((command) => command.name() === "preview")!, "screenrig screen schedule preview scr_LOBBY --file dayparts.json", "screenrig screen schedule preview scr_LOBBY --file dayparts.json --calendar-from 2026-12-01T00:00:00Z --calendar-to 2027-01-01T00:00:00Z");
   addCommandExamples(takeover.commands.find((command) => command.name() === "set")!,
     'screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"',
     "screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --for 2h",

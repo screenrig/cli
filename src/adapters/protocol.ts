@@ -2123,6 +2123,8 @@ export interface LevelMembers {
 export interface ScreenScheduleEntryWrite extends LevelMembers {
   id?: string;
   playlist_id: string;
+  /** A draft: stored, drawn dashed in the calendar, and on no stack, resolver or Player until published (absent or false). */
+  paused?: boolean;
 }
 
 export interface ScreenScheduleEntry extends ScreenScheduleEntryWrite {
@@ -2298,6 +2300,80 @@ export interface CampaignPatch extends Nullable<LevelMembers> {
 }
 
 type Nullable<T> = { [K in keyof T]?: T[K] | null };
+
+/** Who made a revision, as the project's event log names them. */
+export interface RevisionAuthor { type: "person" | "agent"; id?: string; name: string }
+
+/** One stored revision of a campaign: the campaign as it was after a write. */
+export interface CampaignRevision {
+  revision: number;
+  created_at: string;
+  change: "created" | "edited" | "restored" | "promoted" | "baseline";
+  restored_from?: number;
+  current: boolean;
+  author?: RevisionAuthor;
+  campaign: Campaign;
+}
+
+/** One stored revision of a screen's playlist schedule: its whole entries list after a write. */
+export interface ScreenScheduleRevision {
+  revision: number;
+  created_at: string;
+  change: "edited" | "restored" | "baseline";
+  restored_from?: number;
+  current: boolean;
+  author?: RevisionAuthor;
+  entries: ScreenScheduleEntry[];
+}
+
+/** A page of revisions, newest first. */
+export interface RevisionPage<T> { items: T[]; next_cursor?: string | null }
+
+export interface CampaignPromote { revision: number }
+
+export interface CampaignPreviewRequest {
+  id?: string;
+  body: CampaignWrite | CampaignPatch;
+  from?: string;
+  to?: string;
+}
+
+export interface ScreenSchedulePreviewRequest {
+  entries: ScreenScheduleEntryWrite[];
+  from?: string;
+  to?: string;
+}
+
+export interface SchedulePreviewReach { count: number; screen_ids: string[] }
+
+/** The levels of a stack, for the calendar: id is takeover, campaign:ID, schedule:ENTRY_ID, default or folder:FOLDER_ID. */
+export interface CalendarLevel { id: string; source: string; playlist_id: string; name?: string; record_id?: string }
+
+export interface CalendarSpan { from: string; to: string; level_id: string; state: "plays" | "partial" | "outranked" | "conditional" | "paused"; displays?: number[]; reason?: string }
+
+export interface CalendarOnScreen { display: number; region?: "header" | "footer" | "side"; from: string; to: string; level_id?: string }
+
+export interface CalendarGroup {
+  key: string;
+  screens: number;
+  screen_ids: string[];
+  timezone?: string;
+  displays: number;
+  levels: CalendarLevel[];
+  paused_levels?: CalendarLevel[];
+  spans: CalendarSpan[];
+  on_screen: CalendarOnScreen[];
+  conflicts: Array<{ kind: string; level_ids: string[]; from?: string; to?: string }>;
+}
+
+export interface ScheduleCalendar { from: string; to: string; screens: number; groups: CalendarGroup[]; truncated?: boolean }
+
+/** What a campaign or schedule write would change: the screens that gain or lose a level, and the calendar before and after. */
+export interface SchedulePreview {
+  gained: SchedulePreviewReach;
+  lost: SchedulePreviewReach;
+  calendar: { before: ScheduleCalendar; after: ScheduleCalendar };
+}
 
 export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "paused" | "blocked" | "not_in_audience";
 

@@ -2933,7 +2933,7 @@ paths:
       x-screenrig-access: write
       operationId: moveScreens
       description: >-
-        Moves screens (screen_ids) and folders (folder_ids) into one folder (folder_id), or to the project root when folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items already in the destination are left as they are; each moved screen and folder advances its revision. Moved screens re-resolve their playlist within about 15 seconds: levels names the campaigns whose folder audience they enter or leave and the folder default playlists they gain or lose. Emits screen.moved.
+        Moves screens (screen_ids) and folders (folder_ids) into one folder (folder_id), or to the project root when folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items already in the destination are left as they are; each moved screen and folder advances its revision. Moved screens re-resolve their playlist within about 15 seconds: levels names the campaigns whose folder audience they enter or leave and the folder default playlists they gain or lose. Emits screen.moved, whose details carry the counts (screens, folders) and where each moved item was: moves [{screen_id, from}] (from is the folder id, empty for the root) and folder_moves [{folder_id, from_parent}], at most 1000 each, so a history can move them back with this route.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4126,6 +4126,130 @@ paths:
               schema:
                 $ref: '#/components/schemas/Screen'
         '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/playlist-schedule/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: read
+      operationId: previewScreenPlaylistSchedule
+      description: >-
+        What replacing the screen's playlist schedule with entries would change, without making it. The entries are checked as PUT checks them (grammar, the screen's timezone and displays, a default playlist, and each playlist as an assignment: it exists, has an approved version, fits the screen's wall and the region it covers, and its references resolve), so a preview refuses what the PUT refuses. The answer says whether the screen would gain or lose levels of its schedule on its stack (a paused entry is on no stack, so publishing one gains it), and the screen's schedule calendar as it is (before) and as it would be (after) over from to to (default: a week from now; at most 93 days). Read access: nothing is written.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenSchedulePreviewRequest'
+      responses:
+        '200':
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulePreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/playlist-schedule/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenPlaylistScheduleRevisions
+      description: >-
+        The screen's playlist schedule revisions, newest first: the whole entries list as stored after each write (a PUT, a DELETE, a restore, a schedule import), with the kind of change and who made it. A revision is numbered by the screen's revision at the write, so numbers have gaps where the screen changed otherwise. A screen whose history has no row yet lists its schedule as it stands, with change baseline. Revisions go with the screen's purge. At most 50 per page; next_cursor while more remain, null on the last page.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: The screen's schedule revisions, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenScheduleRevisionList'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/playlist-schedule/revisions/{revision}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/RevisionNumber'
+    post:
+      x-screenrig-access: review
+      operationId: restoreScreenPlaylistScheduleRevision
+      x-rate-limit-policies:
+        - name: screen-control-project
+          quota: 600
+          windowSeconds: 60
+        - name: screen-control-screen
+          quota: 20
+          windowSeconds: 60
+        - name: screen-control-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Puts an earlier revision's entries back as the screen's schedule: the same write as PUT /api/screens/{id}/playlist-schedule with those entries (or DELETE when that revision had none), checked as they are checked now (a playlist deleted since refuses it), so under Propose access the restore becomes the same screen_change review the PUT becomes. If-Match is required and names the screen's current revision. Earlier revisions stay as they were.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReviewNote'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPending'
+        '200':
+          description: Screen with the restored schedule and its effective_playlist. The ETag is the new revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/Problem'
@@ -5404,6 +5528,38 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/campaigns/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: read
+      operationId: previewCampaign
+      description: >-
+        What a campaign write would change, without making it. With id, body is the PATCH body of that campaign; without, it is the POST body of a new one. The body is checked as the write checks it (an audience rule, a window, an unapproved playlist, a screen folder the project does not have). The answer lists the screens that would gain the campaign on their stack and those that would lose it (count, and the first 500 screen ids), and the schedule calendar of the screens in the old and the new audience as it is (before) and as it would be (after) over from to to (default: a week from now; at most 93 days), grouped as GET /api/schedule/calendar groups. A paused campaign is on no stack, so publishing one gains its audience; an edit that keeps the campaign on a screen's stack gains and loses nothing and shows in the calendars. Read access: nothing is written.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignPreviewRequest'
+      responses:
+        '200':
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulePreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/campaigns/{id}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -5431,7 +5587,8 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateCampaign
-      description: Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision.
+      description: >-
+        Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. A paused campaign is a draft: it is on no screen's stack, and a write that leaves it paused re-resolves no screen. Publishing it for a test is this PATCH with paused false and an audience that is a test folder or a few screens; POST /api/campaigns/{id}/promote then copies that audience onto the real one. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision. Each write is stored in the campaign's history (GET /api/campaigns/{id}/revisions).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5472,7 +5629,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteCampaign
-      description: Deletes the campaign. Every screen showing it returns to what it would show without it within a minute. Appends campaign.deleted. If-Match guards the revision.
+      description: Deletes the campaign and its revision history. Every screen showing it returns to what it would show without it within a minute. Appends campaign.deleted. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5488,6 +5645,104 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/campaigns/{id}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listCampaignRevisions
+      description: >-
+        The campaign's revisions, newest first: the campaign as stored after each write by a person, an agent or a schedule import (a create, an update, a promote, a restore), with the kind of change and who made it. History begins with the revision a campaign held when revision history was first recorded: until its next write the list holds that revision alone, with change baseline. A campaign whose history holds no revision with paused false is a draft. Revisions are kept for as long as the campaign is and go with it. At most 50 per page; next_cursor while more remain, null on the last page.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: The campaign's revisions, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignRevisionList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/campaigns/{id}/revisions/{revision}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/RevisionNumber'
+    post:
+      x-screenrig-access: write
+      operationId: restoreCampaignRevision
+      description: >-
+        Makes an earlier revision current again by copying it forward through the same write as PATCH: its name, playlist, audience, rule, placement, priority and paused become a new revision (change restored, restored_from the revision copied), checked as an update is (its playlist must still exist and be approved), and every screen of the old and the new audience re-resolves, unless the campaign was paused and stays paused. Earlier revisions stay as they were. If-Match is required and names the current revision (invalid_request when absent, revision_conflict when stale). A revision whose content is the current content changes nothing and answers the current campaign. The same access as PATCH.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The campaign with the copied revision current; ETag carries its revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/campaigns/{id}/promote:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: promoteCampaign
+      description: >-
+        Publishes a test. A test publish is a PATCH of a draft with paused false and an audience that is a test folder or a few screens; promote then copies the audience of revision (the draft's own, paused, revision) onto the campaign in one write (change promoted, restored_from the revision copied) and every screen of the old and the new audience re-resolves. Refused (invalid_request, naming revision) when that revision was not paused, since it is not a draft, and when the campaign is paused now, since there is no test to promote. If-Match is required and names the current revision. A revision whose audience is the current one changes nothing. The same access as PATCH.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignPromote'
+      responses:
+        '200':
+          description: The campaign with the draft's audience; ETag carries its revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/campaigns/{id}/screens:
@@ -23951,6 +24206,7 @@ components:
     EventOrder: {name: order, in: query, required: false, schema: {type: string, enum: [asc, desc], default: asc}, description: "asc pages oldest first with after; desc pages newest first with before. before implies desc; order=asc with before is refused."}
     EventLogFrom: {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the start of the window (inclusive). Defaults to 24 hours before to; a newest-first page without from reaches back to the project's event retention instead."}
     EventLogTo: {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: "With source=log, the end of the window (exclusive). Defaults to now. The window is at most 31 days."}
+    RevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the record, as its revisions list numbers them."}
     PlaylistRevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the playlist, as listPlaylistRevisions numbers them."}
     ListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 256}, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request."}
     EventListLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit."}
@@ -28812,6 +29068,7 @@ components:
         covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
+        paused: {type: boolean, description: "A draft: the entry is stored and drawn dashed in the calendar, and reaches no stack, resolver or Player until it is published (paused false or absent). Its playlist is validated like any entry's."}
     ScreenScheduleEntry:
       type: object
       additionalProperties: false
@@ -28830,6 +29087,7 @@ components:
         covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
+        paused: {type: boolean, description: "A draft: the entry is stored and drawn dashed in the calendar, and reaches no stack, resolver or Player until it is published (paused false or absent). Its playlist is validated like any entry's."}
     LevelMonthly:
       type: object
       additionalProperties: false
@@ -28857,6 +29115,82 @@ components:
         The level holds while someone is using the screen: from a touch, click or key until idle_s seconds pass with no input. Typical use: an interactive page above an attract loop. idle_s is stored and returned (60 when omitted).
       properties:
         idle_s: {type: integer, minimum: 5, maximum: 3600}
+    CampaignRevision:
+      type: object
+      additionalProperties: false
+      required: [revision, created_at, change, current, campaign]
+      description: >-
+        One stored revision of a campaign: the campaign as it was after a write. change says what made it: created, edited (an update or a schedule import), restored or promoted (a copy of an earlier revision, named by restored_from), or baseline (the revision the campaign held when its history began, before any write recorded one). A value this reader does not know reads as edited.
+      properties:
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        change: {type: string, enum: [created, edited, restored, promoted, baseline]}
+        restored_from: {type: integer, minimum: 1, description: "The revision a restore or promote copied."}
+        current: {type: boolean, description: "This revision is the campaign's current one."}
+        author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
+        campaign: {$ref: "#/components/schemas/Campaign"}
+    CampaignRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/CampaignRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    CampaignPromote:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1, description: "The draft's (paused) revision whose audience the campaign takes."}
+    CampaignPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        id: {type: string, description: "The campaign a PATCH body is previewed on; omit to preview a create."}
+        body: {type: object, description: "A CampaignPatch with id, a CampaignWrite without."}
+        from: {type: string, format: date-time, description: "Start of the calendars; defaults to now."}
+        to: {type: string, format: date-time, description: "End of the calendars; defaults to a week after from, at most 93 days after it."}
+    ScreenSchedulePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries: {type: array, minItems: 1, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntryWrite"}}
+        from: {type: string, format: date-time, description: "Start of the calendars; defaults to now."}
+        to: {type: string, format: date-time, description: "End of the calendars; defaults to a week after from, at most 93 days after it."}
+    SchedulePreviewReach:
+      type: object
+      additionalProperties: false
+      required: [count, screen_ids]
+      properties:
+        count: {type: integer, minimum: 0}
+        screen_ids: {type: array, maxItems: 500, items: {type: string}, description: "The first 500 by screen id."}
+    SchedulePreview:
+      type: object
+      additionalProperties: false
+      required: [gained, lost, calendar]
+      description: >-
+        What a campaign or schedule write would change. gained are the screens that would carry a level of the write they do not carry now, lost those that carry one they would no longer; a level that stays on a stack changes neither and shows in calendar.
+      properties:
+        gained: {$ref: "#/components/schemas/SchedulePreviewReach"}
+        lost: {$ref: "#/components/schemas/SchedulePreviewReach"}
+        calendar:
+          type: object
+          additionalProperties: false
+          required: [before, after]
+          properties:
+            before: {$ref: "#/components/schemas/ScheduleCalendar"}
+            after: {$ref: "#/components/schemas/ScheduleCalendar"}
+    ScreenScheduleRevision:
+      type: object
+      additionalProperties: false
+      required: [revision, created_at, change, current, entries]
+      description: >-
+        One stored revision of a screen's playlist schedule: its whole entries list after a write (no entries: the screen had no schedule). revision is the screen's revision at the write. change is edited, restored (a copy of an earlier revision, named by restored_from) or baseline (the schedule the screen held when its history began).
+      properties:
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        change: {type: string, enum: [edited, restored, baseline]}
+        restored_from: {type: integer, minimum: 1}
+        current: {type: boolean, description: "The newest revision, the schedule the screen holds."}
+        author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
+        entries: {type: array, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntry"}}
+    ScreenScheduleRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ScreenScheduleRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     ScreenPlaylistScheduleWrite:
       type: object
       additionalProperties: false
@@ -29002,7 +29336,7 @@ components:
             required: [display, level_id]
             properties:
               display: {type: integer, minimum: 1, maximum: 12}
-              region: {type: string, enum: [main, header, footer, side], description: "The strip the level plays in on that display; absent is the page (a report may spell it main). Each display and region appears once."}
+              region: {type: string, enum: [header, footer, side], description: "The strip the level plays in on that display; absent is the page (the server stores a reported main as absent). Each display and region appears once."}
               level_id: {type: string}
         reported_at: {type: string, format: date-time}
     StackLevel:
@@ -29174,6 +29508,7 @@ components:
         timezone: {type: string}
         displays: {type: integer, minimum: 1}
         levels: {type: array, items: {$ref: "#/components/schemas/StackLevel"}, description: Highest first.}
+        paused_levels: {type: array, items: {$ref: "#/components/schemas/StackLevel"}, description: "The paused campaigns and schedule entries of the group, listed for their spans (state paused) only: they are not in levels, win no on_screen stretch and make no conflict."}
         spans: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarSpan"}}
         on_screen: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarOnScreen"}}
         conflicts: {type: array, items: {$ref: "#/components/schemas/ScheduleCalendarConflict"}}
@@ -29185,7 +29520,7 @@ components:
         level_id: {type: string}
         from: {type: string, format: date-time}
         to: {type: string, format: date-time}
-        state: {type: string, enum: [plays, partial, outranked, conditional]}
+        state: {type: string, enum: [plays, partial, outranked, conditional, paused], description: "paused: a paused level (a draft) would hold by its time rule here; drawn dashed, never played."}
         displays: {type: array, items: {type: integer}, description: The displays a partial level plays on.}
         reason: {type: string, enum: [interaction, data], description: What a conditional level waits on.}
     ScheduleCalendarOnScreen:
@@ -29194,6 +29529,7 @@ components:
       required: [display, from, to]
       properties:
         display: {type: integer, minimum: 1}
+        region: {type: string, enum: [header, footer, side], description: "The strip this stretch is of; absent is the page itself (main)."}
         from: {type: string, format: date-time}
         to: {type: string, format: date-time}
         level_id: {type: string, description: Absent when nothing plays.}

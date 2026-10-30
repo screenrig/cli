@@ -828,7 +828,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
   const group = root.commands.find((command) => command.name === "campaign")!;
   assert.match(group.summary, /Schedule your screens; ads campaigns buy ad time on other screens/);
   assert.ok(group.summary.length <= 69, "the root listing keeps the summary on one line");
-  assert.deepEqual(commandHelp(["campaign"]).commands.map((command) => command.name), ["list", "show", "create", "update", "pause", "resume", "delete", "screens", "explain"]);
+  assert.deepEqual(commandHelp(["campaign"]).commands.map((command) => command.name), ["list", "show", "create", "update", "preview", "publish", "promote", "revisions", "restore", "pause", "resume", "delete", "screens", "explain"]);
   assert.match(commandHelp(["campaign"]).usage, /It schedules your own screens: ads campaigns\s+buy ad time on other screens/);
 
   const create = commandHelp(["campaign", "create"]);
@@ -860,7 +860,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
   assert.match(commandHelp(["campaign", "pause"]).usage, /within a minute/);
   assert.match(commandHelp(["campaign", "delete"]).usage, /within a minute/);
 
-  const everything = JSON.stringify([commandHelp(["campaign"]), ...["list", "show", "create", "update", "pause", "resume", "delete", "screens", "explain"].map((action) => commandHelp(["campaign", action]))]);
+  const everything = JSON.stringify([commandHelp(["campaign"]), ...["list", "show", "create", "update", "preview", "publish", "promote", "revisions", "restore", "pause", "resume", "delete", "screens", "explain"].map((action) => commandHelp(["campaign", action]))]);
   assert.doesNotMatch(everything, /\b(beta|coming soon|not yet|planned|in development|not available yet|experimental)\b/i);
   assert.doesNotMatch(everything, /localhost|MCP|\/home\//);
 });
