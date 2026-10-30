@@ -282,7 +282,7 @@ export class OAuthClient {
     });
   }
 
-  async startDevice(options: { access: AccessLevel; projectId?: string; name?: string; platform?: string; version?: string; bearer?: string }): Promise<DeviceStart> {
+  async startDevice(options: { access: AccessLevel; projectId?: string; name?: string; platform?: string; version?: string; installSource?: string; bearer?: string }): Promise<DeviceStart> {
     const metadata = await this.discover();
     if (!metadata.device_authorization_endpoint) throw oauthUnavailable("The authorization server offers no device sign-in.");
     const form = new URLSearchParams({
@@ -292,6 +292,7 @@ export class OAuthClient {
       ...(options.name ? { name: options.name } : {}),
       ...(options.platform ? { platform: options.platform } : {}),
       ...(options.version ? { version: options.version } : {}),
+      ...(options.installSource ? { install_source: options.installSource } : {}),
     });
     const headers = { ...this.authenticate(form, metadata), ...(options.bearer ? { authorization: `Bearer ${options.bearer}` } : {}) };
     const response = await this.send("POST", metadata.device_authorization_endpoint, form, headers);

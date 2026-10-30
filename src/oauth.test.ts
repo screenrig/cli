@@ -1065,3 +1065,40 @@ test("project token requires explicit enrollment and sends nothing on a fresh in
     assert.equal(transport.calls.length + transport.oauthCalls.length, 0);
   } finally { await h.done(); }
 });
+
+test("login and agent enroll send the plugin helper's install source", async () => {
+  const source = "claude/claude-plugins-official";
+  const signIn = await harness({ api_url: API });
+  signIn.fs.env.SCREENRIG_INSTALL_SOURCE = source;
+  const sent: Array<string | null> = [];
+  const devices = withDiscovery(new FakeTransport())
+    .on("POST", "/oauth/device_authorization", (req) => {
+      sent.push(form(req).get("install_source"));
+      return json(200, { device_code: "E".repeat(43), user_code: "BCDF-GHJK", verification_uri: "https://screenrig.ai/dashboard/connect",
+        verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK", expires_in: 600, interval: 5 });
+    })
+    .on("POST", "/oauth/token", () => tokenResponse(access(), refresh(1)))
+    .on("GET", "/api/project", () => projectBody());
+  try {
+    const result = await signIn.cli(["--json", "login"], devices);
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(sent, [source]);
+  } finally { await signIn.done(); }
+
+  const enroll = await harness();
+  enroll.fs.env.SCREENRIG_INSTALL_SOURCE = source;
+  const pair = { access: access({ project: OTHER_PROJECT, sid: "grt_BBBB" }), refresh: "opaque-install-source" };
+  const bodies: unknown[] = [];
+  const enrollments = new FakeTransport()
+    .on("POST", "/api/enrollments", (req) => {
+      bodies.push((req.body as { install_source?: string }).install_source);
+      return enrollmentBody(pair);
+    })
+    .on("GET", "/api/project", () => ({ ...projectBody(OTHER_PROJECT), headers: { "content-type": "application/json", "cache-control": "private, no-store" } }))
+    .on("GET", "/api/agents/self", () => agentSelf());
+  try {
+    const result = await enroll.cli(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme"], enrollments);
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(bodies, [source]);
+  } finally { await enroll.done(); }
+});

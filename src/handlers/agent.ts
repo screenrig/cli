@@ -15,6 +15,7 @@ import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { CliError, configError, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
+import { installSource } from "../install-source.js";
 import { redactText } from "../redact.js";
 import { agentPlatform, validateAgent, validateAgentSelfStatus } from "../agent-identity.js";
 import { AGENT_SELF_PATH, notesHint, notesHintWarning, selfNoteCounts, selfNotesField, type NoteCounts } from "../agent-notes.js";
@@ -116,12 +117,14 @@ export async function login(args: ParsedArgs, runtime: CliRuntime, resolved: Res
   if (name && name.length > 80) throw usageError("login --name is at most 80 characters.");
   const session = oauthSessionFor(runtime, resolved);
   const device = new DeviceLogin(session, resolved.configPath, sessionRuntime(runtime));
+  const source = installSource(runtime.env);
   const outcome: LoginOutcome = await device.run({
     access: request.access,
     ...(request.project ? { project: request.project } : {}),
     ...(name ? { name } : {}),
     platform: agentPlatform(),
     version: CLI_VERSION,
+    ...(source ? { installSource: source } : {}),
     wait: request.wait,
     ...(request.resume !== undefined ? { resume: request.resume } : {}),
   }, (pending, resumed) => {
@@ -683,6 +686,7 @@ export async function enrollForCommand(
       },
       enroll: async (state) => {
         const client = clientFor(runtime, args, resolved.apiUrl);
+        const source = installSource(runtime.env);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
           credential_format: state.credentialFormat,
@@ -694,6 +698,7 @@ export async function enrollForCommand(
           ...(state.setupCode !== undefined ? { setup_code: state.setupCode } : {}),
           ...(options.name ? { name: options.name } : {}),
           ...(options.explicit ? { agent_type: "cli", platform: agentPlatform(), version: CLI_VERSION } : {}),
+          ...(source ? { install_source: source } : {}),
         };
         let response;
         try {

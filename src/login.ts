@@ -16,6 +16,8 @@ export interface LoginRequest {
   name?: string;
   platform?: string;
   version?: string;
+  /** Where this installation came from (install-source.ts). */
+  installSource?: string;
   wait: boolean;
   resume?: string;
 }
@@ -109,6 +111,7 @@ export class DeviceLogin {
       ...(request.name ? { name: request.name } : {}),
       ...(request.platform ? { platform: request.platform } : {}),
       ...(request.version ? { version: request.version } : {}),
+      ...(request.installSource ? { installSource: request.installSource } : {}),
       ...(bearer ? { bearer } : {}),
     });
     const login: PendingLogin = {
