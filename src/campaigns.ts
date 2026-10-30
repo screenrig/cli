@@ -624,9 +624,16 @@ export function campaignTableLines(items: Campaign[]): string[] {
 
 /** A region, a display lock, interaction or a data condition is honored only by a Player that resolves its own stack. */
 const STACK_ONLY_DETAIL = "needs a Player that resolves its own stack";
-const REGION_DETAIL = "its strip fits no display of this screen (wrong orientation, or over half the display)";
+const REGION_DETAIL = "laid out on no display of this screen (a strip of the wrong orientation or over half the display, or a display lock naming none of its outputs)";
 
-const STANDING_ORDER = ["playing", "pending", "waiting", "ended", "outranked", "paused", "blocked", "not_in_audience"];
+/** What a conditional level waits on: only the Player sees input and its card data. */
+function conditionalDetail(reason: string | undefined): string {
+  return reason === "interaction" ? "plays while someone is using the screen"
+    : reason === "data" ? "plays while its data condition holds"
+    : "plays while the Player's condition holds";
+}
+
+const STANDING_ORDER = ["playing", "pending", "waiting", "ended", "outranked", "conditional", "paused", "blocked", "not_in_audience"];
 
 /** "8 playing, 2 waiting, 1 blocked": the per-standing counts of a campaign's audience. */
 export function campaignCountsText(counts: Record<string, number> | undefined): string {
@@ -651,6 +658,7 @@ export function campaignStandingDetail(status: CampaignStatus, screenId?: string
       return status.reason === "takeover" ? "a screen takeover wins"
         : status.reason === "campaign" ? (status.by ? `campaign ${status.by} wins` : "another campaign wins")
         : "outranked";
+    case "conditional": return conditionalDetail(status.reason);
     case "blocked":
       switch (status.reason) {
         case "no_default_playlist":
@@ -705,13 +713,14 @@ export function verdictDetail(verdict: ScreenVerdict, screenId: string, timezone
     case "outside_hours": return next ? `outside its windows; holds again ${next}` : "outside its windows; no start within eight days";
     case "ended":
       return verdict.kind === "takeover" && verdict.until ? `ended ${instantInZone(verdict.until, timezone)}` : "until has passed";
+    case "conditional": return conditionalDetail(verdict.reason);
     case "off":
       switch (verdict.reason) {
         case "paused": return verdict.kind === "schedule" ? "the schedule entry is paused (a draft)" : "the campaign is paused";
         case "not_in_audience": return "the screen is not in the audience";
         case "no_default_playlist": return `the screen has no default playlist: screenrig screen assign ${screenId} --playlist-id PLAYLIST_ID`;
         case "no_timezone": return `the screen has no timezone: screenrig screen set-timezone ${screenId} --timezone ZONE`;
-        case "playlist_unavailable": return "the playlist is missing or unapproved";
+        case "playlist_unavailable": return "the playlist is missing, unapproved or not in the stack this screen's Player receives";
         case "region_not_laid_out": return REGION_DETAIL;
         case "stack_only": return STACK_ONLY_DETAIL;
         default: return "does not apply";

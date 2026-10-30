@@ -97,7 +97,7 @@ paths:
     put:
       x-screenrig-access: write
       operationId: transferProjectOwnerAgent
-      description: The owner transfers ownership to a verified existing project member; this grants no new membership. The new owner's membership leaves any screen_scope and upload_scope, so the new owner reaches the whole project.
+      description: The owner transfers ownership to a verified existing project member; this grants no new membership. The new owner's membership leaves any screen_scope and upload_scope, so the new owner reaches the whole project. A dashboard session of an admin of the project's organization who is a member transfers ownership the same way, from whoever owns the project; an organization admin who is not a member uses PUT /api/organizations/{org_id}/projects/{project_id}/owner.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -567,7 +567,7 @@ paths:
       x-screenrig-access: write
       operationId: createInvitations
       description: >-
-        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A project_member email invitation to a person who would be an external guest of the project's organization (it is not their home organization) is subject to that organization's guest policy, and guest_not_allowed (403) answers when the policy (allow, domains or none) does not admit the address. Accepting the invitation checks again. Staff and the organization's own admins are exempt. A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -672,7 +672,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: requestSignInReset
-      description: Accepts a sign-in reset request without revealing whether a person holds the address. A live reset is superseded and expires after one hour. With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan, and pending organization admin invitations to live organizations, fill the rest, newest first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other expired invitations, and revoked, accepted and link invitations, are not re-sent.
+      description: Accepts a sign-in reset request without revealing whether a person holds the address. A person whose address is unverified, such as a self-serve signup, is found too, and completing that reset, which its owner must confirm with replace_unverified_account, gives the inbox's owner a new account (a new person with the reset's credential, a new organization and project) and deletes the unverified person, whom nobody had shown the address belonged to. A live reset is superseded and expires after one hour. With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan, and pending organization admin invitations to live organizations, fill the rest, newest first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other expired invitations, and revoked, accepted and link invitations, are not re-sent.
       security: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -720,7 +720,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: inspectDashboardInvitation
-      description: Inspects an invitation without consuming it. Never reports signup or verification state.
+      description: Inspects an invitation without consuming it. Never reports signup or verification state, except that a sign-in reset reports replaces_unverified_account. An organization_admin or organization_member invitation reports the organization's name and no project.
       security: []
       requestBody:
         required: true
@@ -757,7 +757,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: startDashboardInvitationPasskey
-      description: Starts a five-minute registration ceremony bound to the invitation digest and mode. Link create_login requires a verified __Host-screenrig-signup cookie and uses its name. Email create_login binds the supplied display name; reset binds the target person.
+      description: Starts a five-minute registration ceremony bound to the invitation digest and mode. Link create_login requires a verified __Host-screenrig-signup cookie and uses its name. Email create_login binds the supplied display name; reset binds the target person, except that a reset of an unverified address registers the passkey for the new person it creates, named by the supplied display name or, when absent, from the address. That reset requires replace_unverified_account true (the inspection reports replaces_unverified_account) and otherwise answers 409 unverified_account_replacement.
       security:
         - {}
         - invitationSignup: []
@@ -858,7 +858,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: acceptDashboardInvitation
-      description: Accepts an invitation transactionally and mints a fresh person session, deleting the old session when present. Link create_login requires the verified __Host-screenrig-signup cookie for this invitation. signed_in requires a dashboard session and recent sign-in or fresh proof; email delivery requires a matching verified email. An already-registered create_login address returns resource_conflict. An organization_admin invitation adds the person to the organization's admins and opens no project; it returns organization_admin_limit when the organization already has 20 admins and stays outstanding, and resource_conflict when the organization was deleted.
+      description: Accepts an invitation transactionally and mints a fresh person session, deleting the old session when present. Link create_login requires the verified __Host-screenrig-signup cookie for this invitation. signed_in requires a dashboard session and recent sign-in or fresh proof; email delivery requires a matching verified email, or the unverified address of the signed-in person, which accepting verifies. An address a live person already holds, verified or not, returns resource_conflict for create_login. A reset signs in the person who holds a verified address. A reset of an unverified address requires replace_unverified_account true (the inspection reports replaces_unverified_account) and otherwise answers 409 unverified_account_replacement and consumes nothing; with it, the reset creates a new verified person with the credential it registers, named by display_name or, when absent, from the address, with a new organization and project, and signs that person in; the unverified person is deleted (their sessions, passkeys and agents end) and the projects and organizations they made stay, without them and no longer matching the address as their contact, so no later reset re-sends them an enrollment invitation. The response names the new project. A session whose email verification is required (email_verification_required on GET /api/session) accepts only an emailed invitation naming its own address and receives 403 email_verification_required for any other. An organization_admin invitation adds the person to the organization's admins and opens no project; it returns organization_admin_limit when the organization already has 20 admins and stays outstanding, and resource_conflict when the organization was deleted. An organization_member invitation sets the person's home organization to the inviting organization, from any previous home, and grants no project membership; it returns managed_elsewhere (409) when another organization manages the person, and resource_conflict when the organization was deleted. An organization_admin invitation sets the home organization only for a person with none. A project_member invitation re-checks the organization's guest policy and returns guest_not_allowed (403) when the person would be an external guest the policy refuses; a project invitation never changes anyone's home organization. A refused invitation stays outstanding.
       security:
         - {}
         - invitationSignup: []
@@ -896,6 +896,104 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
+  /api/signups/passkey-options:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: startDashboardSignupPasskey
+      description: Starts a five-minute registration ceremony for a self-serve signup, bound to the normalized email address and the display name. It creates nothing and sends no mail. An address a live person holds, verified or not, returns 409 account_exists; an address at a domain whose organization signs in through an identity provider returns 403 sso_required; an invalid address or name returns 400 invalid_request with field errors. A server running dashboard development authentication returns passkeys_disabled. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupPasskeyOptionsRequest'
+      responses:
+        '201':
+          description: Starts a five-minute registration ceremony for a self-serve signup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardPasskeyRegistration'
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+        - name: signup-passkey-options-ip
+          quota: 30
+          windowSeconds: 600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+  /api/signups:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: createDashboardSignup
+      description: Creates a self-serve account and signs this browser in. One transaction creates the person with an unverified email address and a verification deadline 72 hours out, registers the passkey from the ceremony POST /api/signups/passkey-options started, creates the person's organization and project as agent enrollment creates them, makes the person the project owner, stores the marketing email choice, and queues the verification mail (purpose account_email). The website visitor that opened the page is linked to the account and the signup is counted as signed_up. The response sets the dashboard session cookie. The refusals are those of POST /api/signups/passkey-options; a used, expired or mismatched ceremony returns 400 invalid_request. Limited per client address and per email address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: The account exists and this browser holds its session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupCreated'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Set-Cookie:
+              schema:
+                type: string
+              description: Fresh __Host-screenrig-dashboard session.
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+        - name: signup-create-ip
+          quota: 10
+          windowSeconds: 3600
+        - name: signup-create-address
+          quota: 5
+          windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
   /api/session/project:
     servers:
       - url: https://screenrig.ai
@@ -926,7 +1024,7 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: listDashboardMembers
-      description: Lists members of the current project without their private email addresses. Every member has equal authority except removal; owner marks the project owner, and viewer_user_id and viewer_is_owner describe the signed-in person.
+      description: Lists members of the current project without their private email addresses. Every member has equal authority except member management (removal, approver, scopes, ownership), which belongs to the owner and to an admin of the project's organization who is a member. owner marks the project owner, external marks a guest (the member's home is not the project's organization), and viewer_user_id and viewer_is_owner describe the signed-in person.
       security:
         - dashboardSession: []
       responses:
@@ -961,7 +1059,7 @@ paths:
             type: string
             minLength: 1
             maxLength: 200
-      description: Removes a member from the current project. The project owner removes any other member; any member removes themselves to leave. The owner is never removed and never leaves (owner_cannot_leave; transfer ownership first). A member removing someone else is refused with owner_required. A person who is not a member, including one already removed, is not_found. In one transaction the membership ends, that person's outstanding email invitations to the project are revoked, and the project event member.removed is appended (details user_id, removed_by_user_id, left). The person's sessions stop resolving the project on their next request and fall back as they do after a project deletion. Agent memberships are separate and stay. People only; no bearer route.
+      description: Removes a member from the current project. The project owner removes any other member, and so does an admin of the project's organization who is a member; any member removes themselves to leave. The owner is never removed and never leaves (owner_cannot_leave; transfer ownership first). A member removing someone else is refused with owner_required. A person who is not a member, including one already removed, is not_found. In one transaction the membership ends, that person's outstanding email invitations to the project are revoked, and the project event member.removed is appended (details user_id, removed_by_user_id, left). The person's sessions stop resolving the project on their next request and fall back as they do after a project deletion. Agent memberships are separate and stay. People only; no bearer route.
       security:
         - dashboardSession: []
       responses:
@@ -1124,7 +1222,7 @@ paths:
         description: Backend-owned project dashboard origin
     put:
       operationId: setDashboardPassword
-      description: Sets or replaces the person’s password after fresh proof. The first password requires passkey proof; replacement accepts the current password or a passkey. Revokes other sessions and queues a sign-in changed notice.
+      description: Sets or replaces the person’s password after fresh proof. The first password requires passkey proof; replacement accepts the current password or a passkey. Revokes other sessions and queues a sign-in changed notice. A person whose email address is unverified, such as a self-serve signup before they verify it, cannot set a password and receives 403 email_verification_required.
       security:
         - dashboardSession: []
       requestBody:
@@ -1254,7 +1352,7 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: getDashboardEmail
-      description: Returns the person’s verified and pending email state.
+      description: Returns the person’s verified and pending email state. A person who signed up themselves holds an unverified address until they open the link mailed to it; email_verified is false and verify_by is the deadline, after which the session may use only the routes that verify or change the address (email_verification_required on GET /api/session).
       security:
         - dashboardSession: []
       responses:
@@ -1272,7 +1370,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: changeDashboardEmail
-      description: Requests an email change after fresh proof. The verified address stays effective while verification is pending. An address held by another person returns user_email_conflict. The old address receives a warning, not an undo link.
+      description: Requests an email change after fresh proof. The verified address stays effective while verification is pending. An address any other live person holds, verified or not, returns user_email_conflict. The old address receives a warning, not an undo link. A person whose address is unverified changes it the same way; verifying the new address makes it the person's verified address and clears verify_by.
       security:
         - dashboardSession: []
       requestBody:
@@ -1288,6 +1386,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserEmailChangeAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/email/verification:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: requestDashboardEmailVerification
+      description: Queues a fresh verification link. While an email change waits for verification (pending_email on GET /api/me/email), it is that change's link, sent to the pending address; otherwise it is an account_email link for the person's current unverified address. Within ten minutes of the last link of its kind it queues nothing and still answers 202. A person whose address is verified and who has no change pending returns 409 resource_conflict.
+      security:
+        - dashboardSession: []
+      responses:
+        '202':
+          description: The verification link is queued, or was queued within the last ten minutes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardEmailVerificationAccepted'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/signup-profile:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    put:
+      operationId: putDashboardSignupProfile
+      description: Replaces the answers the person gave after signing up with the body, which holds every answer so far; a member left out, or null, is unanswered. Each member has a closed value set, and a value outside it returns 400 invalid_request with a field error. The profile is kept with the person and shown to screenRIG staff with the organization the person signed up into.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupProfile'
+      responses:
+        '204':
+          description: The profile is stored.
+        '400':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /.health:
@@ -8491,6 +8631,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingCreative'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/seller-campaigns:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingSellerCampaigns
+      description: >-
+        The calling seller's submitted buyer campaigns, including campaigns with no plays and history after buyer access is revoked. Returns at most 100 campaigns in identifier order. Drafts, other networks and buyer-wide budgets are private. Follow next_after with after until it is absent.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 200}, description: The preceding page's next_after.}
+      responses:
+        '200':
+          description: Submitted buyer campaigns on this seller's network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingSellerCampaignList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/seller-campaigns/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingSellerCampaign
+      description: >-
+        One submitted buyer campaign's read-only seller view. Inventory and lifetime settled delivery cover the calling seller only. Buyer-wide finances and other networks are private. An unrelated seller gets not_found.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: The seller's campaign and delivery details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingSellerCampaignDetail'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -17721,7 +17911,7 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: peekDashboardEmailVerification
-      description: Scanner-safe verification peek. It never verifies an address, mutates a user, or signs the visitor in.
+      description: Scanner-safe verification peek. It never verifies an address, mutates a user, or signs the visitor in. It reports the link's purpose and state; a pending account_email link verifies only for a request that carries the person's dashboard session, so a page asks for the sign-in before it asks to confirm.
       parameters:
         - name: token
           in: query
@@ -17740,7 +17930,7 @@ paths:
       security: []
     post:
       operationId: verifyDashboardEmail
-      description: Explicit human confirmation consumes one purpose-bound verification challenge. Link-signup challenges require the matching __Host-screenrig-signup cookie; email-change challenges are token-bound. Verification never signs the visitor in.
+      description: Explicit human confirmation consumes one purpose-bound verification challenge. Link-signup challenges require the matching __Host-screenrig-signup cookie; email-change challenges are token-bound, so the link works in any browser. An account_email challenge (mailed at self-serve signup and by POST /api/me/email/verification, valid for 30 days) opens in any browser but verifies only for a request that carries a live dashboard session of the person the link is for, including a session that email_verification_required limits to this route. With no session, or another person's, it answers 200 sign_in_required, verifies nothing and leaves the link usable. A verified account_email link marks the person's address verified and ends the verification deadline; it answers superseded when another person verified the same address first. Verification never signs the visitor in.
       requestBody:
         required: true
         content:
@@ -17759,6 +17949,7 @@ paths:
       security:
         - {}
         - invitationSignup: []
+        - dashboardSession: []
   /api/webauthn/assertions:
     servers:
       - url: https://screenrig.ai
@@ -17855,7 +18046,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. An address at a domain whose organization requires single sign-on is refused with 403 sso_required before any account is looked up, so the answer does not depend on whether a person holds the address; POST /api/sso/starts signs that person in through their identity provider. Development auth uses this same password flow.
+      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. An address at a domain whose organization requires single sign-on is refused with 403 sso_required before any account is looked up, so the answer does not depend on whether a person holds the address; POST /api/sso/starts signs that person in through their identity provider. Password sign-in needs a verified email, so a person who signed themselves up (POST /api/signups) signs in with their passkey, and one who set a password on an unverified address still gets the unauthorized answer. Development auth uses this same password flow.
       requestBody:
         required: true
         content:
@@ -17901,7 +18092,7 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: getDashboardSession
-      description: Returns the current dashboard session. The session cookie and server-side session establish authority; user_id is descriptive. A 401 response means sign-in is required. The dev_auth field is reserved for local development and is false on the hosted service.
+      description: Returns the current dashboard session. The session cookie and server-side session establish authority; user_id is descriptive. A 401 response means sign-in is required. The dev_auth field is reserved for local development and is false on the hosted service. organization is the person's home organization, absent while they have none; project.organization_admin says the person administers the current project's organization.
       security:
         - dashboardSession: []
       responses:
@@ -17966,7 +18157,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Tells the sign-in page whether an email address signs in through an organization's identity provider. The answer is decided by the address's domain alone, against the verified domains of organizations that have an enabled identity-provider connection; no account is looked up, so it is the same whether or not a person holds the address. sso is true when such an organization holds the domain. required is true when that organization requires single sign-on, which refuses password and passkey sign-in for the domain (createDashboardSession answers sso_required); its break-glass admins keep passkey sign-in. provider_name is the connection's display name, present only when sso is true. Limited per client address.
+        Tells the entry page how an email address signs in or signs up. sso, required and provider_name are decided by the address's domain alone, against the verified domains of organizations that have an enabled identity-provider connection: sso is true when such an organization holds the domain. required is true when that organization requires single sign-on, which refuses password and passkey sign-in for the domain (createDashboardSession answers sso_required); its break-glass admins keep passkey sign-in. provider_name is the connection's display name, present only when sso is true. account is true when a live person holds the address, verified or not, and false when nobody does: the page signs the person in when it is true and offers signup (POST /api/signups) when it is false and sso is false. Limited per client address.
       security: []
       requestBody:
         required: true
@@ -19423,7 +19614,7 @@ paths:
       - url: https://screenrig.ai
     get:
       operationId: dashboardOrganizationsProjects
-      description: Organization admins read project names, owners, status and screen counts only; this grants no project access.
+      description: Organization admins read project names, owners, status and screen counts only; this grants no project access. An admin reads a project's content only after joining it (POST .../projects/{project_id}/access), and manages its people with the owner and members routes below.
       security:
         - dashboardSession: []
       responses:
@@ -19655,7 +19846,7 @@ paths:
           maxLength: 200
     get:
       operationId: dashboardOrganizationsPeople
-      description: A designated admin reads the organization's people across its live projects. Read-only. projects lists the organization's live projects, ordered by name, at most 500. people is the union of those projects' active memberships (suspended memberships are left out) and the designated admins, ordered by display name then email; each person carries their role in each project (owner or member) and whether they are an admin, and an admin in no project appears with an empty projects list. email is empty for a person whose address is not verified. Deactivated people and agents never appear. At most 500 people are returned, admins always among them; truncated is true when people, projects or memberships were left out. Anyone else is refused as on the other organization admin routes. People only; agents and bearer credentials have no route.
+      description: A designated admin reads the organization's people. Read-only. projects lists the organization's live projects, ordered by name, at most 500. people is the union of the organization's home members (member true), the active memberships of those projects (suspended memberships are left out) and the designated admins. It is ordered admins first, then home members, then external people (those who are not home members), each group by display name then email. Each person carries their role in each project (owner or member), whether they are an admin, a home member (member), managed by the organization (managed), and, for an external person, whether the current guest policy would not admit them (outside_guest_policy). An admin or home member in no project appears with an empty projects list. email is empty for a person whose address is not verified. Deactivated people and agents never appear. At most 500 people are returned, admins always among them; truncated is true when people, projects or memberships were left out. Anyone else is refused as on the other organization admin routes. People only; agents and bearer credentials have no route.
       security:
         - dashboardSession: []
       responses:
@@ -19780,6 +19971,297 @@ paths:
       responses:
         '204':
           description: The invitation is revoked.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/member-invitations:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsCreateMemberInvitations
+      description: A designated admin invites people by email to join the organization as members. Accepting sets the person's home organization to this one, from any previous home, and creates their login if they have none; it grants no project membership. An address whose person is already a home member of the organization is invalid_request; one whose person another organization manages is managed_elsewhere. Email invitations expire after seven days; an outstanding invitation to the same address is reused. The organization and inviter names must be fit for email. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationMemberInvitationCreate'
+      responses:
+        '201':
+          description: The organization member invitations, one per distinct address.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberInvitationCreated'
+        default:
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+      x-rate-limit-policies:
+        - name: invitation-create-organization
+          quota: 20
+          windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+    get:
+      operationId: dashboardOrganizationsListMemberInvitations
+      description: A designated admin lists the organization's member invitations by id, 50 at a time, after expiring those whose time has passed. Recipient addresses are visible to the organization's admins, who supplied them. Tokens and credential URLs are never listed. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/InvitationStatus'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The organization's member invitations.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberInvitationList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/member-invitations/{invitation_id}/revoke:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: invitation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsRevokeMemberInvitation
+      description: A designated admin revokes an outstanding member invitation. An already revoked invitation returns 204; an accepted one returns invitation_consumed; an id the organization does not hold is not_found. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The invitation is revoked.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/members/{user_id}:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    delete:
+      operationId: dashboardOrganizationsRemoveMember
+      description: A designated admin removes a home member from the organization. In one transaction the person's home organization is cleared and their memberships in all of the organization's live projects end, each as removing them from that project would (outstanding email invitations to it are revoked and their sessions stop resolving it); memberships in other organizations' projects are untouched, and no other organization changes. The change is recorded in the organization audit. A person an identity provider manages (single sign-on or SCIM) is managed_member; a designated admin is organization_admin_member (remove the admin seat first with PUT /api/organizations/{org_id}/admins); a person who owns any live project of the organization is member_owns_projects and the detail lists the project names (transfer those projects first, nothing is removed); a person who is not a home member of the organization, including one already removed, is not_found. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The person is no longer a member of the organization.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/guest-policy:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: dashboardOrganizationsSetGuestPolicy
+      description: A designated admin sets whom the organization admits to its projects as guests, meaning people whose home organization is another one or who have none. mode allow (the default) admits every guest, domains admits a guest whose verified email address is at one of domains, and none admits no guest. domains lists 1 to 20 distinct lowercase DNS names, required for mode domains and omitted otherwise; anything else is invalid_request. The policy replaces the previous one, increments the organization revision, is recorded in the organization audit, and answers the policy in force. It is checked when the organization grants a guest a project membership, by project member invitation (create and accept) and by SCIM group binding, and refuses with guest_not_allowed. Staff and the organization's own admins are exempt, agents are not checked, and home members are never guests. Tightening the policy removes nobody; outside_policy counts the external people already in the organization's live projects whom the new policy would not admit, and GET /api/organizations/{org_id}/people flags each of them (outside_guest_policy). People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationGuestPolicyUpdate'
+      responses:
+        '200':
+          description: The guest policy now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationGuestPolicyResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/projects/{project_id}/access:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsJoinProject
+      description: A designated admin joins one of the organization's live projects as a member without a screen or upload scope who can approve reviews. Joining is what gives the admin the project's content, which the organization routes never show. An admin who is already a member without a scope who can approve gets 200 with joined false and nothing changes; a member with a screen or upload scope, or one who cannot approve, becomes a member without a scope who can approve, recorded as a join. The project's 200-member limit applies (member_limit_reached); the organization's guest policy never applies to its own admins. Joining is recorded in the organization audit as organization.project_joined and in the project's events as member.added_by_organization_admin, and the project's owner is emailed. A project the organization does not hold, or that was deleted, is not_found. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The admin is a member of the project.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectAccess'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/projects/{project_id}/owner:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: dashboardOrganizationsSetProjectOwner
+      description: A designated admin makes a person the owner of one of the organization's live projects without joining it, from whoever owns it now, including an owner whose account is deactivated. The new owner is a verified, active person who is a member of the project or a home member of the organization (a home member who is not a member of the project is added first as a member without a screen or upload scope who can approve reviews; the guest policy does not apply to a home member); anyone else is invalid_request at user_id. An admin makes themself the owner only after joining the project (POST /api/organizations/{org_id}/projects/{project_id}/access), and one who is not a member without a screen or upload scope who can approve is invalid_request at user_id. The effect is that of the owner's own transfer, so the new owner's screen scope and upload scope are cleared and the project's legacy responsibilities are bound to them. Naming the current owner changes nothing. The change is recorded in the organization audit as organization.project_owner_changed, and the previous and the new owner are emailed. The project's 200-member limit applies to an added home member (member_limit_reached). A project the organization does not hold, or that was deleted, is not_found. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationProjectOwnerUpdate'
+      responses:
+        '200':
+          description: The project's owner after the change.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectOwner'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/projects/{project_id}/members/{user_id}:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    delete:
+      operationId: dashboardOrganizationsRemoveProjectMember
+      description: A designated admin removes a member from one of the organization's live projects without joining it. It has the effect of the owner's removal (DELETE /api/members/{user_id}). The membership ends, the person's outstanding email invitations to the project are revoked, their sessions stop resolving the project, and agent memberships stay. The owner is never removed (owner_cannot_leave; transfer ownership first with PUT /api/organizations/{org_id}/projects/{project_id}/owner). A person who is not a member of the project, including one already removed, and a project the organization does not hold or that was deleted, are not_found. The removal is recorded in the organization audit as organization.project_member_removed and in the project's events as member.removed with removed_by_organization_admin true. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The membership ended.
         default:
           $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/domains/{domain}:
@@ -20609,7 +21091,7 @@ paths:
     post:
       operationId: createDashboardGroupBinding
       description: >-
-        Binds a provisioned group to the session project with a role and, optionally, a screen_scope that limits it to screen folders and screens (fixed once made; invalid_request names the field of an id the project does not hold). The project owner or a member who can approve only (approver_required otherwise; a caller limited to screens is outside_screen_scope); a staff shadow session is read-only. The group must be one of the project's organization's provisioned groups, otherwise not_found, and a group is bound to a project once, otherwise resource_conflict. The binding takes effect at once for the group's current members and follows every change to the group's membership. The project's 200-member limit applies: a person it refuses is recorded as a failed event in the organization's SCIM events and nothing else changes. A scope change a binding makes appends project.member_screen_scope_changed (details user_id, screen_scope, previous, via scim, changed_by_user_id empty). Binding a group is SCIM provisioning, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Bindings that exist keep granting and can be removed.
+        Binds a provisioned group to the session project with a role and, optionally, a screen_scope that limits it to screen folders and screens (fixed once made; invalid_request names the field of an id the project does not hold). The project owner or a member who can approve only (approver_required otherwise; a caller limited to screens is outside_screen_scope); an admin of the project's organization binds as such a member, so one who cannot approve joins the project first (POST /api/organizations/{org_id}/projects/{project_id}/access makes them an approver), and the binding is then recorded in the organization audit, marked by_organization_admin in the project's audit, and the project's owner is emailed; a staff shadow session is read-only. The group must be one of the project's organization's provisioned groups, otherwise not_found, and a group is bound to a project once, otherwise resource_conflict. The binding takes effect at once for the group's current members and follows every change to the group's membership. The project's 200-member limit applies: a person it refuses is recorded as a failed event in the organization's SCIM events and nothing else changes; so is a person who would be an external guest that the organization's guest policy does not admit (guest_not_allowed). A scope change a binding makes appends project.member_screen_scope_changed (details user_id, screen_scope, previous, via scim, changed_by_user_id empty). Binding a group is SCIM provisioning, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Bindings that exist keep granting and can be removed.
       security:
         - dashboardSession: []
       requestBody:
@@ -20664,7 +21146,7 @@ paths:
     delete:
       operationId: deleteDashboardGroupBinding
       description: >-
-        Unbinds a group from the session project. The project owner or a member who can approve only (approver_required otherwise). People who held access only through the binding lose it; a membership granted by hand stays, and a hand grant the binding raised or widened returns to what it was, its screen scope included. An id the project does not hold is not_found.
+        Unbinds a group from the session project. The project owner or a member who can approve only (approver_required otherwise); an admin of the project's organization unbinds as such a member, recorded as a binding is. People who held access only through the binding lose it; a membership granted by hand stays, and a hand grant the binding raised or widened returns to what it was, its screen scope included. An id the project does not hold is not_found.
       security:
         - dashboardSession: []
       responses:
@@ -20695,7 +21177,7 @@ paths:
     put:
       operationId: setDashboardMemberApprover
       description: >-
-        Sets whether a member can approve: decide reviews and grant agents Manage access. A member who cannot approve has their agents held to Propose. The project owner only (forbidden otherwise); the owner's own row is fixed (resource_conflict); a non-member is not_found. Appends project.member_approver_changed (details user_id, can_approve).
+        Sets whether a member can approve: decide reviews and grant agents Manage access. A member who cannot approve has their agents held to Propose. The project owner, or a member who administers the project's organization (forbidden otherwise); the owner's own row is fixed (resource_conflict); a non-member is not_found. Appends project.member_approver_changed (details user_id, can_approve).
       security:
         - dashboardSession: []
       requestBody:
@@ -20728,7 +21210,7 @@ paths:
     put:
       operationId: setDashboardMemberScreenScope
       description: >-
-        Limits a member to screen folders (each with every folder inside it) and screens, or replaces the scope of one (docs/screen-scope.md). In one transaction it also ends the agents the person brought to the project (agent.disconnected, as removing them would) and appends project.member_screen_scope_changed (details user_id, screen_scope, previous, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row, an uploader (a scoped member is limited to screens, an uploader to content) and a member who approves reviews with single screens in the scope are resource_conflict; a non-member is not_found; an id that is not a live screen folder or screen of the project is invalid_request at screen_scope.folder_ids[i] or screen_scope.screen_ids[i]. A scoped member who approves reviews approves only inside the scope; one who cannot approve reads and runs commands but changes what plays only through approvers (approver_required). A scope is also refused with resource_conflict while the person, or an agent the person brought, has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting a person to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the person until it is cleared (DELETE), which every plan may do.
+        Limits a member to screen folders (each with every folder inside it) and screens, or replaces the scope of one (docs/screen-scope.md). In one transaction it also ends the agents the person brought to the project (agent.disconnected, as removing them would) and appends project.member_screen_scope_changed (details user_id, screen_scope, previous, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner, or a member who administers the project's organization (forbidden otherwise); the owner's own row, an uploader (a scoped member is limited to screens, an uploader to content) and a member who approves reviews with single screens in the scope are resource_conflict; a non-member is not_found; an id that is not a live screen folder or screen of the project is invalid_request at screen_scope.folder_ids[i] or screen_scope.screen_ids[i]. A scoped member who approves reviews approves only inside the scope; one who cannot approve reads and runs commands but changes what plays only through approvers (approver_required). A scope is also refused with resource_conflict while the person, or an agent the person brought, has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting a person to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the person until it is cleared (DELETE), which every plan may do.
       security:
         - dashboardSession: []
       requestBody:
@@ -20751,7 +21233,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '403':
-          description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
+          description: "forbidden - only the project owner or a member who administers the project's organization sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
             application/problem+json:
               schema:
@@ -20767,7 +21249,7 @@ paths:
     delete:
       operationId: clearDashboardMemberScreenScope
       description: >-
-        Gives a scoped member the whole project's screens again. The project owner only; a member who is not scoped is left as they are. Appends project.member_screen_scope_changed with screen_scope null.
+        Gives a scoped member the whole project's screens again. The project owner, or a member who administers the project's organization, only; a member who is not scoped is left as they are. Appends project.member_screen_scope_changed with screen_scope null.
       security:
         - dashboardSession: []
       parameters:
@@ -20787,7 +21269,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DashboardMember'
         '403':
-          description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
+          description: "forbidden - only the project owner or a member who administers the project's organization sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
             application/problem+json:
               schema:
@@ -20809,7 +21291,7 @@ paths:
     put:
       operationId: setDashboardAgentScreenScope
       description: >-
-        Limits an agent's membership of the session project to screen folders and screens, or replaces its scope (docs/screen-scope.md). The agent's reach is this scope narrowed by its responsible person's, so a scoped person never acts through an agent wider than themselves. The project owner only (forbidden otherwise); an agent that is not a member of the project is not_found. Appends agent.screen_scope_changed (details agent_id, screen_scope, previous, changed_by_user_id). An agent's scope applies to its next request on the instance that wrote it and within two seconds on the others. A scope is refused with resource_conflict while the agent has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting an agent to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the agent until it is cleared (DELETE), which every plan may do.
+        Limits an agent's membership of the session project to screen folders and screens, or replaces its scope (docs/screen-scope.md). The agent's reach is this scope narrowed by its responsible person's, so a scoped person never acts through an agent wider than themselves. The project owner, or a member who administers the project's organization (forbidden otherwise); an agent that is not a member of the project is not_found. Appends agent.screen_scope_changed (details agent_id, screen_scope, previous, changed_by_user_id). An agent's scope applies to its next request on the instance that wrote it and within two seconds on the others. A scope is refused with resource_conflict while the agent has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting an agent to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the agent until it is cleared (DELETE), which every plan may do.
       security:
         - dashboardSession: []
       requestBody:
@@ -20832,7 +21314,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '403':
-          description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
+          description: "forbidden - only the project owner or a member who administers the project's organization sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
             application/problem+json:
               schema:
@@ -20848,7 +21330,7 @@ paths:
     delete:
       operationId: clearDashboardAgentScreenScope
       description: >-
-        Removes the scope of an agent's membership of the session project. The project owner only. Appends agent.screen_scope_changed with screen_scope null.
+        Removes the scope of an agent's membership of the session project. The project owner, or a member who administers the project's organization, only. Appends agent.screen_scope_changed with screen_scope null.
       security:
         - dashboardSession: []
       responses:
@@ -20859,7 +21341,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Agent'
         '403':
-          description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
+          description: "forbidden - only the project owner or a member who administers the project's organization sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
             application/problem+json:
               schema:
@@ -20881,7 +21363,7 @@ paths:
     put:
       operationId: setDashboardMemberUploadScope
       description: >-
-        Makes a member an uploader, or replaces the scope of one (docs/uploaders.md): the playlists they change pages of and the media folders they upload into. In one transaction it also stops them approving reviews, ends the agents they brought to the project (agent.disconnected, as removing them would) and appends project.member_upload_scope_changed (details user_id, upload_scope, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row is resource_conflict; a non-member is not_found; an id that is not a live playlist or media folder of the project is invalid_request at upload_scope.playlist_ids[i] or upload_scope.folder_ids[i]. access propose (the default) sends the uploader's changes to review; manage publishes them. A member limited to screens is resource_conflict: clear that scope first (DELETE /api/members/{user_id}/screen-scope).
+        Makes a member an uploader, or replaces the scope of one (docs/uploaders.md): the playlists they change pages of and the media folders they upload into. In one transaction it also stops them approving reviews, ends the agents they brought to the project (agent.disconnected, as removing them would) and appends project.member_upload_scope_changed (details user_id, upload_scope, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner, or a member who administers the project's organization (forbidden otherwise); the owner's own row is resource_conflict; a non-member is not_found; an id that is not a live playlist or media folder of the project is invalid_request at upload_scope.playlist_ids[i] or upload_scope.folder_ids[i]. access propose (the default) sends the uploader's changes to review; manage publishes them. A member limited to screens is resource_conflict: clear that scope first (DELETE /api/members/{user_id}/screen-scope).
       security:
         - dashboardSession: []
       requestBody:
@@ -20908,7 +21390,7 @@ paths:
     delete:
       operationId: clearDashboardMemberUploadScope
       description: >-
-        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null.
+        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner, or a member who administers the project's organization, only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null.
       security:
         - dashboardSession: []
       parameters:
@@ -21088,7 +21570,7 @@ paths:
       x-screenrig-access: write
       operationId: createInvitationsInProject
       description: >-
-        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A project_member email invitation to a person who would be an external guest of the project's organization (it is not their home organization) is subject to that organization's guest policy, and guest_not_allowed (403) answers when the policy (allow, domains or none) does not admit the address. Accepting the invitation checks again. Staff and the organization's own admins are exempt. A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -26110,6 +26592,7 @@ components:
         - personal
         - revision
         - admin
+        - home
         - project_count
         - plan_id
         - free
@@ -26125,6 +26608,9 @@ components:
           type: integer
         admin:
           type: boolean
+        home:
+          type: boolean
+          description: The organization is the caller's home organization; for an agent, its responsible person's.
         verified_domain:
           $ref: '#/components/schemas/VerifiedOrganizationDomain'
           description: The first of verified_domains.
@@ -26153,6 +26639,9 @@ components:
         plan_required:
           type: boolean
           description: The organization admits no new screens until it holds a plan (organization_plan_required). Set when an enrollment's person already held their free organization and the project could not join it. Running screens keep running.
+        guest_policy:
+          $ref: '#/components/schemas/OrganizationGuestPolicy'
+          description: Whom the organization admits to its projects as guests (people whose home is another organization, or who have none). Admins only; absent for anyone else. Present for every admin, with mode allow until one is set.
     OrganizationPersonal:
       type: boolean
       description: "The organization is only its one project's wrapper: exactly one live project, no verified domain, no organization plan now or scheduled, and no admin other than that project's owner. The dashboard hides the organization level for it."
@@ -26206,6 +26695,113 @@ components:
             type: string
             minLength: 1
             maxLength: 200
+    OrganizationGuestPolicyMode:
+      type: string
+      enum:
+        - allow
+        - domains
+        - none
+      description: allow admits every guest. domains admits a guest whose verified email address is at one of the listed domains (exact match). none admits no guest. Home members are never guests.
+    OrganizationGuestPolicyDomain:
+      type: string
+      minLength: 3
+      maxLength: 253
+      pattern: ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
+      description: A lowercase DNS name with at least two labels, as it appears after the @ of a verified email address (internationalized names in their xn-- form).
+    OrganizationGuestPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+        - domains
+      description: The organization's guest policy in force. Guests are people whose home organization is another one, or who have none; a policy never removes anyone who is already a member.
+      properties:
+        mode:
+          $ref: '#/components/schemas/OrganizationGuestPolicyMode'
+        domains:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/OrganizationGuestPolicyDomain'
+          description: The admitted domains, sorted; 1 to 20 for mode domains and empty for allow and none.
+    OrganizationGuestPolicyUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/OrganizationGuestPolicyMode'
+        domains:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/OrganizationGuestPolicyDomain'
+          description: Required for mode domains (1 to 20 domains, duplicates refused), and omitted for allow and none; either way a wrong shape is invalid_request.
+      allOf:
+        - if: {properties: {mode: {const: domains}}, required: [mode]}
+          then: {required: [domains]}
+          else: {not: {required: [domains]}}
+    OrganizationGuestPolicyResult:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+        - domains
+        - outside_policy
+      description: The guest policy now in force, with how many people it leaves outside.
+      properties:
+        mode:
+          $ref: '#/components/schemas/OrganizationGuestPolicyMode'
+        domains:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/OrganizationGuestPolicyDomain'
+          description: The admitted domains, sorted; 1 to 20 for mode domains and empty for allow and none.
+        outside_policy:
+          type: integer
+          minimum: 0
+          description: How many external people hold an active membership in the organization's live projects that the policy now in force would not admit. Nobody is removed; GET /api/organizations/{org_id}/people flags each of them as outside_guest_policy.
+    OrganizationProjectAccess:
+      type: object
+      additionalProperties: false
+      required:
+        - project_id
+        - joined
+      properties:
+        project_id:
+          type: string
+        joined:
+          type: boolean
+          description: True when this request made the admin a member of the project; false when they already were one and nothing changed.
+    OrganizationProjectOwnerUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The new owner. A verified, active person who is a member of the project or a home member of the organization.
+    OrganizationProjectOwner:
+      type: object
+      additionalProperties: false
+      required:
+        - project_id
+        - owner_user_id
+      properties:
+        project_id:
+          type: string
+        owner_user_id:
+          type: string
+          description: The project's owner after the change.
     OrganizationPeople:
       type: object
       additionalProperties: false
@@ -26225,7 +26821,7 @@ components:
           maxItems: 500
           items:
             $ref: '#/components/schemas/OrganizationPeoplePerson'
-          description: Active members of the organization's live projects and its designated admins, ordered by display name then email. Deactivated people and agents never appear.
+          description: The organization's home members (member true), the active members of its live projects and its designated admins. Ordered admins first, then home members, then external people (everyone else); within each group by display name then email. Deactivated people and agents never appear.
         truncated:
           type: boolean
           description: True when people (beyond 500, never an admin), projects (beyond 500) or memberships were left out.
@@ -26248,6 +26844,9 @@ components:
         - display_name
         - email
         - admin
+        - member
+        - managed
+        - outside_guest_policy
         - projects
       properties:
         user_id:
@@ -26260,11 +26859,20 @@ components:
         admin:
           type: boolean
           description: Whether the person is a designated admin of the organization.
+        member:
+          type: boolean
+          description: The organization is the person's home organization (a home member). False for an external person, who belongs to the list through a project membership or an admin seat.
+        managed:
+          type: boolean
+          description: The organization manages the person through its identity provider (single sign-on or SCIM). Such a person is always a home member and cannot be removed here (managed_member).
+        outside_guest_policy:
+          type: boolean
+          description: The person is external to the organization and the organization's current guest policy would not admit them. Tightening the policy removes nobody; this marks who it leaves outside. Always false for a home member.
         projects:
           type: array
           items:
             $ref: '#/components/schemas/OrganizationPeopleMembership'
-          description: The person's active memberships of the organization's live projects, in the order of the top-level projects list; empty for an admin in no project.
+          description: The person's active memberships of the organization's live projects, in the order of the top-level projects list; empty for an admin or home member in no project.
     OrganizationPeopleMembership:
       type: object
       additionalProperties: false
@@ -26420,12 +27028,13 @@ components:
     SSODiscovery:
       type: object
       additionalProperties: false
-      required: [sso, required]
-      description: Decided by the address's domain alone; it never reveals whether a person holds the address.
+      required: [sso, required, account]
+      description: How the address signs in or signs up. sso, required and provider_name are decided by the address's domain alone; account says whether a live person holds the address.
       properties:
         sso: {type: boolean, description: "The domain belongs to an organization with an enabled identity-provider connection."}
         required: {type: boolean, description: "That organization requires single sign-on: password sign-in is refused for the domain, and so is passkey sign-in except for its break-glass admins."}
         provider_name: {type: string, description: "The connection's display name. Present when sso is true."}
+        account: {type: boolean, description: "A live person holds the address, verified or not. False offers signup."}
     SSOStartRequest:
       type: object
       additionalProperties: false
@@ -26805,6 +27414,9 @@ components:
         organization_personal:
           type: boolean
           description: The project's organization is personal (OrganizationPersonal); absent means false. GET /api/session reports it.
+        organization_admin:
+          type: boolean
+          description: The signed-in person is a designated admin of the project's organization; absent means false. When they are also a member of the project they hold the owner's member-management authority there (remove members, set approvers, screen scope and upload scope, transfer ownership, bind SCIM groups). GET /api/session reports it.
     DashboardProjectListItem:
       type: object
       additionalProperties: false
@@ -26849,6 +27461,7 @@ components:
         - passkeys
         - password
         - owner
+        - external
       properties:
         user_id:
           type: string
@@ -26865,6 +27478,9 @@ components:
         owner:
           type: boolean
           description: This member owns the project. The owner removes other members and cannot leave.
+        external:
+          type: boolean
+          description: The member is a guest of the project's organization, because their home organization is another one or they have none. Always present.
         can_approve:
           type: boolean
           description: This member decides reviews and may grant agents Manage access. Always true for the owner. A member who cannot approve has their agents held to Propose. A member joining by invitation can approve only when a person who can approve invited them; the owner changes it later.
@@ -26966,7 +27582,7 @@ components:
           description: The signed-in person; any member may remove themselves (DELETE /api/members/{user_id}).
         viewer_is_owner:
           type: boolean
-          description: The signed-in person owns the project and may remove other members.
+          description: The signed-in person owns the project and may remove other members. An admin of the project's organization who is a member has the same authority and is not the owner; GET /api/session reports them as project.organization_admin.
         viewer_can_approve:
           type: boolean
           description: The signed-in person may decide reviews.
@@ -27226,6 +27842,7 @@ components:
         - ad_buyer
         - sign_in_reset
         - organization_admin
+        - organization_member
     InvitationStatus:
       type: string
       enum:
@@ -27538,6 +28155,85 @@ components:
             $ref: '#/components/schemas/OrganizationAdminInvitation'
         next_cursor:
           type: string
+    OrganizationMemberInvitationCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - emails
+      properties:
+        emails:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            format: email
+            minLength: 3
+            maxLength: 254
+    OrganizationMemberInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - delivery
+        - status
+        - recipient_email
+        - organization_id
+        - created_at
+        - expires_at
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - organization_member
+        delivery:
+          type: string
+          enum:
+            - email
+        status:
+          $ref: '#/components/schemas/InvitationStatus'
+        recipient_email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+          description: Visible to the organization's admins, who supplied it.
+        organization_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    OrganizationMemberInvitationCreated:
+      type: object
+      additionalProperties: false
+      required:
+        - invitations
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationMemberInvitation'
+          minItems: 1
+          maxItems: 20
+    OrganizationMemberInvitationList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationMemberInvitation'
+        next_cursor:
+          type: string
     EnrollmentInvitation:
       type: object
       additionalProperties: false
@@ -27657,7 +28353,7 @@ components:
                 name:
                   $ref: '#/components/schemas/ProjectName'
             - type: 'null'
-          description: Null for sign-in resets and organization admin invitations; other invitation kinds identify their target project.
+          description: Null for sign-in resets and organization admin and member invitations; other invitation kinds identify their target project.
         organization:
           type: object
           additionalProperties: false
@@ -27666,7 +28362,7 @@ components:
           properties:
             name:
               $ref: '#/components/schemas/ProjectName'
-          description: Only for organization_admin, the organization the person is invited to administer.
+          description: Only for organization_admin, the organization the person is invited to administer, and organization_member, the organization the person is invited to join as a member (it becomes their home).
         network:
           type: object
           additionalProperties: false
@@ -27726,7 +28422,10 @@ components:
               type: string
               description: The name the enrolling agent gave itself (untrusted text), or empty when no agent waits to be bound.
           description: Only on an agent enrollment's invitation. Accepting makes the person responsible for the agent that enrolled, which then acts with the person's authority, including creating projects in and renaming the organizations they administer; the page says so before the person accepts.
-      description: Non-consuming inspection. person is null for links. Never reports signup verification state. Email modes are create_login or signed_in; links offer both, and resets offer reset.
+        replaces_unverified_account:
+          type: boolean
+          description: Only on a sign-in reset. True when the address is held by a person who signed up for themselves and never verified it, so completing the reset would not sign that person in but create a new, empty account (a new person, organization and project) and delete the unverified person; the account they made stays with whoever created it. POST /api/invitations/passkey-options and POST /api/invitations/accept then require replace_unverified_account true. False when completing the reset signs in the person who holds the address.
+      description: Non-consuming inspection. person is null for links. Never reports signup verification state, except that a sign-in reset, whose link went only to the address, says whether completing it replaces an unverified account (replaces_unverified_account). Email modes are create_login or signed_in; links offer both, and resets offer reset.
       allOf:
         - if:
             properties:
@@ -27735,10 +28434,15 @@ components:
             required:
               - kind
           then:
+            required:
+              - replaces_unverified_account
             properties:
               project:
                 type: 'null'
           else:
+            not:
+              required:
+                - replaces_unverified_account
             properties:
               project:
                 type: object
@@ -27760,6 +28464,10 @@ components:
             - reset
         display_name:
           $ref: '#/components/schemas/DashboardDisplayName'
+        replace_unverified_account:
+          type: boolean
+          default: false
+          description: Sign-in reset only (mode reset; any other mode refuses it). Must be true when the inspection reports replaces_unverified_account true, which is the person's consent to a new, empty account in place of the unverified one the address holds; absent or false then answers 409 unverified_account_replacement and starts no ceremony. Ignored when the reset replaces nothing.
     InvitationEmailVerificationRequest:
       type: object
       additionalProperties: false
@@ -27882,7 +28590,11 @@ components:
         remove_other_passkeys:
           type: boolean
           default: true
-          description: Sign-in reset only (mode reset). Removes the person's passkeys other than the one this reset registers, or every passkey when the reset sets a password, so a lost or stolen device stops signing in. Absent means true; any other invitation refuses it.
+          description: Sign-in reset only (mode reset). Removes the person's passkeys other than the one this reset registers, or every passkey when the reset sets a password, so a lost or stolen device stops signing in. Absent means true; any other invitation refuses it. A reset of an unverified address creates a new person who has no other passkeys, and ignores it.
+        replace_unverified_account:
+          type: boolean
+          default: false
+          description: Sign-in reset only (mode reset; any other invitation refuses it). Must be true when the inspection reports replaces_unverified_account true, which is the person's consent to a new, empty account in place of the unverified one the address holds; absent or false then answers 409 unverified_account_replacement and consumes nothing. Ignored when the reset replaces nothing.
       description: New credentials are required for create_login and reset. Link create_login requires the verified signup cookie and uses its display name and email. Email create_login requires display_name. signed_in needs sign-in within ten minutes or an invitation_accept proof bound to the invitation id. buyer applies only to ad_buyer; new buyer projects start at zero credit.
       oneOf:
         - properties:
@@ -27916,11 +28628,11 @@ components:
           $ref: '#/components/schemas/InvitationKind'
         project_id:
           oneOf: [{type: string, minLength: 1}, {type: 'null'}]
-          description: Current project after acceptance. Null only when a sign-in reset or an organization admin invitation leaves the person without any project memberships.
+          description: Current project after acceptance. Null only when a sign-in reset or an organization admin or member invitation leaves the person without any project memberships.
         organization_id:
           type: string
           minLength: 1
-          description: Only for organization_admin, the organization the person now administers.
+          description: Only for organization_admin, the organization the person now administers, and organization_member, the organization that is now the person's home.
         next:
           type: string
           enum:
@@ -27930,8 +28642,127 @@ components:
       allOf:
         - if: {properties: {kind: {enum: [project_member, ad_buyer]}}, required: [kind]}
           then: {properties: {project_id: {type: string, minLength: 1}}}
-        - if: {properties: {kind: {const: organization_admin}}, required: [kind]}
+        - if: {properties: {kind: {enum: [organization_admin, organization_member]}}, required: [kind]}
           then: {required: [organization_id], properties: {next: {const: organization}}}
+    SignupPasskeyOptionsRequest:
+      type: object
+      additionalProperties: false
+      required: [email, display_name]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+    SignupRequest:
+      type: object
+      additionalProperties: false
+      required: [email, display_name, marketing_email, credential]
+      description: The email address and display name are those the ceremony was started with.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+        marketing_email:
+          type: boolean
+          description: The person chose to receive product news by email. Stored as consent with the person.
+        credential:
+          $ref: '#/components/schemas/DashboardPasskeyProof'
+    SignupCreated:
+      type: object
+      additionalProperties: false
+      required: [user_id, project_id, organization_id]
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+        project_id:
+          type: string
+          minLength: 1
+          description: The project created with the account; it is the session's current project.
+        organization_id:
+          type: string
+          minLength: 1
+    SignupProfile:
+      type: object
+      additionalProperties: false
+      description: The answers a person gives after signing up. Every member is optional and may be null, meaning unanswered or skipped.
+      properties:
+        who_for:
+          oneOf:
+            - {type: string, enum: [personal, own_business, employer, clients]}
+            - {type: 'null'}
+        use_case:
+          oneOf:
+            - {type: string, enum: [signage, kiosk, sell_ads, buy_ads, exploring]}
+            - {type: 'null'}
+        screen_range:
+          oneOf:
+            - {type: string, enum: ["1_10", "11_50", "51_250", "251_plus", unknown]}
+            - {type: 'null'}
+        go_live:
+          oneOf:
+            - {type: string, enum: [this_week, this_month, this_quarter, later, unknown]}
+            - {type: 'null'}
+        devices:
+          oneOf:
+            - type: array
+              maxItems: 11
+              uniqueItems: true
+              items: {type: string, enum: [android, amazon_signage_stick, apple_tv, samsung_tizen, brightsign, windows, macos, linux, chromeos, browser, unsure]}
+            - {type: 'null'}
+        role:
+          oneOf:
+            - {type: string, enum: [operations, marketing, it, leadership, other]}
+            - {type: 'null'}
+        firm_kind:
+          oneOf:
+            - {type: string, enum: [agency, integrator, reseller, msp, other]}
+            - {type: 'null'}
+        agent:
+          oneOf:
+            - {type: string, enum: [claude_code, chatgpt_dots, chatgpt_codex, meta_muse, grok_bot, grok_build, gemini_spark, hermes, other, none_yet]}
+            - {type: 'null'}
+        agent_other:
+          oneOf:
+            - {type: string, maxLength: 120}
+            - {type: 'null'}
+          description: The agent's name when agent is other.
+        heard:
+          oneOf:
+            - {type: string, enum: [search, ai_assistant, referral, social, event, press, ad, other]}
+            - {type: 'null'}
+        heard_detail:
+          oneOf:
+            - $ref: '#/components/schemas/SignupHeardDetail'
+            - {type: 'null'}
+    SignupHeardDetail:
+      type: object
+      additionalProperties: false
+      description: The follow-up to heard. kind names a choice from a short list, and text is free text.
+      properties:
+        kind:
+          oneOf:
+            - {type: string, maxLength: 40}
+            - {type: 'null'}
+        text:
+          oneOf:
+            - {type: string, maxLength: 120}
+            - {type: 'null'}
+    DashboardEmailVerificationAccepted:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [sent]
     HealthResponse: {type: object, additionalProperties: false, required: [status], properties: {status: {type: string, enum: [alive]}}}
     ReadyResponse:
       type: object
@@ -29272,6 +30103,51 @@ components:
         networks: {type: array, items: {$ref: "#/components/schemas/AdvertisingCampaignNetwork"}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    AdvertisingSellerCampaign:
+      type: object
+      additionalProperties: false
+      description: A submitted buyer campaign projected onto the calling seller's network alone.
+      required: [id, buyer_project_id, name, state, flight_start, flight_end, screen_ids, slot_ids, creative_ids, review_state, enabled, price_change_pending, updated_at]
+      properties:
+        id: {type: string}
+        buyer_project_id: {type: string}
+        name: {type: string}
+        state: {type: string, enum: [pending_review, active, paused, ended]}
+        flight_start: {type: string, format: date-time}
+        flight_end: {type: string, format: date-time}
+        screen_ids: {type: array, items: {type: string}}
+        slot_ids: {type: array, items: {type: string}}
+        creative_ids: {type: array, items: {type: string}}
+        review_state: {type: string}
+        enabled: {type: boolean}
+        price_change_pending: {type: boolean}
+        updated_at: {type: string, format: date-time}
+    AdvertisingSellerCampaignList:
+      type: object
+      additionalProperties: false
+      required: [campaigns]
+      properties:
+        campaigns: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AdvertisingSellerCampaign'}}
+        next_after: {type: string}
+    AdvertisingSellerCampaignDelivery:
+      type: object
+      additionalProperties: false
+      description: Lifetime settled plays and amounts on the calling seller's network, plus its current held amount.
+      required: [completed, reserved_mcr, gross_mcr, fee_mcr, net_mcr]
+      properties:
+        completed: {type: integer, minimum: 0}
+        reserved_mcr: {$ref: '#/components/schemas/McrString'}
+        gross_mcr: {$ref: '#/components/schemas/McrString'}
+        fee_mcr: {$ref: '#/components/schemas/McrString'}
+        net_mcr: {$ref: '#/components/schemas/McrString'}
+        estimated_impressions: {type: number, minimum: 0}
+    AdvertisingSellerCampaignDetail:
+      type: object
+      additionalProperties: false
+      required: [campaign, delivery]
+      properties:
+        campaign: {$ref: '#/components/schemas/AdvertisingSellerCampaign'}
+        delivery: {$ref: '#/components/schemas/AdvertisingSellerCampaignDelivery'}
     AdvertisingCampaignList: {type: object, additionalProperties: false, required: [campaigns], properties: {campaigns: {type: array, items: {$ref: "#/components/schemas/AdvertisingCampaign"}}}}
     AdvertisingQuoteAccept: {type: object, additionalProperties: false, required: [quote_id], properties: {quote_id: {type: string}}}
     AdvertisingQuoteItem:
@@ -29636,6 +30512,7 @@ components:
         email_verified: {type: boolean}
         email_revision: {type: integer}
         pending_email: {allOf: [{$ref: "#/components/schemas/DashboardPendingEmail"}]}
+        verify_by: {type: string, format: date-time, description: "Present while the address is unverified and has a deadline: after it the session answers email_verification_required until the address is verified."}
     DashboardPendingEmail: {type: object, additionalProperties: false, required: [email, expires_at], properties: {email: {type: string}, expires_at: {type: string, format: date-time}}}
     EmailVerifyRequest: {type: object, additionalProperties: false, required: [token], properties: {token: {type: string, minLength: 1, writeOnly: true}}}
     EmailVerifyResult:
@@ -29643,11 +30520,11 @@ components:
       additionalProperties: false
       required: [purpose, status]
       properties:
-        purpose: {type: string}
+        purpose: {type: string, description: "What the link verifies: signup (an invitation's link signup), change (an email change) or account_email (the address of a self-serve account)."}
         status:
           type: string
-          enum: [pending, verified, superseded, expired, browser_mismatch]
-          description: A live link-signup challenge without the matching __Host-screenrig-signup cookie returns browser_mismatch. Nothing is verified and the challenge is not consumed; open the link in the browser where signup started.
+          enum: [pending, verified, superseded, expired, browser_mismatch, sign_in_required]
+          description: A live link-signup challenge without the matching __Host-screenrig-signup cookie returns browser_mismatch. Nothing is verified and the challenge is not consumed; open the link in the browser where signup started. A live account_email link without a dashboard session of its person returns sign_in_required. Nothing is verified and the link is not consumed; the person signs in (one who lost the passkey uses a sign-in reset) and opens the link again. It returns superseded when another person verified the address first.
     UserEmailChangeRequest:
       type: object
       additionalProperties: false
@@ -33168,13 +34045,13 @@ components:
       additionalProperties: false
       required: [campaign_id, screen_id, status]
       description: >-
-        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: the strip of its region playlist is laid out on no display the campaign targets here and the level is left out of this screen's stack, or stack_only: only a Player that resolves its own stack honors it). not_in_audience.
+        One campaign's standing on one screen. On a screen whose Player resolves its own stack (schedule.stack) and receives it, a campaign that holds by time stands where that stack puts it: a strip or main campaign plays in its region and a display lock on its displays; one the stack does not carry is pending or blocked (playlist_unavailable). playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. conditional: it holds by time and plays while what only the Player observes holds too (reason interaction: someone is using the screen; data: its data condition). paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs) and is left out of this screen's stack, or stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition). not_in_audience.
       properties:
         campaign_id: {type: string}
         screen_id: {type: string}
         screen_name: {type: string}
-        status: {type: string, enum: [playing, pending, waiting, ended, outranked, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only]}
+        status: {type: string, enum: [playing, pending, waiting, ended, outranked, conditional, paused, blocked, not_in_audience]}
+        reason: {type: string, enum: [takeover, campaign, interaction, data, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only]}
         by: {type: string, description: The campaign that outranks this one.}
         next_start: {type: string, format: date-time}
     CampaignScreens:
@@ -33200,7 +34077,7 @@ components:
       additionalProperties: false
       required: [instant, effective_playlist, verdicts, not_judged]
       description: >-
-        What the screen shows at instant and why, from the resolver the boundary sweep runs. The screen's takeover, playlist schedule and the project's campaigns are read as they are now, not as they were then. A campaign whose playlist is missing or unapproved is skipped, as the sweep skips it.
+        What the screen shows at instant and why, from the resolver the boundary sweep runs. The screen's takeover, playlist schedule and the project's campaigns are read as they are now, not as they were then. A campaign whose playlist is missing or unapproved is skipped, as the sweep skips it. On a screen whose Player resolves its own stack (schedule.stack) the verdicts read that stack, and not_judged says so (player_stack).
       properties:
         instant: {type: string, format: date-time, description: "The explained instant, in UTC."}
         timezone: {type: string, description: "The screen's timezone, when it has one."}
@@ -33215,13 +34092,13 @@ components:
       additionalProperties: false
       required: [kind, playlist_id, verdict]
       description: >-
-        One candidate at the explained instant. won: the resolver picks it. outranked: it holds, and by is the candidate that won. not_started: before its from. ended: at or after its until (a takeover: its end). outside_hours: inside from and until, outside its windows. off: it does not apply, and reason says why.
+        One candidate at the explained instant. won: the resolver picks it (on a screen whose Player resolves its own stack: it fills its region on a display it targets). outranked: it holds, and by is the candidate that won. not_started: before its from. ended: at or after its until (a takeover: its end). outside_hours: inside from and until, outside its windows. conditional: on a screen whose Player resolves its own stack, it holds by time and plays while what only the Player observes holds too (reason interaction or data). off: it does not apply, and reason says why.
       properties:
         kind: {type: string, enum: [takeover, campaign, schedule]}
         id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
         playlist_id: {type: string}
-        verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, off]}
-        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only], description: "Why an off candidate does not apply. region_not_laid_out: the strip of its region playlist is laid out on no display this screen targets. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition)."}
+        verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, conditional, off]}
+        reason: {type: string, enum: [interaction, data, paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only], description: "What a conditional candidate waits on (interaction: someone using the screen; data: its data condition), or why an off candidate does not apply. playlist_unavailable: the playlist is missing or unapproved or, on a screen whose Player resolves its own stack, the stack it receives does not carry the level (the sweep has yet to issue it, or its playlist cannot be shown here). region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs). stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition."}
         by:
           type: object
           additionalProperties: false
@@ -33247,7 +34124,7 @@ components:
       required: [code, detail]
       description: Something the explanation does not judge.
       properties:
-        code: {type: string, enum: [configuration_history, playlist_content, page_rules, player_state, archived]}
+        code: {type: string, enum: [configuration_history, playlist_content, page_rules, player_state, archived, player_stack]}
         detail: {type: string}
     BIConnectionConfig:
       type: object
@@ -34083,6 +34960,30 @@ components:
                 maxItems: 32
                 items: {oneOf: [{$ref: "#/components/schemas/RuntimeImageResolvedMedia"}, {$ref: "#/components/schemas/RuntimeVideoResolvedMedia"}]}
         pageMaxMs: {type: object, additionalProperties: {type: integer, minimum: 1000, maximum: 86400000}}
+        playlists:
+          type: object
+          description: >-
+            The selections of the stack's other playlists that use runtime selectors, by playlist id, sent to a Player that declares selector.stack (docs/player-compatibility.md §6.11); selections and pageMaxMs above are the root's.
+          additionalProperties: {$ref: "#/components/schemas/RuntimeSelectorPlaylistSnapshot"}
+    RuntimeSelectorPlaylistSnapshot:
+      type: object
+      description: One stack playlist's selections, named by that playlist's own page ids.
+      required: [selections, pageMaxMs]
+      properties:
+        selections:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [pageId, primitiveId, resolvedMedia]
+            properties:
+              pageId: {type: string}
+              primitiveId: {type: string}
+              resolvedMedia:
+                type: array
+                maxItems: 32
+                items: {oneOf: [{$ref: "#/components/schemas/RuntimeImageResolvedMedia"}, {$ref: "#/components/schemas/RuntimeVideoResolvedMedia"}]}
+        pageMaxMs: {type: object, additionalProperties: {type: integer, minimum: 1000, maximum: 86400000}}
     RuntimeManifest:
       type: object
       description: >-
@@ -34613,6 +35514,7 @@ components:
         - staff
         - shadow
         - passkey_enrollment_required
+        - email_verification_required
       properties:
         user_id:
           type: string
@@ -34630,6 +35532,9 @@ components:
           oneOf:
             - $ref: '#/components/schemas/DashboardProjectReference'
             - type: 'null'
+        organization:
+          $ref: '#/components/schemas/DashboardSessionOrganization'
+          description: The person's home organization (the one organization they belong to), read on each request. Absent while they have none. It is independent of project, and the person is a guest (external) in the projects of every other organization.
         auth_method:
           type: string
           enum:
@@ -34662,12 +35567,31 @@ components:
         passkey_enrollment_required:
           type: boolean
           description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /api/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
+        email_verification_required:
+          type: boolean
+          description: The person signed up themselves, never verified the address, and the verification deadline (verify_by on GET /api/me/email) has passed. Until the address is verified, this session may only call GET /api/session, GET /api/me, GET /api/me/email, POST /api/me/email/verification, POST /api/me/email/change (and POST /api/me/reauthentications, which starts the passkey proof the change needs), POST /api/logout and POST /api/email/verify; every other dashboard route answers 403 email_verification_required. Agents and service clients are never gated.
         csrf_token:
           type: string
           minLength: 22
           maxLength: 43
           description: Present when the session cookie is a session token. The client sends it as the X-ScreenRig-CSRF header on every state-changing dashboard request; it is the same for the whole session. A state change with a session-token cookie must also carry Origin equal to the dashboard origin, and Sec-Fetch-Site same-origin when the browser sends it.
       description: 'Person session. Identifiers are descriptive; the session cookie establishes authority. A person with no projects has project: null.'
+    DashboardSessionOrganization:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - managed
+      description: The person's home organization.
+      properties:
+        id:
+          type: string
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        managed:
+          type: boolean
+          description: The organization's identity provider (single sign-on or SCIM) manages the person. An admin cannot remove a managed person from the organization (managed_member), and no other organization can make them a member (managed_elsewhere).
     DashboardSessionSSO:
       type: object
       additionalProperties: false
@@ -35404,6 +36328,11 @@ x-problem-codes:
   - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit
+  - guest_not_allowed
+  - managed_member
+  - organization_admin_member
+  - member_owns_projects
+  - managed_elsewhere
   - version_required
   - price_change_pending
   - quote_stale
@@ -35463,3 +36392,6 @@ x-problem-codes:
   - demo_slot_unavailable
   - agentid_claim_invalid
   - agentid_already_enrolled
+  - account_exists
+  - email_verification_required
+  - unverified_account_replacement

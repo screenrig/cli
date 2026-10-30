@@ -709,7 +709,7 @@ test("verdicts read as short details with the fix when the screen is known", () 
   assert.equal(verdictDetail(verdict({ kind: "takeover", verdict: "ended", until: "2026-12-24T18:00:00Z" }), A, "America/Los_Angeles"), "ended 2026-12-24 10:00 America/Los_Angeles");
   assert.equal(verdictDetail(verdict({ verdict: "ended" }), A, "UTC"), "until has passed");
   assert.equal(verdictDetail(verdict({ verdict: "off", reason: "no_timezone" }), A, "UTC"), `the screen has no timezone: screenrig screen set-timezone ${A} --timezone ZONE`);
-  assert.equal(verdictDetail(verdict({ verdict: "off", reason: "playlist_unavailable" }), A, "UTC"), "the playlist is missing or unapproved");
+  assert.equal(verdictDetail(verdict({ verdict: "off", reason: "playlist_unavailable" }), A, "UTC"), "the playlist is missing, unapproved or not in the stack this screen's Player receives");
 });
 
 test("campaign standings read as short details with the fix when the screen is known", () => {
@@ -1128,6 +1128,17 @@ test("a stack-only reason reads as needing a Player that resolves its own stack"
   assert.equal(json.envelope.data.items[0].reason, "stack_only");
 });
 
+test("a conditional level reads as waiting on what only the Player observes", () => {
+  const conditional = (reason: CampaignStatus["reason"]): CampaignStatus => ({ campaign_id: "cmp_X", screen_id: A, status: "conditional", reason });
+  assert.equal(campaignStandingDetail(conditional("interaction")), "plays while someone is using the screen");
+  assert.equal(campaignStandingDetail(conditional("data")), "plays while its data condition holds");
+  assert.equal(verdictDetail({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "conditional", reason: "interaction" }, A, "UTC"), "plays while someone is using the screen");
+  assert.equal(verdictDetail({ kind: "schedule", id: "fallback", playlist_id: PLAYLIST, verdict: "conditional", reason: "data" }, A, "UTC"), "plays while its data condition holds");
+  assert.equal(campaignCountsText({ audience: 4, blocked: 1, conditional: 2, playing: 1 }), "1 playing, 2 conditional, 1 blocked");
+  assert.match(commandHelp(["campaign", "explain"]).usage, /conditional \(it holds by time and plays while someone is using the screen, reason interaction/);
+  assert.match(commandHelp(["campaign", "screens"]).usage, /conditional \(on a screen whose Player resolves its own stack/);
+});
+
 test("campaign show and list say how many screens a campaign reaches of the screens it reached when published, and which groups are empty", async () => {
   const env = await enrolled();
   const CAMPAIGN = "cmp_REACHEDAAAAAAAAAA";
@@ -1179,7 +1190,7 @@ test("campaign create and update send covers for a strip, and a strip left out o
   assert.match(commandHelp(["campaign", "create"]).usage, /--covers sets where the playlist plays[^]*playlist create --format-region/);
   assert.match(commandHelp(["campaign", "explain"]).usage, /region_not_laid_out/);
 
-  const detail = "its strip fits no display of this screen (wrong orientation, or over half the display)";
+  const detail = "laid out on no display of this screen (a strip of the wrong orientation or over half the display, or a display lock naming none of its outputs)";
   assert.equal(campaignStandingDetail({ campaign_id: "cmp_X", screen_id: A, status: "blocked", reason: "region_not_laid_out" }), detail);
   assert.equal(verdictDetail({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "off", reason: "region_not_laid_out" }, A, "UTC"), detail);
 });

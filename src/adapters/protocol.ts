@@ -2426,7 +2426,7 @@ export interface SchedulePreview {
   calendar: { before: ScheduleCalendar; after: ScheduleCalendar };
 }
 
-export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "paused" | "blocked" | "not_in_audience";
+export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "conditional" | "paused" | "blocked" | "not_in_audience";
 
 /** One campaign's standing on one screen. */
 export interface CampaignStatus {
@@ -2434,8 +2434,8 @@ export interface CampaignStatus {
   screen_id: string;
   screen_name?: string;
   status: CampaignStanding;
-  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out: its strip fits no display of the screen, stack_only: only a Player that resolves its own stack honors it). */
-  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
+  /** Why a campaign is outranked (takeover, campaign), what a conditional one waits on (interaction, data), or why it is blocked (no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out: it is laid out on no display of the screen, stack_only: the screen's Player does not resolve its own stack, and only one that does honors it). */
+  reason?: "takeover" | "campaign" | "interaction" | "data" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The campaign that outranks this one. */
   by?: string;
   next_start?: string;
@@ -2459,7 +2459,7 @@ export interface ScreenCampaigns {
   at?: ScreenExplainAt;
 }
 
-export type ScreenVerdictName = "won" | "outranked" | "not_started" | "ended" | "outside_hours" | "off";
+export type ScreenVerdictName = "won" | "outranked" | "not_started" | "ended" | "outside_hours" | "conditional" | "off";
 
 /** One takeover, campaign or schedule entry at the explained instant. */
 export interface ScreenVerdict {
@@ -2468,8 +2468,8 @@ export interface ScreenVerdict {
   id?: string;
   playlist_id: string;
   verdict: ScreenVerdictName;
-  /** Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition). */
-  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
+  /** What a conditional candidate waits on (interaction, data), or why an off candidate does not apply. stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition. */
+  reason?: "interaction" | "data" | "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The candidate that won over an outranked one. */
   by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
   /** When a takeover ends. */
@@ -2488,7 +2488,7 @@ export interface ScreenTimelineSegment {
 
 /** What an explanation declines to judge. */
 export interface ScreenNotJudged {
-  code: "configuration_history" | "playlist_content" | "page_rules" | "player_state" | "archived";
+  code: "configuration_history" | "playlist_content" | "page_rules" | "player_state" | "archived" | "player_stack";
   detail: string;
 }
 
