@@ -567,7 +567,7 @@ paths:
       x-screenrig-access: write
       operationId: createInvitations
       description: >-
-        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope).
+        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -591,6 +591,12 @@ paths:
               $ref: '#/components/headers/RateLimitPolicy'
             RateLimit:
               $ref: '#/components/headers/RateLimit'
+        '402':
+          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Premium; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -2191,6 +2197,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Premium; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -2243,6 +2255,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Premium. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     patch:
@@ -2272,6 +2290,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Premium. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -2328,6 +2352,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: playlist_not_approved — the playlist has no approved version; resource_conflict — the name is in use, or a media item a kept page names is no longer ready.
           content:
@@ -2478,6 +2508,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -2604,6 +2640,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -2641,6 +2683,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -2664,6 +2712,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -2899,7 +2953,7 @@ paths:
       x-screenrig-access: write
       operationId: updateScreenFolder
       description: >-
-        Renames a folder (name), moves it with everything inside (parent_id, null for the project root) or sets the default playlist its screens without their own show (default_playlist_id, null clears it). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). A move or a default change re-resolves the screens inside within about 15 seconds, and the response's levels name the campaigns and folder defaults those screens gain or lose. A change advances the folder revision and emits screen.folder_updated; the same values are a no-op. If-Match optionally guards the revision. protected true protects the folder and every folder inside it, and false clears it; send it alone (invalid_request otherwise). Only a person who can approve sets it: an agent, a service client or a member who cannot approve gets approver_required. A change appends screen.folder_protection_changed (details folder_id, protected). Clearing protection, and a move or a default playlist change on a folder that holds protected screens, is a protected_change review (202 pending_review) decided by a second approver. A caller limited to screens (docs/screen-scope.md) changes only folders inside its scope: parent_id must name one too (the root is outside_screen_scope), and protected is not its to change on a folder its scope names.
+        Renames a folder (name), moves it with everything inside (parent_id, null for the project root) or sets the default playlist its screens without their own show (default_playlist_id, null clears it). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). A move or a default change re-resolves the screens inside within about 15 seconds, and the response's levels name the campaigns and folder defaults those screens gain or lose. A change advances the folder revision and emits screen.folder_updated; the same values are a no-op. If-Match optionally guards the revision. protected true protects the folder and every folder inside it, and false clears it; send it alone (invalid_request otherwise). Only a person who can approve sets it: an agent, a service client or a member who cannot approve gets approver_required. A change appends screen.folder_protection_changed (details folder_id, protected). Clearing protection, and a move or a default playlist change on a folder that holds protected screens, is a protected_change review (202 pending_review) decided by a second approver. A caller limited to screens (docs/screen-scope.md) changes only folders inside its scope: parent_id must name one too (the root is outside_screen_scope), and protected is not its to change on a folder its scope names. protected true is protected folders, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Protection that is set keeps holding changes for a second approver, and asking to remove it is a review on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2926,6 +2980,12 @@ paths:
                 $ref: '#/components/schemas/ScreenFolder'
         '202':
           $ref: '#/components/responses/PendingReview'
+        '402':
+          description: feature_not_in_plan — Protected folders are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/ScreenScopePlays'
         default:
@@ -3054,7 +3114,7 @@ paths:
       x-screenrig-access: read
       operationId: previewScheduleImport
       description: >-
-        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope).
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3080,6 +3140,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScheduleImportPreview'
+        '402':
+          description: feature_not_in_plan — Schedule import is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -3091,7 +3157,7 @@ paths:
       x-screenrig-access: write
       operationId: commitScheduleImport
       description: >-
-        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent. A commit that would update or delete a reserved campaign answers reserved_item (403) and writes nothing, unless a person who can approve commits it. A commit that reaches a protected screen is refused whole with protected_target, also when the import has no levels but removes import entries of a protected screen or deletes an import campaign whose audience reaches one. In a project with protected screen folders a commit whose preview fails on a service, not on the sheet, answers dependency_unavailable and writes nothing: send the same request again after a short wait. A sheet, campaign or screen validation error answers as the commit would (invalid_request and the other problems above). Not available to a caller limited to screens.
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent. A commit that would update or delete a reserved campaign answers reserved_item (403) and writes nothing, unless a person who can approve commits it. A commit that reaches a protected screen is refused whole with protected_target, also when the import has no levels but removes import entries of a protected screen or deletes an import campaign whose audience reaches one. In a project with protected screen folders a commit whose preview fails on a service, not on the sheet, answers dependency_unavailable and writes nothing: send the same request again after a short wait. A sheet, campaign or screen validation error answers as the commit would (invalid_request and the other problems above). Not available to a caller limited to screens. Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3119,6 +3185,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScheduleImportCommitted'
+        '402':
+          description: feature_not_in_plan — Schedule import is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/CampaignForbidden'
         '409':
@@ -3344,7 +3416,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule and clear_display_schedule on a protected screen are protected_target (409).
+        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule and clear_display_schedule on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -3406,7 +3478,11 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          $ref: '#/components/responses/Problem'
+          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Premium; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           description: "insufficient_access, outside_screen_scope when a caller limited to screens selects outside its scope, or approver_required for a member limited to screens who cannot approve."
           content:
@@ -3471,6 +3547,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Screen'
+        '402':
+          description: 'feature_not_in_plan — Video walls are part of Premium: setting a wall other than the screen''s own needs it, null clears it in every plan. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/ScreenScopePlays'
         '409':
@@ -4134,7 +4216,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have a timezone and an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, page visibility needs a timezone, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-project 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level.'
+      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have a timezone and an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, page visibility needs a timezone, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-project 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level. A new entry with paused true (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Entries already stored may stay paused, and pausing a stored entry is open on every plan.'
       security:
         - projectBearer: []
       parameters:
@@ -4177,6 +4259,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 2 or beyond of a video wall (displays) other than the screen's stored entry is part of Premium. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -5458,6 +5546,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Scheduled reboots are part of Premium; enabled true needs it, enabled false and DELETE do not. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -5676,7 +5770,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createCampaign
-      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; one with from, until or windows needs the screen''s timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. A project has at most 100 campaigns (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level.'
+      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; one with from, until or windows needs the screen''s timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. A project has at most 100 campaigns (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders and paused true on a new campaign (a draft) is schedule change control, both part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5701,6 +5795,12 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         '400':
           description: invalid_request, including an audience rule, a window or a playlist_id the project does not have.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Premium. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -5778,7 +5878,7 @@ paths:
       x-screenrig-access: write
       operationId: updateCampaign
       description: >-
-        Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. A paused campaign is a draft: it is on no screen's stack, and a write that leaves it paused re-resolves no screen. Publishing it for a test is this PATCH with paused false and an audience that is a test folder or a few screens; POST /api/campaigns/{id}/promote then copies that audience onto the real one. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision. Each write is stored in the campaign's history (GET /api/campaigns/{id}/revisions). campaign.updated. If-Match guards the revision. reserved sets or clears the reserved flag (a reserved campaign is changed, paused or un-reserved only by a person who can approve: reserved_item otherwise); a flip appends campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) changes a campaign only when its stored and new audience are inside its scope (outside_screen_scope; otherwise it is read-only to them). A campaign that reaches a protected screen is a protected_change review decided by a second approver (202 pending_review).
+        Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. A paused campaign is a draft: it is on no screen's stack, and a write that leaves it paused re-resolves no screen. Publishing it for a test is this PATCH with paused false and an audience that is a test folder or a few screens; POST /api/campaigns/{id}/promote then copies that audience onto the real one. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision. Each write is stored in the campaign's history (GET /api/campaigns/{id}/revisions). campaign.updated. If-Match guards the revision. reserved sets or clears the reserved flag (a reserved campaign is changed, paused or un-reserved only by a person who can approve: reserved_item otherwise); a flip appends campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) changes a campaign only when its stored and new audience are inside its scope (outside_screen_scope; otherwise it is read-only to them). A campaign that reaches a protected screen is a protected_change review decided by a second approver (202 pending_review). reserved true on a campaign that is not reserved is protected folders, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Pausing or resuming a campaign, and editing or releasing a reserved one, are open on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5802,6 +5902,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+        '402':
+          description: "feature_not_in_plan — Protected folders are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. Setting displays other than the campaign's own is part of Premium; null clears it in every plan. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: playlist_not_approved or idempotency_mismatch.
           content:
@@ -5911,7 +6017,7 @@ paths:
       x-screenrig-access: write
       operationId: promoteCampaign
       description: >-
-        Publishes a test. A test publish is a PATCH of a draft with paused false and an audience that is a test folder or a few screens; promote then copies the audience of revision (the draft's own, paused, revision) onto the campaign in one write (change promoted, restored_from the revision copied) and every screen of the old and the new audience re-resolves. Refused (invalid_request, naming revision) when that revision was not paused, since it is not a draft, and when the campaign is paused now, since there is no test to promote. If-Match is required and names the current revision. A revision whose audience is the current one changes nothing. The same access as PATCH.
+        Publishes a test. A test publish is a PATCH of a draft with paused false and an audience that is a test folder or a few screens; promote then copies the audience of revision (the draft's own, paused, revision) onto the campaign in one write (change promoted, restored_from the revision copied) and every screen of the old and the new audience re-resolves. Refused (invalid_request, naming revision) when that revision was not paused, since it is not a draft, and when the campaign is paused now, since there is no test to promote. If-Match is required and names the current revision. A revision whose audience is the current one changes nothing. The same access as PATCH. Promote is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Revision history, restore and previews are open on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5935,6 +6041,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+        '402':
+          description: feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -6098,6 +6210,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: idempotency_mismatch.
           content:
@@ -6178,6 +6296,12 @@ paths:
                 $ref: '#/components/schemas/BIConnection'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does. A change that only replaces the secret (and the Tableau secret_id that goes with it) is always allowed, so a connection whose token expired stays current."
           content:
             application/problem+json:
               schema:
@@ -6396,6 +6520,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           description: not_found, the connection is not in this project.
           content:
@@ -6482,6 +6612,12 @@ paths:
                 $ref: '#/components/schemas/BIView'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does."
           content:
             application/problem+json:
               schema:
@@ -7312,6 +7448,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Live view is part of Premium. Ending a session stays open. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -7428,6 +7570,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -7539,6 +7687,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -7621,6 +7775,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -7726,7 +7886,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getProjectCapabilities
-      description: The calling project's plan, independent advertiser/screens flags with their revision, and the derived effective capability set. Never reflects a client claim; an unknown plan fails closed as forbidden.
+      description: The calling project's plan, independent advertiser/screens flags with their revision, the derived effective capability set, the plan features it has (plan_features) and its limits (limits). Never reflects a client claim; an unknown plan fails closed as forbidden.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8777,6 +8937,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include direct campaigns; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: goal_overbooked or resource_conflict.
           content:
@@ -8831,6 +8997,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include direct campaigns; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: goal_overbooked or resource_conflict.
           content:
@@ -8899,6 +9071,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include direct campaigns; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '412':
           description: revision_conflict.
           content:
@@ -8973,6 +9151,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingDirectReport'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include direct campaigns; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -9001,6 +9185,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingAvailability'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include direct campaigns; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -9461,7 +9651,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAuditLog
-      description: 'Lists the project''s configuration changes, newest first: who changed what, when, from which surface, with the field-level before and after, kept 400 days on every plan. Filter by actor (id), actor_kind, source, resource_type and resource_id, action (exact, or a prefix when it ends in *), field (a JSON Pointer prefix such as /label) and a since/until window; page with cursor. format csv, xlsx or pdf writes the filtered log through the report renderer as a file (one row per changed field, oldest first, the last 30 days unless since says otherwise, the chain head and retention floor in the file so it is an anchor for audit verify). Secrets (tokens, keys, passwords, webhook and source credentials) are shown as (redacted); every other value is the stored value. Entries are written by the services in the transaction that makes the change; nothing writes, updates or deletes an entry. Needs the project capability; a dashboard session reads it as the project owner, an organization admin or a staff member shadowing the project.'
+      description: 'Lists the project''s configuration changes, newest first: who changed what, when, from which surface, with the field-level before and after, kept 400 days on every plan. Filter by actor (id), actor_kind, source, resource_type and resource_id, action (exact, or a prefix when it ends in *), field (a JSON Pointer prefix such as /label) and a since/until window; page with cursor. format csv, xlsx or pdf writes the filtered log through the report renderer as a file (one row per changed field, oldest first, the last 30 days unless since says otherwise, the chain head and retention floor in the file so it is an anchor for audit verify). Secrets (tokens, keys, passwords, webhook and source credentials) are shown as (redacted); every other value is the stored value. Entries are written by the services in the transaction that makes the change; nothing writes, updates or deletes an entry. Needs the project capability; a dashboard session reads it as the project owner, an organization admin or a staff member shadowing the project. Reading and exporting the log is the audit log, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Every plan records its changes.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9498,6 +9688,12 @@ paths:
                 format: binary
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — The audit log is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -9511,7 +9707,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getAuditHead
-      description: The project's audit chain head (the last chained entry's seq and hash), the retention floor the chain starts from, and how many entries are waiting to be chained. Keep a head as an anchor and pass it to GET /api/audit/verify later to prove no history before it was rewritten or removed.
+      description: The project's audit chain head (the last chained entry's seq and hash), the retention floor the chain starts from, and how many entries are waiting to be chained. Keep a head as an anchor and pass it to GET /api/audit/verify later to prove no history before it was rewritten or removed. Part of the audit log, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9522,6 +9718,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditHead'
+        '402':
+          description: feature_not_in_plan — The audit log is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -9535,7 +9737,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: verifyAuditLog
-      description: Recomputes the audit hash chain over a range and reports what is wrong, if anything. Every chained entry's hash is recomputed from its stored content, each entry must link to the one before it, seq must be contiguous from the retention floor, and the last entry must be the chain head. anchor (SEQ:HASH from an earlier export or head) additionally proves the entry at that seq is unchanged and the chain was not truncated below it. A call checks at most 5000 entries; continue from next_seq with from_seq.
+      description: Recomputes the audit hash chain over a range and reports what is wrong, if anything. Every chained entry's hash is recomputed from its stored content, each entry must link to the one before it, seq must be contiguous from the retention floor, and the last entry must be the chain head. anchor (SEQ:HASH from an earlier export or head) additionally proves the entry at that seq is unchanged and the chain was not truncated below it. A call checks at most 5000 entries; continue from next_seq with from_seq. Part of the audit log, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9552,6 +9754,12 @@ paths:
                 $ref: '#/components/schemas/AuditVerifyResult'
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — The audit log is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -9566,7 +9774,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getAuditEntry
-      description: One audit entry with its field-level changes.
+      description: One audit entry with its field-level changes. Part of the audit log, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9577,6 +9785,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditEntry'
+        '402':
+          description: feature_not_in_plan — The audit log is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -9590,7 +9804,7 @@ paths:
         description: Backend-owned dashboard origin
     get:
       operationId: listOrganizationAudit
-      description: "The organization's own audit log: changes to its administrators, domains and billing settings, with the same entries, filters and formats as GET /api/audit. Requires an administrator of the organization."
+      description: "The organization's own audit log: changes to its administrators, domains and billing settings, with the same entries, filters and formats as GET /api/audit. Requires an administrator of the organization. Part of the audit log, which the Enterprise plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). Every plan records its changes."
       security:
         - dashboardSession: []
       parameters:
@@ -9624,6 +9838,12 @@ paths:
                 format: binary
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — The audit log is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -9657,7 +9877,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getReport
-      description: 'Builds a report from the project''s aggregates (uptime rollups, the alert rows, screen state, direct campaign delivery), never from raw events. fleet_health, uptime, publishing and alerts roll up by group_by folder (default), screen or tag over the inclusive UTC days from to to (default the last 30): a folder holds every screen in it and in every folder inside it, and its first row is the whole project; folder_id limits the report to a folder and what it holds, and with direct to the folder and its child folders (or, grouped by screen, to the screens directly in it). alert_log lists each alert that began in the period. proof_of_play totals the plays of the project''s direct campaigns per campaign, media and screen, for one campaign_id or every campaign of an advertiser. format json (default) returns the table; csv, xlsx and pdf return the same table as a file attachment.'
+      description: 'Builds a report from the project''s aggregates (uptime rollups, the alert rows, screen state, direct campaign delivery), never from raw events. fleet_health, uptime, publishing and alerts roll up by group_by folder (default), screen or tag over the inclusive UTC days from to to (default the last 30): a folder holds every screen in it and in every folder inside it, and its first row is the whole project; folder_id limits the report to a folder and what it holds, and with direct to the folder and its child folders (or, grouped by screen, to the screens directly in it). alert_log lists each alert that began in the period. proof_of_play totals the plays of the project''s direct campaigns per campaign, media and screen, for one campaign_id or every campaign of an advertiser. format json (default) returns the table; csv, xlsx and pdf return the same table as a file attachment. fleet_health as JSON is in every plan; every other kind, and any file format, needs the reports plan feature (402 feature_not_in_plan).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9695,6 +9915,12 @@ paths:
                 format: binary
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Reports are part of Premium: every kind but fleet_health as JSON, and csv, xlsx and pdf of any kind, need them. fleet_health as JSON (the default format) is open in every plan, as are the report kinds and the existing report routes'' exports. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
@@ -9751,6 +9977,12 @@ paths:
                 $ref: '#/components/schemas/ReportSubscription'
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Reports are part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: report_subscription_limit_reached.
           content:
@@ -9817,6 +10049,12 @@ paths:
                 $ref: '#/components/schemas/ReportSubscription'
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Reports are part of Premium; a change that only turns the subscription off stays open. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -10314,6 +10552,12 @@ paths:
                 $ref: '#/components/schemas/ReportSubscription'
         '400':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: 'feature_not_in_plan — Reports are part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: report_subscription_limit_reached.
           content:
@@ -10996,6 +11240,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: source_target_taken (the card already has a source; source_id names it), source_limit_reached or idempotency_mismatch.
           content:
@@ -11039,6 +11289,12 @@ paths:
                 $ref: '#/components/schemas/SourceTestResult'
         '400':
           description: invalid_request or source_secret_required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
           content:
             application/problem+json:
               schema:
@@ -11126,6 +11382,12 @@ paths:
                 $ref: '#/components/schemas/Source'
         '400':
           description: invalid_request or source_secret_required.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A change that only replaces secrets, alone or with enabled false, is always allowed, so a source whose token expired stays current."
           content:
             application/problem+json:
               schema:
@@ -12653,6 +12915,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceClientResult'
+        '402':
+          description: "feature_not_in_plan — an upload scope makes an uploader, and the project's plan does not include uploaders; required_plan names the plan that does. Narrowing a scope and removing it are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -12702,6 +12970,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceClientResult'
+        '402':
+          description: "feature_not_in_plan — an upload scope makes an uploader, and the project's plan does not include uploaders; required_plan names the plan that does. Narrowing a scope and removing it are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -12922,6 +13196,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
           content:
@@ -12993,6 +13273,12 @@ paths:
                 $ref: '#/components/schemas/MediaSyncAccount'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does. A change that only replaces the secret is always allowed, so an account whose client secret expired stays current."
           content:
             application/problem+json:
               schema:
@@ -13255,6 +13541,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: media_sync_source_refused (the provider refused the app, its permission or the folder), resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
           content:
@@ -13332,6 +13624,12 @@ paths:
                 $ref: '#/components/schemas/MediaSync'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does. Pausing a sync is always allowed."
           content:
             application/problem+json:
               schema:
@@ -14104,6 +14402,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '402':
+          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (the loop_stalled, glass_blank and glass_frozen conditions) are part of Premium. Email and webhook notifications with the default rules are in every plan. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: notification_limit_reached or idempotency_mismatch.
           content:
@@ -14168,6 +14472,12 @@ paths:
                 $ref: '#/components/schemas/Notification'
         '400':
           description: invalid_request, webhook_url_rejected or notification_destination_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: 'feature_not_in_plan — Alert routing (changing a Slack, Teams, PagerDuty or Telegram notification other than turning it off, snoozing it or describing it, or setting a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (adding the loop_stalled, glass_blank or glass_frozen condition) are part of Premium. Clearing a rule is open in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -19555,7 +19865,7 @@ paths:
     put:
       operationId: dashboardOrganizationsSetIdentityProvider
       description: >-
-        A designated admin creates the organization's connection or changes it; an organization holds one. If-Match carries the connection's revision from GET, or 0 when the organization has none, and is required; a stale value is revision_conflict with current_revision. 201 creates and 200 changes. proof is required: a fresh passkey or password proof bound to a reauthentication of kind identity_provider_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago (otherwise reauthentication_required). OIDC with preset entra takes tenant_id and builds the issuer from it; preset generic takes issuer. Omitting oidc.client_secret keeps the stored secret. For SAML, metadata_xml is read for the identity provider's entity ID, sign-in address and signing certificates, and idp_entity_id, idp_sso_url and certificates_pem state them directly; certificates_pem replaces the stored list, which holds at most 4 so a new certificate can overlap the old during rotation. While Require SSO is in force a change of identity (issuer, tenant, entity ID or kind) is resource_conflict and certificate and client secret rotation are allowed; outside it, a change of identity makes ready_to_require false until a test or sign-in succeeds. Returns the connection with its ETag. People only; agents and bearer credentials have no route.
+        A designated admin creates the organization's connection or changes it; an organization holds one. If-Match carries the connection's revision from GET, or 0 when the organization has none, and is required; a stale value is revision_conflict with current_revision. 201 creates and 200 changes. proof is required: a fresh passkey or password proof bound to a reauthentication of kind identity_provider_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago (otherwise reauthentication_required). OIDC with preset entra takes tenant_id and builds the issuer from it; preset generic takes issuer. Omitting oidc.client_secret keeps the stored secret. For SAML, metadata_xml is read for the identity provider's entity ID, sign-in address and signing certificates, and idp_entity_id, idp_sso_url and certificates_pem state them directly; certificates_pem replaces the stored list, which holds at most 4 so a new certificate can overlap the old during rotation. While Require SSO is in force a change of identity (issuer, tenant, entity ID or kind) is resource_conflict and certificate and client secret rotation are allowed; outside it, a change of identity makes ready_to_require false until a test or sign-in succeeds. Returns the connection with its ETag. People only; agents and bearer credentials have no route. Creating the first connection (If-Match 0) is single sign-on, which the Enterprise plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). Changing a connection that exists, such as rotating a certificate or client secret or refreshing metadata, reading, testing and removing one are open on every plan, and a connection that exists keeps signing people in.
       security:
         - dashboardSession: []
       parameters:
@@ -19608,6 +19918,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Single sign-on is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '409':
@@ -19700,7 +20016,7 @@ paths:
     put:
       operationId: dashboardOrganizationsSetSSOPolicy
       description: >-
-        A designated admin turns Require SSO on or off and names the break-glass admins. required true refuses password and passkey sign-in for the organization's verified domains (sso_required) and needs a verified domain and ready_to_require on the connection, otherwise resource_conflict; it bumps policy_revision. required false does not lift the requirement at once: it schedules the removal for 72 hours after the request (enforcement_ends_at) and emails every admin, and DELETE .../sso-policy/removal cancels it. break_glass_user_ids names at most 2 designated admins who hold a passkey, otherwise invalid_request; they keep passkey sign-in while SSO is required, and each such sign-in is audited. If-Match carries policy_revision and is required; a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind sso_policy_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Returns the policy with its ETag. People only; agents and bearer credentials have no route.
+        A designated admin turns Require SSO on or off and names the break-glass admins. required true refuses password and passkey sign-in for the organization's verified domains (sso_required) and needs a verified domain and ready_to_require on the connection, otherwise resource_conflict; it bumps policy_revision. required false does not lift the requirement at once: it schedules the removal for 72 hours after the request (enforcement_ends_at) and emails every admin, and DELETE .../sso-policy/removal cancels it. break_glass_user_ids names at most 2 designated admins who hold a passkey, otherwise invalid_request; they keep passkey sign-in while SSO is required, and each such sign-in is audited. If-Match carries policy_revision and is required; a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind sso_policy_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Returns the policy with its ETag. People only; agents and bearer credentials have no route. Setting required true is single sign-on, which the Enterprise plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). required false is always accepted, and Require SSO that is on stays enforced until it is turned off.
       security:
         - dashboardSession: []
       parameters:
@@ -19737,6 +20053,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Single sign-on is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
@@ -19832,7 +20154,7 @@ paths:
     put:
       operationId: dashboardOrganizationsSetSCIM
       description: >-
-        A designated admin enables or disables SCIM provisioning after fresh proof: a passkey or password proof bound to a reauthentication of kind scim_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Disabling changes nobody's access: the people and groups already provisioned keep their grants, and the /scim/v2 routes answer 403 until SCIM is enabled again. Returns the settings. People only; agents and bearer credentials have no route.
+        A designated admin enables or disables SCIM provisioning after fresh proof: a passkey or password proof bound to a reauthentication of kind scim_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Disabling changes nobody's access: the people and groups already provisioned keep their grants, and the /scim/v2 routes answer 403 until SCIM is enabled again. Returns the settings. People only; agents and bearer credentials have no route. enabled true is SCIM provisioning, which the Enterprise plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). enabled false is always accepted, and the /scim/v2 endpoints of an organization that has SCIM on keep answering.
       security:
         - dashboardSession: []
       requestBody:
@@ -19858,6 +20180,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — SCIM provisioning is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         default:
@@ -19876,7 +20204,7 @@ paths:
     post:
       operationId: dashboardOrganizationsCreateSCIMToken
       description: >-
-        A designated admin mints a provisioning token after fresh proof (as for PUT .../scim). The token, srscim_ plus 43 base64url characters, is returned once, here only; the server keeps a SHA-256 digest and a prefix to recognise it by. An organization holds at most 5 live tokens, otherwise resource_conflict. People only; agents and bearer credentials have no route.
+        A designated admin mints a provisioning token after fresh proof (as for PUT .../scim). The token, srscim_ plus 43 base64url characters, is returned once, here only; the server keeps a SHA-256 digest and a prefix to recognise it by. An organization holds at most 5 live tokens, otherwise resource_conflict. People only; agents and bearer credentials have no route. Issuing a token is SCIM provisioning, which the Enterprise plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). Tokens already issued keep working and can be revoked.
       security:
         - dashboardSession: []
       requestBody:
@@ -19902,6 +20230,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — SCIM provisioning is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '409':
@@ -20250,7 +20584,7 @@ paths:
     get:
       operationId: listDashboardGroupBindings
       description: >-
-        The session project's group bindings, and the groups its organization's identity provider has provisioned (name and member count) to choose from. A binding gives every member of the group a membership in this project: role member is a plain membership and role approver also lets the person approve reviews. A person in several bound groups holds the highest role, approver over member. Any member of the project reads.
+        The session project's group bindings, and the groups its organization's identity provider has provisioned (name and member count) to choose from. A binding gives every member of the group a membership in this project: role member is a plain membership and role approver also lets the person approve reviews, of the whole project or of the binding's screen_scope. A person several bindings of the project reach holds the union of their scopes, and a binding without a scope gives the whole project. They approve reviews only when the union of their approver bindings' scopes (with an approving hand grant's) covers that whole union, and are a member otherwise; SCIM never lowers a hand grant: a binding that would is not applied to the person and is recorded as a failed SCIM event. Any member of the project reads, except a caller limited to screens (outside_screen_scope).
       security:
         - dashboardSession: []
       responses:
@@ -20275,7 +20609,7 @@ paths:
     post:
       operationId: createDashboardGroupBinding
       description: >-
-        Binds a provisioned group to the session project with a role. The project owner or a member who can approve only (approver_required otherwise); a staff shadow session is read-only. The group must be one of the project's organization's provisioned groups, otherwise not_found, and a group is bound to a project once, otherwise resource_conflict. The binding takes effect at once for the group's current members and follows every change to the group's membership. The project's 200-member limit applies: a person it refuses is recorded as a failed event in the organization's SCIM events and nothing else changes.
+        Binds a provisioned group to the session project with a role and, optionally, a screen_scope that limits it to screen folders and screens (fixed once made; invalid_request names the field of an id the project does not hold). The project owner or a member who can approve only (approver_required otherwise; a caller limited to screens is outside_screen_scope); a staff shadow session is read-only. The group must be one of the project's organization's provisioned groups, otherwise not_found, and a group is bound to a project once, otherwise resource_conflict. The binding takes effect at once for the group's current members and follows every change to the group's membership. The project's 200-member limit applies: a person it refuses is recorded as a failed event in the organization's SCIM events and nothing else changes. A scope change a binding makes appends project.member_screen_scope_changed (details user_id, screen_scope, previous, via scim, changed_by_user_id empty). Binding a group is SCIM provisioning, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Bindings that exist keep granting and can be removed.
       security:
         - dashboardSession: []
       requestBody:
@@ -20301,6 +20635,12 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — SCIM provisioning is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
@@ -20324,7 +20664,7 @@ paths:
     delete:
       operationId: deleteDashboardGroupBinding
       description: >-
-        Unbinds a group from the session project. The project owner or a member who can approve only (approver_required otherwise). People who held access only through the binding lose it; a membership granted by hand stays, and a hand grant the binding raised returns to what it was. An id the project does not hold is not_found.
+        Unbinds a group from the session project. The project owner or a member who can approve only (approver_required otherwise). People who held access only through the binding lose it; a membership granted by hand stays, and a hand grant the binding raised or widened returns to what it was, its screen scope included. An id the project does not hold is not_found.
       security:
         - dashboardSession: []
       responses:
@@ -20388,7 +20728,7 @@ paths:
     put:
       operationId: setDashboardMemberScreenScope
       description: >-
-        Limits a member to screen folders (each with every folder inside it) and screens, or replaces the scope of one (docs/screen-scope.md). In one transaction it also ends the agents the person brought to the project (agent.disconnected, as removing them would) and appends project.member_screen_scope_changed (details user_id, screen_scope, previous, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row, an uploader (a scoped member is limited to screens, an uploader to content) and a member who approves reviews with single screens in the scope are resource_conflict; a non-member is not_found; an id that is not a live screen folder or screen of the project is invalid_request at screen_scope.folder_ids[i] or screen_scope.screen_ids[i]. A scoped member who approves reviews approves only inside the scope; one who cannot approve reads and runs commands but changes what plays only through approvers (approver_required). A scope is also refused with resource_conflict while the person, or an agent the person brought, has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written.
+        Limits a member to screen folders (each with every folder inside it) and screens, or replaces the scope of one (docs/screen-scope.md). In one transaction it also ends the agents the person brought to the project (agent.disconnected, as removing them would) and appends project.member_screen_scope_changed (details user_id, screen_scope, previous, changed_by_user_id). The scope is read on the member's next request: the change shows on their next GET /api/session without signing in again. The project owner only (forbidden otherwise); the owner's own row, an uploader (a scoped member is limited to screens, an uploader to content) and a member who approves reviews with single screens in the scope are resource_conflict; a non-member is not_found; an id that is not a live screen folder or screen of the project is invalid_request at screen_scope.folder_ids[i] or screen_scope.screen_ids[i]. A scoped member who approves reviews approves only inside the scope; one who cannot approve reads and runs commands but changes what plays only through approvers (approver_required). A scope is also refused with resource_conflict while the person, or an agent the person brought, has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting a person to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the person until it is cleared (DELETE), which every plan may do.
       security:
         - dashboardSession: []
       requestBody:
@@ -20404,6 +20744,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardMember'
+        '402':
+          description: feature_not_in_plan — Screen scope is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
@@ -20463,7 +20809,7 @@ paths:
     put:
       operationId: setDashboardAgentScreenScope
       description: >-
-        Limits an agent's membership of the session project to screen folders and screens, or replaces its scope (docs/screen-scope.md). The agent's reach is this scope narrowed by its responsible person's, so a scoped person never acts through an agent wider than themselves. The project owner only (forbidden otherwise); an agent that is not a member of the project is not_found. Appends agent.screen_scope_changed (details agent_id, screen_scope, previous, changed_by_user_id). An agent's scope applies to its next request on the instance that wrote it and within two seconds on the others. A scope is refused with resource_conflict while the agent has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written.
+        Limits an agent's membership of the session project to screen folders and screens, or replaces its scope (docs/screen-scope.md). The agent's reach is this scope narrowed by its responsible person's, so a scoped person never acts through an agent wider than themselves. The project owner only (forbidden otherwise); an agent that is not a member of the project is not_found. Appends agent.screen_scope_changed (details agent_id, screen_scope, previous, changed_by_user_id). An agent's scope applies to its next request on the instance that wrote it and within two seconds on the others. A scope is refused with resource_conflict while the agent has a live service client of the project: the detail names up to five clients as ID (name) and counts the rest, and nothing is written. Limiting an agent to screens is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A scope that is set keeps limiting the agent until it is cleared (DELETE), which every plan may do.
       security:
         - dashboardSession: []
       requestBody:
@@ -20479,6 +20825,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Agent'
+        '402':
+          description: feature_not_in_plan — Screen scope is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           description: "forbidden - only the project owner sets a scope, and outside_screen_scope for a member limited to screens; ask the project owner."
           content:
@@ -20545,6 +20897,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardMember'
+        '402':
+          description: "feature_not_in_plan — an upload scope makes an uploader, and the project's plan does not include uploaders; required_plan names the plan that does. Narrowing a scope and removing it are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -20730,7 +21088,7 @@ paths:
       x-screenrig-access: write
       operationId: createInvitationsInProject
       description: >-
-        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope).
+        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A screen_scope on the invitation is screen scope, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -20753,6 +21111,12 @@ paths:
               $ref: '#/components/headers/RateLimitPolicy'
             RateLimit:
               $ref: '#/components/headers/RateLimit'
+        '402':
+          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Premium; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -21036,6 +21400,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
+        '402':
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Premium; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/screens:
@@ -21229,7 +21599,7 @@ paths:
       x-screenrig-access: read
       operationId: previewScheduleImportInProject
       description: >-
-        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope).
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen (32) or a project (100 shared levels) holds. Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
       parameters:
@@ -21254,6 +21624,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScheduleImportPreview'
+        '402':
+          description: feature_not_in_plan — Schedule import is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -21269,7 +21645,7 @@ paths:
       x-screenrig-access: write
       operationId: commitScheduleImportInProject
       description: >-
-        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent. A commit that would update or delete a reserved campaign answers reserved_item (403) and writes nothing, unless a person who can approve commits it. A commit that reaches a protected screen is refused whole with protected_target, also when the import has no levels but removes import entries of a protected screen or deletes an import campaign whose audience reaches one. In a project with protected screen folders a commit whose preview fails on a service, not on the sheet, answers dependency_unavailable and writes nothing: send the same request again after a short wait. A sheet, campaign or screen validation error answers as the commit would (invalid_request and the other problems above). Not available to a caller limited to screens.
+        Commits a previewed import: the same sheet and the fingerprint its preview answered. Every level is created, updated or removed, the screens' schedules and the shared levels written in one transaction, and the import event schedule.imported appended: all rows apply or none does. The one-file playlists the sheet's files need are made first (they change nothing on any screen). A sheet whose rows have errors is refused (schedule_import_invalid); a project that changed since the preview, or rows that read differently, is refused (schedule_import_stale), and the client previews again. Importing the same sheet again under the same name changes nothing; a changed row updates its level and a removed row removes its level. Needs a person who can approve in the dashboard and a credential with write access for an agent. A commit that would update or delete a reserved campaign answers reserved_item (403) and writes nothing, unless a person who can approve commits it. A commit that reaches a protected screen is refused whole with protected_target, also when the import has no levels but removes import entries of a protected screen or deletes an import campaign whose audience reaches one. In a project with protected screen folders a commit whose preview fails on a service, not on the sheet, answers dependency_unavailable and writes nothing: send the same request again after a short wait. A sheet, campaign or screen validation error answers as the commit would (invalid_request and the other problems above). Not available to a caller limited to screens. Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
       parameters:
@@ -21296,6 +21672,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScheduleImportCommitted'
+        '402':
+          description: feature_not_in_plan — Schedule import is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         '409':
@@ -21532,7 +21914,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409).
+      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -21603,7 +21985,11 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          $ref: '#/components/responses/Problem'
+          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Premium; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           description: "insufficient_access, outside_screen_scope when a caller limited to screens selects outside its scope, or approver_required for a member limited to screens who cannot approve."
           content:
@@ -21648,7 +22034,7 @@ paths:
       x-screenrig-access: write
       operationId: createCampaignInProject
       description: >-
-        createCampaign for the project named in the path. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level.
+        createCampaign for the project named in the path. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders and paused true on a new campaign (a draft) is schedule change control, both part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -21672,6 +22058,12 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         '202':
           $ref: '#/components/responses/PendingReview'
+        '402':
+          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Premium. The problem names the feature, the project's plan and required_plan."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/CampaignForbidden'
         default:
@@ -21752,6 +22144,12 @@ paths:
                 $ref: '#/components/schemas/BIConnection'
         '400':
           description: invalid_request, including an address that is not a public Internet host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does."
           content:
             application/problem+json:
               schema:
@@ -21840,6 +22238,12 @@ paths:
                 $ref: '#/components/schemas/BIView'
         '400':
           description: invalid_request, including a url that is not a dashboard address of the connection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include BI dashboards; required_plan names the plan that does."
           content:
             application/problem+json:
               schema:
@@ -21985,7 +22389,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getProjectCapabilitiesInProject
-      description: The calling project's plan, independent advertiser/screens flags with their revision, and the derived effective capability set. Never reflects a client claim; an unknown plan fails closed as forbidden.
+      description: The calling project's plan, independent advertiser/screens flags with their revision, the derived effective capability set, the plan features it has (plan_features) and its limits (limits). Never reflects a client claim; an unknown plan fails closed as forbidden.
       security:
         - projectBearer: []
       responses:
@@ -23259,6 +23663,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceClientResult'
+        '402':
+          description: "feature_not_in_plan — an upload scope makes an uploader, and the project's plan does not include uploaders; required_plan names the plan that does. Narrowing a scope and removing it are always allowed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
         default:
@@ -23326,6 +23736,12 @@ paths:
                 $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does."
           content:
             application/problem+json:
               schema:
@@ -23402,6 +23818,12 @@ paths:
                 $ref: '#/components/schemas/MediaSync'
         '400':
           description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: "feature_not_in_plan — the project's plan does not include media sync; required_plan names the plan that does."
           content:
             application/problem+json:
               schema:
@@ -23697,6 +24119,12 @@ paths:
                 $ref: '#/components/schemas/Notification'
         '400':
           description: invalid_request, webhook_url_rejected or notification_destination_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (the loop_stalled, glass_blank and glass_frozen conditions) are part of Premium. Email and webhook notifications with the default rules are in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -26077,11 +26505,12 @@ components:
     SSOPolicy:
       type: object
       additionalProperties: false
-      required: [required, break_glass_user_ids, policy_revision]
+      required: [required, break_glass_user_ids, passkey_admin_ids, policy_revision]
       properties:
         required: {type: boolean, description: "Require SSO is in force now: password and passkey sign-in are refused for the organization's verified domains (sso_required). A scheduled removal keeps it true until enforcement_ends_at."}
         enforcement_ends_at: {type: string, format: date-time, description: "When a scheduled removal takes effect, 72 hours after it was requested. Absent when none is scheduled."}
         break_glass_user_ids: {type: array, maxItems: 2, items: {type: string}, description: "Admins who hold a passkey and keep passkey sign-in while SSO is required. Each such sign-in is audited."}
+        passkey_admin_ids: {type: array, items: {type: string}, description: "The organization's verified admins who hold a passkey: the people who can be break-glass admins now. While single sign-on is required nobody at its verified domains can add a passkey, so an empty list means no admin can be named."}
         policy_revision: {type: integer, minimum: 0, description: "The revision PUT sends as If-Match. It advances when Require SSO turns on, when the connection's identity changes and when the break-glass admins change."}
     SSOPolicyWrite:
       type: object
@@ -26198,6 +26627,9 @@ components:
         project_id: {type: string}
         project_name: {type: string}
         role: {type: string, enum: [approver, member]}
+        screen_scope:
+          $ref: '#/components/schemas/ScreenScope'
+          description: "Present when the binding limits what it grants to screen folders and screens of the project (docs/screen-scope.md)."
     SCIMGroupSummary:
       type: object
       additionalProperties: false
@@ -26245,7 +26677,10 @@ components:
         binding_id: {type: string}
         group_id: {type: string}
         group_name: {type: string}
-        role: {type: string, enum: [approver, member], description: "member is a plain membership; approver also lets the person approve reviews. The highest role among a person's bound groups applies."}
+        role: {type: string, enum: [approver, member], description: "member is a plain membership; approver also lets the person approve reviews, inside screen_scope when the binding has one."}
+        screen_scope:
+          $ref: '#/components/schemas/ScreenScope'
+          description: "Present when the binding limits what it grants to screen folders and screens (docs/screen-scope.md); absent for the whole project. A person several bindings of the project reach holds the union of their scopes, and a binding without a scope gives the whole project. They approve reviews only when the union of their approver bindings' scopes (with an approving hand grant's) covers that whole union, and are a member otherwise; SCIM never lowers a hand grant: a binding that would is not applied to the person and is recorded as a failed SCIM event. A folder or screen deleted since the binding was made stays as a dead id, which grants nothing."
         created_at: {type: string, format: date-time}
         created_by: {type: string, description: "The user_id of the person who bound the group."}
     GroupBindingList:
@@ -26262,6 +26697,9 @@ components:
       properties:
         group_id: {type: string, minLength: 1, maxLength: 200}
         role: {type: string, enum: [approver, member]}
+        screen_scope:
+          $ref: '#/components/schemas/ScreenScope'
+          description: "Limits what the binding grants to these screen folders and screens of the session project (docs/screen-scope.md); omit it for the whole project. Every id must name a live folder or screen of the project (invalid_request at screen_scope.folder_ids[i] or screen_scope.screen_ids[i]), and an approver binding names folders only (invalid_request at screen_scope.screen_ids). The scope never changes after the binding is made: remove the binding and bind the group again with another. A person several bindings of the project reach holds the union of their scopes, and a binding without a scope gives the whole project. They approve reviews only when the union of their approver bindings' scopes (with an approving hand grant's) covers that whole union, and are a member otherwise; SCIM never lowers a hand grant: a binding that would is not applied to the person and is recorded as a failed SCIM event."
     SCIMResource:
       type: object
       additionalProperties: true
@@ -26654,6 +27092,7 @@ components:
             - account_delete
             - staff_grant
             - staff_action
+            - staff_featuresets
             - dashboard_token
             - oauth_authorization_approval
             - oauth_authorization_denial
@@ -26665,7 +27104,7 @@ components:
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens); a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens); a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -27510,7 +27949,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, media_video_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, features]
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, media_video_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, founding_period_ends_at, features]
       properties:
         api_version: {type: string}
         protocol_version: {type: string}
@@ -27523,13 +27962,14 @@ components:
         application_path_bytes: {type: integer, enum: [255]}
         media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies each image is at most 16383 pixels wide and 16383 tall and at most 67,108,864 pixels (8192 by 8192) in one frame, so an ultra-wide canvas such as 12000 by 540 or 9216 by 2160 uploads, and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
-        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
+        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan and on a Standard project whose featuresets give Premium's limits. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
         playlist_max_pages: {type: integer, enum: [100]}
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
         transition_max_duration_ms: {type: integer, enum: [60000]}
         screens_per_project: {type: integer, enum: [50], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
+        founding_period_ends_at: {type: string, format: date-time, description: "When the founding period ends, in RFC 3339 UTC. Accounts created before it are founding accounts: their featureset gives them Premium's features and limits for as long as they exist, and no billing applies before it beyond the metering that runs today."}
         features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
     WebsiteSetupCode:
       type: object
@@ -28225,14 +28665,50 @@ components:
     ProjectCapabilities:
       type: object
       additionalProperties: false
-      required: [project_id, plan_id, features, feature_revision, capabilities, media_video_bytes]
+      required: [project_id, plan_id, features, feature_revision, capabilities, media_video_bytes, plan_features, limits]
       properties:
         project_id: {type: string}
         plan_id: {type: string}
         features: {$ref: "#/components/schemas/ProjectFeatures"}
         feature_revision: {type: integer}
-        media_video_bytes: {type: integer, enum: [500000000, 1000000000], description: "The most one video/mp4 or video/webm upload may declare on this project's plan, in decimal bytes: 500000000 (500 MB) on Standard, 1000000000 (1 GB) on every other plan. A larger declaration is rejected with invalid_request before any byte is transferred. A plan change never affects a stored video, only later uploads and replacements. GET /api/capabilities publishes the Standard value for callers that have no project."}
+        plan_features: {$ref: "#/components/schemas/ProjectPlanFeatures"}
+        limits: {$ref: "#/components/schemas/ProjectPlanLimits"}
+        media_video_bytes: {type: integer, enum: [500000000, 1000000000], description: "The most one video/mp4 or video/webm upload may declare on this project's plan, in decimal bytes: 500000000 (500 MB) on Standard, 1000000000 (1 GB) on every other plan and on a Standard project whose featuresets give Premium's limits (limits.video_bytes is the same figure). A larger declaration is rejected with invalid_request before any byte is transferred. A plan change never affects a stored video, only later uploads and replacements. GET /api/capabilities publishes the Standard value for callers that have no project."}
         capabilities: {type: array, items: {type: string, enum: [media, credits, signage.pairing, signage.playlists, signage.publish, advertising]}}
+    ProjectPlanFeatures:
+      type: object
+      additionalProperties: false
+      required: [featuresets, features]
+      description: "The plan features the project has. The plan and the project's featuresets decide them; credit never unlocks one. A feature the project does not have is refused with feature_not_in_plan (402), whose required_plan names the lowest sold plan that includes it."
+      properties:
+        featuresets:
+          type: array
+          description: "The featureset tags the project and its organization hold, sorted: founding, premium, enterprise or all. Empty when it holds none; the plan's own featureset is not listed. A tag also widens limits to the plan it names."
+          items: {type: string, enum: [all, enterprise, founding, premium]}
+        features:
+          type: array
+          description: "Every plan feature, always the same twenty in the same order: Premium's twelve, then Enterprise's eight."
+          items: {$ref: "#/components/schemas/ProjectPlanFeature"}
+    ProjectPlanFeature:
+      type: object
+      additionalProperties: false
+      required: [id, enabled, required_plan]
+      properties:
+        id:
+          type: string
+          enum: [video_walls, live_view, glass_monitoring, alert_routing, reports, bi_dashboards, connectors, media_sync, playlist_templates, uploaders, direct_campaigns, scheduled_reboots, sso, scim, screen_scope, protected_folders, change_control, audit_log, schedule_import, momentus]
+        enabled: {type: boolean, description: "Whether the project has the feature now."}
+        required_plan: {type: string, enum: [premium, enterprise], description: "The lowest sold plan that includes the feature, whether or not the project has it."}
+    ProjectPlanLimits:
+      type: object
+      additionalProperties: false
+      required: [screens, members, video_bytes, event_retention_days]
+      description: "The project's limits as its plan and featuresets give them, the figures admission enforces. Zero is no plan cap."
+      properties:
+        screens: {type: integer, minimum: 0, description: "Most pairing_pending and active screens. Archived screens do not count."}
+        members: {type: integer, minimum: 0, description: "Most people in the project, counting outstanding invitations when one is created. A plan change never removes a member. The service ceiling of 200 people holds whatever this says."}
+        video_bytes: {type: integer, minimum: 0, description: "Most one video/mp4 or video/webm upload may declare, in decimal bytes; the same figure as media_video_bytes."}
+        event_retention_days: {type: integer, minimum: 0, description: "How many days the project's events are kept."}
     ProjectFeatures:
       type: object
       additionalProperties: false
@@ -34827,6 +35303,7 @@ components:
 x-problem-registry: ./problems.yaml
 x-problem-codes:
   - free_organization_limit
+  - feature_not_in_plan
   - organization_plan_required
   - project_name_conflict
   - project_delete_blocked

@@ -110,27 +110,27 @@ export interface ProjectFeatures {
   screens: boolean;
 }
 
-/** One plan feature and whether the project's plan or featuresets include it. */
-export interface PlanFeature {
-  id: string;
+/** One plan feature and whether the project's plan or featuresets include it (`ProjectPlanFeature` in the contract). */
+export interface ProjectPlanFeature {
   enabled: boolean;
+  id: "video_walls" | "live_view" | "glass_monitoring" | "alert_routing" | "reports" | "bi_dashboards" | "connectors" | "media_sync" | "playlist_templates" | "uploaders" | "direct_campaigns" | "scheduled_reboots" | "sso" | "scim" | "screen_scope" | "protected_folders" | "change_control" | "audit_log" | "schedule_import" | "momentus";
   /** The lowest plan that includes the feature. */
-  required_plan: string;
+  required_plan: "premium" | "enterprise";
 }
 
-/** The plan features of the authenticated project, in catalog order. */
+/** The plan features of the authenticated project, in catalog order (`ProjectPlanFeatures`). */
 export interface ProjectPlanFeatures {
-  /** Featureset tags the project and its organization hold beyond the plan's own (founding). */
-  featuresets: string[];
-  features: PlanFeature[];
+  features: ProjectPlanFeature[];
+  /** The featuresets the account holds beyond its plan's own (founding). */
+  featuresets: Array<"all" | "enterprise" | "founding" | "premium">;
 }
 
-/** The project's effective plan limits. A limit of 0 is no plan cap. */
-export interface ProjectLimits {
-  screens?: number;
-  members?: number;
-  video_bytes?: number;
-  event_retention_days?: number;
+/** The project's effective plan limits (`ProjectPlanLimits`). A limit of 0 is no plan cap. */
+export interface ProjectPlanLimits {
+  event_retention_days: number;
+  members: number;
+  screens: number;
+  video_bytes: number;
 }
 
 /** The server-derived capability set for the authenticated project. */
@@ -142,8 +142,9 @@ export interface ProjectCapabilities {
   capabilities: string[];
   /** The most bytes one video upload may declare on the project's plan. */
   media_video_bytes?: number;
+  /** The contract requires both; they stay optional here because the command reads, and never checks, them. */
   plan_features?: ProjectPlanFeatures;
-  limits?: ProjectLimits;
+  limits?: ProjectPlanLimits;
 }
 
 /** Enrollment delivers the grant's first token pair. */

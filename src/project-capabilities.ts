@@ -1,4 +1,4 @@
-import type { ProjectCapabilities } from "./adapters/protocol.js";
+import type { ProjectCapabilities, ProjectPlanLimits } from "./adapters/protocol.js";
 import type { ApiClient } from "./client.js";
 import { ExitCode } from "./exit-codes.js";
 import type { ProblemNext } from "./envelope.js";
@@ -29,7 +29,7 @@ const LIMIT_KEYS = ["screens", "members", "video_bytes", "event_retention_days"]
 export function planFeatureFields(capabilities: ProjectCapabilities): Array<[string, string | undefined]> {
   const planFeatures = capabilities.plan_features;
   if (!planFeatures || !Array.isArray(planFeatures.features)) return [];
-  const limits = capabilities.limits && typeof capabilities.limits === "object" ? capabilities.limits : {};
+  const limits: Partial<ProjectPlanLimits> = capabilities.limits && typeof capabilities.limits === "object" ? capabilities.limits : {};
   const stated = LIMIT_KEYS.flatMap((key) => {
     const value = limits[key];
     return typeof value === "number" && Number.isFinite(value) ? [`${key}=${value === 0 ? "none" : value}`] : [];
