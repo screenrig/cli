@@ -1,4 +1,4 @@
-import type { PlaylistFormat, ScreenWall, ScreenWallArrangement, ScreenWallRotation } from "./adapters/protocol.js";
+import type { PlaylistWallFormat, ScreenWall, ScreenWallArrangement, ScreenWallRotation } from "./adapters/protocol.js";
 import { CliError, usageError } from "./problems.js";
 
 /**
@@ -53,7 +53,7 @@ export function wallLine(wall: ScreenWall): string {
 }
 
 /** The wall's canvas and the playlist format that is authored for it. */
-export interface WallCanvas { width: number; height: number; format: PlaylistFormat }
+export interface WallCanvas { width: number; height: number; format: PlaylistWallFormat }
 
 /**
  * The canvas of displays tiles: a tile is 1920 x 1080 landscape or 1080 x 1920

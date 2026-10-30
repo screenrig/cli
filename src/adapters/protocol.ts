@@ -371,12 +371,21 @@ export interface ScreenWall {
 }
 
 /** The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait); `columns` for a grid only. */
-export interface PlaylistFormat {
+export interface PlaylistWallFormat {
   displays: number;
   arrangement: ScreenWallArrangement;
   orientation: "landscape" | "portrait";
   columns?: number;
 }
+
+/** A strip drawn over the page along one edge of a display of this orientation: one canvas per playlist, long side at least twice the short. */
+export interface PlaylistRegionFormat {
+  region: "header" | "footer" | "side";
+  orientation: "landscape" | "portrait";
+}
+
+/** What a playlist is authored for: a video wall or a region. */
+export type PlaylistFormat = PlaylistWallFormat | PlaylistRegionFormat;
 
 /**
  * Player-reported playback surface. Absent until the first accepted player
@@ -2298,8 +2307,8 @@ export interface CampaignStatus {
   screen_id: string;
   screen_name?: string;
   status: CampaignStanding;
-  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, stack_only: only a Player that resolves its own stack honors it). */
-  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
+  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out: its strip fits no display of the screen, stack_only: only a Player that resolves its own stack honors it). */
+  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The campaign that outranks this one. */
   by?: string;
   next_start?: string;
@@ -2333,7 +2342,7 @@ export interface ScreenVerdict {
   playlist_id: string;
   verdict: ScreenVerdictName;
   /** Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition). */
-  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
+  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The candidate that won over an outranked one. */
   by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
   /** When a takeover ends. */

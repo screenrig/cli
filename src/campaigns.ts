@@ -609,6 +609,7 @@ export function campaignTableLines(items: Campaign[]): string[] {
 
 /** A region, a display lock, interaction or a data condition is honored only by a Player that resolves its own stack. */
 const STACK_ONLY_DETAIL = "needs a Player that resolves its own stack";
+const REGION_DETAIL = "its strip fits no display of this screen (wrong orientation, or over half the display)";
 
 const STANDING_ORDER = ["playing", "pending", "waiting", "ended", "outranked", "paused", "blocked", "not_in_audience"];
 
@@ -643,6 +644,8 @@ export function campaignStandingDetail(status: CampaignStatus, screenId?: string
           return `the screen has no timezone: screenrig screen set-timezone ${screenId ?? "SCREEN_ID"} --timezone ZONE`;
         case "playlist_unavailable":
           return "the playlist is missing, unapproved or does not fit the screen";
+        case "region_not_laid_out":
+          return REGION_DETAIL;
         case "stack_only":
           return STACK_ONLY_DETAIL;
         default:
@@ -694,6 +697,7 @@ export function verdictDetail(verdict: ScreenVerdict, screenId: string, timezone
         case "no_default_playlist": return `the screen has no default playlist: screenrig screen assign ${screenId} --playlist-id PLAYLIST_ID`;
         case "no_timezone": return `the screen has no timezone: screenrig screen set-timezone ${screenId} --timezone ZONE`;
         case "playlist_unavailable": return "the playlist is missing or unapproved";
+        case "region_not_laid_out": return REGION_DETAIL;
         case "stack_only": return STACK_ONLY_DETAIL;
         default: return "does not apply";
       }

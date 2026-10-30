@@ -1157,3 +1157,29 @@ test("campaign show and list say how many screens a campaign reaches of the scre
   const quiet = await cli(["--human", "campaign", "list"], new FakeTransport().on("GET", "/api/campaigns", () => ({ status: 200, headers: {}, body: { items: [plain] } })), env);
   assert.doesNotMatch(quiet.stdout, /REACH/, "no counted campaign keeps the old table");
 });
+
+test("campaign create and update send covers for a strip, and a strip left out of a screen reads as not laid out", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const created = await cli(["--json", "campaign", "create", "--name", "Ticker", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--covers", "footer"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(lastCall(transport).body, { name: "Ticker", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, covers: "footer" });
+  const id = (created.envelope.data as { id: string }).id;
+  const shown = await cli(["--human", "campaign", "show", id], transport, env);
+  assert.match(shown.stdout, /^covers: footer$/m);
+
+  const updated = await cli(["--json", "campaign", "update", id, "--covers", "side"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(lastCall(transport).body, { covers: "side" });
+  const bad = await cli(["--json", "campaign", "create", "--name", "Ticker", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--covers", "middle"], transport, env);
+  assert.equal(bad.code, 2, bad.stdout);
+
+  const relationship = commandHelp(["campaign", "update"]).relationships.find((item) => item.kind === "atLeastOne")!;
+  assert.ok(relationship.options.includes("--covers"), "--covers counts as a change");
+  assert.match(commandHelp(["campaign", "create"]).usage, /--covers sets where the playlist plays[^]*playlist create --format-region/);
+  assert.match(commandHelp(["campaign", "explain"]).usage, /region_not_laid_out/);
+
+  const detail = "its strip fits no display of this screen (wrong orientation, or over half the display)";
+  assert.equal(campaignStandingDetail({ campaign_id: "cmp_X", screen_id: A, status: "blocked", reason: "region_not_laid_out" }), detail);
+  assert.equal(verdictDetail({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "off", reason: "region_not_laid_out" }, A, "UTC"), detail);
+});

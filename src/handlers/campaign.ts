@@ -2,7 +2,7 @@
 import { readAuthoringText } from "../authoring-input.js";
 import { LEVEL_IDLE_DEFAULT_S } from "../screen-control.js";
 import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
-import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignScreens, type CampaignWrite, type ScreenCampaigns } from "../adapters/protocol.js";
+import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignScreens, type CampaignWrite, type LevelCovers, type ScreenCampaigns } from "../adapters/protocol.js";
 import { flagBool, flagString, type ParsedArgs } from "../command-input.js";
 import { ApiClient, requireToken } from "../client.js";
 import { successEnvelope } from "../envelope.js";
@@ -71,10 +71,11 @@ export async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime
  * (60 seconds without a value), --displays and --start. A member the flags do
  * not name stays out of the body.
  */
-export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "displays" | "start"> {
+export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "covers" | "displays" | "start"> {
   const monthly = flagString(args.flags, "monthly");
   const dates = flagString(args.flags, "date");
   const except = flagString(args.flags, "except");
+  const covers = flagString(args.flags, "covers");
   const displays = flagString(args.flags, "displays");
   const start = flagString(args.flags, "start");
   const onTouch = args.flags["on-touch"];
@@ -83,6 +84,7 @@ export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "month
     ...(dates !== undefined ? { dates: campaignDateList(dates) } : {}),
     ...(except !== undefined ? { except: except.split(",") } : {}),
     ...(onTouch !== undefined && onTouch !== false ? { interaction: { idle_s: typeof onTouch === "string" ? Number(onTouch) : LEVEL_IDLE_DEFAULT_S } } : {}),
+    ...(covers !== undefined ? { covers: covers as LevelCovers } : {}),
     ...(displays !== undefined ? { displays: campaignDisplayList(displays) } : {}),
     ...(start !== undefined ? { start: start === "on-time" ? "on_time" as const : "next_item" as const } : {}),
   };

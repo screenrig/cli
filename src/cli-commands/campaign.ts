@@ -27,6 +27,8 @@ const DATE_HELP = "YYYY-MM-DD with an optional @HH:MM-HH:MM, such as 2026-12-24 
 const EXCEPT_HELP = "YYYY-MM-DD dates; an exception removes every occurrence that starts on that date (repeatable, or comma-separated, at most 100)";
 const ON_TOUCH_HELP = "Hold only while someone is using the screen, until IDLE_S seconds (5 to 3600, default 60) pass without input; Players that resolve their own stack honor it";
 const DISPLAYS_HELP = "Play only on these video wall outputs, 1 to 12, comma-separated (default: every output)";
+const COVERS_HELP = "Where it plays: full (the whole page, default), main (the page itself), or header, footer or side, a strip drawn over the page that needs a playlist made for that region (playlist create --format-region)";
+const COVERS = ["full", "main", "header", "footer", "side"];
 const START_HELP = "on-time switches at the edge, interrupting the current item; next-item waits for it to end (default)";
 
 const AUDIENCE_FLAGS = ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"];
@@ -54,6 +56,7 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--date <SPEC>", `Hold only on this date, ${DATE_HELP}`).argParser(campaignDates))
     .addOption(new Option("--except <DATE>", `Skip these dates, ${EXCEPT_HELP}`).argParser(campaignExceptDates))
     .addOption(new Option("--on-touch [IDLE_S]", ON_TOUCH_HELP).argParser(campaignOnTouch))
+    .addOption(new Option("--covers <WHERE>", COVERS_HELP).choices(COVERS))
     .addOption(new Option("--displays <N>", DISPLAYS_HELP).argParser(campaignDisplays))
     .addOption(new Option("--start <WHEN>", START_HELP).choices(["on-time", "next-item"]))
     .option("--priority <N>", "Priority 0 to 100; the higher wins when two campaigns hold on one screen (default: 0)", campaignPriority)
@@ -81,13 +84,14 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--clear-except", "Remove every exception date").conflicts(["except"]))
     .addOption(new Option("--on-touch [IDLE_S]", ON_TOUCH_HELP).argParser(campaignOnTouch).conflicts(["clearOnTouch"]))
     .addOption(new Option("--clear-on-touch", "Remove the interaction condition").conflicts(["onTouch"]))
+    .addOption(new Option("--covers <WHERE>", COVERS_HELP).choices(COVERS))
     .addOption(new Option("--displays <N>", DISPLAYS_HELP).argParser(campaignDisplays).conflicts(["clearDisplays"]))
     .addOption(new Option("--clear-displays", "Play on every output again").conflicts(["displays"]))
     .addOption(new Option("--start <WHEN>", START_HELP).choices(["on-time", "next-item"]))
     .option("--priority <N>", "Priority 0 to 100; the higher wins when two campaigns hold on one screen", campaignPriority)
     .option("--expect-rev <REVISION>", "Optionally require this campaign revision", revision)
     .action(bind(handleCampaignUpdate));
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--displays", "--clear-displays", "--start", "--priority"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--covers", "--displays", "--clear-displays", "--start", "--priority"]);
   requireOptionGroup(update, "atMostOne", AUDIENCE_FLAGS);
 
   campaign.command("pause").description("Stop a campaign on every screen without deleting it")

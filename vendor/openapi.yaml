@@ -28959,7 +28959,7 @@ components:
       additionalProperties: false
       required: [gained, lost]
       description: >-
-        What a write does to the schedules of the screens it changes: the campaigns whose audience they enter (gained) or leave (lost), and the folder default playlists that start or stop being their default. screens counts the affected screens per level. A folder change lists the campaigns whose folder audience moves; a tag change those whose tag audience moves.
+        What a write does to the schedules of the screens it changes: the campaigns whose audience they enter (gained) or leave (lost), and the folder default playlists that start or stop being their default. screens counts the affected screens per level. On a tag write a campaign entry reports audience membership: every live campaign the screens enter or leave, whether or not it plays there, which depends on the screen's default playlist. A move or folder change lists the campaigns whose folder audience moves on screens that play them.
       properties:
         gained: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
         lost: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
@@ -28973,8 +28973,8 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
-        reach_before: {type: integer, minimum: 0, description: "campaign only, when it has a reach (Campaign.reach) and the write moves its audience: its last counted reach. Absent on a level gained or lost only with a default playlist, which leaves the audience as it was."}
-        reach_after: {type: integer, minimum: 0, description: "With reach_before: reach_before moved by the active screens this write brings into or takes out of its audience. Reach counts audience matches, so a screen without a default playlist moves it without a level. The campaign-reach worker recounts it about 15 seconds after the changes stop (Campaign.reach.current)."}
+        reach_before: {type: integer, minimum: 0, description: "campaign only, when it has a reach (Campaign.reach): its last counted reach. Present on every campaign entry of a tag write; on a move or folder change absent from a level gained or lost only with a default playlist, which leaves the audience as it was."}
+        reach_after: {type: integer, minimum: 0, description: "With reach_before: reach_before moved by the active screens this write brings into or takes out of its audience. Reach counts audience matches; whether the campaign plays on a screen depends on its default playlist. The campaign-reach worker recounts it about 15 seconds after the changes stop (Campaign.reach.current)."}
     ScreenStackStatus:
       type: object
       additionalProperties: false

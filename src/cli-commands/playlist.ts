@@ -7,6 +7,11 @@ import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionS
 import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
 import { handlePlaylistFields, handlePlaylistInstances, templateClearOption, templateSetOption } from "../playlist-fields.js";
 
+const REGIONS = ["header", "footer", "side"];
+const ORIENTATIONS = ["landscape", "portrait"];
+const REGION_HELP = "Make a strip: a playlist drawn over the page along the top (header), bottom (footer) or right edge (side) of a display, replacing a format in the file; give --format-orientation too";
+const ORIENTATION_HELP = "With --format-region: the orientation of the display the strip is made for, as the viewer sees it";
+
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, and manage playlists");
 
@@ -41,8 +46,11 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--set <NAME=VALUE>", "With --from-template: a field's value, a media ID for a media field (repeatable)", templateSetOption)
     .option("--dry-run", "With --from-template: check the values and print the page count without creating anything")
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .addOption(new Option("--format-region <REGION>", REGION_HELP).choices(REGIONS))
+    .addOption(new Option("--format-orientation <ORIENTATION>", ORIENTATION_HELP).choices(ORIENTATIONS))
     .action(bind(handlePlaylistCreate));
-  requireOptionGroup(create, "atMostOne", ["--from-template", "--starter"]);
+  requireOptionGroup(create, "atMostOne", ["--from-template", "--starter", "--format-region"]);
+  requireOptionGroup(create, "together", ["--format-region", "--format-orientation"]);
   requireOptionGroup(create, "requires", ["--set", "--from-template"]);
   requireOptionGroup(create, "requires", ["--dry-run", "--from-template"]);
 
@@ -60,12 +68,15 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .argument("<id>", "Template playlist identifier")
     .action(bind(handlePlaylistInstances));
 
-  playlist.command("update").description("Update a playlist")
+  const update = playlist.command("update").description("Update a playlist")
     .argument("<id>", "Playlist identifier")
     .argument("<file>", "Playlist JSON file, or - for stdin")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .addOption(new Option("--format-region <REGION>", REGION_HELP).choices(REGIONS))
+    .addOption(new Option("--format-orientation <ORIENTATION>", ORIENTATION_HELP).choices(ORIENTATIONS))
     .action(bind(handlePlaylistUpdate));
+  requireOptionGroup(update, "together", ["--format-region", "--format-orientation"]);
 
   const patch = playlist.command("patch").description("Change only supplied playlist fields; preserve everything omitted")
     .argument("<id>", "Playlist identifier")
