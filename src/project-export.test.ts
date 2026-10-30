@@ -116,6 +116,26 @@ test("a project exports to open files with a manifest of hashes and no secrets",
   });
 });
 
+test("the exit export carries the audit log oldest first and the chain head it ends at", async () => {
+  await inTemp(async (directory) => {
+    const head = { scope: "prj_1", seq: 3, hash: "a".repeat(64), floor_seq: 0, floor_hash: "b".repeat(64), unsealed: 0 };
+    const newestFirst = [{ id: "aud_3", at: "2026-10-03T00:00:00Z", changes: [] }, { id: "aud_2", at: "2026-10-02T00:00:00Z", changes: [] }, { id: "aud_1", at: "2026-10-01T00:00:00Z", changes: [] }];
+    const api = fakeApi({ gets: [], files: [], appends: [] }, { "/api/audit/head": head });
+    const base = api.get.bind(api);
+    api.get = async (pathName, query) => {
+      if (pathName !== "/api/audit") return base(pathName, query);
+      return query?.cursor ? { items: newestFirst.slice(2), next_cursor: null } : { items: newestFirst.slice(0, 2), next_cursor: "au1_page2" };
+    };
+    const result = await runProjectExport(api, { directory, media: false, now: NOW });
+    assert.equal(result.failed, 0, JSON.stringify(result.sections.filter((section) => section.status !== "ok")));
+    const lines = (await readFile(path.join(directory, "log/audit.jsonl"), "utf8")).trim().split("\n").map((line) => (JSON.parse(line) as { id: string }).id);
+    assert.deepEqual(lines, ["aud_1", "aud_2", "aud_3"]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(directory, "log/audit-head.json"), "utf8")), head);
+    const manifest = JSON.parse(await readFile(path.join(directory, "export.json"), "utf8")) as { files: Array<{ path: string }> };
+    assert.ok(manifest.files.some((file) => file.path === "log/audit.jsonl") && manifest.files.some((file) => file.path === "log/audit-head.json"));
+  });
+});
+
 async function listFiles(directory: string): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {

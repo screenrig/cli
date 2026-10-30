@@ -828,7 +828,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
   const group = root.commands.find((command) => command.name === "campaign")!;
   assert.match(group.summary, /Schedule your screens; ads campaigns buy ad time on other screens/);
   assert.ok(group.summary.length <= 69, "the root listing keeps the summary on one line");
-  assert.deepEqual(commandHelp(["campaign"]).commands.map((command) => command.name), ["list", "show", "create", "update", "pause", "resume", "delete", "screens", "explain"]);
+  assert.deepEqual(commandHelp(["campaign"]).commands.map((command) => command.name), ["list", "show", "create", "update", "preview", "publish", "promote", "revisions", "restore", "pause", "resume", "delete", "screens", "explain"]);
   assert.match(commandHelp(["campaign"]).usage, /It schedules your own screens: ads campaigns\s+buy ad time on other screens/);
 
   const create = commandHelp(["campaign", "create"]);
@@ -860,7 +860,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
   assert.match(commandHelp(["campaign", "pause"]).usage, /within a minute/);
   assert.match(commandHelp(["campaign", "delete"]).usage, /within a minute/);
 
-  const everything = JSON.stringify([commandHelp(["campaign"]), ...["list", "show", "create", "update", "pause", "resume", "delete", "screens", "explain"].map((action) => commandHelp(["campaign", action]))]);
+  const everything = JSON.stringify([commandHelp(["campaign"]), ...["list", "show", "create", "update", "preview", "publish", "promote", "revisions", "restore", "pause", "resume", "delete", "screens", "explain"].map((action) => commandHelp(["campaign", action]))]);
   assert.doesNotMatch(everything, /\b(beta|coming soon|not yet|planned|in development|not available yet|experimental)\b/i);
   assert.doesNotMatch(everything, /localhost|MCP|\/home\//);
 });
@@ -1156,4 +1156,30 @@ test("campaign show and list say how many screens a campaign reaches of the scre
   assert.match(lines.find((line) => line.startsWith(OTHER))!, /tag Cafe\s+always/);
   const quiet = await cli(["--human", "campaign", "list"], new FakeTransport().on("GET", "/api/campaigns", () => ({ status: 200, headers: {}, body: { items: [plain] } })), env);
   assert.doesNotMatch(quiet.stdout, /REACH/, "no counted campaign keeps the old table");
+});
+
+test("campaign create and update send covers for a strip, and a strip left out of a screen reads as not laid out", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const created = await cli(["--json", "campaign", "create", "--name", "Ticker", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--covers", "footer"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(lastCall(transport).body, { name: "Ticker", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, covers: "footer" });
+  const id = (created.envelope.data as { id: string }).id;
+  const shown = await cli(["--human", "campaign", "show", id], transport, env);
+  assert.match(shown.stdout, /^covers: footer$/m);
+
+  const updated = await cli(["--json", "campaign", "update", id, "--covers", "side"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(lastCall(transport).body, { covers: "side" });
+  const bad = await cli(["--json", "campaign", "create", "--name", "Ticker", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--covers", "middle"], transport, env);
+  assert.equal(bad.code, 2, bad.stdout);
+
+  const relationship = commandHelp(["campaign", "update"]).relationships.find((item) => item.kind === "atLeastOne")!;
+  assert.ok(relationship.options.includes("--covers"), "--covers counts as a change");
+  assert.match(commandHelp(["campaign", "create"]).usage, /--covers sets where the playlist plays[^]*playlist create --format-region/);
+  assert.match(commandHelp(["campaign", "explain"]).usage, /region_not_laid_out/);
+
+  const detail = "its strip fits no display of this screen (wrong orientation, or over half the display)";
+  assert.equal(campaignStandingDetail({ campaign_id: "cmp_X", screen_id: A, status: "blocked", reason: "region_not_laid_out" }), detail);
+  assert.equal(verdictDetail({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "off", reason: "region_not_laid_out" }, A, "UTC"), detail);
 });

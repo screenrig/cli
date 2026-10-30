@@ -384,12 +384,21 @@ export interface ScreenWall {
 }
 
 /** The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait); `columns` for a grid only. */
-export interface PlaylistFormat {
+export interface PlaylistWallFormat {
   displays: number;
   arrangement: ScreenWallArrangement;
   orientation: "landscape" | "portrait";
   columns?: number;
 }
+
+/** A strip drawn over the page along one edge of a display of this orientation: one canvas per playlist, long side at least twice the short. */
+export interface PlaylistRegionFormat {
+  region: "header" | "footer" | "side";
+  orientation: "landscape" | "portrait";
+}
+
+/** What a playlist is authored for: a video wall or a region. */
+export type PlaylistFormat = PlaylistWallFormat | PlaylistRegionFormat;
 
 /**
  * Player-reported playback surface. Absent until the first accepted player
@@ -2131,6 +2140,8 @@ export interface LevelMembers {
 export interface ScreenScheduleEntryWrite extends LevelMembers {
   id?: string;
   playlist_id: string;
+  /** A draft: stored, drawn dashed in the calendar, and on no stack, resolver or Player until published (absent or false). */
+  paused?: boolean;
 }
 
 export interface ScreenScheduleEntry extends ScreenScheduleEntryWrite {
@@ -2315,6 +2326,80 @@ export interface CampaignPatch extends Nullable<LevelMembers> {
 
 type Nullable<T> = { [K in keyof T]?: T[K] | null };
 
+/** Who made a revision, as the project's event log names them. */
+export interface RevisionAuthor { type: "person" | "agent"; id?: string; name: string }
+
+/** One stored revision of a campaign: the campaign as it was after a write. */
+export interface CampaignRevision {
+  revision: number;
+  created_at: string;
+  change: "created" | "edited" | "restored" | "promoted" | "baseline";
+  restored_from?: number;
+  current: boolean;
+  author?: RevisionAuthor;
+  campaign: Campaign;
+}
+
+/** One stored revision of a screen's playlist schedule: its whole entries list after a write. */
+export interface ScreenScheduleRevision {
+  revision: number;
+  created_at: string;
+  change: "edited" | "restored" | "baseline";
+  restored_from?: number;
+  current: boolean;
+  author?: RevisionAuthor;
+  entries: ScreenScheduleEntry[];
+}
+
+/** A page of revisions, newest first. */
+export interface RevisionPage<T> { items: T[]; next_cursor?: string | null }
+
+export interface CampaignPromote { revision: number }
+
+export interface CampaignPreviewRequest {
+  id?: string;
+  body: CampaignWrite | CampaignPatch;
+  from?: string;
+  to?: string;
+}
+
+export interface ScreenSchedulePreviewRequest {
+  entries: ScreenScheduleEntryWrite[];
+  from?: string;
+  to?: string;
+}
+
+export interface SchedulePreviewReach { count: number; screen_ids: string[] }
+
+/** The levels of a stack, for the calendar: id is takeover, campaign:ID, schedule:ENTRY_ID, default or folder:FOLDER_ID. */
+export interface CalendarLevel { id: string; source: string; playlist_id: string; name?: string; record_id?: string }
+
+export interface CalendarSpan { from: string; to: string; level_id: string; state: "plays" | "partial" | "outranked" | "conditional" | "paused"; displays?: number[]; reason?: string }
+
+export interface CalendarOnScreen { display: number; region?: "header" | "footer" | "side"; from: string; to: string; level_id?: string }
+
+export interface CalendarGroup {
+  key: string;
+  screens: number;
+  screen_ids: string[];
+  timezone?: string;
+  displays: number;
+  levels: CalendarLevel[];
+  paused_levels?: CalendarLevel[];
+  spans: CalendarSpan[];
+  on_screen: CalendarOnScreen[];
+  conflicts: Array<{ kind: string; level_ids: string[]; from?: string; to?: string }>;
+}
+
+export interface ScheduleCalendar { from: string; to: string; screens: number; groups: CalendarGroup[]; truncated?: boolean }
+
+/** What a campaign or schedule write would change: the screens that gain or lose a level, and the calendar before and after. */
+export interface SchedulePreview {
+  gained: SchedulePreviewReach;
+  lost: SchedulePreviewReach;
+  calendar: { before: ScheduleCalendar; after: ScheduleCalendar };
+}
+
 export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "paused" | "blocked" | "not_in_audience";
 
 /** One campaign's standing on one screen. */
@@ -2323,8 +2408,8 @@ export interface CampaignStatus {
   screen_id: string;
   screen_name?: string;
   status: CampaignStanding;
-  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, stack_only: only a Player that resolves its own stack honors it). */
-  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
+  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out: its strip fits no display of the screen, stack_only: only a Player that resolves its own stack honors it). */
+  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The campaign that outranks this one. */
   by?: string;
   next_start?: string;
@@ -2358,7 +2443,7 @@ export interface ScreenVerdict {
   playlist_id: string;
   verdict: ScreenVerdictName;
   /** Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition). */
-  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "stack_only";
+  reason?: "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The candidate that won over an outranked one. */
   by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
   /** When a takeover ends. */

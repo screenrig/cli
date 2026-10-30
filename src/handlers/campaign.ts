@@ -1,13 +1,15 @@
 // Command handlers for the campaign commands, loaded on demand.
 import { readAuthoringText } from "../authoring-input.js";
 import { LEVEL_IDLE_DEFAULT_S } from "../screen-control.js";
-import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
-import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignScreens, type CampaignWrite, type ScreenCampaigns } from "../adapters/protocol.js";
+import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignPromoteProblem, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
+import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignPreviewRequest, type CampaignPromote, type CampaignRevision, type CampaignScreens, type CampaignWrite, type LevelCovers, type RevisionPage, type SchedulePreview, type ScreenCampaigns } from "../adapters/protocol.js";
+import { campaignRevisionLines, schedulePreviewLines } from "../change-control.js";
+import { revisionNumber } from "../playlist-revisions.js";
 import { flagBool, flagString, type ParsedArgs } from "../command-input.js";
 import { ApiClient, requireToken } from "../client.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { usageError } from "../problems.js";
+import { unexpectedResponseError, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
 import { pendingReviewOf } from "../reviews.js";
@@ -75,10 +77,11 @@ export async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime
  * (60 seconds without a value), --displays and --start. A member the flags do
  * not name stays out of the body.
  */
-export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "displays" | "start"> {
+export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "covers" | "displays" | "start"> {
   const monthly = flagString(args.flags, "monthly");
   const dates = flagString(args.flags, "date");
   const except = flagString(args.flags, "except");
+  const covers = flagString(args.flags, "covers");
   const displays = flagString(args.flags, "displays");
   const start = flagString(args.flags, "start");
   const onTouch = args.flags["on-touch"];
@@ -87,6 +90,7 @@ export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "month
     ...(dates !== undefined ? { dates: campaignDateList(dates) } : {}),
     ...(except !== undefined ? { except: except.split(",") } : {}),
     ...(onTouch !== undefined && onTouch !== false ? { interaction: { idle_s: typeof onTouch === "string" ? Number(onTouch) : LEVEL_IDLE_DEFAULT_S } } : {}),
+    ...(covers !== undefined ? { covers: covers as LevelCovers } : {}),
     ...(displays !== undefined ? { displays: campaignDisplayList(displays) } : {}),
     ...(start !== undefined ? { start: start === "on-time" ? "on_time" as const : "next_item" as const } : {}),
   };
@@ -100,18 +104,19 @@ export function campaignResult(response: Awaited<ReturnType<ApiClient["call"]>>,
   };
 }
 
-export const handleCampaignCreate = commandHandler(async (args, runtime, resolved) => {
+/** The body of a new campaign from the create flags (campaign preview without an ID reads the same flags). */
+export async function campaignCreateBody(args: ParsedArgs, runtime: CliRuntime, command: string): Promise<CampaignWrite> {
   const name = campaignName(flagString(args.flags, "name") ?? "");
   const playlistId = campaignPlaylistId(flagString(args.flags, "playlist-id") ?? "");
   const audience = await campaignAudienceFlag(args, runtime);
-  if (!audience) throw usageError("campaign create takes exactly one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.");
+  if (!audience) throw usageError(`${command} takes exactly one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.`);
   const from = flagString(args.flags, "from");
   const until = flagString(args.flags, "until");
   campaignBounds(from, until);
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
   const paused = flagBool(args.flags, "paused");
-  const body: CampaignWrite = {
+  return {
     name,
     playlist_id: playlistId,
     audience,
@@ -122,6 +127,11 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
     ...(paused ? { paused: true } : {}),
   };
+}
+
+export const handleCampaignCreate = commandHandler(async (args, runtime, resolved) => {
+  const body = await campaignCreateBody(args, runtime, "campaign create");
+  const paused = body.paused === true;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, { method: "POST", path: CAMPAIGNS_PATH, idempotent: true, body, headers: campaignRevisionHeaders(args) });
   const pending = pendingReviewOf(response);
@@ -151,8 +161,8 @@ export const handleCampaignShow = commandHandler(async (args, runtime, resolved)
   return campaignResult(response, client, "Campaign");
 });
 
-export const handleCampaignUpdate = commandHandler(async (args, runtime, resolved) => {
-  const id = campaignId(args.positionals[2], "update");
+/** The members the update flags change; campaign preview with an ID reads the same flags. */
+export async function campaignPatchBody(args: ParsedArgs, runtime: CliRuntime): Promise<CampaignPatch> {
   const name = flagString(args.flags, "name");
   const playlistId = flagString(args.flags, "playlist-id");
   const from = flagString(args.flags, "from");
@@ -180,6 +190,12 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
     ...(clears.includes("clear-displays") ? { displays: null } : {}),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
   };
+  return patch;
+}
+
+export const handleCampaignUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "update");
+  const patch = await campaignPatchBody(args, runtime);
   if (!Object.keys(patch).length) {
     throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
   }
@@ -254,5 +270,110 @@ export const handleCampaignExplain = commandHandler(async (args, runtime, resolv
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: campaignExplainLines(screenId, response.body as ScreenCampaigns | undefined).join("\n"),
+  };
+});
+
+/** The current revision for If-Match: the one the caller names, else the campaign's own, read just before the write. */
+async function campaignGuard(client: ApiClient, args: ParsedArgs, id: string): Promise<string> {
+  const given = flagString(args.flags, "expect-rev");
+  if (given !== undefined) return given;
+  const response = await campaignCall(client, { method: "GET", path: `${CAMPAIGNS_PATH}/${id}` }, id);
+  const current = (response.body as Campaign | undefined)?.revision;
+  if (typeof current !== "number") throw unexpectedResponseError("The campaign answer lacks its revision.", client.requestId);
+  return String(current);
+}
+
+export const handleCampaignPublish = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "publish");
+  const folder = flagString(args.flags, "test-folder");
+  const screens = flagString(args.flags, "test-screen");
+  const test = folder !== undefined ? campaignFolderAudience(campaignFolder(folder)) : screens !== undefined ? campaignScreenAudience(screens.split(",")) : undefined;
+  const body: CampaignPatch = { paused: false, ...(test ? { audience: test } : {}) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, {
+    method: "PATCH", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, body, headers: campaignRevisionHeaders(args),
+  }, id);
+  return campaignResult(response, client, test
+    ? `Published campaign ${id} to a test audience. Only the screens named here switch to the playlist within a minute; screenrig campaign revisions ${id} lists the draft to copy to the real audience with screenrig campaign promote ${id} --revision N.`
+    : `Published campaign ${id}. Screens in its audience switch to the playlist within a minute while it holds; screenrig campaign screens ${id} shows each screen's standing.`);
+});
+
+export const handleCampaignPromote = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "promote");
+  const number = revisionNumber(args, "campaign promote");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const expected = await campaignGuard(client, args, id);
+  const body: CampaignPromote = { revision: number };
+  let response;
+  try {
+    response = await campaignCall(client, {
+      method: "POST", path: `${CAMPAIGNS_PATH}/${id}/promote`, idempotent: true, body, headers: { "if-match": quotedRevision(expected) },
+    }, id);
+  } catch (error) {
+    throw campaignPromoteProblem(error, id);
+  }
+  // A draft whose audience is already the campaign's changes nothing and answers the campaign as it was.
+  const unchanged = (response.body as Campaign | undefined)?.revision === Number(expected);
+  return campaignResult(response, client, unchanged
+    ? `Revision ${number} holds the audience campaign ${id} already has; nothing changed.`
+    : `Promoted revision ${number} of campaign ${id}: its audience is now the campaign's. Every screen of the old and the new audience re-resolves within a minute; screenrig campaign screens ${id} shows each screen's standing.`);
+});
+
+export const handleCampaignRevisions = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "revisions");
+  const after = flagString(args.flags, "after");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "GET", path: `${CAMPAIGNS_PATH}/${id}/revisions`, ...(after !== undefined ? { query: { after } } : {}) }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: campaignRevisionLines(id, response.body as RevisionPage<CampaignRevision> | undefined).join("\n"),
+  };
+});
+
+export const handleCampaignRestore = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "restore");
+  const number = revisionNumber(args, "campaign restore");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const expected = await campaignGuard(client, args, id);
+  const response = await campaignCall(client, {
+    method: "POST", path: `${CAMPAIGNS_PATH}/${id}/revisions/${number}/restore`, idempotent: true, headers: { "if-match": quotedRevision(expected) },
+  }, id);
+  const unchanged = (response.body as Campaign | undefined)?.revision === Number(expected);
+  return campaignResult(response, client, unchanged
+    ? `Revision ${number} holds the content campaign ${id} already has; nothing changed.`
+    : `Restored revision ${number} of campaign ${id} as a new revision. Every screen of the old and the new audience re-resolves within a minute.`);
+});
+
+const PREVIEW_CLEARS = ["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const;
+
+export const handleCampaignPreview = commandHandler(async (args, runtime, resolved) => {
+  const given = args.positionals[2];
+  const id = given === undefined ? undefined : campaignId(given, "preview");
+  const publish = flagBool(args.flags, "publish");
+  let body: CampaignPreviewRequest["body"];
+  if (id === undefined) {
+    // Without an ID the flags describe a new campaign, as campaign create reads them.
+    const clear = PREVIEW_CLEARS.find((flag) => flagBool(args.flags, flag));
+    if (publish || clear) throw usageError(`campaign preview without an ID previews a new campaign; --${publish ? "publish" : clear} changes an existing one. Name the campaign: campaign preview ID.`);
+    body = await campaignCreateBody(args, runtime, "campaign preview without an ID");
+  } else {
+    const patch = await campaignPatchBody(args, runtime);
+    if (publish) patch.paused = false;
+    else if (flagBool(args.flags, "paused")) patch.paused = true;
+    if (!Object.keys(patch).length) {
+      throw usageError("campaign preview ID requires at least one change to preview: the flags of campaign update, --publish or --paused.");
+    }
+    body = patch;
+  }
+  const from = flagString(args.flags, "calendar-from");
+  const to = flagString(args.flags, "calendar-to");
+  const request: CampaignPreviewRequest = { ...(id !== undefined ? { id } : {}), body, ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "POST", path: `${CAMPAIGNS_PATH}/preview`, body: request }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: schedulePreviewLines(id === undefined ? "a new campaign" : `the change to campaign ${id}`, response.body as SchedulePreview | undefined).join("\n"),
   };
 });

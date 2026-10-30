@@ -308,7 +308,7 @@ test("a wall playlist passes format through create, update, patch and an editabl
   await writeFile(path.join(dir, "bad.json"), JSON.stringify({ format: "wide" }));
   const bad = await invoke(transport, ["--json", "playlist", "patch", "pl_WALL", "bad.json"]);
   assert.equal(bad.code, 2, bad.stdout);
-  assert.match(bad.body.error.detail, /format must be a video wall format object or null/);
+  assert.match(bad.body.error.detail, /format must be a video wall or region format object, or null/);
 
   // A mismatched canvas is caught locally from the schema's semantics.
   const wrong = { name: "Wall", format, pages: [{ ...page, canvas: { ...page.canvas, width: 1920 } }] };

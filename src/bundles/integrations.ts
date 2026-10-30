@@ -5,10 +5,12 @@ import { registerWebhooksCommands } from "../cli-commands/webhooks.js";
 import { registerNotificationsCommands } from "../cli-commands/notifications.js";
 import { registerReportsCommands } from "../cli-commands/reports.js";
 import { registerBiCommands } from "../cli-commands/bi.js";
+import { registerAuditCommands } from "../cli-commands/audit.js";
 
 export function register(root: Command, bind: CommandActionBinder): void {
   registerWebhooksCommands(root, bind);
   registerNotificationsCommands(root, bind);
   registerReportsCommands(root, bind);
   registerBiCommands(root, bind);
+  registerAuditCommands(root, bind);
 }

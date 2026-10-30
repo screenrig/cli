@@ -375,7 +375,7 @@ test("schedule level members are validated locally with a path in the message", 
 
 test("screen schedule set help describes the level members and shows an entry with monthly and except", () => {
   const help = commandHelp(["screen", "schedule", "set"]);
-  assert.match(help.usage, /1 to 32 entries of \{id\?, playlist_id, from\?, until\?, windows\?, monthly\?, dates\?, except\?, data\?, interaction\?, covers\?, displays\?, start\?\}/);
+  assert.match(help.usage, /1 to 32 entries of \{id\?, playlist_id, from\?, until\?, windows\?, monthly\?, dates\?, except\?, data\?, interaction\?, covers\?, displays\?, start\?, paused\?\}/);
   assert.match(help.usage, /sets at least one of from, until, windows, monthly, dates, except, data or interaction \(windows are no longer required\)/);
   assert.match(help.usage, /"monthly":\[\{"nth":-1,"weekday":"sun","start":"09:00","end":"14:00"\}\],"except":\["2026-12-27"\]/);
   assert.match(help.usage, /reports reason stack_only/);

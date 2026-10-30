@@ -77,7 +77,7 @@ export const handlePlaylistRevisions = commandHandler(async (args, runtime, reso
 });
 
 /** `--revision` is validated by the command; the path takes the number it names, never the raw text. */
-function revisionNumber(args: ParsedArgs, command: string): number {
+export function revisionNumber(args: ParsedArgs, command: string): number {
   const value = flagString(args.flags, "revision");
   const number = Number(value);
   if (value === undefined || !Number.isSafeInteger(number) || number < 1) throw usageError(`${command} requires --revision N, a whole number from 1.`);

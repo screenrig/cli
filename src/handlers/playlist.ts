@@ -205,7 +205,10 @@ export async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliR
   }
   const pages = parsed.pages;
   assertWirePages(pages);
-  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), ...(parsed.fields !== undefined ? { fields: parsed.fields } : {}), pages };
+  const region = flagString(args.flags, "format-region");
+  const orientation = flagString(args.flags, "format-orientation");
+  const format = region !== undefined && orientation !== undefined ? { region, orientation } : parsed.format;
+  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(format !== undefined ? { format } : {}), ...(parsed.fields !== undefined ? { fields: parsed.fields } : {}), pages };
   assertPlaylistValid(body);
   await validatePlaylistCards(client, body);
   // Only a signage-capable project may place adslot pages.
@@ -283,7 +286,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
     throw usageError("audio must be a soundtrack object or null.");
   }
   if (body.format !== undefined && body.format !== null && (typeof body.format !== "object" || Array.isArray(body.format))) {
-    throw usageError("format must be a video wall format object or null.");
+    throw usageError("format must be a video wall or region format object, or null.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (Array.isArray(body.pages)) {

@@ -40,7 +40,7 @@ const COVERS: readonly unknown[] = ["full", "main", "header", "footer", "side"];
 const STARTS: readonly unknown[] = ["next_item", "on_time"];
 /** The data key of a card, or the {screen.weather} template; feed keys are not accepted. */
 const DATA_KEY = /^(?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}|\{screen\.weather\})$/;
-const ENTRY_KEYS = ["id", "playlist_id", "from", "until", "windows", "monthly", "dates", "except", "data", "interaction", "covers", "displays", "start"];
+const ENTRY_KEYS = ["id", "playlist_id", "from", "until", "windows", "monthly", "dates", "except", "data", "interaction", "covers", "displays", "start", "paused"];
 const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -248,6 +248,7 @@ function entry(value: unknown, path: string): ScreenScheduleEntryWrite {
     throw scheduleError(path, "from must be before until.");
   }
   const members = scheduleLevelMembers(item, path);
+  if (item.paused !== undefined && typeof item.paused !== "boolean") throw scheduleError(`${path}.paused`, "must be true (a draft) or false.");
   // An entry holds while its rule members hold, so it needs at least one.
   if (item.from === undefined && item.until === undefined && !["windows", "monthly", "dates", "except", "data", "interaction"].some((key) => item[key] !== undefined)) {
     throw scheduleError(path, "must set at least one rule: windows, monthly, dates, except, from, until, data or interaction.");
@@ -258,6 +259,7 @@ function entry(value: unknown, path: string): ScreenScheduleEntryWrite {
     ...(item.from !== undefined ? { from: item.from as string } : {}),
     ...(item.until !== undefined ? { until: item.until as string } : {}),
     ...members,
+    ...(item.paused !== undefined ? { paused: item.paused as boolean } : {}),
   };
 }
 
@@ -479,7 +481,8 @@ export function levelPlacementParts(level: LevelMembers): string[] {
 
 export function scheduleTableLines(entries: ScreenScheduleEntry[] | undefined, timezone?: string | null): string[] {
   if (!entries?.length) return ["No playlist schedule"];
-  const rules = entries.map((item) => [...levelRuleParts(item), ...levelPlacementParts(item)].join("; "));
+  // A paused entry is a draft: stored, but on no stack until it is published.
+  const rules = entries.map((item) => [...(item.paused ? ["draft (paused)"] : []), ...levelRuleParts(item), ...levelPlacementParts(item)].join("; "));
   const withRules = rules.some((text) => text !== "");
   const zone = timezone === undefined ? [] : [`${withRules ? "Windows, FROM/UNTIL and the monthly and date rules" : "Windows and FROM/UNTIL"} are civil times (screen timezone ${timezone || "not set"}).`];
   const rows = entries.map((item, index) => [
