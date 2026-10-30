@@ -212,6 +212,21 @@ function readFormat(value: unknown): { format?: WallFormat; columnsReason?: stri
   return { format: { displays, arrangement, orientation, columns } };
 }
 
+interface RegionFormat { region: "header" | "footer" | "side"; orientation: "landscape" | "portrait" }
+
+/** The region a format names: a strip drawn over the page along one edge of a display. The JSON Schema holds the members. */
+function readRegion(value: unknown): RegionFormat | undefined {
+  const { region, orientation } = object(value);
+  if (region !== "header" && region !== "footer" && region !== "side") return undefined;
+  if (orientation !== "landscape" && orientation !== "portrait") return undefined;
+  return { region, orientation };
+}
+
+/** A strip's long side runs along its edge (a header or footer is wider than tall, a side taller than wide) and is at least twice the short side. */
+const stripCanvasReason = (region: RegionFormat["region"]): string =>
+  region === "side" ? "a side strip's canvas must be taller than wide, with a height at least twice its width"
+    : `a ${region} strip's canvas must be wider than tall, with a width at least twice its height`;
+
 /** The format in words, as the server says it: "3 landscape displays in a row", "12 landscape displays in a 4-column grid". */
 const describeFormat = (format: WallFormat): string =>
   `${format.displays} ${format.orientation} displays in ${format.arrangement === "grid" ? `a ${format.columns}-column grid` : `a ${format.arrangement}`}`;
@@ -304,6 +319,10 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
   const pages = array(playlist.pages);
   const { format, columnsReason } = readFormat(playlist.format);
   if (columnsReason !== undefined) fail("/format/columns", columnsReason);
+  // A region playlist is a strip: one canvas shaped as its edge, image and card primitives only, no soundtrack.
+  const region = readRegion(playlist.format);
+  if (region !== undefined && playlist.audio !== undefined && playlist.audio !== null) fail("/audio", "strips have no soundtrack: a region playlist cannot carry audio");
+  let stripCanvas: { width?: unknown; height?: unknown } | undefined;
   if (typeof playlist.name === "string" && !playlist.name.trim()) fail("/name", "must not be blank");
   const pageIds = new Set<unknown>();
   const releaseParams = new Map<string, string | undefined>();
@@ -312,6 +331,25 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const page = object(raw), path = `/pages/${index}`;
     if (pageIds.has(page.id)) fail(`${path}/id`, "must be unique within the playlist");
     pageIds.add(page.id);
+    if (region !== undefined) {
+      if (page.type === "adslot") fail(path, "strips show images and cards: a region playlist has no ad slot");
+      else {
+        const canvas = object(page.canvas), { width, height } = canvas;
+        if (typeof width === "number" && typeof height === "number") {
+          const along = region.region === "side" ? height : width, across = region.region === "side" ? width : height;
+          if (stripCanvas === undefined) {
+            stripCanvas = { width, height };
+            if (!(across > 0 && along >= 2 * across)) fail(`${path}/canvas`, stripCanvasReason(region.region));
+          } else if (stripCanvas.width !== width || stripCanvas.height !== height) {
+            fail(`${path}/canvas`, `must be ${String(stripCanvas.width)} x ${String(stripCanvas.height)}, the canvas of the first page: every page of a region playlist has the same canvas`);
+          }
+        }
+        for (const [primitiveIndex, primitive] of array(page.primitives).entries()) {
+          const kind = object(primitive).primitive;
+          if (typeof kind === "string" && kind !== "image" && kind !== "card") fail(`${path}/primitives/${primitiveIndex}/primitive`, "strips show images and cards: a region playlist holds image and card primitives only");
+        }
+      }
+    }
     if (format !== undefined && page.type !== "adslot") {
       const canvas = object(page.canvas), [wantWidth, wantHeight] = canvasOf(format);
       if (typeof canvas.width === "number" && typeof canvas.height === "number" && (canvas.width !== wantWidth || canvas.height !== wantHeight)) {

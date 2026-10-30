@@ -16779,7 +16779,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: completeDashboardPasskeyAssertion
-      description: 'Verifies one usernameless assertion and mints the dashboard session cookie for the user the discoverable credential identifies. No cookie authenticates the request. A ceremony that is unknown, elapsed, or already used returns passkey_invalid, and so does an assertion the relying party cannot verify or a sign counter that moves backwards. The credential identifier is not authorization on its own: the signed assertion is. When the server runs dashboard development authentication, this route returns passkeys_disabled.'
+      description: 'Verifies one usernameless assertion and mints the dashboard session cookie for the user the discoverable credential identifies. No cookie authenticates the request. A ceremony that is unknown, elapsed, or already used returns passkey_invalid, and so does an assertion the relying party cannot verify or a sign counter that moves backwards. The credential identifier is not authorization on its own: the signed assertion is. A person whose verified address is at a domain whose organization requires single sign-on is refused with 403 sso_required, unless they are a break-glass admin of that organization; such a sign-in is audited. When the server runs dashboard development authentication, this route returns passkeys_disabled.'
       requestBody:
         required: true
         content:
@@ -16829,7 +16829,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. Development auth uses this same password flow.
+      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. An address at a domain whose organization requires single sign-on is refused with 403 sso_required before any account is looked up, so the answer does not depend on whether a person holds the address; POST /api/sso/starts signs that person in through their identity provider. Development auth uses this same password flow.
       requestBody:
         required: true
         content:
@@ -16923,6 +16923,323 @@ paths:
                 enum:
                   - '"cache"'
         '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/discovery:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: discoverDashboardSSO
+      x-rate-limit-policies:
+        - name: sso-discovery-ip
+          quota: 30
+          windowSeconds: 600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Tells the sign-in page whether an email address signs in through an organization's identity provider. The answer is decided by the address's domain alone, against the verified domains of organizations that have an enabled identity-provider connection; no account is looked up, so it is the same whether or not a person holds the address. sso is true when such an organization holds the domain. required is true when that organization requires single sign-on, which refuses password and passkey sign-in for the domain (createDashboardSession answers sso_required); its break-glass admins keep passkey sign-in. provider_name is the connection's display name, present only when sso is true. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSODiscoveryRequest'
+      responses:
+        '200':
+          description: The domain's single sign-on answer.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSODiscovery'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/starts:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: startDashboardSSO
+      x-rate-limit-policies:
+        - name: sso-start-ip
+          quota: 30
+          windowSeconds: 600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Starts a single sign-in through the identity provider of the organization that holds the address's domain and answers the provider's address, which the page navigates to. The response sets the __Host-screenrig-sso cookie (HttpOnly, Secure, SameSite=Strict, Path=/, 10 minutes) that binds this browser to the sign-in. An OIDC connection is asked for the authorization code flow with PKCE S256, a nonce and response_mode form_post; a SAML connection receives an HTTP-Redirect AuthnRequest. The provider answers by posting to the connection's /api/sso/oidc/{connection_id}/callback or /api/sso/saml/{connection_id}/acs, and the sign-in ends at /api/sso/finish. return_to is a path under /dashboard/ the sign-in lands on; absent lands on /dashboard/. invitation_token is an invitation the sign-in accepts once the person is signed in. prompt none asks the provider for a silent sign-in, which ends at /dashboard/#sso_error=interaction_required when the person must act; prompt login makes the provider authenticate the person again. An address whose domain has no enabled connection is not_found. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOStartRequest'
+      responses:
+        '200':
+          description: The identity provider's address to navigate to, and the transaction cookie.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Set-Cookie:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOStart'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/oidc/{connection_id}/callback:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: receiveDashboardSSOOIDCCallback
+      description: >-
+        The OIDC redirect URI of one connection. The identity provider posts here from another site (response_mode form_post), so no dashboard cookie arrives. The route signs nobody in: it answers a page that posts the same members and the connection id to /api/sso/finish from the dashboard origin, where the transaction cookie arrives. An answer finishes only a sign-in this connection started; any other ends at /dashboard/#sso_error=bad_state. When the provider's discovery document sets authorization_response_iss_parameter_supported, an answer without iss (RFC 9207) ends at /dashboard/#sso_error=verification_failed. The page runs one inline script protected by a nonce and carries a noscript button; its Content-Security-Policy is strict, Cache-Control is no-store and Referrer-Policy is no-referrer. An id no connection holds is not_found.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: {type: string, maxLength: 512}
+                code: {type: string, maxLength: 8192}
+                error: {type: string, maxLength: 200}
+                error_description: {type: string, maxLength: 2048}
+                iss: {type: string, maxLength: 2048}
+      responses:
+        '200':
+          description: The page that posts the provider's answer to /api/sso/finish.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Referrer-Policy:
+              schema:
+                type: string
+                enum:
+                  - no-referrer
+            Content-Security-Policy:
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/saml/{connection_id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: getDashboardSSOSAMLMetadata
+      description: >-
+        The SAML service provider metadata of one connection. Its entityID is this route's address and its assertion consumer service is /api/sso/saml/{connection_id}/acs with the HTTP-POST binding. An identity provider administrator imports it, or copies the same values from the connection's service_provider. An id no connection holds is not_found.
+      security: []
+      responses:
+        '200':
+          description: The service provider metadata document.
+          content:
+            application/samlmetadata+xml:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/saml/{connection_id}/acs:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: receiveDashboardSSOSAMLAssertion
+      description: >-
+        The SAML assertion consumer service of one connection. The identity provider posts here from another site, so no dashboard cookie arrives. The route signs nobody in: it answers a page that posts the SAMLResponse, its RelayState and the connection id to /api/sso/finish from the dashboard origin, where the transaction cookie arrives. An answer finishes only a sign-in this connection started. The page runs one inline script protected by a nonce and carries a noscript button; its Content-Security-Policy is strict, Cache-Control is no-store and Referrer-Policy is no-referrer. An id no connection holds is not_found.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [SAMLResponse]
+              properties:
+                SAMLResponse: {type: string, maxLength: 1048576}
+                RelayState: {type: string, maxLength: 512}
+      responses:
+        '200':
+          description: The page that posts the provider's answer to /api/sso/finish.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Referrer-Policy:
+              schema:
+                type: string
+                enum:
+                  - no-referrer
+            Content-Security-Policy:
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/sso/finish:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: finishDashboardSSO
+      description: >-
+        Finishes a single sign-in on the dashboard origin, where the __Host-screenrig-sso cookie arrives. The form is state, the connection the answer arrived for, and the identity provider's answer as the callback page copied it: code, error, error_description and iss for OIDC, SAMLResponse for SAML (state is the RelayState). The route binds state to the cookie, refuses an answer that arrived for another connection than the sign-in started through, verifies the provider's token or assertion, applies the account adoption and linking rules, checks the organization's sign-in policy and answers 303. A sign-in, renewal or re-authentication mints a dashboard session with auth_method sso, which lasts 24 hours from this sign-in and is not extended by use, accepts the invitation the sign-in carries, sets the __Host-screenrig-dashboard cookie, expires the transaction cookie and redirects to return_to, or to /dashboard/. A link adds the identity to the signed-in person's account and keeps their session. A test records its outcome on the connection (last_test) and signs nobody in. Every failure also answers 303, to /dashboard/#sso_error=<code>, and never with a problem document. The codes are no_email, email_unverified, domain_not_allowed, account_exists (the person signs in as before and links from their account), managed_elsewhere, subject_mismatch, not_provisioned, sso_required, staff_account, expired, bad_state, interaction_required (a silent renewal needs the person), provider_refused, provider_unavailable, verification_failed and deactivated (SSOErrorCode).
+      security:
+        - ssoTransaction: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                connection_id: {type: string, maxLength: 128}
+                state: {type: string, maxLength: 512}
+                code: {type: string, maxLength: 8192}
+                error: {type: string, maxLength: 200}
+                error_description: {type: string, maxLength: 2048}
+                iss: {type: string, maxLength: 2048}
+                SAMLResponse: {type: string, maxLength: 1048576}
+      responses:
+        '303':
+          description: To return_to or /dashboard/ with the session cookie set, or to /dashboard/#sso_error=<code> when the sign-in did not complete.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Set-Cookie:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/session/sso-starts:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: startDashboardSessionSSO
+      description: >-
+        Starts a single sign-in for the signed-in person and answers the identity provider's address, as POST /api/sso/starts does for an address, setting the __Host-screenrig-sso cookie. intent renew renews a session that signed in through single sign-on, silently (prompt none) before its 24 hours end; the dashboard does so once 12 hours have passed. intent reauth makes the provider authenticate the person again (prompt login), which gives a session the recent sign-in the sso proof needs. intent link attaches the person's identity at the provider to their existing account. renew and reauth need a session that signed in through single sign-on, and link needs an enabled connection at the person's verified domain; otherwise the answer is resource_conflict. return_to is a path under /dashboard/.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionSSOStartRequest'
+      responses:
+        '200':
+          description: The identity provider's address to navigate to, and the transaction cookie.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOStart'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -18429,7 +18746,7 @@ paths:
       - url: https://screenrig.ai
     delete:
       operationId: dashboardOrganizationsRemoveOneDomain
-      description: Remove one domain, verified or pending, and leave the organization's other domains. Future placement and discovery for it stop, and another organization may verify it. Projects already in the organization stay. A domain the organization neither holds nor is proving is not_found.
+      description: Remove one domain, verified or pending, and leave the organization's other domains. Future placement and discovery for it stop, and another organization may verify it. Projects already in the organization stay. A domain the organization neither holds nor is proving is not_found. While the organization requires single sign-on, a verified domain is resource_conflict; turning off Require single sign-on takes effect after 72 hours, and the domain can be removed then.
       security:
         - dashboardSession: []
       responses:
@@ -18462,6 +18779,511 @@ paths:
             type: string
             minLength: 3
             maxLength: 253
+  /api/organizations/{org_id}/identity-provider:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetIdentityProvider
+      description: >-
+        A designated admin reads the organization's single sign-on connection: its protocol and provider, the service provider values to enter at the identity provider (the OIDC redirect URI, the SAML entity ID, assertion consumer service and metadata addresses), its sign-in policy and the outcome of the last test. The client secret is never returned; client_secret_set says whether one is stored. ready_to_require is true once the organization holds a verified domain and a test or a real sign-in has succeeded through the connection's current identity (its issuer, tenant, entity ID and kind); Require SSO is accepted only while it is true. The ETag carries the revision. An organization with no connection is not_found. Anyone else is refused as on the other organization admin routes. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's connection.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted connection revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityProvider'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: dashboardOrganizationsSetIdentityProvider
+      description: >-
+        A designated admin creates the organization's connection or changes it; an organization holds one. If-Match carries the connection's revision from GET, or 0 when the organization has none, and is required; a stale value is revision_conflict with current_revision. 201 creates and 200 changes. proof is required: a fresh passkey or password proof bound to a reauthentication of kind identity_provider_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago (otherwise reauthentication_required). OIDC with preset entra takes tenant_id and builds the issuer from it; preset generic takes issuer. Omitting oidc.client_secret keeps the stored secret. For SAML, metadata_xml is read for the identity provider's entity ID, sign-in address and signing certificates, and idp_entity_id, idp_sso_url and certificates_pem state them directly; certificates_pem replaces the stored list, which holds at most 4 so a new certificate can overlap the old during rotation. While Require SSO is in force a change of identity (issuer, tenant, entity ID or kind) is resource_conflict and certificate and client secret rotation are allowed; outside it, a change of identity makes ready_to_require false until a test or sign-in succeeds. Returns the connection with its ETag. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The connection revision from GET, optionally quoted, or 0 to create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityProviderWrite'
+      responses:
+        '200':
+          description: The changed connection.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted connection revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityProvider'
+        '201':
+          description: The new connection.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted connection revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityProvider'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: dashboardOrganizationsRemoveIdentityProvider
+      description: >-
+        A designated admin removes the organization's connection after fresh proof (the body carries proof, as for PUT). It is resource_conflict while Require SSO is in force, scheduled removal included, and not_found when the organization has no connection. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
+      responses:
+        '204':
+          description: The connection is removed.
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/identity-provider/tests:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsTestIdentityProvider
+      description: >-
+        A designated admin starts a test sign-in through the organization's connection, to prove it works before requiring it. It answers the identity provider's address for the page to navigate to and sets the __Host-screenrig-sso cookie. The provider's answer ends at /api/sso/finish, which records the outcome on the connection (last_test; a success lets ready_to_require become true) and returns the browser to the dashboard. A test signs nobody in. An organization with no connection is not_found. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The identity provider's address to navigate to, and the transaction cookie.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOTestStart'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/sso-policy:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: dashboardOrganizationsSetSSOPolicy
+      description: >-
+        A designated admin turns Require SSO on or off and names the break-glass admins. required true refuses password and passkey sign-in for the organization's verified domains (sso_required) and needs a verified domain and ready_to_require on the connection, otherwise resource_conflict; it bumps policy_revision. required false does not lift the requirement at once: it schedules the removal for 72 hours after the request (enforcement_ends_at) and emails every admin, and DELETE .../sso-policy/removal cancels it. break_glass_user_ids names at most 2 designated admins who hold a passkey, otherwise invalid_request; they keep passkey sign-in while SSO is required, and each such sign-in is audited. If-Match carries policy_revision and is required; a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind sso_policy_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Returns the policy with its ETag. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The policy_revision from GET identity-provider, optionally quoted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOPolicyWrite'
+      responses:
+        '200':
+          description: The policy now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted policy_revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOPolicy'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/sso-policy/removal:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    delete:
+      operationId: dashboardOrganizationsCancelSSORemoval
+      description: >-
+        Any designated admin cancels a scheduled removal of Require SSO, so it stays in force. With no removal scheduled nothing changes. Answers the policy. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The policy now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted policy_revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOPolicy'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/scim:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetSCIM
+      description: >-
+        A designated admin reads the organization's SCIM provisioning settings: whether it is enabled, the base URL to enter at the identity provider (on the API origin), the live provisioning tokens without their secrets, and the counts of provisioned users and groups. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's SCIM settings.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SCIMSettings'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: dashboardOrganizationsSetSCIM
+      description: >-
+        A designated admin enables or disables SCIM provisioning after fresh proof: a passkey or password proof bound to a reauthentication of kind scim_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Disabling changes nobody's access: the people and groups already provisioned keep their grants, and the /scim/v2 routes answer 403 until SCIM is enabled again. Returns the settings. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMSettingsWrite'
+      responses:
+        '200':
+          description: The organization's SCIM settings.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SCIMSettings'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/scim/tokens:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsCreateSCIMToken
+      description: >-
+        A designated admin mints a provisioning token after fresh proof (as for PUT .../scim). The token, srscim_ plus 43 base64url characters, is returned once, here only; the server keeps a SHA-256 digest and a prefix to recognise it by. An organization holds at most 5 live tokens, otherwise resource_conflict. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMTokenCreate'
+      responses:
+        '201':
+          description: The new token, with its secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SCIMTokenCreated'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/scim/tokens/{token_id}:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: token_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    delete:
+      operationId: dashboardOrganizationsRevokeSCIMToken
+      description: >-
+        A designated admin revokes a provisioning token; requests that present it are refused with 401 from then on. An already revoked token returns 204; an id the organization does not hold is not_found. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The token is revoked.
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/scim/groups:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsListSCIMGroups
+      description: >-
+        A designated admin lists the groups the identity provider has provisioned, with their member counts and the projects each is bound to. Binding is done in the project (createDashboardGroupBinding) by a person who can approve there; an admin sees bindings and project names only, which grants no project access. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's provisioned groups.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SCIMGroupList'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/scim/events:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsListSCIMEvents
+      description: >-
+        A designated admin reads the latest 500 requests the organization's SCIM clients made, newest first, failures included, kept for 30 days. Each row names the operation, the resource and the status, and carries a detail when the request failed. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's latest SCIM events.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SCIMEventList'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/reviews:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -18670,6 +19492,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewPolicy'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/project/group-bindings:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardGroupBindings
+      description: >-
+        The session project's group bindings, and the groups its organization's identity provider has provisioned (name and member count) to choose from. A binding gives every member of the group a membership in this project: role member is a plain membership and role approver also lets the person approve reviews. A person in several bound groups holds the highest role, approver over member. Any member of the project reads.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's bindings and the organization's groups.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupBindingList'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createDashboardGroupBinding
+      description: >-
+        Binds a provisioned group to the session project with a role. The project owner or a member who can approve only (approver_required otherwise); a staff shadow session is read-only. The group must be one of the project's organization's provisioned groups, otherwise not_found, and a group is bound to a project once, otherwise resource_conflict. The binding takes effect at once for the group's current members and follows every change to the group's membership. The project's 200-member limit applies: a person it refuses is recorded as a failed event in the organization's SCIM events and nothing else changes.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupBindingCreate'
+      responses:
+        '201':
+          description: The new binding.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupBinding'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/project/group-bindings/{binding_id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: binding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    delete:
+      operationId: deleteDashboardGroupBinding
+      description: >-
+        Unbinds a group from the session project. The project owner or a member who can approve only (approver_required otherwise). People who held access only through the binding lose it; a membership granted by hand stays, and a hand grant the binding raised returns to what it was. An id the project does not hold is not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The binding is removed and the access it gave is withdrawn.
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/members/{user_id}/approver:
@@ -22288,6 +23207,489 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /scim/v2/ServiceProviderConfig:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: getSCIMServiceProviderConfig
+      description: >-
+        The RFC 7643 ServiceProviderConfig of the organization's SCIM service: patch and filter (at most 200 results) are supported; bulk, sort, etag and changePassword are not. Requests and responses are application/scim+json; application/json is accepted on requests.
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: The service provider configuration.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/ResourceTypes:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: listSCIMResourceTypes
+      description: >-
+        The RFC 7643 resource types the service provisions: User and Group.
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: A ListResponse of the resource types.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/Schemas:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: listSCIMSchemas
+      description: >-
+        The RFC 7643 schema definitions of the resources the service provisions.
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: A ListResponse of the schemas.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/Users:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: listSCIMUsers
+      description: >-
+        Lists the organization's provisioned users as an RFC 7644 ListResponse. filter is one to four attr eq value terms joined by and; a value is a quoted JSON string, or true or false for active. Users filter on userName (case-insensitive), externalId (exact), id, emails and emails.value, displayName and active; any other filter is 400 invalidFilter. startIndex is 1-based. count defaults to 100 and is at most 200; count=0 returns only totalResults. attributes and excludedAttributes trim the members returned.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMFilter'
+        - $ref: '#/components/parameters/SCIMStartIndex'
+        - $ref: '#/components/parameters/SCIMCount'
+        - $ref: '#/components/parameters/SCIMAttributes'
+        - $ref: '#/components/parameters/SCIMExcludedAttributes'
+      responses:
+        '200':
+          description: A ListResponse of users.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    post:
+      operationId: createSCIMUser
+      description: >-
+        Provisions a user and answers 201 with the resource and its Location. The person is identified by their work email, else their primary email, else userName, and the address must be at one of the organization's verified domains. A person who holds no credential, or whom the organization already manages, becomes managed by it and signs in through the connection; a person who is already a member of one of its projects and keeps their own sign-in is linked for access only, so SCIM manages their grants in the organization's projects and never the person. An address the organization may not provision, such as one at another domain or a screenRIG staff person, is refused with a SCIM error whose detail names the reason. A person whose user this organization deleted while it did not manage them is provisioned again, with the access the deletion removed. A userName that is already provisioned is 409 uniqueness.
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '201':
+          description: The provisioned user.
+          headers:
+            Location:
+              description: The address of the resource.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/Users/{id}:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: getSCIMUser
+      description: >-
+        Reads one provisioned user. attributes and excludedAttributes trim the members returned.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+        - $ref: '#/components/parameters/SCIMAttributes'
+        - $ref: '#/components/parameters/SCIMExcludedAttributes'
+      responses:
+        '200':
+          description: The user.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    put:
+      operationId: replaceSCIMUser
+      description: >-
+        Replaces a provisioned user with the document sent. active false deactivates the person. A person the organization manages is deactivated as in the dashboard: their sessions and dashboard tokens end, their project memberships and responsible agents are suspended, and the last organization admin is refused with 400 mutability; active true reinstates them with those memberships and agents. A person it does not manage loses their access in the organization's projects (never a project they own) and their sessions end; active true restores that access. A user that stands for a screenRIG staff person is never changed: 400 mutability.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '200':
+          description: The user as stored.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    patch:
+      operationId: patchSCIMUser
+      description: >-
+        Applies an RFC 7644 PatchOp message to a provisioned user and answers 200 with the user. The operations are read as Microsoft Entra ID and Okta send them, with or without ?aadOptscim062020: op names are case- insensitive; booleans are true or false, or "True" or "False"; an operation may omit path or use dotted keys such as name.givenName; paths include emails[type eq "work"].value, members (add, replace, and remove with a value array) and members[value eq "<id>"] (remove); attributes screenRIG does not use are accepted and ignored. active false deactivates the person. A person the organization manages is deactivated as in the dashboard: their sessions and dashboard tokens end, their project memberships and responsible agents are suspended, and the last organization admin is refused with 400 mutability; active true reinstates them with those memberships and agents. A person it does not manage loses their access in the organization's projects (never a project they own) and their sessions end; active true restores that access. A user that stands for a screenRIG staff person is never changed: 400 mutability.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '200':
+          description: The user as stored.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    delete:
+      operationId: deleteSCIMUser
+      description: >-
+        Deactivates the user as active false does, after which the id is not_found and the user leaves every listing and filter. For a person the organization does not manage, the access the deactivation removed is kept, and a later create of the same person restores it. A user that stands for a screenRIG staff person is never changed: 400 mutability. It never erases a person; erasure is the person's own account deletion.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+      responses:
+        '204':
+          description: The user is deactivated and no longer provisioned.
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/Groups:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: listSCIMGroups
+      description: >-
+        Lists the organization's provisioned groups as an RFC 7644 ListResponse. filter is one to four attr eq value terms joined by and. Groups filter on displayName, externalId, id, and members and members.value; any other filter is 400 invalidFilter. startIndex is 1-based. count defaults to 100 and is at most 200; count=0 returns only totalResults. attributes and excludedAttributes trim the members returned.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMFilter'
+        - $ref: '#/components/parameters/SCIMStartIndex'
+        - $ref: '#/components/parameters/SCIMCount'
+        - $ref: '#/components/parameters/SCIMAttributes'
+        - $ref: '#/components/parameters/SCIMExcludedAttributes'
+      responses:
+        '200':
+          description: A ListResponse of groups.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    post:
+      operationId: createSCIMGroup
+      description: >-
+        Provisions a group and answers 201 with the resource and its Location. displayName is unique in the organization, compared case-insensitively; a duplicate is 409 uniqueness. A group grants no access until a person who can approve binds it to a project in the dashboard.
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '201':
+          description: The provisioned group.
+          headers:
+            Location:
+              description: The address of the resource.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+  /scim/v2/Groups/{id}:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: getSCIMGroup
+      description: >-
+        Reads one provisioned group. attributes and excludedAttributes trim the members returned.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+        - $ref: '#/components/parameters/SCIMAttributes'
+        - $ref: '#/components/parameters/SCIMExcludedAttributes'
+      responses:
+        '200':
+          description: The group.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    put:
+      operationId: replaceSCIMGroup
+      description: >-
+        Replaces a provisioned group with the document sent. A document without members keeps the group's members. Membership changes reconcile the affected people's project access, which is idempotent.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '200':
+          description: The group as stored.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    patch:
+      operationId: patchSCIMGroup
+      description: >-
+        Applies an RFC 7644 PatchOp message to a provisioned group and answers 204, or 200 with the group when attributes or excludedAttributes are given. The operations are read as Microsoft Entra ID and Okta send them, with or without ?aadOptscim062020: op names are case-insensitive; booleans are true or false, or "True" or "False"; an operation may omit path or use dotted keys such as name.givenName; paths include emails[type eq "work"].value, members (add, replace, and remove with a value array) and members[value eq "<id>"] (remove); attributes screenRIG does not use are accepted and ignored. Membership changes reconcile the affected people's project access, which is idempotent.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+        - $ref: '#/components/parameters/SCIMAttributes'
+        - $ref: '#/components/parameters/SCIMExcludedAttributes'
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SCIMResource'
+      responses:
+        '200':
+          description: The group as stored, when attributes or excludedAttributes were given.
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/SCIMResource'
+        '204':
+          description: The patch is applied.
+        '400':
+          $ref: '#/components/responses/SCIMProblem'
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '409':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
+    delete:
+      operationId: deleteSCIMGroup
+      description: >-
+        Deletes a provisioned group together with its project bindings. People who held access only through those bindings lose it; a membership granted by hand stays.
+      security:
+        - scimBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SCIMResourceID'
+      responses:
+        '204':
+          description: The group is deleted.
+        '401':
+          $ref: '#/components/responses/SCIMProblem'
+        '403':
+          $ref: '#/components/responses/SCIMProblem'
+        '404':
+          $ref: '#/components/responses/SCIMProblem'
+        '429':
+          $ref: '#/components/responses/SCIMRateLimited'
+        default:
+          $ref: '#/components/responses/SCIMProblem'
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
@@ -22428,6 +23830,12 @@ components:
     SecFetchSite: {name: Sec-Fetch-Site, in: header, required: false, schema: {type: string, enum: [same-origin, same-site, cross-site, none]}}
     SecFetchMode: {name: Sec-Fetch-Mode, in: header, required: false, schema: {type: string}}
     SecFetchDest: {name: Sec-Fetch-Dest, in: header, required: false, schema: {type: string}}
+    SCIMResourceID: {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 200}, description: "The id of a provisioned resource, as the SCIM service returned it."}
+    SCIMFilter: {name: filter, in: query, required: false, schema: {type: string, maxLength: 1000}, description: "One to four attr eq value terms joined by and. A value is a quoted JSON string, or true or false for active. An unsupported attribute, operator or shape is 400 invalidFilter."}
+    SCIMStartIndex: {name: startIndex, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}, description: "The 1-based index of the first result. A value below 1 is read as 1."}
+    SCIMCount: {name: count, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 200, default: 100}, description: "The page size, at most 200. 0 returns only totalResults. A larger value is read as 200."}
+    SCIMAttributes: {name: attributes, in: query, required: false, schema: {type: string, maxLength: 1000}, description: "A comma-separated list of attributes to return; the others are left out, except id and schemas."}
+    SCIMExcludedAttributes: {name: excludedAttributes, in: query, required: false, schema: {type: string, maxLength: 1000}, description: "A comma-separated list of attributes to leave out."}
   securitySchemes:
     demoSession: {type: apiKey, in: cookie, name: screenrig_demo, description: "Short-lived anonymous demo browser session. Secure, HttpOnly, SameSite=Lax, path /website; request and flow IDs are never authorization."}
     invitationSignup:
@@ -22463,6 +23871,16 @@ components:
     releaseGrantCookie: {type: apiKey, in: cookie, name: __Host-screenrig-release, description: Exact-host release/screen/generation/grant cookie; never valid on runtime or project routes.}
     releaseLaunchTicket: {type: apiKey, in: query, name: ticket, description: Random single-use 30-second ticket consumed only on its exact release host.}
     operatorBearer: {type: http, scheme: bearer}
+    ssoTransaction:
+      type: apiKey
+      in: cookie
+      name: __Host-screenrig-sso
+      description: Browser-bound single sign-on transaction. HttpOnly, Secure, SameSite=Strict, Path=/; set by a route that starts a sign-in, expires after 10 minutes and is consumed by POST /api/sso/finish. The identity provider's answer is posted from another site and never carries it, so the callback routes answer a page that posts to finish from the dashboard origin.
+    scimBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: srscim
+      description: "An organization's SCIM provisioning token, srscim_ plus 43 base64url characters, created by one of its admins (POST /api/organizations/{org_id}/scim/tokens) and shown once. It names its organization, so no organization id is sent, and it is accepted only by the /scim/v2 routes on the API origin; it is never a project, agent or dashboard credential. SCIM turned off answers 403 and an unknown or revoked token 401. An organization may make 600 requests a minute across its tokens (429 with Retry-After), and failed authentications are limited per client address."
   responses:
     PendingReview:
       description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). A person approves, rejects or requests changes in the dashboard at review.url. An Idempotency-Key replay answers the same body.
@@ -22487,6 +23905,14 @@ components:
         RateLimit-Policy: {$ref: "#/components/headers/RateLimitPolicy"}
         RateLimit: {$ref: "#/components/headers/RateLimit"}
       content: {application/problem+json: {schema: {$ref: "#/components/schemas/RuntimeProblem"}}}
+    SCIMProblem:
+      description: An RFC 7644 section 3.12 SCIM error, application/scim+json, not a problem document. status repeats the HTTP status as a string and scimType names the class (invalidFilter, uniqueness, mutability and the others of the RFC); detail says what was refused. 401 is an unknown or revoked token and 403 an organization with SCIM turned off.
+      content: {application/scim+json: {schema: {$ref: "#/components/schemas/SCIMError"}}}
+    SCIMRateLimited:
+      description: The organization's request budget (600 a minute) is spent. A SCIM error with status "429"; retry after the Retry-After interval.
+      headers:
+        Retry-After: {required: true, schema: {type: integer, minimum: 1}}
+      content: {application/scim+json: {schema: {$ref: "#/components/schemas/SCIMError"}}}
   schemas:
     AccessLevel:
       type: string
@@ -23514,6 +24940,306 @@ components:
           $ref: '#/components/schemas/ProjectName'
         personal:
           $ref: '#/components/schemas/OrganizationPersonal'
+    SSOErrorCode:
+      type: string
+      enum: [no_email, email_unverified, domain_not_allowed, account_exists, managed_elsewhere, subject_mismatch, not_provisioned, sso_required, staff_account, expired, bad_state, interaction_required, provider_refused, provider_unavailable, verification_failed, deactivated]
+      description: >-
+        The stable code a single sign-in ends with when it does not complete: the value of #sso_error= in the address POST /api/sso/finish redirects to, and the code of a failed identity-provider test. no_email: the provider asserted no email address. email_unverified: it marked the address unverified. domain_not_allowed: the address is not at one of the organization's verified domains. account_exists: the address already belongs to an account with its own sign-in; the person signs in as before and links the identity from their account (intent link). managed_elsewhere: another organization manages the person. subject_mismatch: the account is linked to a different identity at the same provider. not_provisioned: nobody holds the address and the connection does not create people. sso_required: the organization requires single sign-on for the address. staff_account: a screenRIG staff account is never signed in, adopted or linked by a customer's identity provider. expired: the sign-in outlived its 10 minutes. bad_state: the sign-in's state or browser binding does not match, or it was used already. interaction_required: a silent renewal needs the person. provider_refused: the provider answered with an error. provider_unavailable: the provider could not be reached or read. verification_failed: the provider's token or assertion failed verification. deactivated: the person is deactivated.
+    SSODiscoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: {type: string, format: email, minLength: 3, maxLength: 254, description: "The address the person typed. Only its domain is read."}
+    SSODiscovery:
+      type: object
+      additionalProperties: false
+      required: [sso, required]
+      description: Decided by the address's domain alone; it never reveals whether a person holds the address.
+      properties:
+        sso: {type: boolean, description: "The domain belongs to an organization with an enabled identity-provider connection."}
+        required: {type: boolean, description: "That organization requires single sign-on: password sign-in is refused for the domain, and so is passkey sign-in except for its break-glass admins."}
+        provider_name: {type: string, description: "The connection's display name. Present when sso is true."}
+    SSOStartRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: {type: string, format: email, minLength: 3, maxLength: 254, description: "The address the person typed. Its domain selects the organization's connection."}
+        return_to: {type: string, minLength: 1, maxLength: 512, pattern: "^/dashboard/", description: "A path under /dashboard/ the sign-in lands on. Absent lands on /dashboard/; any other value is invalid_request."}
+        invitation_token: {type: string, pattern: "^[A-Za-z0-9_-]{43}$", writeOnly: true, description: "An invitation the sign-in accepts for the person once they are signed in."}
+        prompt: {type: string, enum: [none, login], description: "none asks the provider for a silent sign-in and passes no login hint, so email only selects the domain; login makes it authenticate the person again."}
+    SSOStart:
+      type: object
+      additionalProperties: false
+      required: [redirect_url]
+      properties:
+        redirect_url: {type: string, format: uri, description: "The identity provider's address. The page navigates to it; it is single use."}
+    SessionSSOStartRequest:
+      type: object
+      additionalProperties: false
+      required: [intent]
+      properties:
+        intent: {type: string, enum: [renew, reauth, link], description: "renew: silently renew the single sign-on session. reauth: authenticate the person again, for the sso proof. link: attach the person's identity at the provider to their account."}
+        return_to: {type: string, minLength: 1, maxLength: 512, pattern: "^/dashboard/", description: "A path under /dashboard/ to return to. Absent returns to /dashboard/."}
+    SSOTestStart:
+      type: object
+      additionalProperties: false
+      required: [redirect_url]
+      properties:
+        redirect_url: {type: string, format: uri, description: "The identity provider's address for the test sign-in. The page navigates to it; it is single use."}
+    IdentityProviderOIDC:
+      type: object
+      additionalProperties: false
+      required: [issuer, client_id, client_secret_set, scopes]
+      properties:
+        issuer: {type: string, description: "The issuer the provider's discovery document must name. With preset entra it is https://login.microsoftonline.com/{tenant_id}/v2.0."}
+        tenant_id: {type: string, description: "The Microsoft Entra tenant (directory) id. Present with preset entra."}
+        client_id: {type: string}
+        client_secret_set: {type: boolean, description: "Whether a client secret is stored. The secret is never returned."}
+        scopes: {type: array, items: {type: string}, description: "The scopes the sign-in asks for."}
+    IdentityProviderCertificate:
+      type: object
+      additionalProperties: false
+      required: [sha256, subject, not_after]
+      properties:
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$", description: "The SHA-256 fingerprint of the DER certificate, lowercase hex."}
+        subject: {type: string}
+        not_after: {type: string, format: date-time}
+    IdentityProviderSAML:
+      type: object
+      additionalProperties: false
+      required: [idp_entity_id, idp_sso_url, certificates]
+      properties:
+        idp_entity_id: {type: string}
+        idp_sso_url: {type: string, format: uri, description: "The identity provider's single sign-on address (HTTP-Redirect binding)."}
+        certificates: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/IdentityProviderCertificate"}, description: "The certificates an assertion may be signed with; more than one while a rotation overlaps."}
+    IdentityProviderServiceProvider:
+      type: object
+      additionalProperties: false
+      required: [oidc_redirect_uri, saml_entity_id, saml_acs_url, saml_metadata_url]
+      description: The values to enter at the identity provider, derived from the dashboard origin and the connection id.
+      properties:
+        oidc_redirect_uri: {type: string, format: uri, description: "The connection's own OIDC redirect URI: /api/sso/oidc/{connection_id}/callback."}
+        saml_entity_id: {type: string, description: "The SAML entity ID (audience): /api/sso/saml/{connection_id}."}
+        saml_acs_url: {type: string, format: uri, description: "The SAML assertion consumer service (HTTP-POST binding)."}
+        saml_metadata_url: {type: string, format: uri, description: "The service provider metadata document."}
+    IdentityProviderTest:
+      type: object
+      additionalProperties: false
+      required: [at, ok, subject_present]
+      description: The outcome of the last test sign-in through the connection.
+      properties:
+        at: {type: string, format: date-time}
+        ok: {type: boolean}
+        code: {$ref: "#/components/schemas/SSOErrorCode", description: "Why the test failed. Absent when ok."}
+        email: {type: string, description: "The address the provider asserted."}
+        provider: {type: string, description: "The provider key the identity is stored under: entra:{tenant}, oidc:{issuer} or saml:{entity id}."}
+        subject_present: {type: boolean, description: "The provider asserted a stable subject. The subject itself is never shown."}
+    SSOPolicy:
+      type: object
+      additionalProperties: false
+      required: [required, break_glass_user_ids, policy_revision]
+      properties:
+        required: {type: boolean, description: "Require SSO is in force now: password and passkey sign-in are refused for the organization's verified domains (sso_required). A scheduled removal keeps it true until enforcement_ends_at."}
+        enforcement_ends_at: {type: string, format: date-time, description: "When a scheduled removal takes effect, 72 hours after it was requested. Absent when none is scheduled."}
+        break_glass_user_ids: {type: array, maxItems: 2, items: {type: string}, description: "Admins who hold a passkey and keep passkey sign-in while SSO is required. Each such sign-in is audited."}
+        policy_revision: {type: integer, minimum: 0, description: "The revision PUT sends as If-Match. It advances when Require SSO turns on, when the connection's identity changes and when the break-glass admins change."}
+    SSOPolicyWrite:
+      type: object
+      additionalProperties: false
+      required: [required, break_glass_user_ids, proof]
+      properties:
+        required: {type: boolean, description: "true requires single sign-on. false schedules the removal for 72 hours after the request and emails every admin."}
+        break_glass_user_ids: {type: array, maxItems: 2, items: {type: string, minLength: 1, maxLength: 200}, description: "At most 2 designated admins who hold a passkey. The list replaces the stored one."}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    IdentityProvider:
+      type: object
+      additionalProperties: false
+      required: [connection_id, kind, preset, name, jit, service_provider, ready_to_require, policy, revision, created_at, updated_at]
+      description: The organization's single sign-on connection. It holds no secret.
+      properties:
+        connection_id: {type: string}
+        kind: {type: string, enum: [oidc, saml]}
+        preset: {type: string, enum: [entra, generic], description: "entra applies Microsoft Entra ID's rules (with OIDC, a tenant id builds the issuer); generic takes the provider's own values."}
+        name: {type: string, description: "The display name people see on the sign-in page."}
+        jit: {type: boolean, description: "A person nobody holds the address of is created at first sign-in."}
+        oidc: {$ref: "#/components/schemas/IdentityProviderOIDC", description: "Present when kind is oidc."}
+        saml: {$ref: "#/components/schemas/IdentityProviderSAML", description: "Present when kind is saml."}
+        service_provider: {$ref: "#/components/schemas/IdentityProviderServiceProvider"}
+        last_test: {$ref: "#/components/schemas/IdentityProviderTest", description: "Absent until a test has run."}
+        last_success_at: {type: string, format: date-time, description: "The last successful sign-in or test through the connection. Absent until one has succeeded."}
+        ready_to_require: {type: boolean, description: "The organization holds a verified domain and a test or a real sign-in has succeeded through the connection's current identity. SSOPolicyWrite with required true is accepted only while it is true."}
+        policy: {$ref: "#/components/schemas/SSOPolicy"}
+        revision: {type: integer, minimum: 1, description: "The revision PUT sends as If-Match."}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    IdentityProviderOIDCWrite:
+      type: object
+      additionalProperties: false
+      required: [client_id]
+      properties:
+        issuer: {type: string, format: uri, maxLength: 2048, description: "preset generic: the provider's https issuer, which its /.well-known/openid-configuration must name. Absent with preset entra."}
+        tenant_id: {type: string, pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", description: "preset entra: the Microsoft Entra tenant (directory) id, a GUID. Absent with preset generic."}
+        client_id: {type: string, minLength: 1, maxLength: 200}
+        client_secret: {type: string, minLength: 1, maxLength: 1024, writeOnly: true, description: "The application's client secret. Omit to keep the stored one. It is stored sealed and never returned."}
+    IdentityProviderSAMLWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        metadata_xml: {type: string, maxLength: 1048576, description: "The identity provider's SAML metadata document, read for its entity ID, sign-in address and signing certificates."}
+        idp_entity_id: {type: string, minLength: 1, maxLength: 1024}
+        idp_sso_url: {type: string, format: uri, maxLength: 2048}
+        certificates_pem: {type: array, maxItems: 4, items: {type: string, minLength: 1, maxLength: 16384}, description: "PEM certificates an assertion may be signed with. The list replaces the stored one."}
+    IdentityProviderWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, preset, name, proof]
+      properties:
+        kind: {type: string, enum: [oidc, saml]}
+        preset: {type: string, enum: [entra, generic]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        jit: {type: boolean, description: "Create a person at first sign-in when nobody holds the address. Absent keeps the stored value, true for a new connection."}
+        oidc: {$ref: "#/components/schemas/IdentityProviderOIDCWrite", description: "Required when kind is oidc."}
+        saml: {$ref: "#/components/schemas/IdentityProviderSAMLWrite", description: "Required when kind is saml."}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    SCIMToken:
+      type: object
+      additionalProperties: false
+      required: [id, name, prefix, created_at]
+      properties:
+        id: {type: string}
+        name: {type: string, minLength: 1, maxLength: 80}
+        prefix: {type: string, description: "The token's first characters, enough to recognise it. The secret is shown once, when the token is created."}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string, description: "The user_id of the admin who created it."}
+        last_used_at: {type: string, format: date-time, description: "The last request that presented it, to the minute."}
+    SCIMTokenCreate:
+      type: object
+      additionalProperties: false
+      required: [name, proof]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    SCIMTokenCreated:
+      type: object
+      additionalProperties: false
+      required: [id, name, prefix, created_at, token]
+      description: A SCIMToken with its secret, returned once.
+      properties:
+        id: {type: string}
+        name: {type: string, minLength: 1, maxLength: 80}
+        prefix: {type: string}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string}
+        last_used_at: {type: string, format: date-time}
+        token: {type: string, pattern: "^srscim_[A-Za-z0-9_-]{43}$", description: "The secret (srscim_ plus 43 base64url characters): shown once, never again. Send it as the identity provider's bearer token."}
+    SCIMSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, base_url, tokens, user_count, group_count]
+      properties:
+        enabled: {type: boolean}
+        base_url: {type: string, format: uri, description: "The SCIM base URL to enter at the identity provider: /scim/v2 on the API origin."}
+        tokens: {type: array, maxItems: 5, items: {$ref: "#/components/schemas/SCIMToken"}, description: "The live provisioning tokens."}
+        user_count: {type: integer, minimum: 0, description: "The users the identity provider has provisioned."}
+        group_count: {type: integer, minimum: 0, description: "The groups the identity provider has provisioned."}
+    SCIMSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [enabled, proof]
+      properties:
+        enabled: {type: boolean}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    SCIMGroupProjectBinding:
+      type: object
+      additionalProperties: false
+      required: [binding_id, project_id, project_name, role]
+      properties:
+        binding_id: {type: string}
+        project_id: {type: string}
+        project_name: {type: string}
+        role: {type: string, enum: [approver, member]}
+    SCIMGroupSummary:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, member_count, bindings]
+      properties:
+        id: {type: string, description: "The group's SCIM id."}
+        display_name: {type: string}
+        member_count: {type: integer, minimum: 0}
+        bindings: {type: array, items: {$ref: "#/components/schemas/SCIMGroupProjectBinding"}}
+    SCIMGroupList:
+      type: object
+      additionalProperties: false
+      required: [groups]
+      properties:
+        groups: {type: array, items: {$ref: "#/components/schemas/SCIMGroupSummary"}}
+    SCIMEvent:
+      type: object
+      additionalProperties: false
+      required: [at, action, status]
+      properties:
+        at: {type: string, format: date-time}
+        action: {type: string, description: "The operation the request performed, such as users.create or groups.patch."}
+        resource: {type: string, description: "The resource the request named, such as Users/{id}."}
+        status: {type: integer, minimum: 100, maximum: 599, description: "The HTTP status the request was answered with."}
+        detail: {type: string, description: "Why the request failed. Present on failures."}
+    SCIMEventList:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/SCIMEvent"}, description: "Newest first."}
+    GroupBindingGroup:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, member_count]
+      properties:
+        id: {type: string, description: "The group's SCIM id."}
+        display_name: {type: string}
+        member_count: {type: integer, minimum: 0}
+    GroupBinding:
+      type: object
+      additionalProperties: false
+      required: [binding_id, group_id, group_name, role, created_at]
+      properties:
+        binding_id: {type: string}
+        group_id: {type: string}
+        group_name: {type: string}
+        role: {type: string, enum: [approver, member], description: "member is a plain membership; approver also lets the person approve reviews. The highest role among a person's bound groups applies."}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string, description: "The user_id of the person who bound the group."}
+    GroupBindingList:
+      type: object
+      additionalProperties: false
+      required: [bindings, groups]
+      properties:
+        bindings: {type: array, items: {$ref: "#/components/schemas/GroupBinding"}}
+        groups: {type: array, items: {$ref: "#/components/schemas/GroupBindingGroup"}, description: "The groups the project's organization's identity provider has provisioned."}
+    GroupBindingCreate:
+      type: object
+      additionalProperties: false
+      required: [group_id, role]
+      properties:
+        group_id: {type: string, minLength: 1, maxLength: 200}
+        role: {type: string, enum: [approver, member]}
+    SCIMResource:
+      type: object
+      additionalProperties: true
+      description: "A SCIM 2.0 document in the shape RFC 7643 and RFC 7644 give it at the route that carries it; each operation names which it is. It is a User or Group resource, a ListResponse, a PatchOp message, a ServiceProviderConfig, a ResourceType or a Schema. Members screenRIG does not use are accepted and ignored."
+      properties:
+        schemas: {type: array, items: {type: string}, description: "The URNs of the schemas the document follows."}
+    SCIMError:
+      type: object
+      additionalProperties: false
+      required: [schemas, status]
+      description: The RFC 7644 section 3.12 error document.
+      properties:
+        schemas: {type: array, items: {type: string, enum: ["urn:ietf:params:scim:api:messages:2.0:Error"]}}
+        status: {type: string, description: "The HTTP status as a string."}
+        scimType: {type: string, enum: [invalidFilter, tooMany, uniqueness, mutability, invalidSyntax, invalidPath, noTarget, invalidValue, invalidVers, sensitive]}
+        detail: {type: string}
     DemoSource: {type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, resellers, direct]}
     DemoRequestInput:
       type: object
@@ -23723,7 +25449,7 @@ components:
         request_id: {type: string}
         client_ip: {type: string, description: "The client address under the server's trusted-proxy rule."}
         client: {$ref: '#/components/schemas/MemberActivityClient'}
-        auth_method: {type: string, enum: [password, passkey], description: "How a sign-in, refused sign-in or proof was made."}
+        auth_method: {type: string, enum: [password, passkey, sso], description: "How a sign-in, refused sign-in or proof was made."}
         email: {type: string, description: "The normalized address a refused password sign-in named."}
         source: {type: string, enum: [dashboard, staff], description: "staff is a change made by a staff member under an approved write lease of a project they shadow."}
     MemberActivityList:
@@ -23820,6 +25546,18 @@ components:
       oneOf:
         - $ref: '#/components/schemas/DashboardPasskeyProof'
         - $ref: '#/components/schemas/DashboardPasswordProof'
+        - $ref: '#/components/schemas/DashboardSSOProof'
+    DashboardSSOProof:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+      description: Proof by a recent single sign-on. It is valid while the current session signed in through the organization's identity provider at most 10 minutes ago, and carries no ceremony and no secret. Otherwise the route answers reauthentication_required, and the person signs in through their provider again (POST /api/session/sso-starts, intent reauth).
+      properties:
+        type:
+          type: string
+          enum:
+            - sso
     DashboardPasskeyProof:
       type: object
       additionalProperties: false
@@ -23880,10 +25618,13 @@ components:
             - oauth_authorization_denial
             - service_client_change
             - review_policy_change
+            - identity_provider_change
+            - sso_policy_change
+            - scim_change
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off)."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens); a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -24386,6 +26127,12 @@ components:
           type: string
         issuer:
           type: string
+        sso:
+          type: boolean
+          description: The address's organization has an enabled identity-provider connection, so the person can sign in through it (POST /api/sso/starts with the invitation's token when an invitation is being accepted).
+        break_glass:
+          type: boolean
+          description: The person is a break-glass admin of the organization, who keeps passkey sign-in while the organization requires single sign-on.
       description: Verified person sign-in policy. Passive defaults preserve local sign-in. An enforced organization policy directs sign-in through its identity provider.
     InvitationInspect:
       type: object
@@ -25257,6 +27004,21 @@ components:
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
     Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
+      description: >-
+        What a playlist is authored for: a video wall (PlaylistWallFormat) or a region (PlaylistRegionFormat), never both. A playlist without a format is an ordinary playlist that binds to any screen as the page.
+      oneOf:
+        - {$ref: "#/components/schemas/PlaylistWallFormat"}
+        - {$ref: "#/components/schemas/PlaylistRegionFormat"}
+    PlaylistRegionFormat:
+      type: object
+      additionalProperties: false
+      required: [region, orientation]
+      description: >-
+        A strip drawn over the page along one edge of a display: a header at the top, a footer at the bottom, a side at the right edge at full height. orientation is the orientation of the display it is made for, as the viewer sees it after rotation. Every page has the same canvas (width and height); a header or footer is wider than tall and a side taller than wide, with the long side at least twice the short side, else 400 invalid_request at pages[i].canvas. The playlist holds image and card primitives only (a video, stream, iframe, application or ad slot page is refused) and has no soundtrack (audio is refused); a primitive names no displays. A region playlist is never a screen default, a folder default or a takeover: it plays as a schedule entry or a campaign with covers set to its region (covers main and the full page refuse it), and covers header, footer or side needs a region playlist of that region. The entry or campaign is refused with 409 playlist_format_mismatch when the strip is laid out on none of the displays it targets: a strip is laid out on a display of its orientation, judged on the surface the Player reports after rotation (the screen's wall rotation when it has not reported one), and only while it would cover no more than half of the display (its height for a header or footer, its width for a side). A campaign is refused only when it is laid out on none of the screens of its audience; on a screen of a mixed audience where it is not, the campaign leaves that screen's stack and its explanation says region_not_laid_out. A format change that moves a playlist into or out of a region, or to another region, is refused with 409 resource_conflict while a screen schedule, takeover or default, a folder default or a campaign uses it.
+      properties:
+        region: {type: string, enum: [header, footer, side]}
+        orientation: {type: string, enum: [landscape, portrait]}
+    PlaylistWallFormat:
       type: object
       additionalProperties: false
       required: [displays, arrangement, orientation]
@@ -26874,7 +28636,7 @@ components:
         except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
-        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
     ScreenScheduleEntry:
@@ -26892,7 +28654,7 @@ components:
         except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
-        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
     LevelMonthly:
@@ -27038,14 +28800,14 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
-        reach_before: {type: integer, minimum: 0, description: "campaign only, when it has a reach (Campaign.reach): its last counted reach."}
-        reach_after: {type: integer, minimum: 0, description: "campaign only, when it has a reach: reach_before moved by the screens this write brings into or takes out of its audience. The campaign-reach worker recounts it within about 15 seconds (Campaign.reach.current)."}
+        reach_before: {type: integer, minimum: 0, description: "campaign only, when it has a reach (Campaign.reach) and the write moves its audience: its last counted reach. Absent on a level gained or lost only with a default playlist, which leaves the audience as it was."}
+        reach_after: {type: integer, minimum: 0, description: "With reach_before: reach_before moved by the active screens this write brings into or takes out of its audience. Reach counts audience matches, so a screen without a default playlist moves it without a level. The campaign-reach worker recounts it about 15 seconds after the changes stop (Campaign.reach.current)."}
     ScreenStackStatus:
       type: object
       additionalProperties: false
       required: [manifest_revision, levels, playing, reported_at]
       description: >-
-        What the screen's Player last reported of its stack (docs/player-compatibility.md §6.11): each level's readiness and the level each display shows. Present only for a Player that resolves its own stack, while that stack is current.
+        What the screen's Player last reported of its stack (docs/player-compatibility.md §6.11): each level's readiness and the level each display shows in each region (the page and any strip). Present only for a Player that resolves its own stack, while that stack is current.
       properties:
         manifest_revision: {type: string}
         levels:
@@ -27060,13 +28822,14 @@ components:
               state: {type: string, enum: [ready, preparing, failed]}
         playing:
           type: array
-          maxItems: 12
+          maxItems: 48
           items:
             type: object
             additionalProperties: false
             required: [display, level_id]
             properties:
               display: {type: integer, minimum: 1, maximum: 12}
+              region: {type: string, enum: [main, header, footer, side], description: "The strip the level plays in on that display; absent is the page (a report may spell it main). Each display and region appears once."}
               level_id: {type: string}
         reported_at: {type: string, format: date-time}
     StackLevel:
@@ -27080,7 +28843,7 @@ components:
         source: {type: string, enum: [takeover, campaign, schedule, default, folder]}
         playlist_id: {type: string}
         rule: {$ref: "#/components/schemas/StackLevelRule"}
-        covers: {type: string, enum: [main, header, footer, side]}
+        covers: {type: string, enum: [main, header, footer, side], description: "Absent: the full page, which reaches main. header, footer and side are strips drawn over the page for a region playlist."}
         displays: {type: array, items: {type: integer, minimum: 1, maximum: 12}}
         start: {type: string, enum: [on_time]}
         name: {type: string}
@@ -29152,7 +30915,7 @@ components:
       type: string
       enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale, reach_dropped, group_empty]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. reach_dropped and group_empty are about a campaign (a shared level of the schedule stack), not a screen: the notice's screen member carries the campaign's id and name, the link is the campaign's calendar in the dashboard, and a campaign is the project's, so screen_tags and audience never limit them. reach_dropped: a recount found the campaign reaching fewer screens than when it was last published, because screens left one of its tags or folders, were archived or deleted (campaign.reach_changed with current below published); reach_drop sets how large a drop is notified; clears when it reaches as many screens again, or on its next publish. group_empty: a tag or folder of the campaign's audience matches no screen (campaign.group_changed with matched 0); one notice per tag or folder (audience_group); clears when it matches a screen again, or when a publish removes it from the audience (removed true), which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). A screen's own schedule entries target playlists, not screens, so only campaigns have a reach. Neither is a screen alert. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. reach_dropped and group_empty are about a campaign (a shared level of the schedule stack), not a screen: the notice's screen member carries the campaign's id and name, the link is the campaign's calendar in the dashboard, and a campaign is the project's, so screen_tags and audience never limit them. reach_dropped: a recount found the campaign reaching fewer screens than when it was last published, because screens left one of its tags or folders, were archived or deleted (campaign.reach_changed with current below published); reach_drop sets how large a drop is notified; clears when it reaches as many screens again. A publish that sets a new baseline, or deleting the campaign, also clears it, which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). group_empty: a tag or folder of the campaign's audience matches no screen (campaign.group_changed with matched 0); one notice per tag or folder (audience_group); clears when it matches a screen again, or when a publish removes it from the audience (removed true), which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). A screen's own schedule entries target playlists, not screens, so only campaigns have a reach. Neither is a screen alert. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
       maxItems: 14
@@ -29367,7 +31130,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, or a group_empty one because a publish removed the tag or folder from the campaign's audience, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, or a group_empty one because a publish removed the tag or folder from the campaign's audience, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -29637,7 +31400,7 @@ components:
         except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
-        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
@@ -29652,7 +31415,7 @@ components:
       additionalProperties: false
       required: [published, current, at, empty_groups]
       description: >-
-        How many live screens (active or pairing) the audience matches. published is the count when the campaign was last published (created, or updated with audience, playlist_id or paused); current the latest count. A change to a screen's tags, folder or state, or a folder move, recounts the campaigns whose audience names what changed within about 15 seconds and appends campaign.reach_changed (published, previous, current) and, per tag or folder of the audience that starts or stops matching screens, campaign.group_changed (kind, value, matched); a publish that drops an empty tag or folder from the audience appends campaign.group_changed with removed true and matched 0. Absent on a campaign not published or recounted since reach was introduced.
+        How many active screens the audience matches; a pairing screen is not counted. It counts audience matches, not where the campaign plays: an active screen without a default playlist matches and plays nothing. published is the count when the campaign was last published (created, or updated with a different audience, playlist_id or paused); current the latest count. A change to an active screen's tags, folder or state, or a folder move, recounts the campaigns whose audience names what changed about 15 seconds after the changes stop and appends campaign.reach_changed (published, previous, current; republished true from a publish) and, per tag or folder of the audience that starts or stops matching screens, campaign.group_changed (kind, value, matched); a publish that drops an empty tag or folder from the audience appends campaign.group_changed with removed true and matched 0. Absent on a campaign not published or recounted since reach was introduced.
       properties:
         published: {type: integer, minimum: 0}
         current: {type: integer, minimum: 0}
@@ -29675,7 +31438,7 @@ components:
         except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
-        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or one region of a playlist laid out for that region."}
+        covers: {type: string, enum: [full, main, header, footer, side], description: "Where the level plays: the full page (default, stored absent) or main, the page itself, for an ordinary playlist; header, footer or side, a strip drawn over the page, for a region playlist of that region only (PlaylistRegionFormat). A region playlist is refused with full or main, and a strip needs a region playlist that is laid out on a targeted display."}
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, default: 0}
@@ -29696,7 +31459,7 @@ components:
         except: {anyOf: [{type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}, {type: "null"}], description: null clears them.}
         data: {anyOf: [{$ref: "#/components/schemas/PageDataCondition"}, {type: "null"}], description: null clears it.}
         interaction: {anyOf: [{$ref: "#/components/schemas/LevelInteraction"}, {type: "null"}], description: null clears it.}
-        covers: {anyOf: [{type: string, enum: [full, main, header, footer, side]}, {type: "null"}], description: null is the full page.}
+        covers: {anyOf: [{type: string, enum: [full, main, header, footer, side]}, {type: "null"}], description: "null is the full page. header, footer and side need a region playlist of that region (PlaylistRegionFormat)."}
         displays: {anyOf: [{type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}}, {type: "null"}], description: null plays on every output.}
         start: {anyOf: [{type: string, enum: [next_item, on_time]}, {type: "null"}], description: null is next_item.}
         priority: {type: integer, minimum: 0, maximum: 100}
@@ -29706,13 +31469,13 @@ components:
       additionalProperties: false
       required: [campaign_id, screen_id, status]
       description: >-
-        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, or stack_only: only a Player that resolves its own stack honors it). not_in_audience.
+        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: the strip of its region playlist is laid out on no display the campaign targets here and the level is left out of this screen's stack, or stack_only: only a Player that resolves its own stack honors it). not_in_audience.
       properties:
         campaign_id: {type: string}
         screen_id: {type: string}
         screen_name: {type: string}
         status: {type: string, enum: [playing, pending, waiting, ended, outranked, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable, stack_only]}
+        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only]}
         by: {type: string, description: The campaign that outranks this one.}
         next_start: {type: string, format: date-time}
     CampaignScreens:
@@ -29759,7 +31522,7 @@ components:
         id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
         playlist_id: {type: string}
         verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, off]}
-        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, stack_only], description: "Why an off candidate does not apply. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition)."}
+        reason: {type: string, enum: [paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only], description: "Why an off candidate does not apply. region_not_laid_out: the strip of its region playlist is laid out on no display this screen targets. stack_only: only a Player that resolves its own stack honors it (a region, a display lock, interaction or a data condition)."}
         by:
           type: object
           additionalProperties: false
@@ -31169,12 +32932,17 @@ components:
           enum:
             - passkey
             - password
+            - sso
         authenticated_at:
           type: string
           format: date-time
+          description: >-
+            When the person last authenticated: the password or passkey sign-in, or for an SSO session the identity provider's authentication (its auth_time or AuthnInstant; a re-authentication's own moment when it names none; a renewal keeps the renewed session's). An SSO sign-in whose provider names no time is 1970-01-01T00:00:01Z and never counts as recent.
         expires_at:
           type: string
           format: date-time
+        sso:
+          $ref: '#/components/schemas/DashboardSessionSSO'
         dev_auth:
           type: boolean
         staff:
@@ -31197,6 +32965,28 @@ components:
           maxLength: 43
           description: Present when the session cookie is a session token. The client sends it as the X-ScreenRig-CSRF header on every state-changing dashboard request; it is the same for the whole session. A state change with a session-token cookie must also carry Origin equal to the dashboard origin, and Sec-Fetch-Site same-origin when the browser sends it.
       description: 'Person session. Identifiers are descriptive; the session cookie establishes authority. A person with no projects has project: null.'
+    DashboardSessionSSO:
+      type: object
+      additionalProperties: false
+      required:
+        - organization_id
+        - provider_name
+        - linked
+      description: The person's single sign-on context. Present whenever the person's verified address is at a domain whose organization has an identity-provider connection; linked is false until the person signs in through it or links it. An SSO session lasts 24 hours from sign-in and is not extended by use.
+      properties:
+        organization_id:
+          type: string
+          description: The organization whose identity provider the person signs in through.
+        provider_name:
+          type: string
+          description: The connection's display name.
+        renew_after:
+          type: string
+          format: date-time
+          description: When the dashboard renews the session silently (POST /api/session/sso-starts, intent renew), 12 hours after the authentication. Present on an SSO session.
+        linked:
+          type: boolean
+          description: The person's account holds an identity at that provider.
     DashboardSummary:
       type: object
       additionalProperties: false
@@ -31918,6 +33708,7 @@ x-problem-codes:
   - reauthentication_required
   - member_limit_reached
   - last_credential
+  - sso_required
   - no_project
   - feature_unavailable
   - user_binding_stale
