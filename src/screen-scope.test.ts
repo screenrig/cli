@@ -205,19 +205,13 @@ test("a provisioning retry is bound to its folder as well as its name", async ()
   }
 });
 
-test("screen folder update --protect and --unprotect send protected alone", async () => {
+test("screen folder update --unprotect proposes the removal, sent alone", async () => {
   const configDir = await enrolled("scope-protect-");
   const transport = new FakeTransport().on("PATCH", `/api/screen-folders/${NORTH}`, (req) => {
     const body = req.body as { protected?: boolean };
     return body.protected === false ? pending("protected_change", { type: "screen_folder", id: NORTH, name: "North" }) : json(200, folder(NORTH, "North", { protected: true }));
   });
   try {
-    const protect = await cli(["--human", "screen", "folder", "update", NORTH, "--protect"], transport, configDir);
-    assert.equal(protect.code, ExitCode.Success, protect.stdout);
-    assert.deepEqual(transport.calls.at(-1)?.body, { protected: true });
-    assert.match(protect.stdout, new RegExp(`^Protected screen folder ${NORTH} and every folder inside it\\.$`, "m"));
-    assert.match(protect.stdout, /^protected: true/m);
-
     const unprotect = await cli(["--json", "screen", "folder", "update", NORTH, "--unprotect", "--note", "Menu boards move", "--expect-rev", "1"], transport, configDir);
     assert.equal(unprotect.code, ExitCode.Success, unprotect.stdout);
     const call = transport.calls.at(-1)!;
@@ -237,17 +231,17 @@ test("screen folder update --protect and --unprotect send protected alone", asyn
   }
 });
 
-test("protection flags stand alone and conflict with each other", async () => {
+test("--unprotect stands alone, and --protect does not exist", async () => {
   const configDir = await enrolled("scope-protect-usage-");
   const transport = new FakeTransport();
   try {
-    for (const flags of [["--protect", "--unprotect"], ["--protect", "--name", "x"], ["--unprotect", "--parent", SOUTH], ["--protect", "--root"], ["--unprotect", "--clear-default"]]) {
+    for (const flags of [["--protect"], ["--unprotect", "--name", "x"], ["--unprotect", "--parent", SOUTH], ["--unprotect", "--root"], ["--unprotect", "--clear-default"]]) {
       const result = await cli(["--json", "screen", "folder", "update", NORTH, ...flags], transport, configDir);
       assert.equal(result.code, ExitCode.Usage, `${flags.join(" ")}: ${result.stdout}`);
     }
     assert.equal(transport.calls.length, 0);
     const update = commandHelp(["screen", "folder", "update"]);
-    assert.ok(update.options.some((option) => option.name === "--protect"));
+    assert.equal(update.options.some((option) => option.name === "--protect"), false);
     assert.ok(update.options.some((option) => option.name === "--unprotect"));
     assert.ok(update.options.some((option) => option.name === "--note"));
     assert.ok(update.examples.some((example) => example.includes("--unprotect")));
@@ -285,27 +279,26 @@ test("folder create, rename-free changes, delete and move answer a protected rev
   }
 });
 
-test("campaign create, update, pause and delete send reserved and the note, and answer a pending review", async () => {
+test("campaign create, update, pause and delete send the note, and answer a pending review", async () => {
   const configDir = await enrolled("scope-campaign-");
   const transport = new FakeTransport()
-    .on("POST", "/api/campaigns", () => json(201, campaign({ reserved: true })))
+    .on("POST", "/api/campaigns", () => json(201, campaign()))
     .on("PATCH", `/api/campaigns/${CAMPAIGN}`, () => json(200, campaign()))
     .on("DELETE", `/api/campaigns/${CAMPAIGN}`, () => pending("protected_change", { type: "campaign", id: CAMPAIGN, name: "Spring menu" }));
   try {
-    const created = await cli(["--json", "campaign", "create", "--name", "Fire exits", "--playlist-id", PLAYLIST, "--folder", NORTH, "--reserved", "--note", "Fire safety"], transport, configDir);
+    const created = await cli(["--json", "campaign", "create", "--name", "Fire exits", "--playlist-id", PLAYLIST, "--folder", NORTH, "--note", "Fire safety"], transport, configDir);
     assert.equal(created.code, ExitCode.Success, created.stdout);
     const create = transport.calls.at(-1)!;
-    assert.deepEqual(create.body, { name: "Fire exits", playlist_id: PLAYLIST, audience: { folder: NORTH }, reserved: true });
+    assert.deepEqual(create.body, { name: "Fire exits", playlist_id: PLAYLIST, audience: { folder: NORTH } });
     assert.equal(create.headers?.["screenrig-review-note"], "Fire%20safety");
     const plain = await cli(["--json", "campaign", "create", "--name", "Plain", "--playlist-id", PLAYLIST, "--folder", NORTH], transport, configDir);
     assert.equal(plain.code, ExitCode.Success, plain.stdout);
-    assert.equal("reserved" in (transport.calls.at(-1)?.body as object), false);
+    assert.equal(transport.calls.at(-1)?.headers?.["screenrig-review-note"], undefined);
 
-    for (const [flags, expected] of [[["--reserved"], { reserved: true }], [["--no-reserved"], { reserved: false }], [["--name", "Renamed", "--no-reserved"], { name: "Renamed", reserved: false }]] as const) {
-      const result = await cli(["--json", "campaign", "update", CAMPAIGN, ...flags], transport, configDir);
-      assert.equal(result.code, ExitCode.Success, `${flags.join(" ")}: ${result.stdout}`);
-      assert.deepEqual(transport.calls.at(-1)?.body, expected);
-    }
+    const renamed = await cli(["--json", "campaign", "update", CAMPAIGN, "--name", "Renamed", "--note", "Rename"], transport, configDir);
+    assert.equal(renamed.code, ExitCode.Success, renamed.stdout);
+    assert.deepEqual(transport.calls.at(-1)?.body, { name: "Renamed" });
+    assert.equal(transport.calls.at(-1)?.headers?.["screenrig-review-note"], "Rename");
     const paused = await cli(["--json", "campaign", "pause", CAMPAIGN, "--note", "Holiday over", "--expect-rev", "2"], transport, configDir);
     assert.equal(paused.code, ExitCode.Success, paused.stdout);
     assert.deepEqual(transport.calls.at(-1)?.body, { paused: true });
@@ -319,7 +312,11 @@ test("campaign create, update, pause and delete send reserved and the note, and 
 
     const bare = await cli(["--json", "campaign", "update", CAMPAIGN], transport, configDir);
     assert.equal(bare.code, ExitCode.Usage);
-    assert.match(bare.envelope.error?.detail ?? "", /--reserved or --no-reserved\./);
+    assert.match(bare.envelope.error?.detail ?? "", /or --priority\./);
+    for (const flag of ["--reserved", "--no-reserved"]) {
+      const gone = await cli(["--json", "campaign", "update", CAMPAIGN, flag], transport, configDir);
+      assert.equal(gone.code, ExitCode.Usage, flag);
+    }
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -334,7 +331,7 @@ test("campaign update answers a protected change with its review and a reserved 
     assert.equal(held.code, ExitCode.Success, held.stdout);
     assert.equal(held.envelope.data.status, "pending_review");
     answer = problem(403, "reserved_item", "Campaign cmp_SPRING is reserved.");
-    const refused = await cli(["--json", "campaign", "update", CAMPAIGN, "--no-reserved"], transport, configDir);
+    const refused = await cli(["--json", "campaign", "update", CAMPAIGN, "--name", "x"], transport, configDir);
     assert.equal(refused.code, ExitCode.Auth);
     assert.equal(refused.envelope.error?.code, "reserved_item");
     assert.match(refused.envelope.error?.hint ?? "", /approver/);
@@ -498,13 +495,12 @@ test("help states write scope, waiting and recovery for the scope options", () =
   }
   for (const words of [["campaign", "create"], ["campaign", "update"]]) {
     const help = commandHelp(words);
-    assert.ok(help.options.some((option) => option.name === "--reserved"), words.join(" "));
+    assert.equal(help.options.some((option) => option.name === "--reserved"), false, words.join(" "));
     assert.ok(help.options.some((option) => option.name === "--note"), words.join(" "));
     assert.match(help.usage, /reserved_item/);
     assert.match(help.usage, /editable: false/);
   }
-  assert.ok(commandHelp(["campaign", "update"]).options.some((option) => option.name === "--no-reserved"));
-  assert.ok(commandHelp(["campaign", "update"]).examples.some((example) => example.includes("--no-reserved")));
+  assert.equal(commandHelp(["campaign", "update"]).options.some((option) => option.name === "--no-reserved"), false);
   const reviews = commandHelp(["reviews", "list"]);
   assert.deepEqual(reviews.options.find((option) => option.name === "--kind")?.choices, ["playlist_change", "screen_change", "ad_creative", "protected_change"]);
   assert.ok(reviews.examples.some((example) => example.includes("--kind protected_change")));

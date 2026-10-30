@@ -27,7 +27,6 @@ const DATE_HELP = "YYYY-MM-DD with an optional @HH:MM-HH:MM, such as 2026-12-24 
 const EXCEPT_HELP = "YYYY-MM-DD dates; an exception removes every occurrence that starts on that date (repeatable, or comma-separated, at most 100)";
 const ON_TOUCH_HELP = "Hold only while someone is using the screen, until IDLE_S seconds (5 to 3600, default 60) pass without input; Players that resolve their own stack honor it";
 const DISPLAYS_HELP = "Play only on these video wall outputs, 1 to 12, comma-separated (default: every output)";
-const RESERVED_HELP = "Reserve the campaign: only a person who can approve changes, pauses, deletes or un-reserves it (an agent is refused with reserved_item)";
 const START_HELP = "on-time switches at the edge, interrupting the current item; next-item waits for it to end (default)";
 
 const AUDIENCE_FLAGS = ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"];
@@ -59,7 +58,6 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--start <WHEN>", START_HELP).choices(["on-time", "next-item"]))
     .option("--priority <N>", "Priority 0 to 100; the higher wins when two campaigns hold on one screen (default: 0)", campaignPriority)
     .option("--paused", "Create it paused: no screen changes until campaign resume")
-    .option("--reserved", RESERVED_HELP)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleCampaignCreate));
   requireOptionGroup(create, "exactlyOne", AUDIENCE_FLAGS);
@@ -88,12 +86,10 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--clear-displays", "Play on every output again").conflicts(["displays"]))
     .addOption(new Option("--start <WHEN>", START_HELP).choices(["on-time", "next-item"]))
     .option("--priority <N>", "Priority 0 to 100; the higher wins when two campaigns hold on one screen", campaignPriority)
-    .option("--reserved", RESERVED_HELP)
-    .option("--no-reserved", "Clear the reserved flag")
     .option("--expect-rev <REVISION>", "Optionally require this campaign revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleCampaignUpdate));
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--displays", "--clear-displays", "--start", "--priority", "--reserved", "--no-reserved"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--displays", "--clear-displays", "--start", "--priority"]);
   requireOptionGroup(update, "atMostOne", AUDIENCE_FLAGS);
 
   campaign.command("pause").description("Stop a campaign on every screen without deleting it")

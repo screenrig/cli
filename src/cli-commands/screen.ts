@@ -287,12 +287,11 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--root", "Move it to the project root").conflicts("parent"))
     .addOption(new Option("--default-playlist-id <ID>", "The approved playlist its screens show when they have none of their own").argParser(screenFolderPlaylistOption).conflicts("clearDefault"))
     .addOption(new Option("--clear-default", "Remove its default playlist").conflicts("defaultPlaylistId"))
-    .addOption(new Option("--protect", "Protect the folder and every folder inside it: a change reaching their screens then waits for a second approver. Only a person who can approve protects; an agent is refused with approver_required").conflicts(["unprotect", "name", "parent", "root", "defaultPlaylistId", "clearDefault"]))
-    .addOption(new Option("--unprotect", "Propose removing the folder's protection, sent alone; a second approver decides the review").conflicts(["protect", "name", "parent", "root", "defaultPlaylistId", "clearDefault"]))
+    .addOption(new Option("--unprotect", "Propose removing the folder's protection, sent alone; a second approver decides the review").conflicts(["name", "parent", "root", "defaultPlaylistId", "clearDefault"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenFolderUpdate));
-  requireOptionGroup(folderUpdate, "atLeastOne", ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default", "--protect", "--unprotect"]);
+  requireOptionGroup(folderUpdate, "atLeastOne", ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default", "--unprotect"]);
   folder.command("delete").description("Delete a screen folder; its screens and folders move up one level")
     .argument("<id>", "Screen folder identifier (sfd_...)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)

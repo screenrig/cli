@@ -237,18 +237,16 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
   const playlist = flagString(args.flags, "default-playlist-id");
   const clearDefault = flagBool(args.flags, "clear-default");
   const revision = flagString(args.flags, "expect-rev");
-  const protect = flagBool(args.flags, "protect");
   const unprotect = flagBool(args.flags, "unprotect");
-  if (name === undefined && parent === undefined && !root && playlist === undefined && !clearDefault && !protect && !unprotect) {
-    throw usageError("screen folder update requires --name NAME, --parent ID, --root, --default-playlist-id ID, --clear-default, --protect or --unprotect.");
+  if (name === undefined && parent === undefined && !root && playlist === undefined && !clearDefault && !unprotect) {
+    throw usageError("screen folder update requires --name NAME, --parent ID, --root, --default-playlist-id ID, --clear-default or --unprotect.");
   }
   if (parent !== undefined && root) throw usageError("Give --parent ID or --root, not both.");
   if (playlist !== undefined && clearDefault) throw usageError("Give --default-playlist-id ID or --clear-default, not both.");
-  if (protect && unprotect) throw usageError("Give --protect or --unprotect, not both.");
-  if ((protect || unprotect) && (name !== undefined || parent !== undefined || root || playlist !== undefined || clearDefault)) {
-    throw usageError("--protect and --unprotect change protection alone: send the rename, move or default playlist in another command.");
+  if (unprotect && (name !== undefined || parent !== undefined || root || playlist !== undefined || clearDefault)) {
+    throw usageError("--unprotect changes protection alone: send the rename, move or default playlist in another command.");
   }
-  const body: ScreenFolderPatch = protect || unprotect ? { protected: protect } : {
+  const body: ScreenFolderPatch = unprotect ? { protected: false } : {
     ...(name !== undefined ? { name: screenFolderName(name) } : {}),
     ...(parent !== undefined ? { parent_id: screenFolderId(parent, "--parent") } : {}),
     ...(root ? { parent_id: null } : {}),
@@ -262,8 +260,8 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
   }, id);
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
-  return folderResult(response, client.requestId, protect || unprotect
-    ? `${protect ? "Protected" : "Cleared the protection of"} screen folder ${id}${protect ? " and every folder inside it" : ""}.`
+  return folderResult(response, client.requestId, unprotect
+    ? `Cleared the protection of screen folder ${id}.`
     : `Updated screen folder ${id}. The screens inside re-resolve their playlist within about 15 seconds.`);
 });
 

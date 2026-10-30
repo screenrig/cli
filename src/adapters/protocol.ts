@@ -2189,7 +2189,7 @@ export interface ScreenFolderPatch {
   parent_id?: string | null;
   /** null clears the default playlist. */
   default_playlist_id?: string | null;
-  /** Sent alone. Only a person who can approve protects a folder; clearing it is a review a second approver decides. */
+  /** false, sent alone: removing a folder's protection is a review a second approver decides. */
   protected?: boolean;
 }
 
@@ -2262,7 +2262,6 @@ export interface CampaignWrite extends LevelMembers {
   audience: CampaignAudience;
   priority?: number;
   paused?: boolean;
-  reserved?: boolean;
 }
 
 /** null clears a level member (from, until, windows, monthly, dates, except, data, interaction, displays); null covers is the full page and null start is next_item. */
@@ -2272,7 +2271,6 @@ export interface CampaignPatch extends Nullable<LevelMembers> {
   audience?: CampaignAudience;
   priority?: number;
   paused?: boolean;
-  reserved?: boolean;
 }
 
 type Nullable<T> = { [K in keyof T]?: T[K] | null };

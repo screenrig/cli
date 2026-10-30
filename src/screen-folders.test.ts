@@ -111,7 +111,7 @@ test("screen folder and move commands are in help, with the folder selector on e
   assert.deepEqual(commandHelp(["screen", "move"]).relationships, [{ kind: "exactlyOne", options: ["--folder", "--root"] }]);
   assert.match(commandHelp(["screen", "move"]).usage, /sfd_ IDs\) into --folder ID, or out of every folder with --root/);
   const update = commandHelp(["screen", "folder", "update"]);
-  assert.deepEqual(update.relationships, [{ kind: "atLeastOne", options: ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default", "--protect", "--unprotect"] }]);
+  assert.deepEqual(update.relationships, [{ kind: "atLeastOne", options: ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default", "--unprotect"] }]);
   assert.deepEqual(update.options.find((option) => option.name === "--parent")?.conflicts, ["--root"]);
   assert.deepEqual(update.options.find((option) => option.name === "--default-playlist-id")?.conflicts, ["--clear-default"]);
   assert.equal(commandHelp(["screen", "folder", "create"]).options.find((option) => option.name === "--name")?.required, true);

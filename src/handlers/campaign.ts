@@ -40,11 +40,6 @@ export function campaignRevisionHeaders(args: ParsedArgs): Record<string, string
   return Object.keys(headers).length ? headers : undefined;
 }
 
-/** --reserved is true and --no-reserved false; neither leaves the member out of the body. */
-export function campaignReservedFlag(args: ParsedArgs): boolean | undefined {
-  if (flagBool(args.flags, "reserved")) return true;
-  return flagBool(args.flags, "no-reserved") ? false : undefined;
-}
 
 /**
  * The audience the flags name, or undefined when none is given: --tag (every
@@ -116,7 +111,6 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
   const paused = flagBool(args.flags, "paused");
-  const reserved = campaignReservedFlag(args);
   const body: CampaignWrite = {
     name,
     playlist_id: playlistId,
@@ -127,7 +121,6 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
     ...campaignLevelFlags(args),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
     ...(paused ? { paused: true } : {}),
-    ...(reserved !== undefined ? { reserved } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, { method: "POST", path: CAMPAIGNS_PATH, idempotent: true, body, headers: campaignRevisionHeaders(args) });
@@ -166,7 +159,6 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
   const until = flagString(args.flags, "until");
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
-  const reserved = campaignReservedFlag(args);
   const clears = (["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const).filter((flag) => flagBool(args.flags, flag));
   const audience = await campaignAudienceFlag(args, runtime);
   campaignBounds(from, until);
@@ -187,10 +179,9 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
     ...(clears.includes("clear-on-touch") ? { interaction: null } : {}),
     ...(clears.includes("clear-displays") ? { displays: null } : {}),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
-    ...(reserved !== undefined ? { reserved } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, --priority, --reserved, or --no-reserved.");
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, {
