@@ -2,6 +2,7 @@ import { CliError, usageError } from "./problems.js";
 import type {
   Campaign,
   CampaignAudience,
+  CampaignReach,
   CampaignScreens,
   CampaignStatus,
   LevelDate,
@@ -547,6 +548,24 @@ export function campaignWhenText(campaign: Pick<Campaign, "from" | "until" | "wi
   return parts.length ? parts.join("; ") : "always";
 }
 
+/** "7 of 10": the screens a campaign reaches now of the screens it reached when it was last published. */
+export function campaignReachText(reach: CampaignReach | undefined): string {
+  if (!reach || !Number.isSafeInteger(reach.current) || !Number.isSafeInteger(reach.published)) return "";
+  return `${reach.current} of ${reach.published}`;
+}
+
+/** The reach line of show: the counts, when they were counted, a drop worth a look and the audience groups that match no screen. */
+function reachLines(reach: CampaignReach | undefined): string[] {
+  const text = campaignReachText(reach);
+  if (!text || !reach) return [];
+  const dropped = reach.current < reach.published ? ` (${reach.published - reach.current} fewer than when it was published)` : "";
+  const empty = Array.isArray(reach.empty_groups) ? reach.empty_groups : [];
+  return [
+    `reach: ${text} screens${dropped}${reach.at ? `, counted ${reach.at}` : ""}`,
+    ...(empty.length ? [`empty_groups: ${empty.join(", ")} (no screen matches)`] : []),
+  ];
+}
+
 /** Every field of a campaign, one per line. */
 export function campaignLines(campaign: Campaign | undefined): string[] {
   if (!campaign) return [];
@@ -557,6 +576,7 @@ export function campaignLines(campaign: Campaign | undefined): string[] {
     `name: ${campaign.name}`,
     `playlist_id: ${campaign.playlist_id}`,
     `audience: ${campaignAudienceText(campaign.audience)}`,
+    ...reachLines(campaign.reach),
     `when: ${clock}${civil ? " (civil times in each screen's timezone)" : ""}`,
     ...(campaign.covers && campaign.covers !== "full" ? [`covers: ${campaign.covers}`] : []),
     ...(campaign.displays?.length ? [`displays: ${campaign.displays.join(", ")}`] : []),
@@ -580,11 +600,14 @@ function table(header: string[], rows: string[][]): string[] {
 /** The list table, in the precedence order the API returns. */
 export function campaignTableLines(items: Campaign[]): string[] {
   if (!items.length) return ["No campaigns"];
+  // REACH appears only when a listed campaign has been counted, so a project without counts keeps its table.
+  const reach = items.some((item) => campaignReachText(item.reach) !== "");
   // RESERVED and EDITABLE appear only when some campaign is reserved or the caller is limited to screens.
   const reserved = items.some((item) => item.reserved);
   const scoped = items.some((item) => item.editable !== undefined);
-  return table(["ID", "NAME", "PLAYLIST", "AUDIENCE", "WHEN", "PRIORITY", "PAUSED", ...(reserved ? ["RESERVED"] : []), ...(scoped ? ["EDITABLE"] : [])], items.map((item) => [
+  return table(["ID", "NAME", "PLAYLIST", "AUDIENCE", ...(reach ? ["REACH"] : []), "WHEN", "PRIORITY", "PAUSED", ...(reserved ? ["RESERVED"] : []), ...(scoped ? ["EDITABLE"] : [])], items.map((item) => [
     item.id ?? "", clip(item.name ?? "", 40), item.playlist_id ?? "", clip(campaignAudienceText(item.audience), 48),
+    ...(reach ? [campaignReachText(item.reach)] : []),
     clip(campaignWhenText(item), 56), String(item.priority ?? 0), item.paused ? "yes" : "no",
     ...(reserved ? [item.reserved ? "yes" : "no"] : []), ...(scoped ? [item.editable === false ? "no" : "yes"] : []),
   ]));

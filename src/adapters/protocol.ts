@@ -840,6 +840,8 @@ export interface ScreenManifestUpgrade {
 }
 
 export interface Screen {
+  /** Only on the answer to a write that changed the screen's tags: the campaigns the screen entered or left. Absent on every read. */
+  levels?: ScreenLevelChanges;
   content_access_generation: number;
   created_at: string;
   /** The screen's link, when it has one. Never carries the url. */
@@ -1072,6 +1074,8 @@ export interface ScreenActionResult {
   succeeded: number;
   failed: number;
   results: ScreenActionScreenResult[];
+  /** set_tags, add_tags and remove_tags: the campaigns this page's screens entered or left, summed over the page. */
+  levels?: ScreenLevelChanges;
   /** assign only: the screen_fact_missing warning when the playlist reads a value (screen field, location) some screen of the page lacks. */
   warnings?: Array<{ code: string; message: string; page_id?: string; primitive_id?: string; src?: string; tokens?: string[]; screen_ids?: string[]; screen_count?: number }>;
   /** Continuation metadata from the backend-owned ScreenActionResult contract. */
@@ -1565,6 +1569,14 @@ export type NotificationSeverity = "info" | "warning" | "error";
 /** Condition to severity for one notification; a condition not listed keeps its default (error for screen_offline, warning for the rest). */
 export type NotificationSeverityOverrides = Partial<Record<string, NotificationSeverity>>;
 
+/** The smallest drop in a campaign's reach a reach_dropped notice is sent for; a drop must meet both members that are set. */
+export interface NotificationReachDrop {
+  /** The fewest screens lost (default 1). */
+  screens?: number;
+  /** The smallest share, 1 to 100, of the screens the campaign reached when it was published. */
+  percent?: number;
+}
+
 /** When opened notices go out: the windows, read in timezone; outside them a notice is held for the next opening (the default) or dropped. */
 export interface NotificationActiveHours {
   timezone: string;
@@ -1602,6 +1614,8 @@ export interface Notification {
   severity?: NotificationSeverityOverrides;
   /** Present while set; outside is always shown. */
   active_hours?: NotificationActiveHours;
+  /** reach_dropped only; present while set. Absent notifies any drop. */
+  reach_drop?: NotificationReachDrop;
   snoozed_until?: string;
   status: "active" | "failing" | "disabled";
   /** Telegram only: the chat messages go to. */
@@ -1637,6 +1651,8 @@ export interface NotificationWrite {
   min_severity?: NotificationSeverity;
   severity?: NotificationSeverityOverrides;
   active_hours?: NotificationActiveHours;
+  /** reach_dropped only. */
+  reach_drop?: NotificationReachDrop;
   conditions?: string[];
   description?: string;
   /** Slack, Teams, PagerDuty and Telegram only: the write-only webhook URL, routing key or bot token. */
@@ -1660,6 +1676,8 @@ export interface NotificationPatch {
   severity?: NotificationSeverityOverrides | null;
   /** Replaces the hours; null clears them. */
   active_hours?: NotificationActiveHours | null;
+  /** Replaces the threshold; null clears it, so any drop notifies. */
+  reach_drop?: NotificationReachDrop | null;
   conditions?: string[];
   /** An empty string clears the description. */
   description?: string;
@@ -1682,6 +1700,8 @@ export interface NotificationDelivery {
   completed_at?: string;
   /** A screen notice's condition; absent for an event delivery. */
   condition?: string;
+  /** group_empty only: the tag or folder the notice is about, as tag:NAME or folder:sfd_ID. */
+  audience_group?: string;
   created_at: string;
   /** Email only: how many people the email reached. */
   emailed?: number;
@@ -2173,6 +2193,11 @@ export interface ScreenFolder {
   updated_at: string;
 }
 
+/** The 200 answer of DELETE /api/screen-folders/{id}: the folder default playlists and campaigns the moved screens gained or lost. */
+export interface ScreenFolderDeleteResult {
+  levels: ScreenLevelChanges;
+}
+
 export interface ScreenFolderList {
   items: ScreenFolder[];
 }
@@ -2200,6 +2225,10 @@ export interface ScreenLevelChange {
   name?: string;
   playlist_id: string;
   screens: number;
+  /** Campaign only, when it has a reach (Campaign.reach): its last counted reach. */
+  reach_before?: number;
+  /** Campaign only, when it has a reach: reach_before moved by the screens this write brings into or takes out of its audience; the campaign-reach worker recounts it within about 15 seconds. */
+  reach_after?: number;
 }
 
 export interface ScreenLevelChanges {
@@ -2235,8 +2264,19 @@ export interface CampaignAudience {
 }
 
 /** GET /api/campaigns/{id}: a content campaign. from and until are civil YYYY-MM-DDTHH:MM in each screen's timezone. */
+/** How many live screens a campaign's audience matches: when it was last published, and at the latest count. */
+export interface CampaignReach {
+  published: number;
+  current: number;
+  at: string;
+  /** The tag and folder leaves of the audience that matched no screen at `at`, as tag:NAME or folder:ID. */
+  empty_groups: string[];
+}
+
 export interface Campaign extends LevelMembers {
   project_id?: string;
+  /** Absent until the campaign is first published or recounted. */
+  reach?: CampaignReach;
   id: string;
   name: string;
   playlist_id: string;

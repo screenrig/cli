@@ -3,7 +3,7 @@ import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList, handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate } from "../handlers/notifications.js";
-import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationAudienceOption, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
+import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationAudienceOption, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationReachDropPercent, notificationReachDropScreens, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
 import { weeklyWindows } from "../campaigns.js";
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
@@ -22,6 +22,8 @@ const otherChannels = (flag: (typeof CHANNEL_FLAGS)[number]): string[] => CHANNE
 
 const activeHoursOption = weeklyWindows("--active-hours");
 
+const REACH_DROP_SCREENS_HELP = "With the reach_dropped condition: send a notice only when a campaign loses at least N screens (default 1)";
+const REACH_DROP_PERCENT_HELP = "With the reach_dropped condition: send a notice only when the loss is at least P percent (1 to 100) of the screens the campaign reached when it was published; a drop must meet both thresholds";
 const CONDITIONS = NOTIFICATION_CONDITIONS.join(", ");
 const SEVERITIES = NOTIFICATION_SEVERITIES.join(", ");
 const SEVERITY_HELP = `Override a condition's severity for this notification, CONDITION=LEVEL such as not_playing=error (repeatable; conditions: ${CONDITIONS}; levels: ${SEVERITIES}). The default is error for screen_offline and warning for every other condition. It counts for --min-severity and is the severity every channel shows`;
@@ -39,7 +41,12 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  state: screen_offline, display_disconnected, running_hot, storage_full,",
     "  content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen or crashing,",
     "  or when a data source fails to refresh or goes stale (source_failed,",
-    "  source_stale; --tag never matches a source). A condition notifies once it has lasted",
+    "  source_stale; --tag never matches a source), or when a content campaign (the",
+    "  shared level of the schedule stack) stops reaching screens: reach_dropped when",
+    "  it reaches fewer screens than when it was last published (--reach-drop-screens",
+    "  and --reach-drop-percent set the smallest drop that notifies), group_empty when",
+    "  a tag or folder its audience names matches no screen. Neither is limited by",
+    "  --tag or --audience. A condition notifies once it has lasted",
     "  --hold minutes (default 10), and a resolved notice follows when it clears after",
     "  a notice went out; crashing is sent at once. A notice sends nothing when the",
     "  screen's alert is acknowledged or snoozed during the hold, or a mute covers the",
@@ -88,6 +95,8 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--active-hours <SPEC>", HOURS_HELP).argParser(activeHoursOption))
     .addOption(new Option("--timezone <ZONE>", "With --active-hours: the IANA timezone its windows are read in, such as America/Los_Angeles").argParser(notificationTimezone))
     .addOption(new Option("--outside-hours <WHEN>", "With --active-hours: hold (default) keeps a notice until the next window opens and sends it if its condition still holds; drop skips it").choices(["hold", "drop"]))
+    .addOption(new Option("--reach-drop-screens <N>", REACH_DROP_SCREENS_HELP).argParser(notificationReachDropScreens))
+    .addOption(new Option("--reach-drop-percent <P>", REACH_DROP_PERCENT_HELP).argParser(notificationReachDropPercent))
     .option("--hold <MINUTES>", "Minutes a condition must last before it notifies, 0 to 1440 (default 10); crashing is never held", notificationHold)
     .option("--description <TEXT>", "Describe the notification (at most 200 characters)", webhookDescription)
     .option("--disabled", "Create it disabled; nothing is sent until notifications update --enable")
@@ -131,6 +140,9 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--timezone <ZONE>", "The IANA timezone the active hours are read in; alone it keeps the current windows").argParser(notificationTimezone).conflicts(["clearActiveHours"]))
     .addOption(new Option("--outside-hours <WHEN>", "hold keeps a notice until the next window opens, drop skips it; alone it keeps the current windows").choices(["hold", "drop"]).conflicts(["clearActiveHours"]))
     .addOption(new Option("--clear-active-hours", "Remove the active hours; notices go out at any time").conflicts(["activeHours", "timezone", "outsideHours"]))
+    .addOption(new Option("--reach-drop-screens <N>", `Replace the reach-drop threshold. ${REACH_DROP_SCREENS_HELP}`).argParser(notificationReachDropScreens).conflicts(["clearReachDrop"]))
+    .addOption(new Option("--reach-drop-percent <P>", `Replace the reach-drop threshold. ${REACH_DROP_PERCENT_HELP}`).argParser(notificationReachDropPercent).conflicts(["clearReachDrop"]))
+    .addOption(new Option("--clear-reach-drop", "Remove the reach-drop threshold; any drop notifies").conflicts(["reachDropScreens", "reachDropPercent"]))
     .option("--hold <MINUTES>", "Minutes a condition must last before it notifies, 0 to 1440", notificationHold)
     .addOption(new Option("--description <TEXT>", "Replace the description (at most 200 characters)").argParser(webhookDescription).conflicts(["clearDescription"]))
     .addOption(new Option("--clear-description", "Remove the description").conflicts(["description"]))
@@ -141,7 +153,7 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .action(bind(handleNotificationsUpdate));
   requireOptionGroup(update, "atLeastOne", [
     "--email", "--url", "--destination", "--telegram-chat", "--conditions", "--clear-conditions", "--events", "--clear-events", "--tag", "--any-tag", "--all-tags", "--audience", "--all-screens",
-    "--min-severity", "--clear-min-severity", "--severity", "--clear-severity", "--active-hours", "--timezone", "--outside-hours", "--clear-active-hours",
+    "--min-severity", "--clear-min-severity", "--severity", "--clear-severity", "--active-hours", "--timezone", "--outside-hours", "--clear-active-hours", "--reach-drop-screens", "--reach-drop-percent", "--clear-reach-drop",
     "--hold", "--description", "--clear-description", "--enable", "--disable", "--snooze",
   ]);
   requireOptionGroup(update, "atMostOne", ["--email", "--url", "--destination"]);

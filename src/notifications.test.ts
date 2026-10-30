@@ -1255,3 +1255,110 @@ test("a webhook delivery's severity and the planned_reboot and outside_hours ski
   assert.match(help.stdout, /outside_hours \(the notification's active hours were closed/);
   assert.match(help.stdout, /planned_reboot \(the screen went offline/);
 });
+
+test("reach_dropped and group_empty are conditions of every notification, beside the thresholds the first one takes", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const both = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "reach_dropped,group_empty"], transport, env);
+  assert.equal(both.code, 0, both.stdout);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { conditions: string[] }).conditions, ["reach_dropped", "group_empty"]);
+  assert.equal((notificationCalls(transport).at(-1)!.body as { reach_drop?: unknown }).reach_drop, undefined, "no threshold sends none: any drop notifies");
+
+  const created = await cli(["--json", "notifications", "create", "--webhook", URL_OK, "--conditions", "reach_dropped,screen_offline", "--reach-drop-screens", "2", "--reach-drop-percent", "20", "--severity", "reach_dropped=error"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { reach_drop: unknown }).reach_drop, { screens: 2, percent: 20 });
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { severity: unknown }).severity, { reach_dropped: "error" });
+  const id = created.envelope.data.id as string;
+  const human = await cli(["--human", "notifications", "show", id], transport, env);
+  assert.match(human.stdout, /^reach_drop: at least 2 screens and at least 20% of the screens it reached when published$/m);
+  assert.match(human.stdout, /^conditions: reach_dropped, screen_offline$/m);
+  const list = await cli(["--human", "notifications", "list"], transport, env);
+  assert.match(list.stdout, /reach drop at least 2 screens and at least 20%/);
+
+  const only = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "reach_dropped", "--reach-drop-percent", "10"], transport, env);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { reach_drop: unknown }).reach_drop, { percent: 10 });
+  assert.equal(only.code, 0, only.stdout);
+  const onlyHuman = await cli(["--human", "notifications", "show", only.envelope.data.id], transport, env);
+  assert.match(onlyHuman.stdout, /^reach_drop: at least 10% of the screens it reached when published$/m);
+});
+
+test("notifications create and update validate the reach-drop flags before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const email = ["--email", "owner"];
+  const cases: Array<[string[], RegExp]> = [
+    [[...email, "--conditions", "screen_offline", "--reach-drop-screens", "2"], /add reach_dropped to --conditions/],
+    [[...email, "--conditions", "reach_dropped", "--reach-drop-screens", "0"], /--reach-drop-screens takes a whole number of screens, 1 or more/],
+    [[...email, "--conditions", "reach_dropped", "--reach-drop-screens", "1.5"], /--reach-drop-screens/],
+    [[...email, "--conditions", "reach_dropped", "--reach-drop-percent", "0"], /--reach-drop-percent takes a whole percent from 1 to 100/],
+    [[...email, "--conditions", "reach_dropped", "--reach-drop-percent", "101"], /--reach-drop-percent/],
+    [[...email, "--conditions", "reach_dropped", "--reach-drop-percent", "ten"], /--reach-drop-percent/],
+  ];
+  for (const [args, message] of cases) {
+    const refused = await cli(["--json", "notifications", "create", ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("notifications update replaces, clears and refuses the reach-drop threshold", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = (await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "reach_dropped"], transport, env)).envelope.data as { id: string };
+  const patch = async (...args: string[]) => {
+    const result = await cli(["--json", "notifications", "update", id, ...args], transport, env);
+    assert.equal(result.code, 0, `${args.join(" ")}: ${result.stdout}`);
+    return { body: notificationCalls(transport).filter((call) => call.method === "PATCH").at(-1)!.body, data: result.envelope.data };
+  };
+  const set = await patch("--reach-drop-screens", "3", "--reach-drop-percent", "25");
+  assert.deepEqual(set.body, { reach_drop: { screens: 3, percent: 25 } });
+  assert.deepEqual(set.data.reach_drop, { screens: 3, percent: 25 });
+  assert.deepEqual((await patch("--reach-drop-percent", "50")).body, { reach_drop: { percent: 50 } }, "the threshold is replaced as a whole");
+  const cleared = await patch("--clear-reach-drop");
+  assert.deepEqual(cleared.body, { reach_drop: null });
+  assert.equal(cleared.data.reach_drop, undefined);
+  const both = await patch("--conditions", "reach_dropped,group_empty", "--reach-drop-screens", "2");
+  assert.deepEqual(both.body, { conditions: ["reach_dropped", "group_empty"], reach_drop: { screens: 2 } });
+
+  const count = notificationCalls(transport).length;
+  for (const [args, message] of [
+    [["--clear-reach-drop", "--reach-drop-screens", "2"], /cannot be used with/],
+    [["--conditions", "group_empty", "--reach-drop-screens", "2"], /add reach_dropped to --conditions/],
+    [["--reach-drop-percent", "200"], /--reach-drop-percent/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "notifications", "update", id, ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, count, "invalid input never reaches the server");
+  // The server refuses a threshold on a notification that lacks the condition, and the refusal is shown.
+  const server = await cli(["--json", "notifications", "update", id, "--conditions", "screen_offline"], transport, env);
+  assert.equal(server.code, ExitCode.Client, server.stdout);
+});
+
+test("a group_empty delivery names the tag or folder in an AUDIENCE_GROUP column that appears only then", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = (await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "group_empty,reach_dropped"], transport, env)).envelope.data as { id: string };
+  transport.putNotificationDelivery!(id, {
+    id: "whd_EMPTYAAAAAAAAAAAAAAAA", notification_id: id, event_id: "ev1_8", event_type: "campaign.group_changed", condition: "group_empty", phase: "opened",
+    screen_id: "cmp_PROMOAAAAAAAAAAAAAA", screen_name: "Lobby promo", audience_group: "tag:Lobby", state: "succeeded", attempts: 1, created_at: "2026-10-29T16:55:00.000Z",
+  });
+  const json = await cli(["--json", "notifications", "deliveries", id], transport, env);
+  assert.equal(json.envelope.data.items[0].audience_group, "tag:Lobby");
+  const human = await cli(["--human", "notifications", "deliveries", id], transport, env);
+  assert.match(human.stdout, /AUDIENCE_GROUP/);
+  assert.match(human.stdout, /group_empty\s+opened\s+Lobby promo\s+tag:Lobby\s+succeeded/);
+  transport.putNotificationDelivery!(id, {
+    id: "whd_DROPPEDAAAAAAAAAAAAAA", notification_id: id, event_id: "ev1_9", event_type: "campaign.reach_changed", condition: "reach_dropped", phase: "opened",
+    screen_id: "cmp_PROMOAAAAAAAAAAAAAA", screen_name: "Lobby promo", state: "skipped", attempts: 0, last_error: "condition_cleared", created_at: "2026-10-29T16:56:00.000Z",
+  });
+  const plain = notificationDeliveryTableLines([{ id: "whd_X", notification_id: id, event_id: "e", event_type: "screen.offline", state: "succeeded", attempts: 1, created_at: "x" } as NotificationDelivery]);
+  assert.doesNotMatch(plain.join("\n"), /AUDIENCE_GROUP/);
+  const help = commandHelp(["notifications", "create"]);
+  assert.match(help.options.find((option) => option.name === "--conditions")?.description ?? "", /reach_dropped, group_empty/);
+  for (const name of ["--reach-drop-screens", "--reach-drop-percent"]) assert.ok(help.options.some((option) => option.name === name), name);
+  const update = commandHelp(["notifications", "update"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--clear-reach-drop")?.conflicts, ["--reach-drop-screens", "--reach-drop-percent"]);
+});

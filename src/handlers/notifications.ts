@@ -1,6 +1,6 @@
 // Command handlers for the notifications commands, loaded on demand.
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
-import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationAudience, notificationSeverityMap, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationAudience, notificationReachDrop, notificationSeverityMap, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
 import { type Notification, type NotificationDelivery, type NotificationDeliveryList, type NotificationList, type NotificationPatch, type NotificationActiveHours, type NotificationSeverity, type CampaignAudience, type NotificationWithSecret, type NotificationWrite } from "../adapters/protocol.js";
 import { flagBool, flagString, type ParsedArgs } from "../command-input.js";
 import { campaignAnyTagAudience, campaignTagAudience, campaignWindowList } from "../campaigns.js";
@@ -93,7 +93,15 @@ async function notificationRuleFlags(args: ParsedArgs, runtime: CliRuntime) {
     windows: hours !== undefined ? campaignWindowList(hours) : undefined,
     timezone: flagString(args.flags, "timezone"),
     outside: flagString(args.flags, "outside-hours"),
+    reachDrop: notificationReachDrop(flagString(args.flags, "reach-drop-screens"), flagString(args.flags, "reach-drop-percent")),
   };
+}
+
+/** A reach-drop threshold only means something to the reach_dropped condition; --conditions that leave it out are refused before the request. */
+function reachDropNeedsCondition(conditions: string[] | undefined): void {
+  if (conditions !== undefined && !conditions.includes("reach_dropped")) {
+    throw usageError("--reach-drop-screens and --reach-drop-percent set the threshold of the reach_dropped condition; add reach_dropped to --conditions.");
+  }
 }
 
 export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
@@ -116,6 +124,7 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
   const rules = await notificationRuleFlags(args, runtime);
+  if (rules.reachDrop) reachDropNeedsCondition(conditions === undefined ? [] : notificationConditions(conditions));
   const body: NotificationWrite = {
     channel: email !== undefined ? "email" : webhook !== undefined ? "webhook" : chat[0]!.channel,
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
@@ -129,6 +138,7 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
     ...(rules.minSeverity !== undefined ? { min_severity: rules.minSeverity } : {}),
     ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
     ...(rules.windows !== undefined ? { active_hours: notificationActiveHours(rules.windows, rules.timezone, rules.outside, undefined) } : {}),
+    ...(rules.reachDrop ? { reach_drop: rules.reachDrop } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
@@ -193,6 +203,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     hours = notificationActiveHours(undefined, rules.timezone, rules.outside, current?.active_hours);
     readRevision = current?.revision;
   }
+  // A new list of conditions that leaves reach_dropped out cannot carry a threshold; without --conditions the server judges against the stored ones.
+  if (rules.reachDrop && conditions !== undefined) reachDropNeedsCondition(notificationConditions(conditions));
   const patch: NotificationPatch = {
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
     ...(url !== undefined ? { url: webhookUrl(url) } : {}),
@@ -211,6 +223,8 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
     ...(flagBool(args.flags, "clear-severity") ? { severity: null } : {}),
     ...(hours !== undefined ? { active_hours: hours } : {}),
+    ...(rules.reachDrop ? { reach_drop: rules.reachDrop } : {}),
+    ...(flagBool(args.flags, "clear-reach-drop") ? { reach_drop: null } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "clear-description") ? { description: "" } : {}),
@@ -219,7 +233,7 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --reach-drop-screens, --reach-drop-percent, --clear-reach-drop, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
   const guard = webhookRevisionHeaders(args) ?? (readRevision !== undefined ? { "if-match": quotedRevision(String(readRevision)) } : undefined);
   // --snooze derives its instant from the clock, so a rerun fingerprints

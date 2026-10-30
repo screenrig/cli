@@ -1127,3 +1127,33 @@ test("a stack-only reason reads as needing a Player that resolves its own stack"
   const json = await cli(["--json", "campaign", "screens", touch.id], transport, env);
   assert.equal(json.envelope.data.items[0].reason, "stack_only");
 });
+
+test("campaign show and list say how many screens a campaign reaches of the screens it reached when published, and which groups are empty", async () => {
+  const env = await enrolled();
+  const CAMPAIGN = "cmp_REACHEDAAAAAAAAAA";
+  const OTHER = "cmp_PLAINAAAAAAAAAAAAA";
+  const base = { playlist_id: PLAYLIST, audience: { all: [{ tag: "Lobby" }, { folder: "sfd_NORTHAAAAAAAAAAAAAAAAAA" }] }, priority: 0, paused: false, revision: 2, created_at: "2026-10-29T10:00:00Z", updated_at: "2026-10-29T10:00:00Z" };
+  const reached = { ...base, id: CAMPAIGN, name: "Lobby promo", reach: { published: 10, current: 7, at: "2026-10-29T16:59:00Z", empty_groups: ["tag:Lobby", "folder:sfd_NORTHAAAAAAAAAAAAAAAAAA"] } };
+  const plain = { ...base, id: OTHER, name: "Plain", audience: { tag: "Cafe" } };
+  const transport = new FakeTransport()
+    .on("GET", `/api/campaigns/${CAMPAIGN}`, () => ({ status: 200, headers: {}, body: reached }))
+    .on("GET", `/api/campaigns/${OTHER}`, () => ({ status: 200, headers: {}, body: plain }))
+    .on("GET", "/api/campaigns", () => ({ status: 200, headers: {}, body: { items: [reached, plain] } }));
+  const shown = await cli(["--human", "campaign", "show", CAMPAIGN], transport, env);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /^reach: 7 of 10 screens \(3 fewer than when it was published\), counted 2026-10-29T16:59:00Z$/m);
+  assert.match(shown.stdout, /^empty_groups: tag:Lobby, folder:sfd_NORTHAAAAAAAAAAAAAAAAAA \(no screen matches\)$/m);
+  const json = await cli(["--json", "campaign", "show", CAMPAIGN], transport, env);
+  assert.deepEqual(json.envelope.data.reach, reached.reach);
+  const unreached = await cli(["--human", "campaign", "show", OTHER], transport, env);
+  assert.doesNotMatch(unreached.stdout, /^reach:|empty_groups/m, "a campaign without a count prints no reach");
+
+  const list = await cli(["--human", "campaign", "list"], transport, env);
+  const lines = list.stdout.split("\n");
+  const header = lines.find((line) => line.startsWith("ID "))!;
+  assert.match(header, /^ID\s+NAME\s+PLAYLIST\s+AUDIENCE\s+REACH\s+WHEN\s+PRIORITY\s+PAUSED$/);
+  assert.match(lines.find((line) => line.startsWith(CAMPAIGN))!, /\s7 of 10\s+always/);
+  assert.match(lines.find((line) => line.startsWith(OTHER))!, /tag Cafe\s+always/);
+  const quiet = await cli(["--human", "campaign", "list"], new FakeTransport().on("GET", "/api/campaigns", () => ({ status: 200, headers: {}, body: { items: [plain] } })), env);
+  assert.doesNotMatch(quiet.stdout, /REACH/, "no counted campaign keeps the old table");
+});
