@@ -4,18 +4,18 @@ import { readAuthoringJson } from "../authoring-input.js";
 import { publishScreen } from "../screen-publish.js";
 import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, SCREEN_FOLDER_ID_PATTERN, screenFolderId, screenTag, screenTagList, screenTarget, selectorFlags, folderSubtree, SCREEN_TAGS_MAX, type FleetItem } from "../screen-fleet.js";
 import { canonicalPairingCode } from "../pairing-code.js";
-import { playlistWarnings, hasFramingRefusal } from "../playlist-warnings.js";
+import { playlistWarnings, playlistAnswerWarnings, withoutAnswerWarnings, hasFramingRefusal } from "../playlist-warnings.js";
 import { shortApplicationPageWarning } from "../playlist-authoring.js";
 import { callPlaylist } from "../playlist-api.js";
 import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
-import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "../screen-display.js";
+import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "../screen-commands.js";
 import { flatFrameNote, frameRow, glassLines } from "../screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "../screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "../screen-live-frame.js";
-import type { LiveStartRequest } from "../adapters/protocol.js";
+import type { LiveStartRequest, ScreenRebootScheduleView } from "../adapters/protocol.js";
 import { healthLines, screenHealthIssues } from "../screen-health.js";
 import { outageLines } from "../screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "../screen-manifest-upgrade.js";
@@ -579,6 +579,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
+      ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone),
       ...healthLines(screen?.health),
       ...outageLines(screen),
       ...commandLines(screen),
@@ -664,12 +665,14 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   // A playlist-only change under Propose access waits for review.
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
+  // The answer's screen_fact_missing warning (a playlist the screen shows reads a value it lacks) moves into the envelope.
   const warnings = [
     ...(playlistId ? aspectMismatchWarnings(id, response.body, playlist) : []),
     ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+    ...playlistAnswerWarnings(response.body),
   ];
   return {
-    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     // The merged fields and the location the screen now holds, when this update changed them.
     human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
@@ -705,9 +708,10 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const warnings = [
     ...aspectMismatchWarnings(id, response.body, playlist),
     ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+    ...playlistAnswerWarnings(response.body),
   ];
   return {
-    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     human: [`Assigned playlist ${playlistId} to ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
@@ -732,7 +736,12 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
     body,
   });
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
+  const lifted = playlistAnswerWarnings(response.body);
+  return {
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, lifted),
+    exitCode: ExitCode.Success,
+    human: [`Set timezone ${timezone} on ${id}`, ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
 }, true);
 
 /** screen wall set|clear: one ScreenPatch carrying only wall; null clears it. */
@@ -988,6 +997,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
   let after: string | undefined;
   const result: import("../adapters/protocol.js").ScreenActionResult = { action: action.type, matched: 0, succeeded: 0, failed: 0, results: [] };
   let total: number | undefined;
+  const answerWarnings: Warning[] = [];
   while (true) {
     try {
       response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body,
@@ -1016,6 +1026,8 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
     result.succeeded += page.succeeded;
     result.failed += page.failed;
     result.results.push(...page.results);
+    // A fleet assign page answers screen_fact_missing when a playlist it assigns reads a value some screen of the page lacks.
+    answerWarnings.push(...playlistWarnings(page.warnings ?? []));
     if (page.next_cursor === undefined) {
       if (response.status !== 200 || (total !== undefined && result.matched !== total)) {
         throw unexpectedResponseError("Fleet action ended without all selected screens; rerun the identical command to resume safely.");
@@ -1034,7 +1046,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
   }
   const outcome = fleetOutcome(result);
   return {
-    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, outcome.warnings),
+    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, [...outcome.warnings, ...answerWarnings]),
     exitCode: outcome.exitCode,
     human: [
       fleetHumanLines(title, result, (item) => {
@@ -2457,6 +2469,78 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: displayHuman(`Cleared the display schedule on ${id}`, response.body as Screen | undefined),
+  };
+}, true);
+
+function rebootScheduleHuman(title: string, screen: Screen | undefined): string {
+  return [title, ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
+}
+
+export const handleScreenRebootScheduleShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("screen reboot-schedule show requires <id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule` });
+  const view = response.body as ScreenRebootScheduleView | undefined;
+  let timezone: string | undefined;
+  if (flagBool(args.flags, "human")) {
+    try {
+      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+    } catch {
+      timezone = undefined;
+    }
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Reboot schedule for ${id}`, ...(view?.reboot_schedule ? [] : ["No reboot schedule: the screen reboots only when asked (screen reboot)."]), ...rebootScheduleLines(view?.reboot_schedule, view?.next_reboot_at, timezone)].join("\n"),
+  };
+}, true);
+
+export const handleScreenRebootScheduleSet = commandHandler(async (args, runtime, resolved) => {
+  const file = flagString(args.flags, "file");
+  const windows = flagString(args.flags, "window");
+  if ((file === undefined) === (windows === undefined)) throw usageError("screen reboot-schedule set requires --window SPEC (repeatable) or --file FILE (or --file - for stdin).");
+  const target = nestedScreenTarget(args, "screen reboot-schedule set");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule set");
+  const write = file !== undefined
+    ? rebootScheduleWrite(await readAuthoringJson(file, runtime))
+    : { enabled: !flagBool(args.flags, "disabled"), windows: rebootWindowList(windows!) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot schedule set", target.selector, { type: "set_reboot_schedule", ...write });
+  const id = target.id;
+  const revision = flagString(args.flags, "expect-rev");
+  let response;
+  try {
+    response = await client.call({
+      method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule`, idempotent: true, body: write,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw rebootScheduleProblem(screenControlProblem(error, id), id);
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: rebootScheduleHuman(`Set a ${write.windows.length}-window reboot schedule on ${id}${write.enabled ? "" : " (disabled: no reboots)"}`, response.body as Screen | undefined),
+  };
+}, true);
+
+export const handleScreenRebootScheduleClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen reboot-schedule clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot schedule clear", target.selector, { type: "clear_reboot_schedule" });
+  const id = target.id;
+  const revision = flagString(args.flags, "expect-rev");
+  const response = await screenControlCall(client, id, {
+    method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/reboot-schedule`, idempotent: true,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: rebootScheduleHuman(`Cleared the reboot schedule on ${id}`, response.body as Screen | undefined),
   };
 }, true);
 

@@ -9,9 +9,16 @@ export interface PlaylistWarningItem {
   primitive_id?: string;
   src?: string;
   reason?: string;
+  /** screen_fact_missing: the screen tokens some listed screen has no value for. */
+  tokens?: string[];
+  /** screen_fact_missing: the first 20 affected screens. */
+  screen_ids?: string[];
+  /** screen_fact_missing: how many screens are affected. */
+  screen_count?: number;
 }
 
 export const IFRAME_FRAMING_REFUSED = "iframe_framing_refused";
+export const SCREEN_FACT_MISSING = "screen_fact_missing";
 
 function text(value: unknown, max = 600): string | undefined {
   return typeof value === "string" && value.trim() ? plainText(value).trim().slice(0, max) : undefined;
@@ -33,6 +40,9 @@ export function playlistWarningItems(value: unknown): PlaylistWarningItem[] {
       ...(text(item.primitive_id, 200) ? { primitive_id: text(item.primitive_id, 200)! } : {}),
       ...(text(item.src, 2000) ? { src: text(item.src, 2000)! } : {}),
       ...(text(item.reason, 80) ? { reason: text(item.reason, 80)! } : {}),
+      ...(Array.isArray(item.tokens) ? { tokens: item.tokens.flatMap((token) => text(token, 100) ?? []).slice(0, 64) } : {}),
+      ...(Array.isArray(item.screen_ids) ? { screen_ids: item.screen_ids.flatMap((id) => text(id, 200) ?? []).slice(0, 20) } : {}),
+      ...(typeof item.screen_count === "number" && Number.isSafeInteger(item.screen_count) && item.screen_count > 0 ? { screen_count: item.screen_count } : {}),
     });
   }
   return items;
@@ -40,6 +50,7 @@ export function playlistWarningItems(value: unknown): PlaylistWarningItem[] {
 
 /** The envelope warning for one server item: its code, its message and a next step built from the item. */
 export function playlistWarning(item: PlaylistWarningItem, playlistId?: string, pending = false): Warning {
+  if (item.code === SCREEN_FACT_MISSING) return screenFactWarning(item);
   if (item.code !== IFRAME_FRAMING_REFUSED) return { code: item.code, message: item.message };
   const where = [
     item.page_id ? `page ${item.page_id}` : undefined,
@@ -51,6 +62,19 @@ export function playlistWarning(item: PlaylistWarningItem, playlistId?: string, 
     code: item.code,
     message: `${item.message} ${pending ? "The change waits for review as written." : "The playlist was saved as written."} Next: ${where ? `replace the iframe (${where}) with a page that allows framing from the Player origin, or ask the page's owner to allow it` : "replace the iframe with a page that allows framing from the Player origin, or ask the page's owner to allow it"}; edit the pages with ${edit} FILE.`,
   };
+}
+
+/** screen_fact_missing: the server's message, the screens it names (first 20 of screen_count) and the tokens that need a value, with the commands that give one. */
+function screenFactWarning(item: PlaylistWarningItem): Warning {
+  const ids = item.screen_ids ?? [];
+  const more = item.screen_count !== undefined && item.screen_count > ids.length ? ` and ${item.screen_count - ids.length} more` : "";
+  const screens = ids.length ? ` Screens: ${ids.join(", ")}${more}.` : "";
+  const tokens = item.tokens?.length ? ` Tokens: ${item.tokens.join(", ")}.` : "";
+  const where = item.page_id || item.primitive_id ? ` First use: ${[item.page_id ? `page ${item.page_id}` : "", item.primitive_id ? `primitive ${item.primitive_id}` : ""].filter(Boolean).join(", ")}.` : "";
+  const next = ids.length
+    ? ` Next: screenrig screen update ${ids[0]} --field NAME=VALUE (or --location LAT,LON, --timezone ZONE) gives a screen the value; screenrig screen show ${ids[0]} lists what it has.`
+    : "";
+  return { code: item.code, message: `${item.message}${where}${tokens}${screens}${next}` };
 }
 
 export function playlistWarnings(items: unknown, playlistId?: string, pending = false): Warning[] {

@@ -144,15 +144,21 @@ export function commandLines(screen: Screen | undefined): string[] {
     const { type, state, id } = command;
     if (typeof type !== "string" || !COMMAND_TYPES.has(type) || typeof state !== "string" || !COMMAND_STATES.has(state) || typeof id !== "string" || !COMMAND_ID.test(id)) continue;
     const cause = typeof command.cause === "string" && COMMAND_CAUSE.test(command.cause) ? command.cause : "";
-    rows.push([type, id, state, instant(command.expires_at) ?? "", instant(command.sent_at) ?? "", instant(command.done_at) ?? "", cause]);
+    rows.push([type, id, state, instant(command.expires_at) ?? "", instant(command.sent_at) ?? "", instant(command.done_at) ?? "", cause, command.source === "schedule" ? "schedule" : ""]);
     const detail = typeof command.detail === "string" ? plainText(command.detail).trim().slice(0, COMMAND_DETAIL_MAX) : "";
     if (detail) notes.push(`${id} ${state}${cause ? ` (${cause})` : ""}: ${detail}`);
   }
   if (!rows.length) return [];
-  // The CAUSE column appears only when the Player reported one.
+  // The CAUSE column appears only when the Player reported one; SOURCE only when a listed command came from a reboot schedule (the others read manual).
   const withCause = rows.some((row) => row[6] !== "");
-  const header = ["TYPE", "ID", "STATE", "EXPIRES", "SENT", "DONE", ...(withCause ? ["CAUSE"] : [])];
-  if (!withCause) for (const row of rows) row.pop();
+  const withSource = rows.some((row) => row[7] !== "");
+  const header = ["TYPE", "ID", "STATE", "EXPIRES", "SENT", "DONE", ...(withCause ? ["CAUSE"] : []), ...(withSource ? ["SOURCE"] : [])];
+  for (const row of rows) {
+    const [cause, source] = [row[6]!, row[7] || "manual"];
+    row.length = 6;
+    if (withCause) row.push(cause);
+    if (withSource) row.push(source);
+  }
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]!.length)));
   const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
   const queued = rows.find((row) => row[2] === "queued");

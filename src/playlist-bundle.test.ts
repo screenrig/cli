@@ -1367,3 +1367,49 @@ test("bundle export refuses a tag selector with a screen token and names the pag
     assert.equal(transport.calls.length, 0, "nothing is previewed for a selector that cannot be frozen");
   }
 });
+
+test("an iframe address with screen tokens survives export and import as written, braces and all", async () => {
+  const dir = await testTemp("bundle-iframe-tokens-");
+  const output = path.join(dir, "export");
+  const bytes = Uint8Array.from([7, 8, 9]);
+  const src = "https://Maps.example.com/{screen.id}/map?kiosk={screen.field.kiosk_id}&where={screen.location.name}#at={screen.location.lat}";
+  const fallback_src = "https://status.example.com/{screen.name}";
+  const source = iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_SOURCE" })), { src, fallback_src, reload_s: 120 });
+  const client = new ApiClient({ transport: exportTransport(bytes, { playlist: source }), token: "token" });
+  await exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client });
+  const exported = JSON.parse(await readFile(path.join(output, PLAYLIST_BUNDLE_PLAYLIST), "utf8"));
+  const web = exported.pages[0].primitives.find((primitive: any) => primitive.primitive === "iframe");
+  assert.equal(web.src, src, "the template is exported verbatim");
+  assert.equal(web.fallback_src, fallback_src);
+
+  const transport = importTransport([remoteMedia("med_SOURCE", bytes)]);
+  await importPlaylistBundle({
+    directory: output,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-iframe-token-key" }),
+    runtime: runtimeForImport([]),
+  });
+  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists")!;
+  const sent = (create.body as any).pages[0].primitives.find((primitive: any) => primitive.primitive === "iframe");
+  assert.equal(sent.src, src, "the template is imported verbatim");
+  assert.equal(sent.fallback_src, fallback_src);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a bundle whose iframe address carries a token in its host is refused before any write", async () => {
+  const dir = await testTemp("bundle-iframe-host-token-");
+  const output = path.join(dir, "export");
+  const bytes = Uint8Array.from([7, 8, 9]);
+  const source = iframeWithFields(playlist(mediaPrimitive({ by: "id", media_id: "med_SOURCE" })), { src: "https://example.com/{screen.id}" });
+  await exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client: new ApiClient({ transport: exportTransport(bytes, { playlist: source }), token: "token" }) });
+  const file = path.join(output, PLAYLIST_BUNDLE_PLAYLIST);
+  const document = JSON.parse(await readFile(file, "utf8"));
+  document.pages[0].primitives.find((primitive: any) => primitive.primitive === "iframe").src = "https://{screen.id}.example.com/";
+  await writeFile(file, JSON.stringify(document));
+  const transport = importTransport([remoteMedia("med_SOURCE", bytes)]);
+  await assert.rejects(
+    importPlaylistBundle({ directory: output, client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-host-token-key" }), runtime: runtimeForImport([]) }),
+    (error: unknown) => error instanceof CliError && error.problem.detail.includes("only in the path, query or fragment"),
+  );
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
+  await rm(dir, { recursive: true, force: true });
+});

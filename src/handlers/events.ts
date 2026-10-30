@@ -52,6 +52,9 @@ export const CANNED_EVENT_MESSAGES = new Set([
   "Screen display override set",
   "Screen display schedule updated",
   "Screen display schedule cleared",
+  "Screen reboot schedule updated",
+  "Screen reboot schedule cleared",
+  "Scheduled reboot skipped",
 ]);
 
 /**

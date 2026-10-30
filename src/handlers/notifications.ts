@@ -1,8 +1,10 @@
 // Command handlers for the notifications commands, loaded on demand.
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
-import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
-import { type Notification, type NotificationDelivery, type NotificationDeliveryList, type NotificationList, type NotificationPatch, type NotificationWithSecret, type NotificationWrite } from "../adapters/protocol.js";
-import { flagBool, flagString } from "../command-input.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationAudience, notificationSeverityMap, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
+import { type Notification, type NotificationDelivery, type NotificationDeliveryList, type NotificationList, type NotificationPatch, type NotificationActiveHours, type NotificationSeverity, type CampaignAudience, type NotificationWithSecret, type NotificationWrite } from "../adapters/protocol.js";
+import { flagBool, flagString, type ParsedArgs } from "../command-input.js";
+import { campaignAnyTagAudience, campaignTagAudience, campaignWindowList } from "../campaigns.js";
+import { quotedRevision } from "../if-match.js";
 import { ApiClient, requireToken } from "../client.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
@@ -68,6 +70,32 @@ export async function notificationSecretResult(response: Awaited<ReturnType<ApiC
   };
 }
 
+/**
+ * The severity filter, overrides, active hours and audience the flags name, each undefined
+ * when its flags are absent: --min-severity, --severity (repeatable CONDITION=LEVEL),
+ * --active-hours (repeatable weekly windows) with --timezone and --outside-hours, and the
+ * audience as --any-tag, --all-tags or --audience (a campaign audience rule: inline JSON,
+ * FILE or - for stdin).
+ */
+async function notificationRuleFlags(args: ParsedArgs, runtime: CliRuntime) {
+  const severity = flagString(args.flags, "severity");
+  const hours = flagString(args.flags, "active-hours");
+  const anyTags = flagString(args.flags, "any-tag");
+  const allTags = flagString(args.flags, "all-tags");
+  const raw = flagString(args.flags, "audience");
+  const audience: CampaignAudience | undefined = anyTags !== undefined ? campaignAnyTagAudience(anyTags.split(","))
+    : allTags !== undefined ? campaignTagAudience(allTags.split(","))
+    : raw !== undefined ? await notificationAudience(raw, runtime) : undefined;
+  return {
+    audience,
+    minSeverity: flagString(args.flags, "min-severity") as NotificationSeverity | undefined,
+    severity: severity !== undefined ? notificationSeverityMap(severity) : undefined,
+    windows: hours !== undefined ? campaignWindowList(hours) : undefined,
+    timezone: flagString(args.flags, "timezone"),
+    outside: flagString(args.flags, "outside-hours"),
+  };
+}
+
 export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
   const email = flagString(args.flags, "email");
   const webhook = flagString(args.flags, "webhook");
@@ -87,6 +115,7 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
   const tags = flagString(args.flags, "tag");
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
+  const rules = await notificationRuleFlags(args, runtime);
   const body: NotificationWrite = {
     channel: email !== undefined ? "email" : webhook !== undefined ? "webhook" : chat[0]!.channel,
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
@@ -96,6 +125,10 @@ export const handleNotificationsCreate = commandHandler(async (args, runtime, re
     ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
+    ...(rules.audience !== undefined ? { audience: rules.audience } : {}),
+    ...(rules.minSeverity !== undefined ? { min_severity: rules.minSeverity } : {}),
+    ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
+    ...(rules.windows !== undefined ? { active_hours: notificationActiveHours(rules.windows, rules.timezone, rules.outside, undefined) } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
@@ -146,6 +179,20 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
   const hold = flagString(args.flags, "hold");
   const description = flagString(args.flags, "description");
   const snooze = flagString(args.flags, "snooze");
+  const rules = await notificationRuleFlags(args, runtime);
+  let client: ApiClient | undefined;
+  const getClient = (): ApiClient => client ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  // The hours are replaced whole: a new zone or outside setting alone keeps the windows the notification has, read first
+  // and guarded by the revision just read, so a concurrent change fails with revision_conflict instead of being overwritten.
+  let readRevision: number | undefined;
+  let hours: NotificationActiveHours | null | undefined;
+  if (flagBool(args.flags, "clear-active-hours")) hours = null;
+  else if (rules.windows !== undefined) hours = notificationActiveHours(rules.windows, rules.timezone, rules.outside, undefined);
+  else if (rules.timezone !== undefined || rules.outside !== undefined) {
+    const current = (await notificationCall(getClient(), { method: "GET", path: `${NOTIFICATIONS_PATH}/${id}` }, id)).body as Notification | undefined;
+    hours = notificationActiveHours(undefined, rules.timezone, rules.outside, current?.active_hours);
+    readRevision = current?.revision;
+  }
   const patch: NotificationPatch = {
     ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
     ...(url !== undefined ? { url: webhookUrl(url) } : {}),
@@ -155,8 +202,15 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(flagBool(args.flags, "clear-conditions") ? { conditions: [] } : {}),
     ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
     ...(flagBool(args.flags, "clear-events") ? { event_types: [] } : {}),
-    ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
-    ...(flagBool(args.flags, "all-screens") ? { screen_tags: [] } : {}),
+    // The audience and the screen tags exclude each other: switching from one to the other clears the first in the same request.
+    ...(tags !== undefined ? { screen_tags: tags.split(","), audience: null } : {}),
+    ...(rules.audience !== undefined ? { audience: rules.audience, screen_tags: [] } : {}),
+    ...(flagBool(args.flags, "all-screens") ? { screen_tags: [], audience: null } : {}),
+    ...(rules.minSeverity !== undefined ? { min_severity: rules.minSeverity } : {}),
+    ...(flagBool(args.flags, "clear-min-severity") ? { min_severity: null } : {}),
+    ...(rules.severity !== undefined ? { severity: rules.severity } : {}),
+    ...(flagBool(args.flags, "clear-severity") ? { severity: null } : {}),
+    ...(hours !== undefined ? { active_hours: hours } : {}),
     ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
     ...(description !== undefined ? { description: webhookDescription(description) } : {}),
     ...(flagBool(args.flags, "clear-description") ? { description: "" } : {}),
@@ -165,17 +219,17 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const guard = webhookRevisionHeaders(args) ?? (readRevision !== undefined ? { "if-match": quotedRevision(String(readRevision)) } : undefined);
   // --snooze derives its instant from the clock, so a rerun fingerprints
   // differently; drop the obsolete saved key instead of leaving it behind.
-  const response = await notificationCall(client, {
-    method: "PATCH", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, body: patch, headers: webhookRevisionHeaders(args),
+  const response = await notificationCall(getClient(), {
+    method: "PATCH", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, body: patch, headers: guard,
     ...(snooze !== undefined ? { recoverySupersede: JSON.stringify(["notifications update --snooze", id]) } : {}),
   }, id);
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, getClient().requestId),
     exitCode: ExitCode.Success,
     human: [`Updated notification ${id}`, ...notificationLines(response.body as Notification | undefined)].join("\n"),
   };

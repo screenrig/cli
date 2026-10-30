@@ -311,6 +311,9 @@ test("root help is compact and every command is discoverable through immediate c
     "screen display-schedule show",
     "screen display-schedule set",
     "screen display-schedule clear",
+    "screen reboot-schedule show",
+    "screen reboot-schedule set",
+    "screen reboot-schedule clear",
     "webhooks create",
     "webhooks list",
     "webhooks show",
@@ -611,7 +614,14 @@ test("notifications help, JSON help and preflight agree on option relationships 
     { kind: "requires", options: ["--email", "--conditions"] },
     { kind: "requires", options: ["--events", "--webhook"] },
     { kind: "together", options: ["--telegram", "--telegram-chat"] },
+    { kind: "requires", options: ["--active-hours", "--timezone"] },
+    { kind: "requires", options: ["--timezone", "--active-hours"] },
+    { kind: "requires", options: ["--outside-hours", "--active-hours"] },
   ]);
+  assert.deepEqual(create.options.find((option) => option.name === "--any-tag")?.conflicts, ["--tag", "--all-tags", "--audience"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--min-severity")?.choices, ["info", "warning", "error"]);
+  assert.deepEqual(create.options.find((option) => option.name === "--outside-hours")?.choices, ["hold", "drop"]);
+  assert.match(create.options.find((option) => option.name === "--audience")?.description ?? "", /\bstdin\b/, "--audience reads stdin");
   assert.deepEqual(create.options.find((option) => option.name === "--email")?.conflicts, ["--webhook", "--slack", "--teams", "--pagerduty", "--telegram"]);
   assert.deepEqual(create.options.find((option) => option.name === "--webhook")?.conflicts, ["--email", "--slack", "--teams", "--pagerduty", "--telegram"]);
   assert.deepEqual(create.options.find((option) => option.name === "--telegram")?.conflicts, ["--email", "--webhook", "--slack", "--teams", "--pagerduty"]);
@@ -627,7 +637,9 @@ test("notifications help, JSON help and preflight agree on option relationships 
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
   assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url", "--destination"] });
   assert.match(update.options.find((option) => option.name === "--destination")?.description ?? "", /\bstdin\b/);
-  assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens", "--any-tag", "--all-tags", "--audience"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--clear-active-hours")?.conflicts, ["--active-hours", "--timezone", "--outside-hours"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--severity")?.conflicts, ["--clear-severity"]);
   assert.deepEqual(update.options.find((option) => option.name === "--description")?.conflicts, ["--clear-description"]);
   assert.match(update.options.find((option) => option.name === "--snooze")?.description ?? "", /30m, 1h, 4h, 2d.*off/);
   for (const name of ["create", "update", "delete", "rotate-secret", "test", "list", "show", "deliveries"]) {

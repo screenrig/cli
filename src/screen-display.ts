@@ -1,5 +1,6 @@
-import type { Screen, ScreenDisplay, ScreenScheduleWindow } from "./adapters/protocol.js";
+import type { Screen, ScreenDisplay, ScreenRebootSchedule, ScreenScheduleWindow } from "./adapters/protocol.js";
 import { CliError, usageError } from "./problems.js";
+import { campaignWindow, campaignWindowSpec, CAMPAIGN_WINDOWS_MAX } from "./campaigns.js";
 import { durationMs, instantInZone, normalizeInstant, scheduleWindow } from "./screen-control.js";
 
 /**
@@ -16,8 +17,50 @@ function displayScheduleError(path: string, message: string): CliError {
   });
 }
 
+function rebootScheduleError(path: string, message: string): CliError {
+  return usageError(`Reboot schedule file: ${path} ${message}`, {
+    command: "screenrig screen reboot-schedule set --help",
+    reason: "The file is {\"enabled\": true, \"windows\": [{\"days\": [...], \"start\"?, \"end\"?}]}: the windows in which the screen reboots, at the start of each, in the screen timezone.",
+  });
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+interface ScheduleKind {
+  /** The member of a saved show envelope that holds the schedule. */
+  member: "display_schedule" | "reboot_schedule";
+  noun: string;
+  group: string;
+  fail: (path: string, message: string) => CliError;
+  disabled: string;
+}
+
+function scheduleWrite(document: unknown, kind: ScheduleKind): { enabled: boolean; windows: ScreenScheduleWindow[] } {
+  let value = document;
+  const envelope = record(value);
+  if (envelope && envelope.ok === true && record(envelope.data)) value = envelope.data;
+  const view = record(value);
+  if (view && kind.member in view) value = view[kind.member];
+  const object = record(value);
+  if (!object) {
+    throw usageError(`${kind.noun} file: must be an object {"enabled": true, "windows": [...]}. To remove a schedule, run ${kind.group} clear.`, {
+      command: `screenrig ${kind.group} clear <id>`, reason: "Clearing is its own command.",
+    });
+  }
+  const extra = Object.keys(object).find((key) => !["enabled", "windows", "updated_at"].includes(key));
+  if (extra !== undefined) throw kind.fail("document", `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: enabled, windows.`);
+  if (typeof object.enabled !== "boolean") throw kind.fail("enabled", `must be true or false (false keeps the windows and ${kind.disabled}).`);
+  const windows = object.windows;
+  if (!Array.isArray(windows) || windows.length < 1 || windows.length > DISPLAY_WINDOWS_MAX) {
+    throw kind.fail("windows", `must list 1 to ${DISPLAY_WINDOWS_MAX} windows.`);
+  }
+  const parsed = windows.map((item, index) => scheduleWindow(item, `windows[${index}]`, kind.fail));
+  return {
+    enabled: object.enabled,
+    windows: parsed.map((item) => ({ days: item.days, ...(item.start !== undefined ? { start: item.start, end: item.end } : {}) })),
+  };
 }
 
 /**
@@ -26,29 +69,12 @@ function record(value: unknown): Record<string, unknown> | undefined {
  * unwrapped and updated_at dropped) so show output can be edited and sent back.
  */
 export function displayScheduleWrite(document: unknown): { enabled: boolean; windows: ScreenScheduleWindow[] } {
-  let value = document;
-  const envelope = record(value);
-  if (envelope && envelope.ok === true && record(envelope.data)) value = envelope.data;
-  const view = record(value);
-  if (view && "display_schedule" in view) value = view.display_schedule;
-  const object = record(value);
-  if (!object) {
-    throw usageError("Display schedule file: must be an object {\"enabled\": true, \"windows\": [...]}. To remove a schedule, run screen display-schedule clear.", {
-      command: "screenrig screen display-schedule clear <id>", reason: "Clearing is its own command.",
-    });
-  }
-  const extra = Object.keys(object).find((key) => !["enabled", "windows", "updated_at"].includes(key));
-  if (extra !== undefined) throw displayScheduleError("document", `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: enabled, windows.`);
-  if (typeof object.enabled !== "boolean") throw displayScheduleError("enabled", "must be true or false (false keeps the windows and leaves the display on).");
-  const windows = object.windows;
-  if (!Array.isArray(windows) || windows.length < 1 || windows.length > DISPLAY_WINDOWS_MAX) {
-    throw displayScheduleError("windows", `must list 1 to ${DISPLAY_WINDOWS_MAX} windows.`);
-  }
-  const parsed = windows.map((item, index) => scheduleWindow(item, `windows[${index}]`, displayScheduleError));
-  return {
-    enabled: object.enabled,
-    windows: parsed.map((item) => ({ days: item.days, ...(item.start !== undefined ? { start: item.start, end: item.end } : {}) })),
-  };
+  return scheduleWrite(document, { member: "display_schedule", noun: "Display schedule", group: "screen display-schedule", fail: displayScheduleError, disabled: "leaves the display on" });
+}
+
+/** Accept ScreenRebootScheduleWrite `{enabled, windows}`, or a saved `screen reboot-schedule show` envelope / view, the way displayScheduleWrite does. */
+export function rebootScheduleWrite(document: unknown): { enabled: boolean; windows: ScreenScheduleWindow[] } {
+  return scheduleWrite(document, { member: "reboot_schedule", noun: "Reboot schedule", group: "screen reboot-schedule", fail: rebootScheduleError, disabled: "reboots nothing" });
 }
 
 /** `on`/`off` from --power, or a trailing positional on|off. */
@@ -107,6 +133,69 @@ export function displayLines(display: ScreenDisplay | undefined, timezone: strin
     lines.push(`Display reported: ${parts || "no power state"} at ${reported.reported_at}${reported.stale ? " (stale: no report for over 35 minutes)" : ""}`);
   }
   return lines;
+}
+
+/** A reboot window lasts 5 minutes to 24 hours; the end of one at or before its start crosses midnight, and a window without edges is the whole day. */
+const REBOOT_WINDOW_MIN_MINUTES = 5;
+
+function windowMinutes(window: ScreenScheduleWindow): number {
+  if (window.start === undefined || window.end === undefined) return 24 * 60;
+  const clock = (text: string): number => Number(text.slice(0, 2)) * 60 + Number(text.slice(3, 5));
+  const length = (clock(window.end) - clock(window.start) + 24 * 60) % (24 * 60);
+  return length === 0 ? 24 * 60 : length;
+}
+
+/** One --window of a reboot schedule: DAYS HH:MM-HH:MM such as "Mon-Sun 04:00-04:30", or the DAYS@HH:MM-HH:MM spelling of campaigns, at least 5 minutes long. */
+export function rebootWindowOption(value: string, previous?: string): string {
+  const window = campaignWindow(value, "--window");
+  if (windowMinutes(window) < REBOOT_WINDOW_MIN_MINUTES) {
+    throw usageError(`--window ${JSON.stringify(value)}: a reboot window lasts 5 minutes to 24 hours; the reboot goes out at its start.`);
+  }
+  const specs = [...(previous ? previous.split(";") : []), campaignWindowSpec(window)];
+  if (specs.length > CAMPAIGN_WINDOWS_MAX) throw usageError(`--window accepts at most ${CAMPAIGN_WINDOWS_MAX} windows.`);
+  return specs.join(";");
+}
+
+/** The windows a --window accumulation names, in the order given. */
+export function rebootWindowList(accumulated: string): ScreenScheduleWindow[] {
+  return accumulated.split(";").map((spec) => campaignWindow(spec));
+}
+
+/** A window in the spelling the lines of show use: "mon,tue 07:00-19:00" or "sat all day". */
+function windowText(window: ScreenScheduleWindow): string {
+  return `${window.days.join(",")} ${window.start !== undefined ? `${window.start}-${window.end}` : "all day"}`;
+}
+
+/**
+ * `Reboot schedule:` lines for screen show --human and screen reboot-schedule show: the
+ * windows in the screen's zone and, while an enabled schedule has one, the next reboot.
+ * Nothing when the screen has no schedule.
+ */
+export function rebootScheduleLines(schedule: ScreenRebootSchedule | null | undefined, nextRebootAt: string | null | undefined, timezone: string | undefined): string[] {
+  if (!schedule || !Array.isArray(schedule.windows)) return [];
+  const lines = [`Reboot schedule: ${schedule.enabled ? "enabled" : "disabled (no reboots)"}, ${schedule.windows.length} window${schedule.windows.length === 1 ? "" : "s"}${timezone ? ` in ${timezone}` : ""}`];
+  for (const window of schedule.windows) lines.push(`  ${windowText(window)}`);
+  if (typeof nextRebootAt === "string" && nextRebootAt) lines.push(`Next reboot: ${instantInZone(nextRebootAt, timezone)}`);
+  return lines;
+}
+
+/** 409 reboot_unsupported on a reboot schedule write: nothing is stored until the Player declares reboot. */
+export function rebootScheduleProblem(error: unknown, id: string): unknown {
+  if (!(error instanceof CliError) || error.problem.next) return error;
+  if (error.problem.code === "reboot_unsupported") {
+    return new CliError({
+      ...error.problem,
+      detail: `${error.problem.detail} Nothing was stored. A reboot schedule needs a Player that declares the reboot capability in its host report (screen show lists host capabilities); this device's Player did not.`,
+      next: { command: `screenrig screen show ${id}`, reason: "Check the host capabilities. A schedule can be set once the Player declares reboot." },
+    }, error.exitCode, error.warnings);
+  }
+  if (error.problem.code === "invalid_request" && /timezone/i.test(error.problem.detail)) {
+    return new CliError({
+      ...error.problem,
+      next: { command: `screenrig screen set-timezone ${id} --timezone ZONE`, reason: "A reboot schedule reads its windows in the screen's timezone. Set it first, then rerun." },
+    }, error.exitCode, error.warnings);
+  }
+  return rebootProblem(error, id);
 }
 
 export function hostDeclaresReboot(screen: Screen | undefined): boolean {

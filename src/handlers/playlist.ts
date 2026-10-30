@@ -18,6 +18,7 @@ import { pendingReviewLines, pendingReviewOf, pendingReviewWarning, reviewNext }
 import { successEnvelope, type Warning } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { iframeSnippetSource } from "../iframe-snippet.js";
+import { hasScreenToken, screenTemplateRefusal, screenTokenStandIn } from "../screen-tokens.js";
 import { usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
@@ -400,10 +401,18 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     } else if (iframeSnippetSource(input) !== undefined || /^[a-z][a-z0-9+.-]*:/i.test(input)) {
       // A pasted <iframe> embed code gives its src; the server rebuilds a
       // Google or Microsoft document link when the playlist is written.
+      // An address with screen tokens ({screen.id}, {screen.field.NAME}, ...) is a template: it is kept as written, braces and all,
+      // and the server fills it in for each screen.
+      const written = iframeSnippetSource(input) ?? input;
+      const templated = hasScreenToken(written);
+      if (templated) {
+        const refusal = screenTemplateRefusal(written);
+        if (refusal !== undefined) throw usageError(`The iframe address ${refusal}.`);
+      }
       let url: URL;
-      try { url = new URL(iframeSnippetSource(input) ?? input); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
+      try { url = new URL(templated ? screenTokenStandIn(written) : written); } catch { throw usageError("Provide a valid http or https iframe URL or embed code."); }
       if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) throw usageError("Iframe URLs must use http or https.");
-      content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
+      content.push({ primitive: "iframe", src: templated ? written.trim() : url.href, title: url.hostname.slice(0, 200) });
     } else {
       const sourcePath = path.resolve(runtime.cwd(), input);
       try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }

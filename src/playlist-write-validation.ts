@@ -1,6 +1,7 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
+import { hasScreenToken, screenTemplateRefusal, screenTokenStandIn } from "./screen-tokens.js";
 
 interface JsonRecord { [key: string]: unknown }
 
@@ -306,9 +307,20 @@ function validateIframeAddress(value: JsonRecord, key: "src" | "fallback_src", n
   // A sign shows what its owner points it at: http or https, any host including
   // the screen's LAN, with user:pass@ credentials for a page behind a login. The
   // server also reads a pasted <iframe ...> embed code for the address.
-  let parsed: URL;
-  try { parsed = new URL(iframeSnippetSource(address) ?? address); } catch (error) {
+  let source: string;
+  try { source = iframeSnippetSource(address) ?? address; } catch (error) {
     if (error instanceof CliError) throw error;
+    throw usageError(`${name}.${key} must be an http or https URL.`);
+  }
+  // Screen tokens stand in the path, query or fragment and are stored as written (braces kept); the
+  // address is checked with a letter in each token's place. A token elsewhere is refused.
+  const templated = hasScreenToken(source);
+  if (templated) {
+    const refusal = screenTemplateRefusal(source);
+    if (refusal !== undefined) throw usageError(`${name}.${key} ${refusal}.`);
+  }
+  let parsed: URL;
+  try { parsed = new URL(templated ? screenTokenStandIn(source) : source); } catch {
     throw usageError(`${name}.${key} must be an http or https URL.`);
   }
   if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {

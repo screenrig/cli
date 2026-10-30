@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { test } from "node:test";
+import { commandHelp } from "./help-tree.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { createMemoryLogger } from "./log/logger.js";
@@ -390,12 +391,13 @@ test("notifications update sends only supplied fields with the revision guard", 
   const tagged = await cli(["--json", "notifications", "update", id, "--tag", "Lobby", "--tag", "Floor2"], transport, env);
   assert.equal(tagged.code, 0, tagged.stdout);
   call = notificationCalls(transport).at(-1)!;
-  assert.deepEqual(call.body, { screen_tags: ["Lobby", "Floor2"] });
+  // Setting the tags clears any audience in the same request: the two exclude each other.
+  assert.deepEqual(call.body, { screen_tags: ["Lobby", "Floor2"], audience: null });
   assert.equal(call.headers?.["if-match"], undefined, "no --expect-rev sends no If-Match");
   assert.deepEqual(tagged.envelope.data.screen_tags, ["Lobby", "Floor2"]);
   const everywhere = await cli(["--json", "notifications", "update", id, "--all-screens"], transport, env);
   assert.equal(everywhere.code, 0, everywhere.stdout);
-  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { screen_tags: [] });
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { screen_tags: [], audience: null });
   assert.deepEqual(everywhere.envelope.data.screen_tags, []);
 
   const recipients = await cli(["--json", "notifications", "update", id, "--email", "owner,usr_OTHER"], transport, env);
@@ -1027,4 +1029,229 @@ test("notifications resubscribe needs a user, refuses a malformed one and finds 
   const odd = await cli(["--json", "notifications", "resubscribe", id, "--user", "usr/ADA?"], transport, env);
   assert.equal(notificationCalls(transport).at(-1)!.path, `/api/notifications/${id}/unsubscribed/usr%2FADA%3F`);
   assert.equal(odd.code, 0, "an id with reserved characters stays one path segment, and nobody by that id changes nothing");
+});
+
+test("notifications create sends the severity filter, overrides, active hours and an audience, and show prints them", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli([
+    "--json", "notifications", "create", "--email", "owner", "--conditions", "screen_offline,not_playing,glass_blank",
+    "--min-severity", "error", "--severity", "not_playing=error", "--severity", "glass_blank=info",
+    "--active-hours", "Mon-Fri 08:00-22:00", "--active-hours", "sat@10:00-14:00", "--timezone", "America/Los_Angeles", "--outside-hours", "drop",
+    "--all-tags", "level2,overhead",
+  ], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  const call = notificationCalls(transport).at(-1)!;
+  assert.deepEqual(call.body, {
+    channel: "email", recipients: ["owner"], conditions: ["screen_offline", "not_playing", "glass_blank"],
+    audience: { all: [{ tag: "level2" }, { tag: "overhead" }] },
+    min_severity: "error", severity: { not_playing: "error", glass_blank: "info" },
+    active_hours: { timezone: "America/Los_Angeles", windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "08:00", end: "22:00" }, { days: ["sat"], start: "10:00", end: "14:00" }], outside: "drop" },
+  });
+  assert.equal(created.envelope.data.min_severity, "error");
+  assert.equal(created.envelope.data.screen_tags.length, 0);
+  const id = created.envelope.data.id as string;
+
+  const human = await cli(["--human", "notifications", "show", id], transport, env);
+  assert.match(human.stdout, /^audience: tag level2 and tag overhead$/m);
+  assert.doesNotMatch(human.stdout, /^screen_tags:/m, "an audience stands in for the tags");
+  assert.match(human.stdout, /^min_severity: error$/m);
+  assert.match(human.stdout, /^severity: not_playing=error, glass_blank=info$/m);
+  assert.match(human.stdout, /^active_hours: America\/Los_Angeles mon-fri@08:00-22:00; sat@10:00-14:00 \(outside the hours: drop\)$/m);
+  const list = await cli(["--human", "notifications", "list"], transport, env);
+  assert.match(list.stdout, /RULES/);
+  assert.match(list.stdout, /min error; severity not_playing=error,glass_blank=info; hours America\/Los_Angeles mon-fri@08:00-22:00; sat@10:00-14:00 \(outside the hours: drop\); audience tag level2 and tag overhead/);
+});
+
+test("notifications create takes --any-tag, a one-tag --all-tags, and an audience from a file, stdin or inline JSON", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const base = ["--json", "notifications", "create", "--email", "owner", "--conditions", "screen_offline"];
+  const any = await cli([...base, "--any-tag", "Lobby", "--any-tag", "Floor2"], transport, env);
+  assert.equal(any.code, 0, any.stdout);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { audience: unknown }).audience, { any: [{ tag: "Lobby" }, { tag: "Floor2" }] });
+  const one = await cli([...base, "--all-tags", "Lobby"], transport, env);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { audience: unknown }).audience, { tag: "Lobby" });
+  assert.equal(one.code, 0, one.stdout);
+  const rule = { any: [{ all: [{ tag: "level2" }, { tag: "overhead" }] }, { screen_id: "scr_LOBBYAAAAAAAAAAAAAAAAAA" }] };
+  await writeFile(path.join(env.cwd, "audience.json"), JSON.stringify(rule));
+  for (const [value, stdin] of [["audience.json", undefined], ["@audience.json", undefined], ["-", JSON.stringify(rule)], [JSON.stringify(rule), undefined]] as const) {
+    const result = await cli([...base, "--audience", value], transport, env, undefined, stdin);
+    assert.equal(result.code, 0, `${value}: ${result.stdout}`);
+    assert.deepEqual((notificationCalls(transport).at(-1)!.body as { audience: unknown }).audience, rule, value);
+    assert.equal((notificationCalls(transport).at(-1)!.body as { screen_tags?: unknown }).screen_tags, undefined);
+  }
+  const shown = await cli(["--human", "notifications", "show", (any.envelope.data as { id: string }).id], transport, env);
+  assert.match(shown.stdout, /^audience: tag Lobby or tag Floor2$/m);
+  const server = await cli([...base, "--audience", "{\"nope\":1}"], transport, env);
+  assert.equal(server.code, 0, "the server owns the rule's members; the fake accepts any object");
+  const before = notificationCalls(transport).length;
+  const failures: Array<[string[], RegExp]> = [
+    [["--audience", "missing.json"], /missing\.json does not exist/],
+    [["--audience", "[1]"], /--audience (must be a JSON object|is not valid JSON)|Input is not valid JSON|must be a JSON object/],
+    [["--tag", "Lobby", "--any-tag", "Lobby"], /--tag cannot be used with --any-tag|--any-tag cannot be used with --tag/],
+    [["--any-tag", "Lobby", "--all-tags", "Lobby"], /cannot be used with/],
+    [["--all-tags", "Lobby", "--audience", "{}"], /cannot be used with/],
+    [["--tag", "Lobby", "--audience", "{}"], /cannot be used with/],
+    [["--any-tag", "Lobby!"], /--any-tag takes tags of 1 to 32 letters or digits/],
+    [["--all-tags", "Lobby,Lobby"], /--all-tags lists a tag more than once/],
+  ];
+  for (const [args, message] of failures) {
+    const refused = await cli([...base, ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, before, "invalid input never reaches the server");
+});
+
+test("notifications create validates severity and active hours flags before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const email = ["--email", "owner", "--conditions", "screen_offline"];
+  const cases: Array<[string[], RegExp]> = [
+    [["--min-severity", "fatal"], /--min-severity/],
+    [["--severity", "not_playing"], /--severity takes CONDITION=LEVEL/],
+    [["--severity", "bogus=error"], /--severity does not take the condition "bogus"/],
+    [["--severity", "not_playing=fatal"], /--severity does not take the level "fatal"/],
+    [["--severity", "not_playing=error", "--severity", "not_playing=info"], /--severity names not_playing more than once/],
+    [["--active-hours", "Mon-Fri 08:00-22:00"], /--active-hours requires --timezone/],
+    [["--timezone", "America/Los_Angeles"], /--timezone requires --active-hours/],
+    [["--outside-hours", "drop"], /--outside-hours requires --active-hours/],
+    [["--active-hours", "Mon-Fri 08:00-22:00", "--timezone", "Mars/Olympus"], /--timezone takes an IANA timezone name/],
+    [["--active-hours", "Funday 08:00-22:00", "--timezone", "UTC"], /--active-hours "Funday 08:00-22:00": "funday" is not a day/],
+    [["--active-hours", "Mon-Fri 25:00-26:00", "--timezone", "UTC"], /--active-hours/],
+    [["--active-hours", "Mon 08:00-22:00", "--timezone", "UTC", "--outside-hours", "later"], /--outside-hours/],
+    [[...Array.from({ length: 17 }, () => ["--active-hours", "Mon 08:00-22:00"]).flat(), "--timezone", "UTC"], /--active-hours accepts at most 16 windows/],
+  ];
+  for (const [args, message] of cases) {
+    const refused = await cli(["--json", "notifications", "create", ...email, ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("notifications update sets, replaces and clears the severity filter, overrides, hours and audience", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env, "--tag", "Lobby");
+  const patch = async (...args: string[]) => {
+    const result = await cli(["--json", "notifications", "update", id, ...args], transport, env);
+    assert.equal(result.code, 0, `${args.join(" ")}: ${result.stdout}`);
+    return { body: notificationCalls(transport).filter((call) => call.method === "PATCH").at(-1)!.body, data: result.envelope.data };
+  };
+
+  const filter = await patch("--min-severity", "warning");
+  assert.deepEqual(filter.body, { min_severity: "warning" });
+  assert.equal(filter.data.min_severity, "warning");
+  assert.deepEqual((await patch("--clear-min-severity")).body, { min_severity: null });
+  const overrides = await patch("--severity", "not_playing=error", "--severity", "glass_blank=error");
+  assert.deepEqual(overrides.body, { severity: { not_playing: "error", glass_blank: "error" } });
+  assert.deepEqual(overrides.data.severity, { not_playing: "error", glass_blank: "error" });
+  const cleared = await patch("--clear-severity");
+  assert.deepEqual(cleared.body, { severity: null });
+  assert.equal(cleared.data.severity, undefined);
+
+  const hours = await patch("--active-hours", "Mon-Fri 08:00-22:00", "--timezone", "America/Los_Angeles");
+  assert.deepEqual(hours.body, { active_hours: { timezone: "America/Los_Angeles", windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "08:00", end: "22:00" }] } });
+  assert.equal(hours.data.active_hours.outside, "hold", "the server shows outside");
+  // A new outside setting or zone alone keeps the windows the notification has, and is guarded by the revision just read.
+  const reads = () => notificationCalls(transport).filter((call) => call.method === "GET").length;
+  const readsBefore = reads();
+  const drop = await patch("--outside-hours", "drop");
+  assert.equal(reads(), readsBefore + 1);
+  assert.deepEqual(drop.body, { active_hours: { timezone: "America/Los_Angeles", windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "08:00", end: "22:00" }], outside: "drop" } });
+  assert.equal(notificationCalls(transport).filter((call) => call.method === "PATCH").at(-1)!.headers?.["if-match"], `"${hours.data.revision}"`);
+  const zone = await patch("--timezone", "Europe/London");
+  assert.deepEqual(zone.body, { active_hours: { timezone: "Europe/London", windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "08:00", end: "22:00" }], outside: "drop" } });
+  assert.deepEqual((await patch("--clear-active-hours")).body, { active_hours: null });
+  const readsAfter = reads();
+  const nothing = await cli(["--json", "notifications", "update", id, "--outside-hours", "drop"], transport, env);
+  assert.equal(nothing.code, ExitCode.Usage, nothing.stdout);
+  assert.match(nothing.envelope.error!.detail, /give --active-hours for a notification that has none/);
+  assert.equal(reads(), readsAfter + 1);
+  assert.equal(notificationCalls(transport).filter((call) => call.method === "PATCH").length, 8);
+
+  // The audience and the tags exclude each other: each switch clears the other in the same request.
+  const audience = await patch("--any-tag", "Lobby,Floor2");
+  assert.deepEqual(audience.body, { audience: { any: [{ tag: "Lobby" }, { tag: "Floor2" }] }, screen_tags: [] });
+  assert.deepEqual(audience.data.audience, { any: [{ tag: "Lobby" }, { tag: "Floor2" }] });
+  assert.deepEqual(audience.data.screen_tags, []);
+  const all = await patch("--all-tags", "level2", "--all-tags", "overhead");
+  assert.deepEqual(all.body, { audience: { all: [{ tag: "level2" }, { tag: "overhead" }] }, screen_tags: [] });
+  await writeFile(path.join(env.cwd, "audience.json"), JSON.stringify({ tag: "Lobby" }));
+  assert.deepEqual((await patch("--audience", "audience.json")).body, { audience: { tag: "Lobby" }, screen_tags: [] });
+  const tags = await patch("--tag", "Cafe");
+  assert.deepEqual(tags.body, { screen_tags: ["Cafe"], audience: null });
+  assert.equal(tags.data.audience, undefined);
+  await patch("--any-tag", "Lobby");
+  const everywhere = await patch("--all-screens");
+  assert.deepEqual(everywhere.body, { screen_tags: [], audience: null });
+  assert.equal(everywhere.data.audience, undefined);
+
+  const piped = await cli(["--json", "notifications", "update", id, "--audience", "-"], transport, env, undefined, JSON.stringify({ any: [{ tag: "Piped" }] }));
+  assert.equal(piped.code, 0, piped.stdout);
+  assert.deepEqual(piped.envelope.data.audience, { any: [{ tag: "Piped" }] });
+  const refused: Array<[string[], RegExp]> = [
+    [["--min-severity", "warning", "--clear-min-severity"], /cannot be used with/],
+    [["--severity", "not_playing=error", "--clear-severity"], /cannot be used with/],
+    [["--clear-active-hours", "--timezone", "UTC"], /cannot be used with/],
+    [["--clear-active-hours", "--active-hours", "Mon 08:00-09:00"], /cannot be used with/],
+    [["--all-screens", "--any-tag", "Lobby"], /cannot be used with/],
+    [["--audience", "{}", "--all-tags", "Lobby"], /cannot be used with/],
+    [["--severity", "bogus=error"], /--severity does not take the condition/],
+    [["--active-hours", "Mon 08:00-22:00"], /--active-hours needs --timezone/],
+  ];
+  const count = notificationCalls(transport).length;
+  for (const [args, message] of refused) {
+    const result = await cli(["--json", "notifications", "update", id, ...args], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${args.join(" ")}: ${result.stdout}`);
+    assert.match(result.envelope.error!.detail, message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, count, "invalid input never reaches the server");
+});
+
+test("notifications create and update expose severity, active hours and audience in help, with the stdin and choices the flags accept", () => {
+  const create = commandHelp(["notifications", "create"]);
+  for (const name of ["--min-severity", "--severity", "--active-hours", "--timezone", "--outside-hours", "--audience", "--any-tag", "--all-tags"]) {
+    assert.ok(create.options.some((option) => option.name === name), `create takes ${name}`);
+  }
+  const update = commandHelp(["notifications", "update"]);
+  for (const name of ["--clear-min-severity", "--clear-severity", "--clear-active-hours", "--audience", "--any-tag", "--all-tags"]) {
+    assert.ok(update.options.some((option) => option.name === name), `update takes ${name}`);
+  }
+  assert.ok(create.examples.some((example) => example.includes("--active-hours")));
+  assert.ok(update.examples.some((example) => example.includes("--clear-severity")));
+  assert.match((create.usage + create.notes.join("\n")).replace(/\s+/g, " "), /error for screen_offline and warning for every other condition/);
+});
+
+test("notification lines show the severity filter, overrides, hours and audience only while they are set", () => {
+  const plain = { id: "ntf_PLAINAAAAAAAAAAAAAAA", channel: "email", recipients: ["owner"], conditions: ["screen_offline"], screen_tags: ["Lobby"], hold_minutes: 10, enabled: true, revision: 1, status: "active", created_at: "x", updated_at: "x" } as Notification;
+  const lines = notificationLines(plain);
+  assert.ok(!lines.some((line) => /^(min_severity|severity|active_hours|audience):/.test(line)), "a notification created before the rules shows none");
+  assert.ok(lines.includes("screen_tags: Lobby"));
+  assert.ok(!notificationTableLines([plain]).join("\n").includes("RULES"));
+  const ruled = { ...plain, screen_tags: [], audience: { all: [{ any: [{ tag: "A" }, { tag: "B" }] }, { folder: "sfd_X" }] }, min_severity: "info", severity: { crashing: "error" }, active_hours: { timezone: "UTC", windows: [{ days: ["sat", "sun"] }] } } as Notification;
+  const shown = notificationLines(ruled);
+  assert.ok(shown.includes("audience: (tag A or tag B) and folder sfd_X"));
+  assert.ok(shown.includes("min_severity: info"));
+  assert.ok(shown.includes("severity: crashing=error"));
+  assert.ok(shown.includes("active_hours: UTC sat,sun (outside the hours: hold)"));
+});
+
+test("a webhook delivery's severity and the planned_reboot and outside_hours skips read as the server sends them", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env);
+  for (const [deliveryId, reason] of [["whd_HOURSAAAAAAAAAAAAAAAA", "outside_hours"], ["whd_REBOOTAAAAAAAAAAAAAAA", "planned_reboot"], ["whd_BELOWAAAAAAAAAAAAAAAA", "below_severity"]] as const) {
+    transport.putNotificationDelivery!(id, {
+      id: deliveryId, notification_id: id, event_id: "ev1_7", event_type: "screen.offline", condition: "screen_offline", phase: "opened",
+      screen_id: "scr_LOBBYAAAAAAAAAAAAAAAA", screen_name: "Lobby TV", state: "skipped", attempts: 0, last_error: reason, created_at: "2026-08-14T16:55:00.000Z",
+    });
+  }
+  const human = await cli(["--human", "notifications", "deliveries", id], transport, env);
+  for (const reason of ["outside_hours", "planned_reboot", "below_severity"]) assert.match(human.stdout, new RegExp(`skipped\\s+0\\s+${reason}`));
+  const help = await cli(["--human", "notifications", "deliveries", "--help"], transport, env);
+  assert.match(help.stdout, /outside_hours \(the notification's active hours were closed/);
+  assert.match(help.stdout, /planned_reboot \(the screen went offline/);
 });

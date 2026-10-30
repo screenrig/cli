@@ -118,7 +118,7 @@ test("screen folder and move commands are in help, with the folder selector on e
   assert.ok(commandHelp(["screen", "list"]).options.some((option) => option.name === "--folder"));
   for (const words of [
     ["assign"], ["reload"], ["toast"], ["screenshot"], ["tag"], ["schedule", "set"], ["schedule", "clear"], ["takeover", "set"], ["takeover", "clear"],
-    ["reboot"], ["display", "set"], ["display", "clear"], ["display-schedule", "set"], ["display-schedule", "clear"],
+    ["reboot"], ["display", "set"], ["display", "clear"], ["display-schedule", "set"], ["display-schedule", "clear"], ["reboot-schedule", "set"], ["reboot-schedule", "clear"],
   ]) {
     const option = commandHelp(["screen", ...words]).options.find((item) => item.name === "--folder");
     assert.ok(option, `screen ${words.join(" ")} takes --folder`);

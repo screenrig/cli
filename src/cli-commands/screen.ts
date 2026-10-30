@@ -2,12 +2,12 @@ import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes
 import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import type { CommandHandler } from "../commands.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
 import { liveFrameIntervalOption } from "../screen-live-frame.js";
-import { untilOption } from "../screen-display.js";
+import { rebootWindowOption, untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
 import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } from "../screen-link.js";
@@ -427,6 +427,35 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "clear")!,
     "screenrig screen display-schedule clear scr_LOBBY", "screenrig screen display-schedule clear --tag Cafe");
+  const rebootSchedule = screen.command("reboot-schedule").description("Show, set, or clear when the backend reboots a screen's device");
+  rebootSchedule.command("show").description("Show a screen's reboot schedule and its next reboot")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenRebootScheduleShow));
+  const rebootScheduleSet = rebootSchedule.command("set").description("Replace the reboot schedule on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .addOption(folderSelector())
+    .addOption(new Option("--window <SPEC>", "Reboot at the start of this weekly window, DAYS HH:MM-HH:MM such as \"Mon-Sun 04:00-04:30\" (repeatable, at most 16); each window lasts 5 minutes to 24 hours").argParser(rebootWindowOption).conflicts(["file"]))
+    .addOption(new Option("--file <FILE>", "Reboot schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin, instead of --window").conflicts(["window", "disabled", "enabled"]))
+    .addOption(new Option("--enabled", "Reboot at each window (the default)").conflicts(["disabled", "file"]))
+    .addOption(new Option("--disabled", "Keep the windows and reboot nothing").conflicts(["enabled", "file"]))
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenRebootScheduleSet));
+  requireOptionGroup(rebootScheduleSet, "exactlyOne", ["--window", "--file"]);
+  rebootSchedule.command("clear").description("Remove the reboot schedule from a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .addOption(folderSelector())
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenRebootScheduleClear));
+  addCommandNotes(rebootSchedule, "Reboot schedule:\n  The screen needs a timezone first (screen set-timezone ID --timezone ZONE), and\n  its Player must declare the reboot capability (reboot_unsupported otherwise).\n  Each --window is DAYS HH:MM-HH:MM in the screen timezone, 5 minutes to 24 hours\n  long (end <= start crosses midnight); the backend sends the normal reboot at the\n  start of every window, so \"Mon-Sun 04:00-04:30\" reboots the screen at 04:00\n  local time every day. An offline screen keeps the reboot queued only until its\n  window ends, so a late reboot never lands in business hours. screen show lists\n  such a reboot under commands with source schedule, and a planned reboot raises\n  no offline alert for ten minutes. --disabled keeps the windows and reboots\n  nothing. show prints next_reboot_at.");
+  addCommandExamples(rebootSchedule.commands.find((command) => command.name() === "show")!, "screenrig screen reboot-schedule show scr_LOBBY");
+  addCommandExamples(rebootScheduleSet,
+    'screenrig screen reboot-schedule set scr_LOBBY --window "Mon-Sun 04:00-04:30"',
+    'screenrig screen reboot-schedule set --tag Cafe --window "Mon-Fri 04:00-04:30" --window "Sat,Sun 05:00-06:00"',
+    "screenrig screen reboot-schedule set scr_LOBBY --file reboots.json --expect-rev 4");
+  addCommandExamples(rebootSchedule.commands.find((command) => command.name() === "clear")!,
+    "screenrig screen reboot-schedule clear scr_LOBBY", "screenrig screen reboot-schedule clear --tag Cafe");
   const update = screen.commands.find(command => command.name() === "update")!;
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);
