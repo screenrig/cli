@@ -231,3 +231,13 @@ test("mapLimit runs a few at a time and keeps the order of the results", async (
   assert.equal(peak, 2);
   await assert.rejects(mapLimit([1, 2, 3], 2, async (value) => { if (value === 2) throw new Error("boom"); return value; }), /boom/);
 });
+
+test("an audit log the project's plan does not include is skipped, not a failed copy", async () => {
+  await inTemp(async (directory) => {
+    const notInPlan = new CliError(makeProblem("feature_not_in_plan", "This feature is not in the project's plan", 402, "The audit log is part of Enterprise. This account is on Standard."));
+    const result = await runProjectExport(fakeApi({ gets: [], files: [], appends: [] }, { "/api/audit/head": notInPlan }), { directory, media: false, now: NOW });
+    const statuses = Object.fromEntries(result.sections.map((section) => [section.name, section.status]));
+    assert.equal(statuses["audit log"], "skipped");
+    assert.equal(result.failed, 0);
+  });
+});

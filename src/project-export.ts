@@ -176,8 +176,9 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
       sections.push({ name, status: "ok", files: await run() });
     } catch (error) {
       const problem = error instanceof CliError ? error.problem : undefined;
-      // A route this credential or plan does not reach is skipped, not a failure of the copy.
-      const skipped = problem?.status === 403 || problem?.status === 404 || problem?.code === "forbidden" || problem?.code === "not_ready";
+      // A route this credential or plan does not reach is skipped, not a failure of the copy:
+      // feature_not_in_plan is a plan feature (the audit log) the project's plan does not include.
+      const skipped = problem?.status === 403 || problem?.status === 404 || problem?.code === "forbidden" || problem?.code === "not_ready" || problem?.code === "feature_not_in_plan";
       sections.push({ name, status: skipped ? "skipped" : "failed", files: 0, detail: problem?.detail ?? (error instanceof Error ? error.message : String(error)), code: problem?.code });
       if (!skipped) result.failed += 1;
     }
