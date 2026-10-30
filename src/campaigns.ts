@@ -563,6 +563,8 @@ export function campaignLines(campaign: Campaign | undefined): string[] {
     ...(campaign.start ? [`start: ${campaign.start === "on_time" ? "on time" : "next item"}`] : []),
     `priority: ${campaign.priority}`,
     `paused: ${campaign.paused}`,
+    ...(campaign.reserved ? ["reserved: true (only a person who can approve changes it)"] : []),
+    ...(campaign.editable === false ? ["editable: false (it reaches screens outside this caller's scope, so it is read-only here)"] : []),
     `revision: ${campaign.revision}`,
     ...when(campaign.created_at, "created_at"),
     ...when(campaign.updated_at, "updated_at"),
@@ -578,9 +580,13 @@ function table(header: string[], rows: string[][]): string[] {
 /** The list table, in the precedence order the API returns. */
 export function campaignTableLines(items: Campaign[]): string[] {
   if (!items.length) return ["No campaigns"];
-  return table(["ID", "NAME", "PLAYLIST", "AUDIENCE", "WHEN", "PRIORITY", "PAUSED"], items.map((item) => [
+  // RESERVED and EDITABLE appear only when some campaign is reserved or the caller is limited to screens.
+  const reserved = items.some((item) => item.reserved);
+  const scoped = items.some((item) => item.editable !== undefined);
+  return table(["ID", "NAME", "PLAYLIST", "AUDIENCE", "WHEN", "PRIORITY", "PAUSED", ...(reserved ? ["RESERVED"] : []), ...(scoped ? ["EDITABLE"] : [])], items.map((item) => [
     item.id ?? "", clip(item.name ?? "", 40), item.playlist_id ?? "", clip(campaignAudienceText(item.audience), 48),
     clip(campaignWhenText(item), 56), String(item.priority ?? 0), item.paused ? "yes" : "no",
+    ...(reserved ? [item.reserved ? "yes" : "no"] : []), ...(scoped ? [item.editable === false ? "no" : "yes"] : []),
   ]));
 }
 

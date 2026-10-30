@@ -409,6 +409,8 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
     throw usageError("screen provision requires exactly one of --open or --print-url.");
   }
   const label = flagString(args.flags, "name");
+  const folder = flagString(args.flags, "folder");
+  const folderId = folder === undefined ? undefined : screenFolderId(folder, "--folder");
   const enrollmentRuntime = {
     fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
     now: runtime.now,
@@ -418,10 +420,11 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
     resolved,
     runtime: enrollmentRuntime,
     ...(label ? { label } : {}),
+    ...(folderId ? { folderId } : {}),
     ...(flagString(args.flags, "idempotency-key") ? { requestedKey: flagString(args.flags, "idempotency-key") } : {}),
   });
 
-  const request: ProvisionScreen = { ...(label ? { label } : {}) };
+  const request: ProvisionScreen = { ...(label ? { label } : {}), ...(folderId ? { folder_id: folderId } : {}) };
   let response;
   try {
     response = await client.call({
@@ -463,6 +466,7 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
   if (printMode || opened) await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
   const data = {
     screen_id: provisioned.screen.id,
+    ...(provisioned.screen.folder_id ? { folder_id: provisioned.screen.folder_id } : {}),
     public_url: urls.publicUrl,
     expires_at: provisioned.expires_at,
     ...(openMode ? { opened } : { provisioning_url: urls.provisioningUrl }),
@@ -472,6 +476,7 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
     exitCode: ExitCode.Success,
     human: humanLines(openMode ? "Browser provisioning" : "Sensitive one-time browser provisioning URL", [
       ["screen_id", provisioned.screen.id],
+      ["folder_id", provisioned.screen.folder_id],
       ["public_url", urls.publicUrl],
       ["expires_at", provisioned.expires_at],
       ...(openMode ? [["opened", opened ? "true" : "false"] as [string, string]] : [["provisioning_url", urls.provisioningUrl] as [string, string]]),
@@ -510,7 +515,8 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   if (!rawCode) throw usageError("screen pair requires CODE.");
   const code = canonicalPairingCode(rawCode, "screen pair CODE");
   const label = flagString(args.flags, "name");
-  const request: PairScreen = { code, ...(label ? { label } : {}) };
+  const folder = flagString(args.flags, "folder");
+  const request: PairScreen = { code, ...(label ? { label } : {}), ...(folder !== undefined ? { folder_id: screenFolderId(folder, "--folder") } : {}) };
   const response = await client.call({
     method: "POST",
     path: "/api/screens/pair",
@@ -536,6 +542,7 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
       ["code", code],
       ["screen_id", claim.screen.id],
       ["label", claim.screen.label],
+      ["folder_id", claim.screen.folder_id],
       ["state", claim.screen.state],
       ["next", next ? `${next.command} (the Player finishes pairing when it next contacts the service)` : undefined],
     ]),

@@ -37,12 +37,14 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   screen.command("pair").description("Claim a Player pairing code")
     .argument("<code...>", "Player pairing code as shown; spaces and dashes are ignored")
     .option("--name <NAME>", "Set the screen name")
+    .option("--folder <ID>", "Put the screen in this screen folder (sfd_...); omitted leaves it at the project root. An agent limited to screen folders must name a folder of its scope", screenFolderIdOption("--folder"))
     .action(bind(handleScreenPair));
 
   screen.command("provision").description("Create a screen and browser handoff")
     .addOption(new Option("--open", "Open the browser Player handoff").conflicts(["printUrl"]))
     .option("--print-url", "Return the browser handoff URL")
     .option("--name <NAME>", "Set the screen name")
+    .option("--folder <ID>", "Put the screen in this screen folder (sfd_...); omitted leaves it at the project root. An agent limited to screen folders must name a folder of its scope", screenFolderIdOption("--folder"))
     .action(bind(handleScreenProvision));
 
   screen.command("update").description("Update a screen")
@@ -262,6 +264,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<ids...>", "Screen (scr_...) and screen folder (sfd_...) identifiers, at most 1000")
     .option("--folder <ID>", "Destination screen folder (sfd_...)", screenFolderIdOption("--folder"))
     .option("--root", "Move to the project root, outside every folder")
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenMove));
   requireOptionGroup(move, "exactlyOne", ["--folder", "--root"]);
 
@@ -275,6 +278,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .requiredOption("--name <NAME>", "Folder name, 1 to 100 characters, unique among its siblings (required)", screenFolderName)
     .option("--parent <ID>", "Create it inside this screen folder (sfd_...); omitted creates it at the project root", screenFolderIdOption("--parent"))
     .option("--default-playlist-id <ID>", "The approved playlist its screens show when they have none of their own", screenFolderPlaylistOption)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenFolderCreate));
   const folderUpdate = folder.command("update").description("Rename a screen folder, move it with everything inside, or set or clear its default playlist")
     .argument("<id>", "Screen folder identifier (sfd_...)")
@@ -283,12 +287,16 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--root", "Move it to the project root").conflicts("parent"))
     .addOption(new Option("--default-playlist-id <ID>", "The approved playlist its screens show when they have none of their own").argParser(screenFolderPlaylistOption).conflicts("clearDefault"))
     .addOption(new Option("--clear-default", "Remove its default playlist").conflicts("defaultPlaylistId"))
+    .addOption(new Option("--protect", "Protect the folder and every folder inside it: a change reaching their screens then waits for a second approver. Only a person who can approve protects; an agent is refused with approver_required").conflicts(["unprotect", "name", "parent", "root", "defaultPlaylistId", "clearDefault"]))
+    .addOption(new Option("--unprotect", "Propose removing the folder's protection, sent alone; a second approver decides the review").conflicts(["protect", "name", "parent", "root", "defaultPlaylistId", "clearDefault"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenFolderUpdate));
-  requireOptionGroup(folderUpdate, "atLeastOne", ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default"]);
+  requireOptionGroup(folderUpdate, "atLeastOne", ["--name", "--parent", "--root", "--default-playlist-id", "--clear-default", "--protect", "--unprotect"]);
   folder.command("delete").description("Delete a screen folder; its screens and folders move up one level")
     .argument("<id>", "Screen folder identifier (sfd_...)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenFolderDelete));
 
   const schedule = screen.command("schedule").description("Show, set, or clear a screen's server-evaluated playlist schedule");

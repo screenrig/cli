@@ -1,7 +1,8 @@
-import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaChange, ReviewMediaFields, ReviewMediaFile, ReviewMediaPlaylist, ReviewMediaReplace, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
+import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaChange, ReviewMediaFields, ReviewMediaFile, ReviewMediaPlaylist, ReviewMediaReplace, ReviewPending, ReviewPlaylistChange, ReviewProtectedChange, ReviewSummary } from "./adapters/protocol.js";
 import type { ProblemNext, Warning } from "./envelope.js";
 import { accessLabel } from "./oauth.js";
 import { unexpectedResponseError, usageError } from "./problems.js";
+import { campaignAudienceText } from "./campaigns.js";
 
 /**
  * Reviews. Under Propose access a review-class write (playlist create and
@@ -73,6 +74,9 @@ export function pendingReviewWarning(review: Pick<ReviewSummary, "url">): Warnin
 
 export const PENDING_REVIEW_SENTENCE = "Nothing changes on glass until a person approves it; they can also reject it or ask for changes. Do not repeat the write: check the decision later.";
 
+/** A protected change waits for a second approver, never the proposer or the person responsible for the agent. */
+export const PROTECTED_REVIEW_SENTENCE = "This change reaches a protected screen folder, so an approver other than the person who proposed it, or who is responsible for this agent, must decide it. Nothing changes until then. Do not repeat the write: check the decision later.";
+
 /** Server text in a terminal: control characters (escape sequences, line breaks) become spaces. */
 export function plainText(value: string): string {
   return value.replace(/\p{Cc}/gu, " ");
@@ -82,6 +86,7 @@ const KIND_LABELS: Record<string, string> = {
   playlist_change: "Playlist change",
   screen_change: "Screen change",
   ad_creative: "Ad creative",
+  protected_change: "Protected change",
 };
 
 function kindLabel(kind: string): string {
@@ -118,7 +123,7 @@ export function pendingReviewLines(review: ReviewSummary): string[] {
     ...(typeof review.impact?.screens === "number" ? [`impact: approving changes ${screensText(review.impact.screens)}`] : []),
     `url: ${review.url}`,
     `next: screenrig reviews show ${review.id}`,
-    PENDING_REVIEW_SENTENCE,
+    review.kind === "protected_change" ? PROTECTED_REVIEW_SENTENCE : PENDING_REVIEW_SENTENCE,
   ];
 }
 
@@ -263,6 +268,61 @@ export function mediaReplaceLines(change: ReviewMediaReplace): string[] {
   ];
 }
 
+const PROTECTED_SUBKINDS: Record<ReviewProtectedChange["subkind"], string> = {
+  campaign_create: "create a campaign",
+  campaign_update: "change a campaign",
+  campaign_delete: "delete a campaign",
+  folder_create: "create a screen folder",
+  folder_update: "change a screen folder",
+  folder_delete: "delete a screen folder",
+  folder_unprotect: "remove a screen folder's protection",
+  screens_move: "move screens and screen folders",
+};
+
+function idList(ids: string[] | null | undefined): string {
+  return Array.isArray(ids) && ids.length ? ids.map(plainText).join(", ") : "none";
+}
+
+/**
+ * What a protected_change review does when a second approver approves it, one
+ * line per fact: the campaign's name, playlist and audience, the folder's name
+ * and parent, the screens and folders moved.
+ */
+export function protectedChangeLines(change: ReviewProtectedChange): string[] {
+  const lines = [`${PROTECTED_SUBKINDS[change.subkind] ?? plainText(String(change.subkind))}`];
+  const campaign = change.campaign;
+  if (campaign) {
+    const body = campaign.body ?? {};
+    const audience = body.audience && typeof body.audience === "object" ? campaignAudienceText(body.audience as Parameters<typeof campaignAudienceText>[0]) : undefined;
+    const others = Object.keys(body).filter((key) => !["name", "playlist_id", "audience"].includes(key)).map(plainText);
+    lines.push(
+      ...(campaign.id ? [`campaign: ${plainText(campaign.id)}`] : []),
+      ...(typeof body.name === "string" ? [`name: ${plainText(body.name)}`] : []),
+      ...(typeof body.playlist_id === "string" ? [`playlist: ${plainText(body.playlist_id)}`] : []),
+      ...(audience ? [`audience: ${plainText(audience)}`] : []),
+      ...(others.length ? [`also sets: ${others.join(", ")}`] : []),
+    );
+  }
+  const folder = change.folder;
+  if (folder) {
+    lines.push(
+      ...(folder.id ? [`folder: ${plainText(folder.id)}`] : []),
+      ...(folder.name !== undefined ? [`name: ${plainText(folder.name)}`] : []),
+      ...(change.subkind === "folder_create" || folder.move ? [`${folder.move ? "moves to" : "inside"}: ${folder.parent_id ? `folder ${plainText(folder.parent_id)}` : "the project root"}`] : []),
+      ...(folder.set_default ? [`default playlist: ${folder.default_playlist_id ? plainText(folder.default_playlist_id) : "cleared"}`] : []),
+    );
+  }
+  const move = change.move;
+  if (move) {
+    lines.push(
+      `into: ${move.folder_id ? `folder ${plainText(move.folder_id)}` : "the project root"}`,
+      `screens: ${idList(move.screen_ids)}`,
+      `folders: ${idList(move.folder_ids)}`,
+    );
+  }
+  return lines;
+}
+
 /** Human detail of one review (reviews show, withdraw). */
 export function reviewDetailLines(review: Review): string[] {
   // A list value prints as indented lines under its key.
@@ -275,6 +335,8 @@ export function reviewDetailLines(review: Review): string[] {
     ["decision_note", review.decision_note === undefined ? undefined : plainText(review.decision_note)],
     ["impact", typeof review.impact?.screens === "number" ? `approving changes ${screensText(review.impact.screens)}` : undefined],
     ["change", review.playlist_change ? playlistChangeText(review.playlist_change) : undefined],
+    ["protected", review.protected ? "a second approver decides this: not the proposer, nor the person responsible for the proposing agent" : undefined],
+    ["protected_change", review.protected_change ? protectedChangeLines(review.protected_change) : undefined],
     ["media_change", review.playlist_change?.media_change ? mediaChangeText(review.playlist_change.media_change) : undefined],
     ["media_replace", review.playlist_change?.media_replace ? mediaReplaceLines(review.playlist_change.media_replace) : undefined],
     ["applied_revision", review.playlist_change?.applied_revision === undefined ? undefined : String(review.playlist_change.applied_revision)],
@@ -301,7 +363,7 @@ export function reviewListLines(list: ReviewList): string[] {
   const items = Array.isArray(list.items) ? list.items : [];
   return [
     `Reviews (${items.length}; ${list.pending_count ?? 0} pending)`,
-    ...items.map((review) => [review.id, review.kind, review.state, subjectText(review.subject) ?? "-", review.created_at,
+    ...items.map((review) => [review.id, review.kind, review.state, ...(review.protected && review.kind !== "protected_change" ? ["protected"] : []), subjectText(review.subject) ?? "-", review.created_at,
       ...(review.playlist_change?.media_change ? [mediaChangeText(review.playlist_change.media_change)] : []),
       ...(review.playlist_change?.media_replace ? [`${review.playlist_change.media_replace.source === "restore" ? "restore" : "replacement"} becomes version ${review.playlist_change.media_replace.version}`] : [])].join("  ")),
   ];

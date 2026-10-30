@@ -10,7 +10,8 @@ import { ExitCode } from "../exit-codes.js";
 import { usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
-import { clientFor, commandHandler, jsonBody, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
+import { pendingReviewOf } from "../reviews.js";
+import { clientFor, commandHandler, jsonBody, pendingReviewResult, reviewNoteFrom, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
 // Content campaigns: /api/campaigns switch every screen of an audience to a
@@ -32,9 +33,17 @@ export async function campaignCall(
   }
 }
 
+/** The revision guard and the review note of a campaign write. */
 export function campaignRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
   const revision = flagString(args.flags, "expect-rev");
-  return revision ? { "if-match": quotedRevision(revision) } : undefined;
+  const headers = { ...reviewNoteFrom(args), ...(revision ? { "if-match": quotedRevision(revision) } : {}) };
+  return Object.keys(headers).length ? headers : undefined;
+}
+
+/** --reserved is true and --no-reserved false; neither leaves the member out of the body. */
+export function campaignReservedFlag(args: ParsedArgs): boolean | undefined {
+  if (flagBool(args.flags, "reserved")) return true;
+  return flagBool(args.flags, "no-reserved") ? false : undefined;
 }
 
 /**
@@ -107,6 +116,7 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
   const paused = flagBool(args.flags, "paused");
+  const reserved = campaignReservedFlag(args);
   const body: CampaignWrite = {
     name,
     playlist_id: playlistId,
@@ -117,9 +127,12 @@ export const handleCampaignCreate = commandHandler(async (args, runtime, resolve
     ...campaignLevelFlags(args),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
     ...(paused ? { paused: true } : {}),
+    ...(reserved !== undefined ? { reserved } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await campaignCall(client, { method: "POST", path: CAMPAIGNS_PATH, idempotent: true, body });
+  const response = await campaignCall(client, { method: "POST", path: CAMPAIGNS_PATH, idempotent: true, body, headers: campaignRevisionHeaders(args) });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   const id = (response.body as Campaign | undefined)?.id ?? "";
   return campaignResult(response, client, paused
     ? `Created campaign ${id}, paused. No screen changes until screenrig campaign resume ${id}.`
@@ -153,6 +166,7 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
   const until = flagString(args.flags, "until");
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
+  const reserved = campaignReservedFlag(args);
   const clears = (["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const).filter((flag) => flagBool(args.flags, flag));
   const audience = await campaignAudienceFlag(args, runtime);
   campaignBounds(from, until);
@@ -173,14 +187,17 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
     ...(clears.includes("clear-on-touch") ? { interaction: null } : {}),
     ...(clears.includes("clear-displays") ? { displays: null } : {}),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
+    ...(reserved !== undefined ? { reserved } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, --priority, --reserved, or --no-reserved.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, {
     method: "PATCH", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, body: patch, headers: campaignRevisionHeaders(args),
   }, id);
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return campaignResult(response, client, `Updated campaign ${id}. Every screen of its old and new audience re-resolves within a minute.`);
 });
 
@@ -191,6 +208,8 @@ export async function campaignPaused(args: ParsedArgs, runtime: CliRuntime, reso
   const response = await campaignCall(client, {
     method: "PATCH", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, body, headers: campaignRevisionHeaders(args),
   }, id);
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return campaignResult(response, client, paused
     ? `Paused campaign ${id}. Screens that showed it return to what they would show without it within a minute; screenrig campaign resume ${id} starts it again.`
     : `Resumed campaign ${id}. Screens in its audience switch to the playlist within a minute while it holds; screenrig campaign screens ${id} shows each screen's standing.`);
@@ -206,6 +225,8 @@ export const handleCampaignDelete = commandHandler(async (args, runtime, resolve
   const response = await campaignCall(client, {
     method: "DELETE", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, headers: campaignRevisionHeaders(args),
   }, id);
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
     exitCode: ExitCode.Success,

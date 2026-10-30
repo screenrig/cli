@@ -4,7 +4,8 @@ import { flagBool, flagString } from "../command-input.js";
 import { requireToken } from "../client.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { usageError } from "../problems.js";
+import { screenScopeOf, usageError } from "../problems.js";
+import { screenScopeFromArgs } from "../screen-folders.js";
 import { adsListOption, clientFor, commandHandler, humanLines, isPlainContactEmail, jsonBody, requirePrivateNoStore, uploadScopeFromArgs } from "../commands.js";
 
 
@@ -29,12 +30,19 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
   const emails = link ? [] : adsListOption(flagString(args.flags, "email"), "email").map(invitationEmail);
   if (!link && (!emails.length || emails.length > 50)) throw usageError("invitations create requires --link, or --email with 1 to 50 addresses.");
   const screenIds = adsListOption(flagString(args.flags, "screen-id"), "screen-id");
+  const screenFolderIds = adsListOption(flagString(args.flags, "screen-folder-id"), "screen-folder-id");
   const slotIds = adsListOption(flagString(args.flags, "slot-id"), "slot-id");
   const policy = flagString(args.flags, "policy");
   if (kind === "ad_buyer" && link) throw usageError("--link is available only for member invitations.");
-  if (kind === "project_member" && (screenIds.length || slotIds.length || policy !== undefined)) {
+  if (kind === "project_member" && (slotIds.length || policy !== undefined)) {
     throw usageError("Advertising scope and policy require --kind ad-buyer.");
   }
+  if (kind === "ad_buyer" && screenFolderIds.length) throw usageError("--screen-folder-id limits a member to screen folders and needs --kind member.");
+  if (uploader && (screenIds.length || screenFolderIds.length)) {
+    throw usageError("An uploader works in media folders and playlists, not screens: give --folder-id and --playlist-id with --kind uploader, or --screen-folder-id and --screen-id with --kind member.");
+  }
+  const screenScope = kind === "project_member" && (screenIds.length || screenFolderIds.length)
+    ? screenScopeFromArgs(screenFolderIds, screenIds) : undefined;
   if (!uploader && (flagString(args.flags, "folder-id") !== undefined || flagString(args.flags, "playlist-id") !== undefined || flagString(args.flags, "access") !== undefined)) {
     throw usageError("--folder-id, --playlist-id and --access require --kind uploader.");
   }
@@ -49,6 +57,7 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
     body: { kind, delivery: link ? "link" : "email",
       ...(!link ? { emails } : {}),
       ...(uploadScope ? { upload_scope: uploadScope } : {}),
+      ...(screenScope ? { screen_scope: screenScope } : {}),
       ...(kind === "ad_buyer" ? { advertising: { screen_ids: screenIds, slot_ids: slotIds, policy: policy ?? "trusted" } } : {}),
     },
   });
@@ -116,6 +125,7 @@ export function validateInvitation(value: unknown): Invitation {
     || !isDateTime(invitation.created_at) || !isDateTime(invitation.expires_at)) {
     throw usageError("Invitation response does not match the generated invitation contract.");
   }
+  const screenScope = screenScopeOf(invitation.screen_scope);
   // Project onto the credential-free contract before the explicit link handoff.
   return {
     id: invitation.id, kind: invitation.kind!, delivery: invitation.delivery!, status: invitation.status!,
@@ -123,5 +133,6 @@ export function validateInvitation(value: unknown): Invitation {
     ...(invitation.recipient_email ? { recipient_email: invitation.recipient_email } : {}),
     ...(invitation.advertising ? { advertising: invitation.advertising } : {}),
     ...(invitation.upload_scope ? { upload_scope: invitation.upload_scope } : {}),
+    ...(screenScope ? { screen_scope: screenScope } : {}),
   };
 }

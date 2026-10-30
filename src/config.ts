@@ -67,6 +67,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       screen_provision?: {
         idempotency_key: string;
         label?: string;
+        folder_id?: string;
       };
       browser_setup?: {
         idempotency_key: string;

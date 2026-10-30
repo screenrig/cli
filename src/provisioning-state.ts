@@ -7,16 +7,18 @@ import type { EnrollmentRuntime } from "./enrollment.js";
 export interface ProvisioningRetryState {
   idempotency_key: string;
   label?: string;
+  folder_id?: string;
 }
 
-function sameRequest(state: ProvisioningRetryState, label: string | undefined): boolean {
-  return state.label === label;
+function sameRequest(state: ProvisioningRetryState, label: string | undefined, folderId: string | undefined): boolean {
+  return state.label === label && state.folder_id === folderId;
 }
 
 export async function provisionRetryState(options: {
   resolved: ResolvedConfig;
   runtime: EnrollmentRuntime;
   label?: string;
+  folderId?: string;
   requestedKey?: string;
   generateIdempotencyKey?: () => string;
 }): Promise<ProvisioningRetryState> {
@@ -29,8 +31,8 @@ export async function provisionRetryState(options: {
       const current = stored ? projectConfigFor(stored, options.resolved) : undefined;
       if (current) assertProjectCredential(current, options.resolved);
       if (current?.screen_provision) {
-        if (!sameRequest(current.screen_provision, options.label)) {
-          throw usageError("A browser provisioning retry is pending. Retry the same label before creating another screen.");
+        if (!sameRequest(current.screen_provision, options.label, options.folderId)) {
+          throw usageError("A browser provisioning retry is pending. Retry the same --name and --folder before creating another screen.");
         }
         if (options.requestedKey && current.screen_provision.idempotency_key !== options.requestedKey) {
           throw usageError("The supplied idempotency key does not match the pending browser provisioning retry.");
@@ -42,6 +44,7 @@ export async function provisionRetryState(options: {
       const state: ProvisioningRetryState = {
         idempotency_key: idempotencyKey,
         ...(options.label ? { label: options.label } : {}),
+        ...(options.folderId ? { folder_id: options.folderId } : {}),
       };
       await writeConfigAtomic(options.resolved.configPath, withProjectConfig(stored ?? { api_url: options.resolved.apiUrl }, options.resolved, {
         ...(current ?? { api_url: options.resolved.apiUrl }),

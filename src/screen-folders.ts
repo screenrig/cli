@@ -1,11 +1,12 @@
 import type { ScreenFolder, ScreenFolderCreate, ScreenFolderList, ScreenFolderPatch, ScreenLevelChange, ScreenLevelChanges, ScreenMove, ScreenMoveResult } from "./adapters/protocol.js";
 import { requireToken } from "./client.js";
 import { flagBool, flagString } from "./command-input.js";
-import { clientFor, commandHandler, jsonBody } from "./commands.js";
+import { clientFor, commandHandler, jsonBody, pendingReviewResult, reviewNoteFrom } from "./commands.js";
 import { ExitCode } from "./exit-codes.js";
 import { isResourceID } from "./generated/resource-ids.js";
 import { quotedRevision } from "./if-match.js";
 import { CliError, usageError } from "./problems.js";
+import { pendingReviewOf } from "./reviews.js";
 import { SCREEN_FOLDER_ID_PATTERN, screenFolderId } from "./screen-fleet.js";
 
 /** Screen folders: `screen folder list|show|create|update|delete` and `screen move`. */
@@ -13,6 +14,9 @@ import { SCREEN_FOLDER_ID_PATTERN, screenFolderId } from "./screen-fleet.js";
 export const SCREEN_FOLDER_NAME_MAX = 100;
 /** One move names at most this many screens and folders in all. */
 export const SCREEN_MOVE_IDS_MAX = 1000;
+/** A screen scope names at most this many folders and single screens. */
+export const SCREEN_SCOPE_FOLDERS_MAX = 1000;
+export const SCREEN_SCOPE_SCREENS_MAX = 200;
 const FOLDERS_PATH = "/api/screen-folders";
 
 /** ScreenFolder.name: trimmed, 1 to 100 characters, no controls, not "." or "..". */
@@ -22,6 +26,18 @@ export function screenFolderName(value: string): string {
     throw usageError(`--name must hold 1 to ${SCREEN_FOLDER_NAME_MAX} characters without controls, and not be . or ..`);
   }
   return trimmed;
+}
+
+/** The ScreenScope an invitation carries: screen folders (sfd_...) and single screens (scr_...), at least one in all. */
+export function screenScopeFromArgs(folderIds: string[], screenIds: string[]): { folder_ids: string[]; screen_ids: string[] } {
+  if (!folderIds.length && !screenIds.length) throw usageError("A screen scope needs at least one --screen-folder-id or --screen-id.");
+  if (folderIds.length > SCREEN_SCOPE_FOLDERS_MAX || screenIds.length > SCREEN_SCOPE_SCREENS_MAX) {
+    throw usageError(`A screen scope holds at most ${SCREEN_SCOPE_FOLDERS_MAX} screen folders and ${SCREEN_SCOPE_SCREENS_MAX} single screens; a folder includes every screen inside it.`);
+  }
+  if (new Set(folderIds).size !== folderIds.length || new Set(screenIds).size !== screenIds.length) throw usageError("A screen scope lists each folder and screen once.");
+  for (const id of folderIds) screenFolderId(id, "--screen-folder-id");
+  for (const id of screenIds) if (!isResourceID(id, "screen")) throw usageError("--screen-id takes screen IDs (scr_...); screen list shows them.");
+  return { folder_ids: folderIds, screen_ids: screenIds };
 }
 
 /** A Commander parser for a flag that takes one screen folder ID (sfd_...). */
@@ -98,10 +114,12 @@ function table(header: string[], rows: string[][]): string[] {
 /** screen folder list: the tree as one row per folder, with the live screens directly inside it and its default playlist. */
 export function folderListLines(items: readonly ScreenFolder[]): string[] {
   if (!items.length) return ["No screen folders"];
+  // A protected folder is marked; a project with none keeps its columns.
+  const marked = items.some((item) => item.protected);
   return [
     `Screen folders (${items.length})`,
-    ...table(["PATH", "ID", "SCREENS", "DEFAULT_PLAYLIST"], folderRows(items).map(({ folder, path }) => [
-      path, folder.id, folder.screens === undefined ? "" : String(folder.screens), folder.default_playlist_id ?? "",
+    ...table(["PATH", "ID", "SCREENS", "DEFAULT_PLAYLIST", ...(marked ? ["PROTECTED"] : [])], folderRows(items).map(({ folder, path }) => [
+      path, folder.id, folder.screens === undefined ? "" : String(folder.screens), folder.default_playlist_id ?? "", ...(marked ? [folder.protected ? "yes" : ""] : []),
     ])),
   ];
 }
@@ -114,6 +132,7 @@ export function folderLines(folder: ScreenFolder | undefined): string[] {
     `name: ${printable(folder.name)}`,
     `parent_id: ${folder.parent_id ?? "(project root)"}`,
     `default_playlist_id: ${folder.default_playlist_id ?? "(none)"}`,
+    ...(folder.protected ? ["protected: true (a change reaching its screens waits for a second approver)"] : []),
     ...(folder.screens === undefined ? [] : [`screens: ${folder.screens}`]),
     `revision: ${folder.revision}`,
     ...(folder.created_at ? [`created_at: ${folder.created_at}`] : []),
@@ -203,7 +222,9 @@ export const handleScreenFolderCreate = commandHandler(async (args, runtime, res
     ...(playlist !== undefined ? { default_playlist_id: screenFolderPlaylistOption(playlist) } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await folderCall(client, { method: "POST", path: FOLDERS_PATH, idempotent: true, body });
+  const response = await folderCall(client, { method: "POST", path: FOLDERS_PATH, idempotent: true, body, headers: reviewNoteFrom(args) });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   const id = (response.body as ScreenFolder | undefined)?.id ?? "";
   return folderResult(response, client.requestId, `Created screen folder ${id} ${parent === undefined ? "at the project root" : `inside ${parent}`}. screenrig screen move SCREEN_ID --folder ${id} puts screens in it.`);
 });
@@ -216,12 +237,18 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
   const playlist = flagString(args.flags, "default-playlist-id");
   const clearDefault = flagBool(args.flags, "clear-default");
   const revision = flagString(args.flags, "expect-rev");
-  if (name === undefined && parent === undefined && !root && playlist === undefined && !clearDefault) {
-    throw usageError("screen folder update requires --name NAME, --parent ID, --root, --default-playlist-id ID or --clear-default.");
+  const protect = flagBool(args.flags, "protect");
+  const unprotect = flagBool(args.flags, "unprotect");
+  if (name === undefined && parent === undefined && !root && playlist === undefined && !clearDefault && !protect && !unprotect) {
+    throw usageError("screen folder update requires --name NAME, --parent ID, --root, --default-playlist-id ID, --clear-default, --protect or --unprotect.");
   }
   if (parent !== undefined && root) throw usageError("Give --parent ID or --root, not both.");
   if (playlist !== undefined && clearDefault) throw usageError("Give --default-playlist-id ID or --clear-default, not both.");
-  const body: ScreenFolderPatch = {
+  if (protect && unprotect) throw usageError("Give --protect or --unprotect, not both.");
+  if ((protect || unprotect) && (name !== undefined || parent !== undefined || root || playlist !== undefined || clearDefault)) {
+    throw usageError("--protect and --unprotect change protection alone: send the rename, move or default playlist in another command.");
+  }
+  const body: ScreenFolderPatch = protect || unprotect ? { protected: protect } : {
     ...(name !== undefined ? { name: screenFolderName(name) } : {}),
     ...(parent !== undefined ? { parent_id: screenFolderId(parent, "--parent") } : {}),
     ...(root ? { parent_id: null } : {}),
@@ -231,9 +258,13 @@ export const handleScreenFolderUpdate = commandHandler(async (args, runtime, res
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await folderCall(client, {
     method: "PATCH", path: `${FOLDERS_PATH}/${id}`, idempotent: true, body,
-    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+    headers: { ...reviewNoteFrom(args), ...(revision ? { "if-match": quotedRevision(revision) } : {}) },
   }, id);
-  return folderResult(response, client.requestId, `Updated screen folder ${id}. The screens inside re-resolve their playlist within about 15 seconds.`);
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
+  return folderResult(response, client.requestId, protect || unprotect
+    ? `${protect ? "Protected" : "Cleared the protection of"} screen folder ${id}${protect ? " and every folder inside it" : ""}.`
+    : `Updated screen folder ${id}. The screens inside re-resolve their playlist within about 15 seconds.`);
 });
 
 export const handleScreenFolderDelete = commandHandler(async (args, runtime, resolved) => {
@@ -242,8 +273,10 @@ export const handleScreenFolderDelete = commandHandler(async (args, runtime, res
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await folderCall(client, {
     method: "DELETE", path: `${FOLDERS_PATH}/${id}`, idempotent: true,
-    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+    headers: { ...reviewNoteFrom(args), ...(revision ? { "if-match": quotedRevision(revision) } : {}) },
   }, id, "delete");
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: jsonBody({ ...response, body: { id, deleted: true } }, client.requestId),
     exitCode: ExitCode.Success,
@@ -274,7 +307,9 @@ export const handleScreenMove = commandHandler(async (args, runtime, resolved) =
     ...(folder_ids.length ? { folder_ids } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await folderCall(client, { method: "POST", path: "/api/screens/move", idempotent: true, body });
+  const response = await folderCall(client, { method: "POST", path: "/api/screens/move", idempotent: true, body, headers: reviewNoteFrom(args) });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   const moved = response.body as ScreenMoveResult | undefined;
   return {
     envelope: jsonBody(response, client.requestId),
