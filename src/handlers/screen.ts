@@ -15,7 +15,8 @@ import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds
 import { flatFrameNote, frameRow, glassLines } from "../screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "../screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "../screen-live-frame.js";
-import type { LiveStartRequest, ScreenRebootScheduleView } from "../adapters/protocol.js";
+import { levelsLines, sumLevels } from "../screen-folders.js";
+import type { LiveStartRequest, ScreenLevelChanges, ScreenRebootScheduleView } from "../adapters/protocol.js";
 import { healthLines, screenHealthIssues } from "../screen-health.js";
 import { outageLines } from "../screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "../screen-manifest-upgrade.js";
@@ -675,7 +676,8 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     // The merged fields and the location the screen now holds, when this update changed them.
-    human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    // Tags change through screen tag; an answer that carries levels (a tag change) prints them here too.
+    human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...levelsLines((response.body as Screen | undefined)?.levels), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -998,6 +1000,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
   const result: import("../adapters/protocol.js").ScreenActionResult = { action: action.type, matched: 0, succeeded: 0, failed: 0, results: [] };
   let total: number | undefined;
   const answerWarnings: Warning[] = [];
+  const pageLevels: Array<ScreenLevelChanges | undefined> = [];
   while (true) {
     try {
       response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body,
@@ -1028,6 +1031,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
     result.results.push(...page.results);
     // A fleet assign page answers screen_fact_missing when a playlist it assigns reads a value some screen of the page lacks.
     answerWarnings.push(...playlistWarnings(page.warnings ?? []));
+    pageLevels.push(page.levels);
     if (page.next_cursor === undefined) {
       if (response.status !== 200 || (total !== undefined && result.matched !== total)) {
         throw unexpectedResponseError("Fleet action ended without all selected screens; rerun the identical command to resume safely.");
@@ -1045,6 +1049,9 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
     if (wait > 0 && Number.isFinite(wait)) await runtime.sleep(wait * 1000);
   }
   const outcome = fleetOutcome(result);
+  // The tag actions answer the campaigns the screens entered or left, page by page; the envelope carries them added up.
+  const levels = sumLevels(pageLevels);
+  if (levels) result.levels = levels;
   return {
     envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, [...outcome.warnings, ...answerWarnings]),
     exitCode: outcome.exitCode,
@@ -1059,6 +1066,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
         if (item.toast && serverInstant(item.toast.expires_at)) return `toast expires ${item.toast.expires_at}`;
         return undefined;
       }),
+      ...levelsLines(levels),
       ...outcome.warnings.map((warning) => `warning: ${warning.message}`),
     ].join("\n"),
     keepRecoveryUntilOutput: true,
@@ -1133,10 +1141,13 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: humanLines(`Tagged screen ${id}`, [
-      ["tags", screenTags(screen).join(", ") || "(none)"],
-      ["revision", typeof screen?.revision === "number" ? String(screen.revision) : undefined],
-    ]),
+    human: [
+      humanLines(`Tagged screen ${id}`, [
+        ["tags", screenTags(screen).join(", ") || "(none)"],
+        ["revision", typeof screen?.revision === "number" ? String(screen.revision) : undefined],
+      ]),
+      ...levelsLines(screen?.levels),
+    ].join("\n"),
   };
 }, true);
 

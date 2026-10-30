@@ -2907,7 +2907,7 @@ paths:
       x-screenrig-access: write
       operationId: deleteScreenFolder
       description: >-
-        Deletes one folder. Nothing inside is deleted: its screens and folders move up into the deleted folder's parent (the project root when it had none), each moved folder advancing its revision, and those screens re-resolve. Refused with resource_conflict while a campaign audience names the folder, so no schedule loses its screens silently: change or delete those campaigns first. Emits screen.folder_deleted. If-Match optionally guards the revision.
+        Deletes one folder. Nothing inside is deleted: its screens and folders move up into the deleted folder's parent (the project root when it had none), each moved folder advancing its revision, and those screens re-resolve. Refused with resource_conflict while a campaign audience names the folder, so no schedule loses its screens silently: change or delete those campaigns first. Answers the levels its screens gained or lost. Emits screen.folder_deleted. If-Match optionally guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2915,8 +2915,12 @@ paths:
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
       responses:
-        '204':
-          description: Deleted; its contents now sit in its parent.
+        '200':
+          description: Deleted; its contents now sit in its parent. levels names the folder default playlists its screens gained or lost.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenFolderDeleteResult'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -3380,7 +3384,7 @@ paths:
       x-screenrig-access: review
       operationId: updateScreen
       description: >-
-        Updates the screen's name, playlist_id, timezone, wall, tags, fields or location. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields and location included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out.
+        Updates the screen's name, playlist_id, timezone, wall, tags, fields or location. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields and location included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out.
       security:
         - projectBearer: []
       parameters:
@@ -27009,12 +27013,18 @@ components:
         screens: {type: integer, minimum: 0, description: Screens that moved; screens already in the destination are not counted.}
         folders: {type: integer, minimum: 0, description: Folders that moved.}
         levels: {$ref: "#/components/schemas/ScreenLevelChanges"}
+    ScreenFolderDeleteResult:
+      type: object
+      additionalProperties: false
+      required: [levels]
+      properties:
+        levels: {$ref: "#/components/schemas/ScreenLevelChanges"}
     ScreenLevelChanges:
       type: object
       additionalProperties: false
       required: [gained, lost]
       description: >-
-        What a folder change does to the schedules of the screens it moves or re-parents: the campaigns whose folder audience they enter (gained) or leave (lost), and the folder default playlists that start or stop being their default. screens counts the affected screens per level. Campaigns matched by tag or screen id are unaffected and not listed.
+        What a write does to the schedules of the screens it changes: the campaigns whose audience they enter (gained) or leave (lost), and the folder default playlists that start or stop being their default. screens counts the affected screens per level. A folder change lists the campaigns whose folder audience moves; a tag change those whose tag audience moves.
       properties:
         gained: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
         lost: {type: array, maxItems: 1100, items: {$ref: "#/components/schemas/ScreenLevelChange"}}
@@ -27028,6 +27038,8 @@ components:
         name: {type: string}
         playlist_id: {type: string}
         screens: {type: integer, minimum: 1}
+        reach_before: {type: integer, minimum: 0, description: "campaign only, when it has a reach (Campaign.reach): its last counted reach."}
+        reach_after: {type: integer, minimum: 0, description: "campaign only, when it has a reach: reach_before moved by the screens this write brings into or takes out of its audience. The campaign-reach worker recounts it within about 15 seconds (Campaign.reach.current)."}
     ScreenStackStatus:
       type: object
       additionalProperties: false
@@ -27290,6 +27302,7 @@ components:
         public_id: {type: string}
         label: {type: string}
         warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a screen write that succeeded (updateScreen, the dashboard's fields, location and playlist routes): the screen_fact_missing warning when the playlist the screen shows has an iframe or application that reads a fact the screen lacks. Absent when there is nothing to act on, and on every read."}
+        levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "Only on the answer to a write that changed the screen's tags (updateScreen, the dashboard's tags route): the campaigns the screen entered or left. Absent on every read."}
         playlist_id: {type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover, a campaign that holds or a matching playlist schedule entry takes precedence; effective_playlist names what is shown."}
         playlist_schedule: {$ref: "#/components/schemas/ScreenPlaylistSchedule"}
         takeover: {$ref: "#/components/schemas/ScreenTakeover"}
@@ -27644,6 +27657,7 @@ components:
         failed: {type: integer, minimum: 0}
         results: {type: array, items: {$ref: "#/components/schemas/ScreenActionScreenResult"}}
         warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "assign only: the screen_fact_missing warning when the playlist has an iframe or application that reads a fact some screen of this page lacks. It lists up to 20 of this page's screens and counts them all; it replays with the page."}
+        levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "set_tags, add_tags and remove_tags: the campaigns this page's screens entered or left, summed over the page; it replays with the page."}
         offset: {type: integer, minimum: 0, description: Number of results preceding this page.}
         total: {type: integer, minimum: 0, description: Size of the pinned fleet.}
         next_cursor: {type: string, pattern: "^[0-9]+$", description: Continue with this value as after and the same request body and Idempotency-Key. Absent when complete.}
@@ -29136,12 +29150,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale, reach_dropped, group_empty]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. reach_dropped and group_empty are about a campaign (a shared level of the schedule stack), not a screen: the notice's screen member carries the campaign's id and name, the link is the campaign's calendar in the dashboard, and a campaign is the project's, so screen_tags and audience never limit them. reach_dropped: a recount found the campaign reaching fewer screens than when it was last published, because screens left one of its tags or folders, were archived or deleted (campaign.reach_changed with current below published); reach_drop sets how large a drop is notified; clears when it reaches as many screens again, or on its next publish. group_empty: a tag or folder of the campaign's audience matches no screen (campaign.group_changed with matched 0); one notice per tag or folder (audience_group); clears when it matches a screen again, or when a publish removes it from the audience (removed true), which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). A screen's own schedule entries target playlists, not screens, so only campaigns have a reach. Neither is a screen alert. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 12
+      maxItems: 14
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -29180,6 +29194,19 @@ components:
         glass_blank: {$ref: "#/components/schemas/NotificationSeverity"}
         glass_frozen: {$ref: "#/components/schemas/NotificationSeverity"}
         crashing: {$ref: "#/components/schemas/NotificationSeverity"}
+        source_failed: {$ref: "#/components/schemas/NotificationSeverity"}
+        source_stale: {$ref: "#/components/schemas/NotificationSeverity"}
+        reach_dropped: {$ref: "#/components/schemas/NotificationSeverity"}
+        group_empty: {$ref: "#/components/schemas/NotificationSeverity"}
+    NotificationReachDrop:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >-
+        The smallest drop in a campaign's reach a reach_dropped notice is sent for: screens is the fewest screens lost (default 1) and percent, when set, the smallest share of the screens the campaign reached when it was published; a drop must meet both. A smaller drop queues no notice, and a queued notice whose drop shrank below it by the time it is due is skipped (condition_cleared). Only with the reach_dropped condition; on a notification without it, invalid_request.
+      properties:
+        screens: {type: integer, minimum: 1}
+        percent: {type: integer, minimum: 1, maximum: 100}
     NotificationActiveHours:
       type: object
       additionalProperties: false
@@ -29205,6 +29232,7 @@ components:
         min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: "Opened notices below this severity are not sent; a resolved notice follows its opened notice. Absent sends them all."}
         severity: {$ref: "#/components/schemas/NotificationSeverityOverrides"}
         active_hours: {$ref: "#/components/schemas/NotificationActiveHours"}
+        reach_drop: {$ref: "#/components/schemas/NotificationReachDrop", description: "reach_dropped only. Absent notifies any drop."}
         hold_minutes: {type: integer, minimum: 0, maximum: 1440, default: 10, description: "How long a condition must last before it notifies. crashing is never held."}
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri, description: "Webhook only: https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment."}
@@ -29243,6 +29271,9 @@ components:
         active_hours:
           oneOf: [{$ref: "#/components/schemas/NotificationActiveHours"}, {type: "null"}]
           description: Replaces the hours; null clears them.
+        reach_drop:
+          oneOf: [{$ref: "#/components/schemas/NotificationReachDrop"}, {type: "null"}]
+          description: Replaces the threshold; null clears it, so any drop notifies. Removing reach_dropped from conditions while it is set is invalid_request; clear it in the same request.
         hold_minutes: {type: integer, minimum: 0, maximum: 1440}
         recipients: {$ref: "#/components/schemas/NotificationRecipients"}
         url: {type: string, maxLength: 2048, format: uri}
@@ -29258,7 +29289,7 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification; a notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification. A campaign's notice also carries reach {published, current} (reach_dropped: the screens the campaign reached when it was published and reaches when the notice is sent) or audience_group {kind: tag or folder, value: the tag or the folder id} (group_empty); email and chat say the same in words. A notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
@@ -29270,6 +29301,7 @@ components:
         min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: Present while set.}
         severity: {$ref: "#/components/schemas/NotificationSeverityOverrides", description: Present while any condition is overridden.}
         active_hours: {$ref: "#/components/schemas/NotificationActiveHours", description: "Present while set; outside is always shown."}
+        reach_drop: {$ref: "#/components/schemas/NotificationReachDrop", description: Present while set.}
         hold_minutes: {type: integer, minimum: 0, maximum: 1440}
         recipients: {type: array, items: {type: string}, description: Email only. owner or member user_ids.}
         url: {type: string, description: "Webhook only. The receiver URL. Empty, with url_redacted true, below effective Manage."}
@@ -29319,8 +29351,9 @@ components:
         test: {type: boolean, description: Present and true for a POST .../test delivery.}
         condition: {type: string, description: "A screen notice's NotificationCondition; absent for an event delivery."}
         phase: {type: string, enum: [opened, resolved], description: A screen notice's phase.}
-        screen_id: {type: string}
+        screen_id: {type: string, description: "The screen a notice is about; a data source's or campaign's id for their conditions."}
         screen_name: {type: string}
+        audience_group: {type: string, description: "group_empty only: the tag or folder the notice is about, as tag:NAME or folder:sfd_ID. Each one is its own notice."}
         since: {type: string, format: date-time, description: When the notice's condition began.}
         sent_with: {type: string, description: "Email only: the delivery whose email carried this notice."}
         emailed: {type: integer, minimum: 0, description: "Email only: how many people the email reached."}
@@ -29334,7 +29367,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, or a group_empty one because a publish removed the tag or folder from the campaign's audience, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -29610,9 +29643,21 @@ components:
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
         paused: {type: boolean}
         import: {type: string, description: "Present on a campaign a schedule import made: the import's mark and the level's key. Importing the same sheet again under the same name updates it."}
+        reach: {$ref: "#/components/schemas/CampaignReach"}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    CampaignReach:
+      type: object
+      additionalProperties: false
+      required: [published, current, at, empty_groups]
+      description: >-
+        How many live screens (active or pairing) the audience matches. published is the count when the campaign was last published (created, or updated with audience, playlist_id or paused); current the latest count. A change to a screen's tags, folder or state, or a folder move, recounts the campaigns whose audience names what changed within about 15 seconds and appends campaign.reach_changed (published, previous, current) and, per tag or folder of the audience that starts or stops matching screens, campaign.group_changed (kind, value, matched); a publish that drops an empty tag or folder from the audience appends campaign.group_changed with removed true and matched 0. Absent on a campaign not published or recounted since reach was introduced.
+      properties:
+        published: {type: integer, minimum: 0}
+        current: {type: integer, minimum: 0}
+        at: {type: string, format: date-time, description: When current was counted.}
+        empty_groups: {type: array, maxItems: 500, items: {type: string, pattern: "^(tag|folder):.+$"}, description: "The tag and folder leaves of the audience that matched no screen at at, as tag:NAME or folder:ID."}
     CampaignList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Campaign"}}}}
     CampaignWrite:
       type: object

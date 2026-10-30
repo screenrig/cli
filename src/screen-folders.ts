@@ -1,4 +1,4 @@
-import type { ScreenFolder, ScreenFolderCreate, ScreenFolderList, ScreenFolderPatch, ScreenLevelChange, ScreenLevelChanges, ScreenMove, ScreenMoveResult } from "./adapters/protocol.js";
+import type { ScreenFolder, ScreenFolderCreate, ScreenFolderDeleteResult, ScreenFolderList, ScreenFolderPatch, ScreenLevelChange, ScreenLevelChanges, ScreenMove, ScreenMoveResult } from "./adapters/protocol.js";
 import { requireToken } from "./client.js";
 import { flagBool, flagString } from "./command-input.js";
 import { clientFor, commandHandler, jsonBody } from "./commands.js";
@@ -124,7 +124,35 @@ export function folderLines(folder: ScreenFolder | undefined): string[] {
 function levelLine(level: ScreenLevelChange): string {
   const name = level.name ? ` ${JSON.stringify(printable(level.name))}` : "";
   const what = level.source === "folder" ? "default playlist" : "playlist";
-  return `  ${level.source} ${level.id}${name}: ${what} ${level.playlist_id}, ${plural(level.screens, "screen")}`;
+  // A campaign with a reach says how many screens it reached before the write and how many after.
+  const reach = Number.isSafeInteger(level.reach_before) && Number.isSafeInteger(level.reach_after) ? `, reach ${level.reach_before} -> ${level.reach_after}` : "";
+  return `  ${level.source} ${level.id}${name}: ${what} ${level.playlist_id}, ${plural(level.screens, "screen")}${reach}`;
+}
+
+/**
+ * The levels of several pages of a fleet action added up: a level's screens
+ * add, and its reach moves by the sum of what each page moved it.
+ */
+export function sumLevels(pages: Array<ScreenLevelChanges | undefined>): ScreenLevelChanges | undefined {
+  const seen = pages.filter((page): page is ScreenLevelChanges => page !== undefined);
+  if (!seen.length) return undefined;
+  const add = (lists: ScreenLevelChange[][]): ScreenLevelChange[] => {
+    const sums = new Map<string, ScreenLevelChange>();
+    for (const level of lists.flat()) {
+      const key = `${level.source}:${level.id}`;
+      const have = sums.get(key);
+      if (!have) { sums.set(key, { ...level }); continue; }
+      have.screens += level.screens;
+      if (Number.isSafeInteger(have.reach_before) && Number.isSafeInteger(have.reach_after) && Number.isSafeInteger(level.reach_before) && Number.isSafeInteger(level.reach_after)) {
+        have.reach_after = have.reach_after! + (level.reach_after! - level.reach_before!);
+      }
+    }
+    return [...sums.values()];
+  };
+  return {
+    gained: add(seen.map((page) => (Array.isArray(page.gained) ? page.gained : []))),
+    lost: add(seen.map((page) => (Array.isArray(page.lost) ? page.lost : []))),
+  };
 }
 
 /**
@@ -244,10 +272,15 @@ export const handleScreenFolderDelete = commandHandler(async (args, runtime, res
     method: "DELETE", path: `${FOLDERS_PATH}/${id}`, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
   }, id, "delete");
+  // The answer is 200 {levels}; an empty body (a server that answers 204) is a delete without levels.
+  const levels = (response.body as ScreenFolderDeleteResult | undefined)?.levels;
   return {
-    envelope: jsonBody({ ...response, body: { id, deleted: true } }, client.requestId),
+    envelope: jsonBody({ ...response, body: { id, deleted: true, ...(levels ? { levels } : {}) } }, client.requestId),
     exitCode: ExitCode.Success,
-    human: `Deleted screen folder ${id}; its screens and folders moved up into its parent (the project root when it had none) and the screens re-resolve their playlist.`,
+    human: [
+      `Deleted screen folder ${id}; its screens and folders moved up into its parent (the project root when it had none) and the screens re-resolve their playlist.`,
+      ...levelsLines(levels),
+    ].join("\n"),
   };
 });
 

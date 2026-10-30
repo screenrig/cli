@@ -4,14 +4,14 @@ import { chmod, mkdir, open, readdir, rename, rm, stat } from "node:fs/promises"
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import type { ScreenFolder } from "./adapters/protocol.js";
+import type { ScreenFolder, ScreenLevelChange } from "./adapters/protocol.js";
 import { commandHelp } from "./help-tree.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
 import { projectRequest } from "./project-routing.js";
 import { effectivePlaylistText } from "./screen-control.js";
-import { folderListLines, folderRows, levelsLines, screenFolderName } from "./screen-folders.js";
+import { folderListLines, folderRows, levelsLines, screenFolderName, sumLevels } from "./screen-folders.js";
 import { folderSubtree, screenTarget } from "./screen-fleet.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -523,4 +523,106 @@ test("folder rows, subtrees, names, levels and project routing", () => {
   assert.equal(projectRequest({ method: "POST", path: "/api/screen-folders" }, "prj_X").path, "/api/projects/prj_X/screen-folders");
   assert.equal(projectRequest({ method: "POST", path: "/api/screens/move" }, "prj_X").path, "/api/projects/prj_X/screens/move");
   assert.equal(projectRequest({ method: "PATCH", path: `/api/screen-folders/${NORTH}` }, "prj_X").path, `/api/screen-folders/${NORTH}`, "instance IDs stay global");
+});
+
+const LOBBY_PROMO: ScreenLevelChange = { source: "campaign", id: CAMPAIGN, name: "Lobby promo", playlist_id: PLAYLIST, screens: 1, reach_before: 7, reach_after: 6 };
+
+test("screen folder delete answers 200 levels and prints them with the campaign's reach, and still tolerates an empty 204", async () => {
+  const configDir = await enrolled("screen-folder-delete-levels-");
+  const levels = { gained: [{ source: "folder", id: NORTH, name: "North", playlist_id: PLAYLIST, screens: 2 }], lost: [LOBBY_PROMO] };
+  try {
+    const transport = new FakeTransport().on("DELETE", `/api/screen-folders/${CAFES}`, () => json(200, { levels }));
+    const deleted = await cli(["--json", "screen", "folder", "delete", CAFES, "--expect-rev", "2"], transport, configDir);
+    assert.equal(deleted.code, ExitCode.Success, deleted.stdout);
+    assert.deepEqual(deleted.envelope.data, { id: CAFES, deleted: true, levels });
+    assert.equal(transport.calls.at(-1)?.headers?.["if-match"], '"2"');
+    const human = await cli(["--human", "screen", "folder", "delete", CAFES], transport, configDir);
+    assert.match(human.stdout, new RegExp(`^Deleted screen folder ${CAFES};`, "m"));
+    assert.match(human.stdout, /^Levels gained:$/m);
+    assert.match(human.stdout, /^Levels lost:$/m);
+    assert.match(human.stdout, new RegExp(`^  campaign ${CAMPAIGN} "Lobby promo": playlist ${PLAYLIST}, 1 screen, reach 7 -> 6$`, "m"));
+    assert.doesNotMatch(human.stdout.split("Levels gained:")[1]!.split("Levels lost:")[0]!, /reach/, "a folder default playlist has no reach");
+    const old = await cli(["--json", "screen", "folder", "delete", CAFES], new FakeTransport().on("DELETE", `/api/screen-folders/${CAFES}`, () => ({ status: 204, headers: {}, body: undefined })), configDir);
+    assert.equal(old.code, ExitCode.Success, old.stdout);
+    assert.deepEqual(old.envelope.data, { id: CAFES, deleted: true });
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen move and folder levels show a campaign's reach before and after when the server sends it", () => {
+  assert.deepEqual(levelsLines({ gained: [], lost: [LOBBY_PROMO] }), ["Levels lost:", `  campaign ${CAMPAIGN} "Lobby promo": playlist ${PLAYLIST}, 1 screen, reach 7 -> 6`]);
+  const without = { ...LOBBY_PROMO, reach_before: undefined, reach_after: undefined };
+  assert.deepEqual(levelsLines({ gained: [without], lost: [] }), ["Levels gained:", `  campaign ${CAMPAIGN} "Lobby promo": playlist ${PLAYLIST}, 1 screen`]);
+});
+
+test("the levels of several fleet pages add up: screens add and reach moves by what each page moved it", () => {
+  const page = (screens: number, before: number, after: number) => ({ gained: [], lost: [{ ...LOBBY_PROMO, screens, reach_before: before, reach_after: after }] });
+  const sum = sumLevels([page(2, 7, 5), undefined, page(3, 7, 4)]);
+  assert.deepEqual(sum?.lost, [{ ...LOBBY_PROMO, screens: 5, reach_before: 7, reach_after: 2 }]);
+  assert.equal(sumLevels([undefined]), undefined);
+  assert.deepEqual(sumLevels([{ gained: [{ source: "folder", id: NORTH, playlist_id: PLAYLIST, screens: 1 }], lost: [] }, { gained: [{ source: "folder", id: NORTH, playlist_id: PLAYLIST, screens: 2 }], lost: [] }])?.gained[0]?.screens, 3);
+});
+
+test("screen tag prints the levels the tag change answers, single screen and fleet", async () => {
+  const configDir = await enrolled("screen-tag-levels-");
+  const levels = { gained: [], lost: [LOBBY_PROMO] };
+  try {
+    const transport = new FakeTransport()
+      .on("PATCH", `/api/screens/${A}`, () => json(200, screen(A, { tags: ["Cafe"], revision: 4, levels })))
+      .on("POST", "/api/screens/actions", () => json(200, { action: "remove_tags", matched: 1, succeeded: 1, failed: 0, results: [{ screen_id: A, status: "ok", tags: ["Cafe"] }], levels }));
+    const single = await cli(["--json", "screen", "tag", A, "--set", "Cafe"], transport, configDir);
+    assert.equal(single.code, ExitCode.Success, single.stdout);
+    assert.deepEqual(single.envelope.data.levels, levels);
+    const human = await cli(["--human", "screen", "tag", A, "--set", "Cafe"], transport, configDir);
+    assert.match(human.stdout, /^Tagged screen /m);
+    assert.match(human.stdout, /^Levels lost:$/m);
+    assert.match(human.stdout, /reach 7 -> 6$/m);
+
+    const fleet = await cli(["--json", "screen", "tag", A, B, "--remove", "Lobby"], transport, configDir);
+    assert.equal(fleet.code, ExitCode.Success, fleet.stdout);
+    assert.deepEqual(fleet.envelope.data.levels, levels);
+    const fleetHuman = await cli(["--human", "screen", "tag", A, B, "--remove", "Lobby"], transport, configDir);
+    assert.match(fleetHuman.stdout, /^Levels lost:$/m);
+    assert.match(fleetHuman.stdout, /campaign cmp_SPRINGAAAAAAAAAAAA "Lobby promo".*reach 7 -> 6$/m);
+
+    const plain = new FakeTransport().on("PATCH", `/api/screens/${A}`, () => json(200, screen(A, { tags: ["Cafe"] })));
+    const quiet = await cli(["--human", "screen", "tag", A, "--set", "Cafe"], plain, configDir);
+    assert.doesNotMatch(quiet.stdout, /Levels/, "an answer without levels prints none");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a fleet tag action over several pages carries the levels added up", async () => {
+  const configDir = await enrolled("screen-tag-levels-pages-");
+  try {
+    let page = 0;
+    const transport = new FakeTransport().on("POST", "/api/screens/actions", () => {
+      page += 1;
+      const lost = [{ ...LOBBY_PROMO, screens: 1, reach_before: 7, reach_after: page === 1 ? 6 : 6 }];
+      return page === 1
+        ? { status: 202, headers: { "retry-after": "0", "content-type": "application/json" }, body: { action: "remove_tags", matched: 1, total: 2, offset: 0, next_cursor: "1", succeeded: 1, failed: 0, results: [{ screen_id: A, status: "ok", tags: [] }], levels: { gained: [], lost } } }
+        : json(200, { action: "remove_tags", matched: 1, total: 2, offset: 1, succeeded: 1, failed: 0, results: [{ screen_id: B, status: "ok", tags: [] }], levels: { gained: [], lost } });
+    });
+    const result = await cli(["--json", "screen", "tag", A, B, "--remove", "Lobby"], transport, configDir);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal(result.envelope.data.matched, 2);
+    assert.deepEqual(result.envelope.data.levels.lost, [{ ...LOBBY_PROMO, screens: 2, reach_before: 7, reach_after: 5 }]);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen update prints the levels an answer carries", async () => {
+  const configDir = await enrolled("screen-update-levels-");
+  try {
+    const transport = new FakeTransport().on("PATCH", `/api/screens/${A}`, () => json(200, screen(A, { levels: { gained: [LOBBY_PROMO], lost: [] } })));
+    const result = await cli(["--human", "screen", "update", A, "--name", "Lobby TV"], transport, configDir);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.match(result.stdout, /^Levels gained:$/m);
+    assert.match(result.stdout, /reach 7 -> 6$/m);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
 });

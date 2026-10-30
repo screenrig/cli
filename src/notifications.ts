@@ -2,7 +2,7 @@ import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import { readAuthoringText } from "./authoring-input.js";
 import type { CliRuntime } from "./runtime.js";
-import type { CampaignAudience, ScreenScheduleWindow, Notification, NotificationActiveHours, NotificationDelivery, NotificationSeverity, NotificationSeverityOverrides } from "./adapters/protocol.js";
+import type { CampaignAudience, ScreenScheduleWindow, Notification, NotificationActiveHours, NotificationDelivery, NotificationReachDrop, NotificationSeverity, NotificationSeverityOverrides } from "./adapters/protocol.js";
 import { campaignAudienceJson, campaignAudienceText, campaignWindowSpec, tagList } from "./campaigns.js";
 import { fleetLinkTags } from "./fleet-links.js";
 import { normalizeInstant } from "./screen-control.js";
@@ -19,7 +19,7 @@ export const NOTIFICATION_CHAT_CHANNELS = [
 /** The credential reads at most this many bytes from stdin. */
 const DESTINATION_STDIN_MAX_BYTES = 4096;
 /** NotificationCondition (vendor/openapi.yaml): the screen state changes a notification fires on. */
-export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale"] as const;
+export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale", "reach_dropped", "group_empty"] as const;
 export const NOTIFICATION_RECIPIENTS_MAX = 20;
 const RECIPIENT_MAX_LENGTH = 200;
 export const NOTIFICATION_HOLD_MAX = 1440;
@@ -78,6 +78,30 @@ export function notificationSeverityOverride(value: string, previous?: string): 
 /** The overrides a --severity accumulation names. */
 export function notificationSeverityMap(accumulated: string): NotificationSeverityOverrides {
   return Object.fromEntries(accumulated.split(",").map((item) => item.split("=") as [string, NotificationSeverity]));
+}
+
+/** --reach-drop-screens: the fewest screens a campaign must lose for a reach_dropped notice, a whole number from 1. */
+export function notificationReachDropScreens(value: string): string {
+  if (!/^\d+$/.test(value) || Number(value) < 1 || !Number.isSafeInteger(Number(value))) throw usageError("--reach-drop-screens takes a whole number of screens, 1 or more.");
+  return value;
+}
+
+/** --reach-drop-percent: the smallest share of the screens a campaign reached when it was published, a whole number from 1 to 100. */
+export function notificationReachDropPercent(value: string): string {
+  if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) throw usageError("--reach-drop-percent takes a whole percent from 1 to 100.");
+  return value;
+}
+
+/** The reach_drop the flags name, or undefined when neither is given. */
+export function notificationReachDrop(screens: string | undefined, percent: string | undefined): NotificationReachDrop | undefined {
+  if (screens === undefined && percent === undefined) return undefined;
+  return { ...(screens !== undefined ? { screens: Number(screens) } : {}), ...(percent !== undefined ? { percent: Number(percent) } : {}) };
+}
+
+/** The threshold as the lines of show print it: "screens >= 3 and percent >= 10". */
+function reachDropText(drop: NotificationReachDrop): string {
+  const parts = [...(drop.screens !== undefined ? [`at least ${drop.screens} ${drop.screens === 1 ? "screen" : "screens"}`] : []), ...(drop.percent !== undefined ? [`at least ${drop.percent}% of the screens it reached when published`] : [])];
+  return parts.join(" and ") || "any drop";
 }
 
 /** Repeatable --all-tags: the screen carries every listed tag. Returns the accumulated list joined by commas. */
@@ -310,6 +334,7 @@ function ruleLines(notification: Notification): string[] {
     ...(notification.min_severity ? [`min_severity: ${notification.min_severity}`] : []),
     ...(severityText(notification.severity) ? [`severity: ${severityText(notification.severity)}`] : []),
     ...(notification.active_hours ? [`active_hours: ${activeHoursText(notification.active_hours)}`] : []),
+    ...(notification.reach_drop ? [`reach_drop: ${reachDropText(notification.reach_drop)}`] : []),
   ];
 }
 
@@ -354,6 +379,7 @@ function rulesCell(item: Notification): string {
     ...(item.min_severity ? [`min ${item.min_severity}`] : []),
     ...(severityText(item.severity) ? [`severity ${severityText(item.severity).replaceAll(", ", ",")}`] : []),
     ...(item.active_hours ? [`hours ${activeHoursText(item.active_hours)}`] : []),
+    ...(item.reach_drop ? [`reach drop ${reachDropText(item.reach_drop)}`] : []),
     ...(item.audience ? [`audience ${campaignAudienceText(item.audience)}`] : []),
   ].join("; ");
 }
@@ -395,7 +421,7 @@ export function deliveryGroupCell(item: NotificationDelivery): string | undefine
   return item.group_id === undefined || item.group_id === "" ? undefined : item.group_id;
 }
 
-/** CONDITION, PHASE, SCREEN, GROUP and EMAILED appear only when a listed delivery has them (screen notices, groups, email). */
+/** CONDITION, PHASE, SCREEN, GROUP, AUDIENCE_GROUP and EMAILED appear only when a listed delivery has them (screen notices, groups, email). */
 export function notificationDeliveryTableLines(items: NotificationDelivery[]): string[] {
   if (!items.length) return ["No deliveries"];
   const columns: Array<[string, (item: NotificationDelivery) => string | undefined, boolean]> = [
@@ -405,6 +431,7 @@ export function notificationDeliveryTableLines(items: NotificationDelivery[]): s
     ["PHASE", (item) => item.phase, false],
     ["SCREEN", (item) => item.screen_name ?? item.screen_id, false],
     ["GROUP", deliveryGroupCell, false],
+    ["AUDIENCE_GROUP", (item) => item.audience_group, false],
     ["STATE", (item) => item.state ?? "", true],
     ["ATTEMPTS", (item) => String(item.attempts ?? 0), true],
     ["LAST_STATUS", (item) => (item.last_status === undefined ? "" : String(item.last_status)), true],

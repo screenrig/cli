@@ -2010,7 +2010,7 @@ export function memoryBackend(options: {
     if (added.length) notifications.set(id, { ...stored, unsubscribed: [...listed, ...added], revision: (stored.revision as number) + 1 });
   };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale", "reach_dropped", "group_empty"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
@@ -2042,6 +2042,9 @@ export function memoryBackend(options: {
   const notificationFor = (req: TransportRequest): Record<string, unknown> | undefined => notifications.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   /** A refusal for what a notification of this channel cannot hold, or undefined when it is whole. */
   const notificationRefusal = (notification: Record<string, unknown>): TransportResponse | undefined => {
+    if (notification.reach_drop && !((notification.conditions ?? []) as string[]).includes("reach_dropped")) {
+      return invalidRequest("reach_drop is only valid with the reach_dropped condition", "reach_drop");
+    }
     if (notification.audience && ((notification.screen_tags ?? []) as string[]).length) {
       return invalidRequest("audience cannot be combined with screen_tags; clear screen_tags to use an audience", "audience");
     }
@@ -2089,6 +2092,7 @@ export function memoryBackend(options: {
       ...(body.min_severity ? { min_severity: body.min_severity } : {}),
       ...(body.severity && Object.keys(body.severity).length ? { severity: body.severity } : {}),
       ...(body.active_hours ? { active_hours: { outside: "hold", ...body.active_hours } } : {}),
+      ...(body.reach_drop ? { reach_drop: body.reach_drop } : {}),
       ...(email ? { recipients: body.recipients }
         : chat ? { destination_hint: destinationHint(body.channel, body.destination), ...(body.channel === "telegram" ? { telegram_chat_id: body.telegram_chat_id } : {}) }
         : { url: body.url, event_types: body.event_types ?? [] }),
@@ -2124,7 +2128,7 @@ export function memoryBackend(options: {
       if (body[field] !== undefined) next[field] = body[field];
     }
     // audience, min_severity, severity and active_hours: null (or an empty severity object) clears; absent keeps.
-    for (const field of ["audience", "min_severity", "severity", "active_hours"]) {
+    for (const field of ["audience", "min_severity", "severity", "active_hours", "reach_drop"]) {
       if (body[field] === undefined) continue;
       const empty = body[field] === null || (field === "severity" && Object.keys(body[field]).length === 0);
       if (empty) delete next[field];
