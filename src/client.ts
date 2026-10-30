@@ -18,6 +18,7 @@ import {
   usageError,
   withOverbookingGuidance,
   withPaymentGuidance,
+  withPlanGuidance,
   withQuotaGuidance,
   withRetryAfter,
   withScreenScopeGuidance,
@@ -308,10 +309,12 @@ export class ApiClient {
       });
       const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
       const wrapped = new CliError(
-        withPaymentGuidance(
-          withQuotaGuidance(
-            withOverbookingGuidance(
-              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+        withPlanGuidance(
+          withPaymentGuidance(
+            withQuotaGuidance(
+              withOverbookingGuidance(
+                withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+              ),
             ),
           ),
         ),
@@ -408,10 +411,12 @@ export class ApiClient {
       });
       const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
       const wrapped = new CliError(
-        withPaymentGuidance(
-          withQuotaGuidance(
-            withOverbookingGuidance(
-              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+        withPlanGuidance(
+          withPaymentGuidance(
+            withQuotaGuidance(
+              withOverbookingGuidance(
+                withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+              ),
             ),
           ),
         ),

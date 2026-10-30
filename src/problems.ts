@@ -233,6 +233,11 @@ export function screenScopeText(scope: { folder_ids: string[]; screen_ids: strin
   return `folders ${scope.folder_ids.join(", ") || "none"}; screens ${scope.screen_ids.join(", ") || "none"}`;
 }
 
+/** A plan or feature id in an answer (premium, video_walls): a short lowercase identifier, or undefined. */
+function planIdOf(value: unknown): string | undefined {
+  return typeof value === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(value) ? value : undefined;
+}
+
 export function normalizeProblem(
   input: unknown,
   fallback: { status?: number; request_id?: string; bodyText?: string } = {},
@@ -266,6 +271,7 @@ export function normalizeProblem(
   const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
   const uploadScope = uploadScopeOf(rec?.upload_scope);
   const screenScope = screenScopeOf(rec?.screen_scope);
+  const feature = planIdOf(rec?.feature), plan = planIdOf(rec?.plan), requiredPlan = planIdOf(rec?.required_plan);
   return {
     type: asString(rec?.type) ?? problemType(code),
     title,
@@ -281,6 +287,9 @@ export function normalizeProblem(
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
     ...(uploadScope ? { upload_scope: uploadScope } : {}),
     ...(screenScope ? { screen_scope: screenScope } : {}),
+    ...(feature ? { feature } : {}),
+    ...(plan ? { plan } : {}),
+    ...(requiredPlan ? { required_plan: requiredPlan } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
     // A valid server next action wins over local guidance; asNext drops any that is not a plain screenrig command.
@@ -348,6 +357,15 @@ export function renderProblem(problem: NormalizedProblem): string {
   }
   if (problem.screen_scope) {
     lines.push(`screen_scope: ${screenScopeText(problem.screen_scope)}`);
+  }
+  if (problem.feature) {
+    lines.push(`feature: ${problem.feature}`);
+  }
+  if (problem.plan) {
+    lines.push(`plan: ${problem.plan}`);
+  }
+  if (problem.required_plan) {
+    lines.push(`required_plan: ${problem.required_plan}`);
   }
   if (typeof problem.retryable === "boolean") {
     lines.push(`retryable: ${problem.retryable}`);
@@ -502,6 +520,42 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
       reason: "Shows remaining, reserved, and available credits so you can tell the user exactly what is left.",
     },
   });
+}
+
+/** "premium" as the plan is named to a person: Premium. */
+function planTitle(id: string): string {
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/**
+ * Plan guidance. feature_not_in_plan is a 402 that credit does not unlock, so
+ * it must not read like the credit 402s above: the feature belongs to the plan
+ * `required_plan` names, retrying is refused the same way, and the task goes on
+ * without it. member_limit_reached and quota_exceeded that carry
+ * `required_plan` also name the plan that has room. Server guidance is kept;
+ * the plan is added to a hint that does not already name it.
+ */
+export function withPlanGuidance(problem: NormalizedProblem): NormalizedProblem {
+  const plan = problem.required_plan ? planTitle(problem.required_plan) : undefined;
+  let guided = problem;
+  if (problem.code === "feature_not_in_plan") {
+    const includes = plan ? `the ${plan} plan` : "a higher plan";
+    guided = withGuidance(problem, {
+      hint: `This feature is part of ${includes}, which this project is not on. Credit does not unlock it and retrying is refused the same way. Stop retrying, tell the user ${includes} includes it, and continue the task without it.`,
+      next: {
+        command: "screenrig project capabilities",
+        reason: "Lists the features this project's plan has and which plan includes each one, so you can tell the user what the refused feature needs.",
+      },
+    });
+    if (plan && guided.hint && !guided.hint.includes(plan)) {
+      guided = { ...guided, hint: `${guided.hint} The ${plan} plan includes it.` };
+    }
+    return guided;
+  }
+  if ((problem.code === "member_limit_reached" || problem.code === "quota_exceeded") && plan && problem.hint && !problem.hint.includes(plan)) {
+    return { ...problem, hint: `${problem.hint} The ${plan} plan raises this limit; tell the user if more is needed.` };
+  }
+  return guided;
 }
 
 /**

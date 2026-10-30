@@ -110,6 +110,29 @@ export interface ProjectFeatures {
   screens: boolean;
 }
 
+/** One plan feature and whether the project's plan or featuresets include it. */
+export interface PlanFeature {
+  id: string;
+  enabled: boolean;
+  /** The lowest plan that includes the feature. */
+  required_plan: string;
+}
+
+/** The plan features of the authenticated project, in catalog order. */
+export interface ProjectPlanFeatures {
+  /** Featureset tags the project and its organization hold beyond the plan's own (founding). */
+  featuresets: string[];
+  features: PlanFeature[];
+}
+
+/** The project's effective plan limits. A limit of 0 is no plan cap. */
+export interface ProjectLimits {
+  screens?: number;
+  members?: number;
+  video_bytes?: number;
+  event_retention_days?: number;
+}
+
 /** The server-derived capability set for the authenticated project. */
 export interface ProjectCapabilities {
   project_id: string;
@@ -119,6 +142,8 @@ export interface ProjectCapabilities {
   capabilities: string[];
   /** The most bytes one video upload may declare on the project's plan. */
   media_video_bytes?: number;
+  plan_features?: ProjectPlanFeatures;
+  limits?: ProjectLimits;
 }
 
 /** Enrollment delivers the grant's first token pair. */

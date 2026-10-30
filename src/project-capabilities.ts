@@ -18,6 +18,38 @@ export function validateProjectCapabilities(value: unknown): ProjectCapabilities
   return body as ProjectCapabilities;
 }
 
+const LIMIT_KEYS = ["screens", "members", "video_bytes", "event_retention_days"] as const;
+
+/**
+ * The plan's featuresets, which plan features are on or off, and its limits,
+ * as four human lines. Each off feature names the plan that includes it, and a
+ * limit of 0 reads as none (no plan cap). A server that sends no plan_features,
+ * or an entry that is not one, adds nothing.
+ */
+export function planFeatureFields(capabilities: ProjectCapabilities): Array<[string, string | undefined]> {
+  const planFeatures = capabilities.plan_features;
+  if (!planFeatures || !Array.isArray(planFeatures.features)) return [];
+  const limits = capabilities.limits && typeof capabilities.limits === "object" ? capabilities.limits : {};
+  const stated = LIMIT_KEYS.flatMap((key) => {
+    const value = limits[key];
+    return typeof value === "number" && Number.isFinite(value) ? [`${key}=${value === 0 ? "none" : value}`] : [];
+  });
+  const on: string[] = [];
+  const off: string[] = [];
+  for (const feature of planFeatures.features) {
+    if (!feature || typeof feature.id !== "string" || typeof feature.enabled !== "boolean") continue;
+    if (feature.enabled) on.push(feature.id);
+    else off.push(typeof feature.required_plan === "string" ? `${feature.id} (${feature.required_plan})` : feature.id);
+  }
+  const sets = Array.isArray(planFeatures.featuresets) ? planFeatures.featuresets.filter((id) => typeof id === "string") : [];
+  return [
+    ["featuresets", sets.join(", ") || "(none)"],
+    ["plan_features_on", on.join(", ") || "(none)"],
+    ["plan_features_off", off.join(", ") || "(none)"],
+    ["limits", stated.join(" ") || undefined],
+  ];
+}
+
 /**
  * Refuse a capability-gated write when the server's own capability set does not
  * grant it.

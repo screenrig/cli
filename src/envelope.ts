@@ -27,6 +27,12 @@ export interface NormalizedProblem {
   upload_scope?: { playlist_ids: string[]; folder_ids: string[]; access?: "propose" | "manage" };
   /** outside_screen_scope only: the screen folders and screens the caller works on. */
   screen_scope?: { folder_ids: string[]; screen_ids: string[] };
+  /** feature_not_in_plan only: the plan feature the project's plan does not include. */
+  feature?: string;
+  /** feature_not_in_plan only: the project's plan. */
+  plan?: string;
+  /** feature_not_in_plan, member_limit_reached and quota_exceeded: the lowest plan that lifts the refusal. */
+  required_plan?: string;
   /** Server 5xx only: whether retrying the unchanged request may succeed. */
   retryable?: boolean;
   /** Present only on 429, taken from the server's Retry-After header. */

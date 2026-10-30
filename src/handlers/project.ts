@@ -1,5 +1,5 @@
 // Command handlers for the project commands, loaded on demand.
-import { validateProjectCapabilities } from "../project-capabilities.js";
+import { planFeatureFields, validateProjectCapabilities } from "../project-capabilities.js";
 import { isResourceID } from "../generated/resource-ids.js";
 import { cacheProjectContexts, contextFromProject, projectName as validateDisplayName, validateProjectContext } from "../project-context.js";
 import { open } from "node:fs/promises";
@@ -190,6 +190,7 @@ export async function projectCapabilities(args: ParsedArgs, runtime: CliRuntime,
     human: humanLines("Project capabilities", [
       ["project_id", capabilities.project_id],
       ["plan_id", capabilities.plan_id],
+      ...planFeatureFields(capabilities),
       ["features", `advertiser=${capabilities.features.advertiser} screens=${capabilities.features.screens}`],
       ["feature_revision", String(capabilities.feature_revision)],
       ["capabilities", [...capabilities.capabilities].sort().join(", ") || "(none)"],
