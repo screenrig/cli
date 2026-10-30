@@ -21,16 +21,18 @@ test("distribution distinguishes a standalone install from an enclosing screenRI
   const temporary = await mkdtemp(path.join(os.tmpdir(), "screenrig-distribution-"));
   try {
     const url = pathToFileURL(path.join(temporary, "cli", "dist", "bin.js")).href;
-    assert.equal(cliDistribution(url).kind, "standalone");
-    assert.match(cliDistribution(url).agent_setup, /plugin list/);
-    await mkdir(path.join(temporary, ".claude-plugin"));
-    await writeFile(path.join(temporary, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "unrelated", version: "26.10.1" }));
-    assert.equal(cliDistribution(url).kind, "standalone");
-    await writeFile(path.join(temporary, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "screenrig", version: "26.10.1" }));
-    const distribution = cliDistribution(url);
+    assert.equal(cliDistribution(url, "26.10.1").kind, "standalone");
+    assert.match(cliDistribution(url, "26.10.1").agent_setup, /plugin list/);
+    // The plugin's bootstrap helper beside the CLI marks the bundle; the
+    // release stamps the plugin version into the CLI package.
+    const scripts = path.join(temporary, "skills", "screenrig", "scripts");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(path.join(scripts, "screenrig-plugin-freshness"), "#!/usr/bin/env node\n");
+    const distribution = cliDistribution(url, "26.10.1");
     assert.equal(distribution.kind, "plugin_bundle");
     assert.equal(distribution.plugin_version, "26.10.1");
     assert.match(distribution.bootstrap!, /screenrig-plugin-freshness.*--bootstrap --json$/);
+    assert.equal(cliDistribution(url, "not-a-version").kind, "standalone");
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
 
