@@ -326,6 +326,39 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     return 1;
   });
 
+  // The audit log: every configuration change with its before and after, and the
+  // chain head, so the copy carries its own anchor (audit verify --anchor).
+  await section("audit log", async () => {
+    const target = path.join(root, "log/audit.jsonl");
+    await mkdir(path.dirname(target), { recursive: true });
+    const temp = `${target}.part`;
+    const handle = await open(temp, "w", 0o600);
+    try {
+      // The head first: entries chained after it are newer than the anchor.
+      const head = asRecord(await api.get("/api/audit/head"));
+      let cursor: string | undefined;
+      const query = options.since === undefined ? {} : { since: `${options.since}T00:00:00Z` };
+      const kept: Array<Record<string, unknown>> = [];
+      for (;;) {
+        // Newest first, page by page; the file is written oldest first.
+        const page = asRecord(await api.get("/api/audit", { limit: "200", ...query, ...(cursor ? { cursor } : {}) }));
+        const items = asArray(page.items);
+        kept.push(...items);
+        const next = typeof page.next_cursor === "string" ? page.next_cursor : undefined;
+        if (!next || items.length === 0) break;
+        cursor = next;
+      }
+      if (kept.length > 0) await handle.write(`${kept.reverse().map((item) => JSON.stringify(item)).join("\n")}\n`);
+      await handle.sync();
+      await json("log/audit-head.json", head);
+    } finally {
+      await handle.close();
+    }
+    await rename(temp, target);
+    written.add("log/audit.jsonl");
+    return 2;
+  });
+
   await section("plays, uptime and alerts", async () => {
     let files = 0;
     const csv = async (relative: string, pathName: string, query: Record<string, string | undefined>): Promise<void> => {

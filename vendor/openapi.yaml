@@ -8934,6 +8934,179 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/audit:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listAuditLog
+      description: 'Lists the project''s configuration changes, newest first: who changed what, when, from which surface, with the field-level before and after, kept 400 days on every plan. Filter by actor (id), actor_kind, source, resource_type and resource_id, action (exact, or a prefix when it ends in *), field (a JSON Pointer prefix such as /label) and a since/until window; page with cursor. format csv, xlsx or pdf writes the filtered log through the report renderer as a file (one row per changed field, oldest first, the last 30 days unless since says otherwise, the chain head and retention floor in the file so it is an anchor for audit verify). Secrets (tokens, keys, passwords, webhook and source credentials) are shown as (redacted); every other value is the stored value. Entries are written by the services in the transaction that makes the change; nothing writes, updates or deletes an entry. Needs the project capability; a dashboard session reads it as the project owner, an organization admin or a staff member shadowing the project.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: actor, in: query, required: false, schema: {type: string, maxLength: 128}, description: "The actor's id (a person, agent or service client)."}
+        - {name: actor_kind, in: query, required: false, schema: {$ref: '#/components/schemas/AuditActorKind'}}
+        - {name: source, in: query, required: false, schema: {$ref: '#/components/schemas/AuditSource'}}
+        - {name: resource_type, in: query, required: false, schema: {type: string, pattern: "^[a-z_]{1,32}$"}}
+        - {name: resource_id, in: query, required: false, schema: {type: string, maxLength: 128}}
+        - {name: action, in: query, required: false, schema: {type: string, pattern: "^[a-z_.]{1,64}\\*?$"}, description: "An action code such as screen.update, or a prefix such as playlist.*."}
+        - {name: field, in: query, required: false, schema: {type: string, maxLength: 200}, description: "A JSON Pointer: entries that changed this member or one below it, e.g. /label."}
+        - {name: since, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: until, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, required: false, schema: {type: string, pattern: "^au1_"}, description: "next_cursor of the previous page, with the same filters. Opaque."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {$ref: '#/components/parameters/ReportFormat'}
+      responses:
+        '200':
+          description: One page of entries, or the filtered log as a file for csv, xlsx and pdf.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditList'
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/audit/head:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getAuditHead
+      description: The project's audit chain head (the last chained entry's seq and hash), the retention floor the chain starts from, and how many entries are waiting to be chained. Keep a head as an anchor and pass it to GET /api/audit/verify later to prove no history before it was rewritten or removed.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The chain head.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditHead'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/audit/verify:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: verifyAuditLog
+      description: Recomputes the audit hash chain over a range and reports what is wrong, if anything. Every chained entry's hash is recomputed from its stored content, each entry must link to the one before it, seq must be contiguous from the retention floor, and the last entry must be the chain head. anchor (SEQ:HASH from an earlier export or head) additionally proves the entry at that seq is unchanged and the chain was not truncated below it. A call checks at most 5000 entries; continue from next_seq with from_seq.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: from_seq, in: query, required: false, schema: {type: integer, minimum: 0}, description: "First chain position to check. Default the oldest retained."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 5000}}
+        - {name: anchor, in: query, required: false, schema: {type: string, pattern: "^[0-9]{1,18}:[0-9a-f]{64}$"}, description: "SEQ:HASH of a chain head you kept."}
+      responses:
+        '200':
+          description: The verification result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditVerifyResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/audit/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - {name: id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?aud_[A-Za-z0-9_-]{1,100}$"}}
+    get:
+      x-screenrig-access: read
+      operationId: getAuditEntry
+      description: One audit entry with its field-level changes.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEntry'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/organizations/{org_id}/audit:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    get:
+      operationId: listOrganizationAudit
+      description: "The organization's own audit log: changes to its administrators, domains and billing settings, with the same entries, filters and formats as GET /api/audit. Requires an administrator of the organization."
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: org_id, in: path, required: true, schema: {type: string}}
+        - {name: actor, in: query, required: false, schema: {type: string, maxLength: 128}}
+        - {name: actor_kind, in: query, required: false, schema: {$ref: '#/components/schemas/AuditActorKind'}}
+        - {name: source, in: query, required: false, schema: {$ref: '#/components/schemas/AuditSource'}}
+        - {name: action, in: query, required: false, schema: {type: string, pattern: "^[a-z_.]{1,64}\\*?$"}}
+        - {name: since, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: until, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, required: false, schema: {type: string, pattern: "^au1_"}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {$ref: '#/components/parameters/ReportFormat'}
+      responses:
+        '200':
+          description: One page of entries, or the filtered log as a file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditList'
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/reports:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -31091,6 +31264,93 @@ components:
     ReportColumn: {type: object, additionalProperties: false, required: [key, label, type], properties: {key: {type: string}, label: {type: string}, type: {type: string, enum: [text, int, decimal, percent, hours, date, datetime]}}}
     ReportParam: {type: object, additionalProperties: false, required: [name, description], properties: {name: {type: string}, description: {type: string}}}
     ReportKindInfo: {type: object, additionalProperties: false, required: [kind, title, description, params], properties: {kind: {type: string}, title: {type: string}, description: {type: string}, params: {type: array, items: {$ref: "#/components/schemas/ReportParam"}}}}
+    AuditActorKind: {type: string, enum: [person, agent, service_client, staff, system]}
+    AuditSource: {type: string, enum: [dashboard, api, cli, mcp, staff, device, webhook, system], description: "The surface a change came through: a dashboard session, the HTTP API, the screenrig CLI, an MCP tool call, a staff member under a write lease, a signed device call, an inbound webhook, or the server itself (a worker applying an approved change)."}
+    AuditActor: {type: object, additionalProperties: false, required: [kind], properties: {kind: {$ref: '#/components/schemas/AuditActorKind'}, id: {type: string}, name: {type: string}}}
+    AuditResource: {type: object, additionalProperties: false, required: [type], properties: {type: {type: string, description: "screen, screen_folder, playlist, media, media_folder, application, card, campaign, notification, webhook, kv_webhook, trigger, source, fleet_link, report_subscription, alert_mute, bi_connection, bi_view, media_sync, member, invitation, project, organization, service_client, agent, review and the other configuration types."}, id: {type: string}, name: {type: string, description: "The resource's name after the change (before it, for a delete)."}}}
+    AuditRevision: {type: object, additionalProperties: false, required: [type], properties: {type: {type: string, description: "The kind of revision the change produced: the resource's own revision counter, or playlist_revision, media_version."}, id: {type: string}, before: {type: integer}, after: {type: integer}}}
+    AuditClient: {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string}, version: {type: string}, platform: {type: string}}}
+    AuditFieldChange:
+      type: object
+      additionalProperties: false
+      required: [path, before, after]
+      properties:
+        path: {type: string, description: "A JSON Pointer to the changed member of the resource, e.g. /label or /fields/room."}
+        before: {description: "The value before the change; null when the member did not exist (a create) ."}
+        after: {description: "The value after the change; null when the member no longer exists (a delete). A value over 1 KiB is replaced by {size, sha256}."}
+        redacted: {type: boolean, description: "A credential: both sides read (redacted)."}
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required: [id, scope, at, actor, source, action, resource, changes]
+      properties:
+        id: {type: string}
+        scope: {type: string, description: "The chain the entry belongs to: the project id, or an organization id for organization settings."}
+        project_id: {type: string}
+        organization_id: {type: string}
+        at: {type: string, format: date-time}
+        actor: {$ref: '#/components/schemas/AuditActor'}
+        approved_by: {$ref: '#/components/schemas/AuditActor'}
+        review_id: {type: string, description: "The review that held the change, when an agent proposed it and a person approved it."}
+        source: {$ref: '#/components/schemas/AuditSource'}
+        action: {type: string, pattern: '^[a-z0-9_-]+(\.[a-z0-9_-]+)*$', description: "A stable code, <resource type>.<verb>, e.g. screen.update, playlist.create, webhook.rotate_secret."}
+        resource: {$ref: '#/components/schemas/AuditResource'}
+        changes: {type: array, items: {$ref: '#/components/schemas/AuditFieldChange'}, description: "The field-level before and after. At most 100 changes and 16 KiB; truncated says more were made."}
+        revision: {$ref: '#/components/schemas/AuditRevision'}
+        truncated: {type: boolean}
+        unrecorded: {type: boolean, description: "The change was made but its service recorded no values."}
+        event_sequence: {type: integer, description: "The sequence of the project event announcing the change, when it has one."}
+        request_id: {type: string}
+        route: {type: string, description: "The route pattern the server matched, never the request URL."}
+        method: {type: string}
+        client_ip: {type: string}
+        client: {$ref: '#/components/schemas/AuditClient'}
+        seq: {type: integer, description: "The entry's position in the chain; absent until the sealer has chained it (seconds)."}
+        prev_hash: {type: string}
+        hash: {type: string, description: "sha256 over prev_hash, seq and the entry's canonical content."}
+        sealed_at: {type: string, format: date-time}
+    AuditList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/AuditEntry'}}
+        next_cursor: {oneOf: [{type: string}, {type: "null"}], description: "Cursor of the last returned entry when more exist; pass it back as cursor. null at the end."}
+    AuditHead:
+      type: object
+      additionalProperties: false
+      required: [scope, seq, hash, floor_seq, floor_hash, unsealed, format]
+      properties:
+        scope: {type: string}
+        seq: {type: integer, description: "Position of the last chained entry; 0 for an empty chain."}
+        hash: {type: string, description: "Hash of the last chained entry (the genesis hash for an empty chain). Keep seq:hash as an anchor."}
+        floor_seq: {type: integer, description: "The last entry retention removed; the chain starts after it."}
+        floor_hash: {type: string}
+        sealed_through: {type: string, format: date-time}
+        unsealed: {type: integer, description: "Entries written and waiting to be chained (counted up to 10000)."}
+        oldest_retained_seq: {type: integer}
+        format: {type: integer, description: "The version of the hashed form."}
+    AuditProblem:
+      type: object
+      additionalProperties: false
+      required: [seq, code, detail]
+      properties:
+        seq: {type: integer}
+        code: {type: string, enum: [hash_mismatch, prev_mismatch, gap, head_mismatch, anchor_mismatch, floor_mismatch]}
+        detail: {type: string}
+    AuditVerifyResult:
+      type: object
+      additionalProperties: false
+      required: [ok, scope, checked, head, problems]
+      properties:
+        ok: {type: boolean}
+        scope: {type: string}
+        checked: {type: integer}
+        first_seq: {type: integer}
+        last_seq: {type: integer}
+        next_seq: {type: integer, description: "Present when the range is longer than one call checks: pass it as from_seq."}
+        head: {$ref: '#/components/schemas/AuditHead'}
+        problems: {type: array, items: {$ref: '#/components/schemas/AuditProblem'}}
     ReportCatalog: {type: object, additionalProperties: false, required: [items, formats], properties: {items: {type: array, items: {$ref: "#/components/schemas/ReportKindInfo"}}, formats: {type: array, items: {type: string}}}}
     Report: {type: object, additionalProperties: false, required: [kind, title, generated_at, columns, rows, truncated], description: "One report as a table: columns says what each row member is. Rows carry more members than the columns show (ids, parent_id and depth for a folder outline). Percent columns hold 0 to 100.", properties: {kind: {type: string}, title: {type: string}, subtitle: {type: string}, generated_at: {type: string, format: date-time}, from: {type: string}, to: {type: string}, columns: {type: array, items: {$ref: "#/components/schemas/ReportColumn"}}, rows: {type: array, items: {type: object, additionalProperties: true}}, totals: {type: object, additionalProperties: true}, notes: {type: array, items: {type: string}}, truncated: {type: boolean}, prepared_for: {type: string}}}
     ReportSchedule: {type: object, additionalProperties: false, required: [cadence], properties: {cadence: {type: string, enum: [daily, weekly, monthly]}, weekday: {type: string, enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday], description: Weekly only; default monday.}, day_of_month: {type: integer, minimum: 1, maximum: 28, description: Monthly only; default 1.}, hour: {type: integer, minimum: 0, maximum: 23, description: "Hour of the day in timezone; default 0."}, timezone: {type: string, maxLength: 64, description: "An IANA time zone such as America/Los_Angeles; default UTC."}}}

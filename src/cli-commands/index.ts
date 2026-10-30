@@ -54,6 +54,7 @@ export const TOP_LEVEL_COMMANDS: Record<string, CommandBundle> = {
   alerts: "monitoring",
   reports: "integrations",
   bi: "integrations",
+  audit: "integrations",
   feedback: "account",
   support: "account",
   doctor: "account",
