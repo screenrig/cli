@@ -1,15 +1,7 @@
 import { usageError } from "./problems.js";
+import { decodeAttributeEntities } from "./generated/playlist-write-semantics.js";
 
-const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-
-/** Decodes the character references an HTML attribute value carries. */
-export function decodeAttributeEntities(text: string): string {
-  return text.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(amp|lt|gt|quot|apos));/gi, (match, decimal?: string, hex?: string, name?: string) => {
-    if (name !== undefined) return NAMED_ENTITIES[name.toLowerCase()] ?? match;
-    const code = decimal !== undefined ? Number.parseInt(decimal, 10) : Number.parseInt(hex ?? "", 16);
-    return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-  });
-}
+export { decodeAttributeEntities };
 
 /**
  * The src of the first iframe of a pasted embed code (Google's Publish to web

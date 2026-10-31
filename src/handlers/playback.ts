@@ -84,7 +84,7 @@ export async function playbackPlays(
   const range = playsRange(flagString(args.flags, "from"), flagString(args.flags, "to"), runtime.now());
   const filters = { screen_id: screenId, media_id: mediaId, tag };
   const query = { from: range.from, to: range.to, ...filters };
-  const playsFile = await reportFileOf(args, runtime, resolved, "/api/playback/plays", query, "plays", "plays", true);
+  const playsFile = await reportFileOf(args, runtime, resolved, "/api/playback/plays", { ...query, cursor }, "plays", "plays", true);
   if (playsFile) return playsFile;
   const format = playbackFormat(args, "playback plays");
   // The server never returns the newest 5 seconds: report the effective end.
