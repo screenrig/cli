@@ -3,7 +3,7 @@ import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promise
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import type { CampaignRevision, SchedulePreview, ScheduleCalendar, ScreenScheduleRevision } from "./adapters/protocol.js";
+import type { CampaignPatch, CampaignRevision, SchedulePreview, ScheduleCalendar, ScreenScheduleRevision } from "./adapters/protocol.js";
 import { calendarInstantOption, campaignRevisionLines, schedulePreviewLines, screenScheduleRevisionLines } from "./change-control.js";
 import { verdictDetail } from "./campaigns.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -277,6 +277,38 @@ test("campaign preview of a change reads the update flags, --publish and --pause
   assert.deepEqual(last(transport).body, { id: campaign.id, body: { paused: true } });
 });
 
+for (const [flag, values, patch] of [
+  ["window", ["mon@09:00-10:00", "fri@17:00-18:00"], { windows: [{ days: ["mon"], start: "09:00", end: "10:00" }, { days: ["fri"], start: "17:00", end: "18:00" }] }],
+  ["monthly", ["15", "last-sun@09:00-14:00"], { monthly: [{ day: 15 }, { nth: -1, weekday: "sun", start: "09:00", end: "14:00" }] }],
+  ["date", ["2026-12-24", "2026-12-31@18:00-22:00"], { dates: [{ date: "2026-12-24" }, { date: "2026-12-31", start: "18:00", end: "22:00" }] }],
+  ["except", ["2026-12-26", "2026-12-25"], { except: ["2026-12-25", "2026-12-26"] }],
+  ["tag", ["North", "Cafe"], { audience: { all: [{ tag: "North" }, { tag: "Cafe" }] } }],
+  ["any-tag", ["North", "Cafe"], { audience: { any: [{ tag: "North" }, { tag: "Cafe" }] } }],
+  ["screen-id", [A, B], { audience: { any: [{ screen_id: A }, { screen_id: B }] } }],
+] satisfies Array<[string, string[], CampaignPatch]>) {
+  for (const existing of [false, true]) {
+    test(`campaign preview of ${existing ? "a change" : "a new campaign"} accumulates repeated --${flag} without writing`, async () => {
+      const env = await enrolled();
+      const transport = backend();
+      const id = existing ? (await draft(transport, env)).id : undefined;
+      const same = calendar();
+      transport.on("POST", "/api/campaigns/preview", () => json(200, { gained: { count: 0, screen_ids: [] }, lost: { count: 0, screen_ids: [] }, calendar: { before: same, after: same } }));
+      const target = id !== undefined ? [id] : ["--name", "Holiday hours", "--playlist-id", PLAYLIST, ...(patch.audience ? [] : ["--tag", "Lobby"])];
+      const before = transport.calls.length;
+      const result = await cli(["--json", "campaign", "preview", ...target, ...values.flatMap((value) => [`--${flag}`, value])], transport, env);
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      assert.equal(transport.calls.length, before + 1, "only the preview was requested");
+      const request = last(transport);
+      assert.equal(request.method, "POST");
+      assert.equal(request.path, "/api/campaigns/preview");
+      assert.deepEqual(request.body, id !== undefined
+        ? { id, body: patch }
+        : { body: { name: "Holiday hours", playlist_id: PLAYLIST, audience: { tag: "Lobby" }, ...patch } });
+      assert.equal(request.headers?.["idempotency-key"], undefined, "preview never writes a campaign");
+    });
+  }
+}
+
 test("campaign preview sends data conditions and explicit clears without writing a campaign", async () => {
   const env = await enrolled();
   const transport = backend();
@@ -309,6 +341,10 @@ test("campaign preview refuses bad input before any request", async () => {
     [["campaign", "preview", "--name", "X", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--clear-data"], /previews a new campaign; --clear-data changes an existing one/],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--paused", "--publish"], /cannot be used with|conflict/i],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--tag", "A", "--folder", FOLDER], /at most one|cannot be used with/i],
+    [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--priority", "1", "--priority", "2"], /--priority may be supplied only once/],
+    [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--tag", "North", "--tag", "Cafe", "--folder", FOLDER], /at most one|cannot be used with/i],
+    [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--window", "mon@09:00-10:00", "--window", "fri@17:00-18:00", "--clear-windows"], /cannot be used with|conflict/i],
+    [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", ...Array.from({ length: 17 }, () => ["--window", "mon@09:00-10:00"]).flat()], /--window accepts at most 16/],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--paused", "--calendar-from", "2026-12-01"], /--calendar-from takes an instant with a zone/],
   ];
   for (const [argv, message] of cases) {
