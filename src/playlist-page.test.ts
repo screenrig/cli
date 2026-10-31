@@ -257,6 +257,56 @@ for (const [before, after] of [["image", "video"], ["video", "image"], ["image",
   });
 }
 
+test("playlist page replace date-only edits preserve every primitive and other visibility constraints", async (t) => {
+  const { resolved_media: _resolved, ...primitive } = (storedImagePage().primitives as Record<string, unknown>[])[0]!;
+  const primitives = [
+    { ...primitive, id: "left", rect: { x: 0, y: 0, width: 1920, height: 2160 } },
+    { ...primitive, id: "right", selector: { by: "id", media_id: "med_CCCCCCCCCCCCCCCCCCCCCCCC" }, rect: { x: 1920, y: 0, width: 1920, height: 2160 }, layer: 1 },
+  ];
+  const windows = [{ days: ["mon"], from: "09:00", until: "17:00" }];
+  const data = { key: "open", path: "/value", equals: true };
+  const visibility = { enabled: false, from: "2026-12-01T00:00", until: "2026-12-25T00:00", windows, data };
+  const stored = storedImagePage({ id: "rich", visibility,
+    primitives: primitives.map((value) => ({ ...value, resolved_media: [{ media_id: IMAGE }] })),
+  });
+  const snapshot = structuredClone(stored);
+  const writes: { body: Record<string, unknown>; headers: Record<string, string | undefined> }[] = [];
+  const transport = new FakeTransport()
+    .on("GET", `/api/media/${IMAGE}`, () => media("image"))
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([storedImagePage(), stored]) }))
+    .on("PUT", `/api/playlists/${PLAYLIST}/pages/rich`, (request) => { writes.push({ body: request.body as never, headers: request.headers ?? {} }); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+  const cases = [
+    { flags: ["--until", "2026-12-31"], visibility: { ...visibility, until: "2027-01-01T00:00" }, revision: "7" },
+    { flags: ["--from", "2026-12-02"], visibility: { ...visibility, from: "2026-12-02T00:00" }, revision: "7" },
+    { flags: ["--from", "2026-12-02", "--until", "2026-12-31"], visibility: { ...visibility, from: "2026-12-02T00:00", until: "2027-01-01T00:00" }, revision: "7" },
+    { flags: ["--always"], visibility: { enabled: false, windows, data }, revision: "7" },
+    { flags: ["--always", "--expect-rev", "5"], visibility: { enabled: false, windows, data }, revision: "5" },
+  ];
+  for (const entry of cases) {
+    const answer = await invoke(["playlist", "page", "replace", PLAYLIST, "rich", ...entry.flags]);
+    assert.equal(answer.code, ExitCode.Success, answer.output);
+    const write = writes.at(-1)!;
+    assert.deepEqual(write.body, { id: "rich", canvas: stored.canvas, transition: stored.transition, advance: stored.advance,
+      primitives, visibility: entry.visibility,
+    }, entry.flags.join(" "));
+    assert.equal(write.headers["if-match"], `"${entry.revision}"`);
+  }
+  assert.equal(writes.length, cases.length);
+
+  for (const flags of [
+    ["--media", IMAGE, "--until", "2026-12-31"],
+    ["--fit", "contain", "--until", "2026-12-31"],
+    ["--seconds", "12", "--always"],
+  ]) {
+    const answer = await invoke(["playlist", "page", "replace", PLAYLIST, "rich", ...flags]);
+    assert.equal(answer.code, ExitCode.Usage, answer.output);
+    assert.equal(JSON.parse(answer.output).error.code, "usage_error");
+    assert.equal(writes.length, cases.length, "a media edit of a rich page still needs --file");
+  }
+  assert.deepEqual(stored, snapshot, "edits do not mutate the stored page");
+});
+
 test("playlist page replace and remove validate their input before any request", async (t) => {
   const transport = new FakeTransport();
   const invoke = await cli(t, transport);

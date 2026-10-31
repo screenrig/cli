@@ -212,29 +212,31 @@ export interface ReplaceMediaInput {
 }
 
 /**
- * The stored page with its media swapped: the same media kind keeps every other
- * member, dates included. A different kind (an image for a video) is rebuilt as
+ * The stored page with its dates changed or media swapped. The same media kind
+ * keeps every other member, dates included. A different kind is rebuilt as
  * a media page on the playlist's canvas, keeping the stored dates and id. A
  * date flag changes only its bound; `always` removes the dates and keeps the
  * rest of the visibility the project set.
  */
 export function replaceMedia(input: ReplaceMediaInput): JSONObject {
   const page = authoringPage(input.stored);
-  const primitives = Array.isArray(page.primitives) ? page.primitives : [];
-  const only = primitives.length === 1 && isObject(primitives[0]) ? primitives[0] : undefined;
-  if (!only) {
-    throw usageError(`Page ${String(input.stored.id)} holds ${primitives.length} primitives, so its media cannot be swapped by itself. Send the whole page with --file.`);
-  }
-  let result: JSONObject;
-  if (input.mediaId === undefined || input.kind === undefined || only.primitive === input.kind) {
-    const primitive: JSONObject = { ...only };
-    if (input.mediaId !== undefined) primitive.selector = { by: "id", media_id: input.mediaId };
-    if (input.fit) primitive.content_fit = input.fit;
-    result = { ...page, primitives: [primitive] };
-    if (only.primitive === "image" && input.seconds !== undefined) result.advance = { mode: "duration", after_ms: Math.round(input.seconds * 1000) };
-  } else {
-    const rebuilt = buildMediaPage({ id: String(input.stored.id), mediaId: input.mediaId, kind: input.kind, fit: input.fit ?? "contain", seconds: input.seconds ?? DEFAULT_SECONDS, playlist: input.playlist });
-    result = { ...page, canvas: rebuilt.canvas, advance: rebuilt.advance, primitives: rebuilt.primitives };
+  let result = page;
+  if (input.mediaId !== undefined || input.fit !== undefined || input.seconds !== undefined) {
+    const primitives = Array.isArray(page.primitives) ? page.primitives : [];
+    const only = primitives.length === 1 && isObject(primitives[0]) ? primitives[0] : undefined;
+    if (!only) {
+      throw usageError(`Page ${String(input.stored.id)} holds ${primitives.length} primitives, so its media cannot be swapped by itself. Send the whole page with --file.`);
+    }
+    if (input.mediaId === undefined || input.kind === undefined || only.primitive === input.kind) {
+      const primitive: JSONObject = { ...only };
+      if (input.mediaId !== undefined) primitive.selector = { by: "id", media_id: input.mediaId };
+      if (input.fit) primitive.content_fit = input.fit;
+      result = { ...page, primitives: [primitive] };
+      if (only.primitive === "image" && input.seconds !== undefined) result.advance = { mode: "duration", after_ms: Math.round(input.seconds * 1000) };
+    } else {
+      const rebuilt = buildMediaPage({ id: String(input.stored.id), mediaId: input.mediaId, kind: input.kind, fit: input.fit ?? "contain", seconds: input.seconds ?? DEFAULT_SECONDS, playlist: input.playlist });
+      result = { ...page, canvas: rebuilt.canvas, advance: rebuilt.advance, primitives: rebuilt.primitives };
+    }
   }
   if (input.always) {
     const visibility = withoutDates(page.visibility);
