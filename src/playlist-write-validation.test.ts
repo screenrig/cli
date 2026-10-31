@@ -207,6 +207,15 @@ function iframeWith(fields: Record<string, unknown>) {
   return playlistWithPrimitives([{ ...iframePrimitive("web", "https://example.com/"), ...fields }]);
 }
 
+test("iframe src and fallback_src validation read actual attributes rather than quoted title text", () => {
+  for (const key of ["src", "fallback_src"]) {
+    const valid = '<iframe title="Sales > last week" src="https://example.com/board"></iframe>';
+    assert.deepEqual(validatePlaylistWrite(iframeWith({ [key]: valid }), new Map()), new Set(), key);
+    const invalid = '<iframe title="Example src=\'https://example.com/decoy\'" src="javascript:alert(1)"></iframe>';
+    assert.throws(() => validatePlaylistWrite(iframeWith({ [key]: invalid }), new Map()), CliError, key);
+  }
+});
+
 test("an iframe takes reload_s of 0 or 60 to 86400 seconds in the canonical schema and in a bundle", () => {
   for (const reload_s of [0, 60, 300, 86400]) {
     assert.deepEqual(playlistIssues(iframeWith({ reload_s })), [], `schema: ${reload_s}`);

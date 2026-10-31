@@ -9,6 +9,12 @@ import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
 const PUBLISHED = "https://docs.google.com/presentation/d/e/2PACX-1vTestPublishedIdentifier_0123456789abcdefghijklmnop/embed?start=true&loop=true&delayms=3000";
+const BOARD = "https://example.com/correct?x=1&y=2";
+const QUOTED_EMBEDS = [
+  `<iframe title="Sales > last week" src="${BOARD}"></iframe>`,
+  `<iframe title="Address example src='https://example.com/wrong'" src="${BOARD}"></iframe>`,
+  `<iframe title='Sales > last week; src="https://example.com/wrong"' src='${BOARD}'></iframe>`,
+];
 
 test("an embed code gives the src of its first iframe", () => {
   const cases: [string, string | undefined][] = [
@@ -25,10 +31,16 @@ test("an embed code gives the src of its first iframe", () => {
     ["./slides.png", undefined],
   ];
   for (const [input, want] of cases) assert.equal(iframeSnippetSource(input), want, input);
+  for (const input of QUOTED_EMBEDS) assert.equal(iframeSnippetSource(input), BOARD, input);
 });
 
 test("an embed code with no src is a usage error", () => {
-  for (const input of [`<iframe width="400"></iframe>`, `<iframe src=""></iframe>`, `<iframe src="  "></iframe>`]) {
+  for (const input of [
+    `<iframe width="400"></iframe>`, `<iframe src=""></iframe>`, `<iframe src="  "></iframe>`,
+    `<iframe title="Example src='https://example.com/wrong'"></iframe>`,
+    `<iframe title="No source"></iframe><iframe src="${BOARD}"></iframe>`,
+    `<iframe title="Unclosed src='https://example.com/wrong'></iframe>`,
+  ]) {
     assert.throws(() => iframeSnippetSource(input), /no src address/, input);
   }
 });
@@ -63,6 +75,14 @@ test("playlist init turns a pasted embed code into an iframe page", async (t) =>
     ["iframe", PUBLISHED, "docs.google.com"],
     ["iframe", "https://example.com/board", "example.com"],
   ]);
+});
+
+test("playlist init uses the iframe source after quoted title text", async (t) => {
+  const result = await initInvoke(QUOTED_EMBEDS);
+  t.after(result.cleanup);
+  assert.equal(result.code, 0, result.stdout);
+  const document = JSON.parse(await readFile(path.join(result.dir, "out.json"), "utf8"));
+  assert.deepEqual(document.pages.map((page: any) => page.primitives[0].src), [BOARD, BOARD, BOARD]);
 });
 
 test("playlist init refuses an embed code with no usable address", async (t) => {
