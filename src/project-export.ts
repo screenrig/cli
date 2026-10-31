@@ -127,6 +127,9 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (
 /** How many requests of one section run at once. */
 const CONCURRENCY = 8;
 
+/** A listed resource must be read; its disappearance is an incomplete copy. */
+class RequiredExportReadError extends Error {}
+
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 
 /** The file extension of a media content type; the media id alone names the file otherwise. */
@@ -170,16 +173,24 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     await writeAtomic(path.join(root, relative), `${JSON.stringify(value, null, 2)}\n`);
     written.add(relative);
   };
+  const requiredGet = async (pathName: string): Promise<unknown> => {
+    try {
+      return await api.get(pathName);
+    } catch (error) {
+      throw new RequiredExportReadError(`Could not export ${pathName}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+  };
   const section = async (name: string, run: () => Promise<number>): Promise<void> => {
     say(`exporting ${name}`);
     try {
       sections.push({ name, status: "ok", files: await run() });
     } catch (error) {
-      const problem = error instanceof CliError ? error.problem : undefined;
+      const cause = error instanceof RequiredExportReadError ? error.cause : error;
+      const problem = cause instanceof CliError ? cause.problem : undefined;
       // A route this credential or plan does not reach is skipped, not a failure of the copy:
       // feature_not_in_plan is a plan feature (the audit log) the project's plan does not include.
-      const skipped = problem?.status === 403 || problem?.status === 404 || problem?.code === "forbidden" || problem?.code === "not_ready" || problem?.code === "feature_not_in_plan";
-      sections.push({ name, status: skipped ? "skipped" : "failed", files: 0, detail: problem?.detail ?? (error instanceof Error ? error.message : String(error)), code: problem?.code });
+      const skipped = !(error instanceof RequiredExportReadError) && (problem?.status === 403 || problem?.status === 404 || problem?.code === "forbidden" || problem?.code === "not_ready" || problem?.code === "feature_not_in_plan");
+      sections.push({ name, status: skipped ? "skipped" : "failed", files: 0, detail: error instanceof RequiredExportReadError ? error.message : problem?.detail ?? (error instanceof Error ? error.message : String(error)), code: problem?.code });
       if (!skipped) result.failed += 1;
     }
   };
@@ -249,8 +260,14 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
   });
 
   await section("cards", async () => {
-    await json("cards/cards.json", asArray(await api.list("/api/cards")));
-    await json("cards/card-data.json", asArray(await api.list("/api/card-data")));
+    const cards = asArray(await api.list("/api/cards"));
+    const data = asArray(await api.list("/api/card-data"));
+    // Lists carry only definitions and summaries. Read all documents before
+    // replacing either file so a failed read never publishes a partial set.
+    const cardDetails = await mapLimit(cards, CONCURRENCY, (card) => requiredGet(`/api/cards/${encodeURIComponent(String(card.id))}`));
+    const documents = await mapLimit(data, CONCURRENCY, (entry) => requiredGet(`/api/card-data/${encodeURIComponent(String(entry.key))}`));
+    await json("cards/cards.json", cardDetails);
+    await json("cards/card-data.json", documents);
     return 2;
   });
 

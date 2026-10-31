@@ -11,6 +11,16 @@ import { mapLimit, runProjectExport, stripSecrets, type ExportApi } from "./proj
 const sha = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 const IMAGE = Buffer.from("not really a jpeg, but bytes all the same".repeat(50));
 const NOW = new Date("2026-10-29T12:00:00Z");
+const CARD = { id: "crd_1", type: "menu", major: 1, params: { title: "Lunch" }, revision: 3 };
+const CARD_DATA = {
+  key: CARD.id, document: { sections: [{ name: "Lunch", items: [{ name: "Soup", description: "Crème fraîche", price: 12.5 }] }] },
+  bytes: 122, sha256: "a".repeat(64), revision: 5, created_at: "2026-09-01T00:00:00Z", updated_at: "2026-10-28T12:00:00Z",
+  expires_at: "2026-11-01T00:00:00Z", expired: false,
+};
+const STANDALONE_DATA = {
+  key: "menu:standalone", document: { nested: { enabled: true, rows: [1, "Résumé", null] } },
+  bytes: 60, sha256: "b".repeat(64), revision: 7, created_at: "2026-09-01T00:00:00Z", updated_at: "2026-10-28T12:00:00Z",
+};
 
 interface Calls { gets: string[]; files: string[]; appends: Array<{ path: string; offset: number }> }
 
@@ -27,8 +37,11 @@ function fakeApi(calls: Calls, overrides: Partial<Record<string, unknown>> = {})
     "/api/playlists/pl_1/revisions/2": { revision: 2 },
     "/api/campaigns": { items: [{ id: "cmp_1" }] },
     "/api/advertising/direct-campaigns": { items: [] },
-    "/api/cards": [{ id: "crd_1", data: { a: 1 } }],
-    "/api/card-data": [{ key: "menu" }],
+    "/api/cards": [CARD],
+    "/api/cards/crd_1": { ...CARD, data: CARD_DATA },
+    "/api/card-data": [CARD_DATA, STANDALONE_DATA].map(({ document: _document, ...summary }) => summary),
+    "/api/card-data/crd_1": CARD_DATA,
+    "/api/card-data/menu%3Astandalone": STANDALONE_DATA,
     "/api/sources": [{ id: "src_1", config: { url: "https://x.invalid/feed" }, secrets: { token: "sealed" }, url: "https://hook.invalid/path/secret-token" }],
     "/api/notifications": { items: [{ id: "ntf_1", url: "https://hooks.invalid/services/T0/B0/XXXX", secret: "whsec_1", recipients: ["owner"] }] },
     "/api/alert-mutes": { items: [] },
@@ -44,7 +57,7 @@ function fakeApi(calls: Calls, overrides: Partial<Record<string, unknown>> = {})
     async get(pathName, query) {
       calls.gets.push(pathName);
       if (pathName === "/api/events") {
-        const start = query?.after ? Number(query.after) : 0;
+        const start = Number(query?.after ?? query?.before ?? 0);
         const items = events.slice(start, start + 2);
         return { items, next_cursor: start + 2 < events.length ? String(start + 2) : null };
       }
@@ -114,6 +127,49 @@ test("a project exports to open files with a manifest of hashes and no secrets",
     assert.ok(plays.length > 2, "plays are read in windows of at most 31 days");
     assert.equal((await readdir(path.join(directory, "data"))).some((name) => name.includes(".part") || name.includes(".window")), false);
   });
+});
+
+test("card documents and their metadata survive exports with and without media", async () => {
+  for (const media of [true, false]) {
+    await inTemp(async (directory) => {
+      const calls: Calls = { gets: [], files: [], appends: [] };
+      const emptyCard = { ...CARD, id: "crd_empty" };
+      const api = fakeApi(calls, {
+        "/api/cards": [CARD, emptyCard],
+        "/api/cards/crd_empty": { ...emptyCard, data: null },
+      });
+      const result = await runProjectExport(api, { directory, media, since: "2026-10-29", now: NOW });
+      assert.deepEqual(result.sections.find((section) => section.name === "cards"), { name: "cards", status: "ok", files: 2 });
+      const read = async (relative: string): Promise<unknown> => JSON.parse(await readFile(path.join(directory, relative), "utf8")) as unknown;
+      assert.deepEqual(await read("cards/cards.json"), [{ ...CARD, data: CARD_DATA }, { ...emptyCard, data: null }]);
+      assert.deepEqual(await read("cards/card-data.json"), [CARD_DATA, STANDALONE_DATA]);
+      for (const relative of ["cards/cards.json", "cards/card-data.json"]) {
+        const file = result.files.find((entry) => entry.path === relative);
+        assert.ok(file, `${relative} is in the manifest`);
+        const bytes = await readFile(path.join(directory, relative));
+        assert.equal(file.bytes, bytes.length);
+        assert.equal(file.sha256, sha(bytes));
+      }
+    });
+  }
+});
+
+test("a listed card or document that cannot be read fails the section instead of skipping missing content", async () => {
+  for (const route of ["/api/cards/crd_1", "/api/card-data/menu%3Astandalone"]) {
+    for (const [code, status] of [["forbidden", 403], ["not_found", 404], ["dependency_unavailable", 503]] as const) {
+      await inTemp(async (directory) => {
+        const result = await runProjectExport(fakeApi({ gets: [], files: [], appends: [] }, {
+          [route]: new CliError(makeProblem(code, "Read failed", status, "Document could not be read")),
+        }), { directory, media: false, now: NOW });
+        const cards = result.sections.find((section) => section.name === "cards");
+        assert.equal(cards?.status, "failed", `${route}: ${status} must make the copy incomplete`);
+        assert.equal(cards?.code, code);
+        assert.equal(result.failed, 1);
+        assert.equal(result.files.some((file) => file.path.startsWith("cards/")), false, "no partial card snapshot is published");
+        assert.equal(result.sections.find((section) => section.name === "sources")?.status, "ok", "other sections still export");
+      });
+    }
+  }
 });
 
 test("the exit export carries the audit log oldest first and the chain head it ends at", async () => {
