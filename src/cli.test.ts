@@ -14,7 +14,7 @@ import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, makeProblem, networkError } from "./problems.js";
+import { CliError, makeProblem, networkError, timeoutError } from "./problems.js";
 import type { ConfigFs } from "./config.js";
 import { isWorldOrGroupReadable, writeConfigAtomic, readConfigFile } from "./config.js";
 import type { Operation } from "./adapters/protocol.js";
@@ -1547,6 +1547,130 @@ test("browser setup reports malformed claims as unexpected responses and withhol
     await rm(result.configDir, { recursive: true, force: true });
   }
 });
+
+for (const refusal of [
+  { status: 404, code: "handoff_code_invalid" },
+  { status: 410, code: "handoff_code_expired" },
+]) {
+  for (const nested of [false, true]) {
+    test(`browser setup releases ${refusal.code} (${nested ? "nested" : "flat"}) retries for a replacement code`, async () => {
+      const configDir = await testTemp("browser-claim-refusal-");
+      const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+      const configPath = path.join(configDir, "screenrig", "config.json");
+      try {
+        await withAuthenticatedRuntime(["--json", "version"], new FakeTransport(), { fs: fsLike });
+        const original = (await readConfigFile(configPath, fsLike))!;
+        const pending = { code: "ABC234", idempotency_key: "pending-browser-claim" };
+        const otherProject = { browser_setup: { code: "GHT789", idempotency_key: "other-browser-claim" } };
+        const provision = { idempotency_key: "pending-provision", label: "Other screen" };
+        await writeConfigAtomic(configPath, {
+          ...original,
+          browser_setup: pending,
+          screen_provision: provision,
+          projects: {
+            [original.project_id!]: { browser_setup: pending, screen_provision: provision },
+            prj_other: otherProject,
+          },
+        }, fsLike);
+        let calls = 0;
+        const transport = new FakeTransport().on("POST", "/api/project/browser-links/claim", (): TransportResponse => {
+          if (calls++ === 0) {
+            const problem = { ...refusal, title: "Browser setup refused", detail: "Use a fresh setup code." };
+            return {
+              status: refusal.status,
+              headers: { "content-type": "application/problem+json" },
+              body: nested ? { errors: [problem] } : problem,
+            };
+          }
+          return {
+            status: 201,
+            headers: { "cache-control": "private, no-store" },
+            body: { session_id: "bls_replacement", status: "claimed", screen: BROWSER_CLAIM_SCREEN },
+          };
+        });
+        const rejected = await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
+        assert.notEqual(rejected.code, ExitCode.Success);
+        assert.equal(JSON.parse(rejected.stdout).error.code, refusal.code);
+        assert.equal(JSON.parse(rejected.stdout).error.status, refusal.status);
+        const cleared = (await readConfigFile(configPath, fsLike))!;
+        assert.equal(cleared.browser_setup, undefined);
+        assert.equal(cleared.projects?.[original.project_id!]?.browser_setup, undefined);
+        assert.deepEqual(cleared.projects?.prj_other, otherProject);
+        assert.deepEqual(cleared.screen_provision, provision);
+        assert.deepEqual(cleared.projects?.[original.project_id!]?.screen_provision, provision);
+        assert.equal(cleared.token, original.token);
+        assert.equal(cleared.project_id, original.project_id);
+
+        const replacement = await withRuntime([
+          "--json", "browser", "setup", "--code", "DEF567", "--idempotency-key", "replacement-browser-claim",
+        ], transport, { fs: fsLike });
+        assert.equal(replacement.code, ExitCode.Success, replacement.stdout);
+        assert.deepEqual(transport.calls.map(call => call.body), [{ code: "ABC234" }, { code: "DEF567" }]);
+        assert.deepEqual(transport.calls.map(call => call.headers?.["idempotency-key"]), [pending.idempotency_key, "replacement-browser-claim"]);
+        const completed = (await readConfigFile(configPath, fsLike))!;
+        assert.equal(completed.browser_setup, undefined);
+        assert.equal(completed.projects?.[original.project_id!]?.browser_setup, undefined);
+        assert.deepEqual(completed.projects?.prj_other, otherProject);
+      } finally {
+        await rm(configDir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+const browserClaimFailures: Array<{ name: string; response?: TransportResponse; error?: CliError }> = [
+  { name: "transport failure", error: networkError("connection reset by peer") },
+  { name: "transport timeout", error: timeoutError("claim timed out") },
+  ...[
+    { status: 408, code: "request_timeout" },
+    { status: 503, code: "dependency_unavailable" },
+    { status: 429, code: "handoff_session_rate_limited" },
+    { status: 404, code: "not_found" },
+    { status: 500, code: "handoff_code_invalid" },
+    { status: 404, code: "handoff_code_expired" },
+  ].map(problem => ({
+    name: `${problem.status} ${problem.code}`,
+    response: {
+      status: problem.status,
+      headers: { "content-type": "application/problem+json" },
+      body: { errors: [{ ...problem, title: "Claim failed", detail: "Retry the same claim." }] },
+    },
+  })),
+  {
+    name: "malformed success",
+    response: { status: 201, headers: { "cache-control": "private, no-store" }, body: { status: "claimed" } },
+  },
+];
+
+for (const failure of browserClaimFailures) {
+  test(`browser setup retains its exact retry after ${failure.name}`, async () => {
+    const configDir = await testTemp("browser-claim-uncertain-");
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const configPath = path.join(configDir, "screenrig", "config.json");
+    const transport = new FakeTransport().on("POST", "/api/project/browser-links/claim", () => {
+      if (failure.error) throw failure.error;
+      return failure.response!;
+    });
+    try {
+      const first = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
+      assert.notEqual(first.code, ExitCode.Success);
+      const pending = (await readConfigFile(configPath, fsLike))?.browser_setup;
+      assert.deepEqual(pending, { code: "ABC234", idempotency_key: transport.calls[0]?.headers?.["idempotency-key"] });
+      for (const args of [["--code", "DEF567"], ["--code", "ABC234", "--idempotency-key", "another-browser-claim"]]) {
+        const blocked = await withRuntime(["--json", "browser", "setup", ...args], transport, { fs: fsLike });
+        assert.equal(blocked.code, ExitCode.Usage);
+        assert.equal(transport.calls.length, 1, "a different code or key must be blocked locally");
+      }
+      const replay = await withRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
+      assert.equal(replay.code, first.code);
+      assert.equal(transport.calls.length, 2);
+      assert.equal(transport.calls[1]?.headers?.["idempotency-key"], pending?.idempotency_key);
+      assert.deepEqual((await readConfigFile(configPath, fsLike))?.browser_setup, pending);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("browser setup rejects malformed codes before claim and keeps exact ambiguous retry state", async () => {
   const invalid = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC10I"], memoryBackend());

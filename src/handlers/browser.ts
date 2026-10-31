@@ -6,7 +6,7 @@ import { requireToken } from "../client.js";
 import { resolveConfig } from "../config.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { unexpectedResponseError, usageError } from "../problems.js";
+import { CliError, unexpectedResponseError, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { isPlayerScreenPath } from "../provisioning-url.js";
 import { browserHandoffUrl, browserSetupRetryState, clearBrowserSetupRetryState, normalizeBrowserSetupCode } from "../browser-setup.js";
@@ -43,6 +43,15 @@ export async function browserSetupCommand(
     idempotent: true,
     idempotencyKey: retry.idempotency_key,
     body: request,
+  }).catch(async (error: unknown) => {
+    if (error instanceof CliError && (
+      (error.problem.status === 404 && error.problem.code === "handoff_code_invalid") ||
+      (error.problem.status === 410 && error.problem.code === "handoff_code_expired")
+    )) {
+      // These refusals create no screen. Uncertain outcomes still need the saved exact retry.
+      await clearBrowserSetupRetryState(resolved, retryRuntime, retry.idempotency_key);
+    }
+    throw error;
   });
   requirePrivateNoStore(response.headers, "Browser setup claim response");
   const claim = response.body as BrowserLinkClaim;
