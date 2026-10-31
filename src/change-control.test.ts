@@ -277,6 +277,25 @@ test("campaign preview of a change reads the update flags, --publish and --pause
   assert.deepEqual(last(transport).body, { id: campaign.id, body: { paused: true } });
 });
 
+test("campaign preview sends data conditions and explicit clears without writing a campaign", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const campaign = await draft(transport, env);
+  const same = calendar();
+  transport.on("POST", "/api/campaigns/preview", () => json(200, { gained: { count: 0, screen_ids: [] }, lost: { count: 0, screen_ids: [] }, calendar: { before: same, after: same } }));
+  const before = transport.calls.length;
+  const created = await cli(["--json", "campaign", "preview", "--name", "Room", "--playlist-id", PLAYLIST, "--folder", FOLDER, "--data", "crd_ROOM"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(last(transport).body, { body: { name: "Room", playlist_id: PLAYLIST, audience: { folder: FOLDER }, data: { key: "crd_ROOM" } } });
+  const changed = await cli(["--json", "campaign", "preview", campaign.id, "--data", "crd_ROOM:/available=true"], transport, env);
+  assert.equal(changed.code, 0, changed.stdout);
+  assert.deepEqual(last(transport).body, { id: campaign.id, body: { data: { key: "crd_ROOM", path: "/available", equals: true } } });
+  const cleared = await cli(["--json", "campaign", "preview", campaign.id, "--clear-data"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(last(transport).body, { id: campaign.id, body: { data: null } });
+  assert.ok(transport.calls.slice(before).every((call) => call.method === "POST" && call.path === "/api/campaigns/preview"));
+});
+
 test("campaign preview refuses bad input before any request", async () => {
   const env = await enrolled();
   const transport = backend();
@@ -287,6 +306,7 @@ test("campaign preview refuses bad input before any request", async () => {
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA"], /requires at least one change to preview/],
     [["campaign", "preview", "--name", "X", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--publish"], /previews a new campaign; --publish changes an existing one/],
     [["campaign", "preview", "--name", "X", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--clear-from"], /previews a new campaign; --clear-from changes an existing one/],
+    [["campaign", "preview", "--name", "X", "--playlist-id", PLAYLIST, "--tag", "Lobby", "--clear-data"], /previews a new campaign; --clear-data changes an existing one/],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--paused", "--publish"], /cannot be used with|conflict/i],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--tag", "A", "--folder", FOLDER], /at most one|cannot be used with/i],
     [["campaign", "preview", "cmp_ONEAAAAAAAAAAAAA", "--paused", "--calendar-from", "2026-12-01"], /--calendar-from takes an instant with a zone/],

@@ -1079,6 +1079,102 @@ test("campaign update refuses conflicting level options before any request", asy
   assert.equal(campaignCalls(transport).length, before);
 });
 
+test("campaign create sends data existence and typed equality for tag and folder audiences", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["crd_ROOM", { key: "crd_ROOM" }],
+    ["room:/available", { key: "room", path: "/available" }],
+    ["room:/available=true", { key: "room", path: "/available", equals: true }],
+    ["room:/available=false", { key: "room", path: "/available", equals: false }],
+    ["room:/count=0", { key: "room", path: "/count", equals: 0 }],
+    ["room:/count=-2.5", { key: "room", path: "/count", equals: -2.5 }],
+    ["room:/status=null", { key: "room", path: "/status", equals: null }],
+    ["room:/status=open", { key: "room", path: "/status", equals: "open" }],
+    ['room:/status="true"', { key: "room", path: "/status", equals: "true" }],
+    ['room:/status=""', { key: "room", path: "/status", equals: "" }],
+    ["room:=false", { key: "room", path: "", equals: false }],
+    ["room:/a~1b/~0c=a:b=c", { key: "room", path: "/a~1b/~0c", equals: "a:b=c" }],
+    ["{screen.weather}:/condition=rain", { key: "{screen.weather}", path: "/condition", equals: "rain" }],
+    [String.raw`site\:room:/available=true`, { key: "site:room", path: "/available", equals: true }],
+  ];
+  for (const [index, [spec, data]] of cases.entries()) {
+    const audience = index % 2 ? { folder: FOLDER } : { tag: "Lobby" };
+    const flags = index % 2 ? ["--folder", FOLDER] : ["--tag", "Lobby"];
+    const result = await cli(["--json", "campaign", "create", "--name", `Room ${index}`, "--playlist-id", PLAYLIST, ...flags, "--data", spec], transport, env);
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(lastCall(transport).body, { name: `Room ${index}`, playlist_id: PLAYLIST, audience, data });
+    assert.deepEqual(result.envelope.data.data, data);
+  }
+  const listed = await cli(["--json", "campaign", "list"], transport, env);
+  const first = await cli(["--human", "campaign", "show", listed.envelope.data.items[0].id], transport, env);
+  assert.match(first.stdout, /^when: data /m);
+});
+
+test("campaign update replaces or clears data, and an unrelated update preserves it", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const campaign = await create(transport, env, "--folder", FOLDER, "--data", "crd_ROOM");
+  const renamed = await cli(["--json", "campaign", "update", campaign.id, "--name", "Rooms"], transport, env);
+  assert.equal(renamed.code, 0, renamed.stdout);
+  assert.deepEqual(lastCall(transport).body, { name: "Rooms" });
+  assert.deepEqual(renamed.envelope.data.data, { key: "crd_ROOM" });
+
+  const replaced = await cli(["--json", "campaign", "update", campaign.id, "--data", "crd_ROOM:/available=false", "--expect-rev", "2"], transport, env);
+  assert.equal(replaced.code, 0, replaced.stdout);
+  assert.deepEqual(lastCall(transport).body, { data: { key: "crd_ROOM", path: "/available", equals: false } });
+  assert.equal(lastCall(transport).headers?.["if-match"], '"2"');
+  assert.ok(lastCall(transport).headers?.["idempotency-key"]);
+  assert.deepEqual(replaced.envelope.data.audience, { folder: FOLDER });
+  const shown = await cli(["--human", "campaign", "show", campaign.id], transport, env);
+  assert.match(shown.stdout, /^when: data crd_ROOM \/available = false$/m);
+
+  const cleared = await cli(["--json", "campaign", "update", campaign.id, "--clear-data"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(lastCall(transport).body, { data: null });
+  assert.equal(cleared.envelope.data.data, undefined);
+  const unconditional = await cli(["--human", "campaign", "show", campaign.id], transport, env);
+  assert.match(unconditional.stdout, /^when: always$/m);
+});
+
+test("campaign data refuses malformed predicates, duplicates and conflicting clears before requests", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  const before = transport.calls.length;
+  const invalid = ["", ":/status", "bad key", String.raw`feed\:room`, "x".repeat(257), "room:status", "room:/bad~2", "room:/" + "x".repeat(256),
+    "room:" + "/a".repeat(17), "room:/status=[]", "room:/status={}", 'room:/status="open', "room:/count=1e309", "room:/status=" + "x".repeat(1025)];
+  for (const spec of invalid) {
+    for (const command of [["create", "--name", "Rooms", "--playlist-id", PLAYLIST, "--tag", "Lobby"], ["update", MISSING], ["preview", MISSING]]) {
+      const result = await cli(["--json", "campaign", ...command, "--data", spec], transport, env);
+      assert.equal(result.code, ExitCode.Usage, `${spec}: ${result.stdout}`);
+      assert.match(result.envelope.error?.detail ?? "", /--data/);
+    }
+  }
+  for (const flags of [["--data", "room", "--clear-data"], ["--clear-data", "--data", "room"], ["--data", "room", "--data", "other"]]) {
+    for (const verb of ["update", "preview"]) {
+      const result = await cli(["--json", "campaign", verb, MISSING, ...flags], transport, env);
+      assert.equal(result.code, ExitCode.Usage, result.stdout);
+      assert.match(result.envelope.error?.detail ?? "", /cannot be used with|only once/);
+    }
+  }
+  assert.equal(transport.calls.length, before);
+});
+
+test("campaign help exposes data conditions, clear conflicts and a working example", () => {
+  const create = commandHelp(["campaign", "create"]);
+  assert.ok(create.options.some((option) => option.name === "--data" && option.valueRequired));
+  assert.match(create.usage, /Missing or expired data never matches/);
+  assert.ok(create.examples.some((example) => example.includes('--data "crd_ROOM:/available=true"')));
+  for (const verb of ["update", "preview"]) {
+    const help = commandHelp(["campaign", verb]);
+    assert.deepEqual(help.options.find((option) => option.name === "--data")!.conflicts, ["--clear-data"]);
+    assert.deepEqual(help.options.find((option) => option.name === "--clear-data")!.conflicts, ["--data"]);
+  }
+  const changes = commandHelp(["campaign", "update"]).relationships.find((item) => item.kind === "atLeastOne")!.options;
+  assert.ok(changes.includes("--data"));
+  assert.ok(changes.includes("--clear-data"));
+});
+
 test("campaign help documents the level flags, their relationships and the stack-only reason", () => {
   const create = commandHelp(["campaign", "create"]);
   for (const name of ["--monthly", "--date", "--except", "--on-touch", "--displays", "--start"]) assert.ok(create.options.some((option) => option.name === name), `create has ${name}`);

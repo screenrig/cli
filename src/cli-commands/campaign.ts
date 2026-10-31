@@ -5,7 +5,7 @@ import type { CommandActionBinder } from "./types.js";
 import { handleCampaignCreate, handleCampaignDelete, handleCampaignExplain, handleCampaignList, handleCampaignPause, handleCampaignPreview, handleCampaignPromote, handleCampaignPublish, handleCampaignResume, handleCampaignRestore, handleCampaignRevisions, handleCampaignScreens, handleCampaignShow, handleCampaignUpdate } from "../handlers/campaign.js";
 import { calendarInstantOption } from "../change-control.js";
 import {
-  campaignAnyTags, campaignAudienceOption, campaignDates, campaignDisplays, campaignExceptDates, campaignExplainTime, campaignFolder, campaignInstant, campaignMonthlies, campaignName,
+  campaignAnyTags, campaignAudienceOption, campaignDataOption, campaignDates, campaignDisplays, campaignExceptDates, campaignExplainTime, campaignFolder, campaignInstant, campaignMonthlies, campaignName,
   campaignOnTouch, campaignPlaylistId, campaignPriority, campaignScreenIds, campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,
 } from "../campaigns.js";
 
@@ -27,6 +27,7 @@ const MONTHLY_HELP = "DAY or NTH-WEEKDAY with an optional @HH:MM-HH:MM, such as 
 const DATE_HELP = "YYYY-MM-DD with an optional @HH:MM-HH:MM, such as 2026-12-24 or 2026-12-24@18:00-22:00 (repeatable, at most 100)";
 const EXCEPT_HELP = "YYYY-MM-DD dates; an exception removes every occurrence that starts on that date (repeatable, or comma-separated, at most 100)";
 const ON_TOUCH_HELP = "Hold only while someone is using the screen, until IDLE_S seconds (5 to 3600, default 60) pass without input; Players that resolve their own stack honor it";
+const DATA_HELP = "Hold only while card data KEY exists, optionally at an RFC 6901 PATH or equal to VALUE (JSON scalar or bare string); missing or expired data never matches";
 const DISPLAYS_HELP = "Play only on these video wall outputs, 1 to 12, comma-separated (default: every output)";
 const COVERS_HELP = "Where it plays: full (the whole page, default), main (the page itself), or header, footer or side, a strip drawn over the page that needs a playlist made for that region (playlist create --format-region)";
 const COVERS = ["full", "main", "header", "footer", "side"];
@@ -47,6 +48,8 @@ function changeOptions(command: Command): void {
     .addOption(new Option("--clear-dates", "Remove every date").conflicts(["date"]))
     .addOption(new Option("--except <DATE>", `Replace every exception date with these, ${EXCEPT_HELP}`).argParser(campaignExceptDates).conflicts(["clearExcept"]))
     .addOption(new Option("--clear-except", "Remove every exception date").conflicts(["except"]))
+    .addOption(new Option("--data <KEY[:PATH[=VALUE]]>", DATA_HELP).argParser(campaignDataOption).conflicts(["clearData"]))
+    .addOption(new Option("--clear-data", "Remove the card-data condition").conflicts(["data"]))
     .addOption(new Option("--on-touch [IDLE_S]", ON_TOUCH_HELP).argParser(campaignOnTouch).conflicts(["clearOnTouch"]))
     .addOption(new Option("--clear-on-touch", "Remove the interaction condition").conflicts(["onTouch"]))
     .addOption(new Option("--covers <WHERE>", COVERS_HELP).choices(COVERS))
@@ -60,7 +63,7 @@ const AUDIENCE_FLAGS = ["--tag", "--any-tag", "--screen-id", "--folder", "--all-
 
 export function registerCampaignCommands(root: Command, bind: CommandActionBinder): void {
   const campaign = root.command("campaign").description("Schedule your screens; ads campaigns buy ad time on other screens");
-  addCommandNotes(campaign, "Campaigns:\n  A campaign switches every screen in its audience to one playlist while its\n  from and until dates, weekly windows, monthly rules, dates, exceptions and\n  touch condition hold, and back when they stop; with none of them it holds\n  always. It schedules your own screens: ads campaigns\n  buy ad time on other screens and are a different resource. The audience is a\n  rule over screen tags, ids or screen folders. from, until, windows, monthly rules, dates and exceptions are\n  civil times read in each screen's own timezone. Per screen, a takeover wins, then the first\n  campaign that holds (priority 0 to 100, higher first, then the newest), then\n  the screen's playlist schedule, then its default playlist. Screens switch\n  within a minute. campaign screens shows each screen's standing and campaign\n  explain says why a campaign plays on a screen or not. A project has at most\n  100 campaigns. A paused campaign is a draft: it is on no screen until\n  campaign publish; publish it to a test folder or test screens first, then\n  campaign promote puts the draft's audience on it. campaign preview shows a\n  change before it is made; campaign revisions and campaign restore keep and\n  bring back earlier versions.");
+  addCommandNotes(campaign, "Campaigns:\n  A campaign switches every screen in its audience to one playlist while its\n  from and until dates, weekly windows, monthly rules, dates, exceptions, data and\n  touch conditions hold, and back when they stop; with none of them it holds\n  always. It schedules your own screens: ads campaigns\n  buy ad time on other screens and are a different resource. The audience is a\n  rule over screen tags, ids or screen folders. from, until, windows, monthly rules, dates and exceptions are\n  civil times read in each screen's own timezone. Per screen, a takeover wins, then the first\n  campaign that holds (priority 0 to 100, higher first, then the newest), then\n  the screen's playlist schedule, then its default playlist. Screens switch\n  within a minute. campaign screens shows each screen's standing and campaign\n  explain says why a campaign plays on a screen or not. A project has at most\n  100 campaigns. A paused campaign is a draft: it is on no screen until\n  campaign publish; publish it to a test folder or test screens first, then\n  campaign promote puts the draft's audience on it. campaign preview shows a\n  change before it is made; campaign revisions and campaign restore keep and\n  bring back earlier versions.");
 
   campaign.command("list").description("List this project's campaigns in the order screens read them")
     .action(bind(handleCampaignList));
@@ -80,6 +83,7 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--monthly <SPEC>", `Hold only on this monthly occurrence, ${MONTHLY_HELP}`).argParser(campaignMonthlies))
     .addOption(new Option("--date <SPEC>", `Hold only on this date, ${DATE_HELP}`).argParser(campaignDates))
     .addOption(new Option("--except <DATE>", `Skip these dates, ${EXCEPT_HELP}`).argParser(campaignExceptDates))
+    .addOption(new Option("--data <KEY[:PATH[=VALUE]]>", DATA_HELP).argParser(campaignDataOption))
     .addOption(new Option("--on-touch [IDLE_S]", ON_TOUCH_HELP).argParser(campaignOnTouch))
     .addOption(new Option("--covers <WHERE>", COVERS_HELP).choices(COVERS))
     .addOption(new Option("--displays <N>", DISPLAYS_HELP).argParser(campaignDisplays))
@@ -100,7 +104,7 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .option("--expect-rev <REVISION>", "Optionally require this campaign revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleCampaignUpdate));
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--on-touch", "--clear-on-touch", "--covers", "--displays", "--clear-displays", "--start", "--priority"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--data", "--clear-data", "--on-touch", "--clear-on-touch", "--covers", "--displays", "--clear-displays", "--start", "--priority"]);
   requireOptionGroup(update, "atMostOne", AUDIENCE_FLAGS);
 
   const preview = campaign.command("preview").description("Show what creating or changing a campaign would do before making it: the screens that gain or lose it and the calendar before and after")

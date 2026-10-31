@@ -7,6 +7,7 @@ import type {
   CampaignStatus,
   LevelDate,
   LevelMonthly,
+  PageDataCondition,
   ScreenCampaigns,
   ScreenExplainAt,
   ScreenScheduleDay,
@@ -16,7 +17,7 @@ import type {
 import { isResourceID } from "./generated/resource-ids.js";
 import {
   effectivePlaylistText, instantInZone, isCivilDate, LEVEL_DISPLAYS_MAX, LEVEL_IDLE_DEFAULT_S, LEVEL_IDLE_MAX_S, LEVEL_IDLE_MIN_S, levelRuleParts,
-  SCHEDULE_DATES_MAX, SCHEDULE_EXCEPT_MAX, SCHEDULE_MONTHLY_MAX, scheduleDate, scheduleMonthly, scheduleWindow,
+  SCHEDULE_DATES_MAX, SCHEDULE_EXCEPT_MAX, SCHEDULE_MONTHLY_MAX, scheduleData, scheduleDate, scheduleMonthly, scheduleWindow,
 } from "./screen-control.js";
 import { SCREEN_TAG_PATTERN, screenFolderId } from "./screen-fleet.js";
 
@@ -405,6 +406,45 @@ export function campaignDisplays(value: string): string {
 /** The display numbers a --displays value names. */
 export function campaignDisplayList(value: string): number[] {
   return value.split(",").map(Number);
+}
+
+/** KEY[:PATH[=VALUE]]; escape a colon in KEY as \: and use an empty PATH for root equality. */
+export function campaignData(value: string): PageDataCondition {
+  let key = "";
+  let rest: string | undefined;
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] === "\\" && value[index + 1] === ":") {
+      key += ":";
+      index++;
+    } else if (value[index] === ":") {
+      rest = value.slice(index + 1);
+      break;
+    } else {
+      key += value[index];
+    }
+  }
+  const condition: Record<string, unknown> = { key };
+  if (rest !== undefined) {
+    const equals = rest.indexOf("=");
+    condition.path = equals < 0 ? rest : rest.slice(0, equals);
+    if (equals >= 0) {
+      const text = rest.slice(equals + 1);
+      try {
+        condition.equals = JSON.parse(text) as unknown;
+      } catch {
+        if (/^["\[{]/.test(text.trimStart())) throw usageError("--data VALUE must be a JSON scalar or a bare string; quote strings with JSON syntax to preserve their type.");
+        condition.equals = text;
+      }
+    }
+  }
+  return scheduleData(condition, "--data", (field, reason) => usageError(`${field} ${reason}`));
+}
+
+/** Validate the single data condition before resolving credentials or sending a request. */
+export function campaignDataOption(value: string, previous?: string): string {
+  if (previous !== undefined) throw usageError("--data may be given only once.");
+  campaignData(value);
+  return value;
 }
 
 /** --on-touch IDLE_S: the seconds without input before the screen counts as idle, a whole number from 5 to 3600. */

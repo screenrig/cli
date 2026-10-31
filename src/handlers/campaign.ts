@@ -1,7 +1,7 @@
 // Command handlers for the campaign commands, loaded on demand.
 import { readAuthoringText } from "../authoring-input.js";
 import { LEVEL_IDLE_DEFAULT_S } from "../screen-control.js";
-import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignPromoteProblem, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
+import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignPromoteProblem, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignData, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
 import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignPreviewRequest, type CampaignPromote, type CampaignRevision, type CampaignScreens, type CampaignWrite, type LevelCovers, type RevisionPage, type SchedulePreview, type ScreenCampaigns } from "../adapters/protocol.js";
 import { campaignRevisionLines, schedulePreviewLines } from "../change-control.js";
 import { revisionNumber } from "../playlist-revisions.js";
@@ -73,14 +73,15 @@ export async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime
 }
 
 /**
- * The level members the flags set: --monthly, --date, --except, --on-touch
+ * The level members the flags set: --monthly, --date, --except, --data, --on-touch
  * (60 seconds without a value), --displays and --start. A member the flags do
  * not name stays out of the body.
  */
-export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "interaction" | "covers" | "displays" | "start"> {
+export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "monthly" | "dates" | "except" | "data" | "interaction" | "covers" | "displays" | "start"> {
   const monthly = flagString(args.flags, "monthly");
   const dates = flagString(args.flags, "date");
   const except = flagString(args.flags, "except");
+  const data = flagString(args.flags, "data");
   const covers = flagString(args.flags, "covers");
   const displays = flagString(args.flags, "displays");
   const start = flagString(args.flags, "start");
@@ -89,6 +90,7 @@ export function campaignLevelFlags(args: ParsedArgs): Pick<CampaignWrite, "month
     ...(monthly !== undefined ? { monthly: campaignMonthlyList(monthly) } : {}),
     ...(dates !== undefined ? { dates: campaignDateList(dates) } : {}),
     ...(except !== undefined ? { except: except.split(",") } : {}),
+    ...(data !== undefined ? { data: campaignData(data) } : {}),
     ...(onTouch !== undefined && onTouch !== false ? { interaction: { idle_s: typeof onTouch === "string" ? Number(onTouch) : LEVEL_IDLE_DEFAULT_S } } : {}),
     ...(covers !== undefined ? { covers: covers as LevelCovers } : {}),
     ...(displays !== undefined ? { displays: campaignDisplayList(displays) } : {}),
@@ -169,7 +171,7 @@ export async function campaignPatchBody(args: ParsedArgs, runtime: CliRuntime): 
   const until = flagString(args.flags, "until");
   const windows = flagString(args.flags, "window");
   const priority = flagString(args.flags, "priority");
-  const clears = (["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const).filter((flag) => flagBool(args.flags, flag));
+  const clears = (["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-data", "clear-on-touch", "clear-displays"] as const).filter((flag) => flagBool(args.flags, flag));
   const audience = await campaignAudienceFlag(args, runtime);
   campaignBounds(from, until);
   const patch: CampaignPatch = {
@@ -186,6 +188,7 @@ export async function campaignPatchBody(args: ParsedArgs, runtime: CliRuntime): 
     ...(clears.includes("clear-monthly") ? { monthly: null } : {}),
     ...(clears.includes("clear-dates") ? { dates: null } : {}),
     ...(clears.includes("clear-except") ? { except: null } : {}),
+    ...(clears.includes("clear-data") ? { data: null } : {}),
     ...(clears.includes("clear-on-touch") ? { interaction: null } : {}),
     ...(clears.includes("clear-displays") ? { displays: null } : {}),
     ...(priority !== undefined ? { priority: Number(priority) } : {}),
@@ -197,7 +200,7 @@ export const handleCampaignUpdate = commandHandler(async (args, runtime, resolve
   const id = campaignId(args.positionals[2], "update");
   const patch = await campaignPatchBody(args, runtime);
   if (!Object.keys(patch).length) {
-    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --folder, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, --monthly, --clear-monthly, --date, --clear-dates, --except, --clear-except, --data, --clear-data, --on-touch, --clear-on-touch, --displays, --clear-displays, --start, or --priority.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await campaignCall(client, {
@@ -345,7 +348,7 @@ export const handleCampaignRestore = commandHandler(async (args, runtime, resolv
     : `Restored revision ${number} of campaign ${id} as a new revision. Every screen of the old and the new audience re-resolves within a minute.`);
 });
 
-const PREVIEW_CLEARS = ["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-on-touch", "clear-displays"] as const;
+const PREVIEW_CLEARS = ["clear-from", "clear-until", "clear-windows", "clear-monthly", "clear-dates", "clear-except", "clear-data", "clear-on-touch", "clear-displays"] as const;
 
 export const handleCampaignPreview = commandHandler(async (args, runtime, resolved) => {
   const given = args.positionals[2];
