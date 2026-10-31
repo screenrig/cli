@@ -97,7 +97,9 @@ function playlistDocumentIssues(value: unknown): Array<{ path: string; message: 
     // leaf issues, deduplicated, while the canonical schema remains authoritative.
     const issues = errors.filter((error) => error.keyword !== "oneOf" && error.keyword !== "anyOf" && error.keyword !== "if").map((error) => ({
       path: error.instancePath + (error.keyword === "additionalProperties" ? `/${String(error.params.additionalProperty).replaceAll("~", "~0").replaceAll("/", "~1")}` : error.keyword === "required" ? `/${String(error.params.missingProperty)}` : ""),
-      message: error.keyword === "additionalProperties" && error.instancePath.endsWith("/enter") ? "unsupported entry field; keep only type and optional stagger (player timing is fixed)" : error.message ?? "does not match the canonical playlist schema",
+      message: error.keyword === "false schema" && /\/then\/properties\/(major|params|data)\/false schema$/.test(error.schemaPath)
+        ? "belongs to the card instance; send only its UID"
+        : error.keyword === "additionalProperties" && error.instancePath.endsWith("/enter") ? "unsupported entry field; keep only type and optional stagger (player timing is fixed)" : error.message ?? "does not match the canonical playlist schema",
     }));
     return [...new Map(issues.map((issue) => [`${issue.path}:${issue.message}`, issue])).values()];
   }

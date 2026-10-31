@@ -80,8 +80,23 @@ test("a page condition may read the weather of each screen's own location", () =
     }
   }
   // Only the whole key is the token.
-  for (const key of ["{screen.weather}x", "weather-{screen.weather}", "{screen.name}", "{screen.field.store}", "{screen.weather", "feed.conditions.v1:49.25:-123.00 "]) {
+  for (const key of ["{screen.weather}x", "weather-{screen.weather}", "{screen.name}", "{screen.weather", "feed.conditions.v1:49.25:-123.00 "]) {
     const value = playlistWithVisibility({ enabled: true, data: { key, path: "/condition", equals: "rain" } });
+    assert.throws(() => validatePlaylistWrite(value, new Map()), CliError, key);
+    assert.notDeepEqual(playlistIssues(value), [], key);
+  }
+});
+
+test("authoring and bundle page conditions accept screen-field data keys and reject malformed tokens", () => {
+  for (const key of ["{screen.field.store}", "momentus-room-{screen.field.room}", "{screen.field.a}/{screen.field.b}.json"]) {
+    const value = playlistWithVisibility({ enabled: true, data: { key } });
+    const original = structuredClone(value);
+    assert.deepEqual(playlistIssues(value), [], key);
+    assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set(), key);
+    assert.deepEqual(value, original);
+  }
+  for (const key of ["room-{screen.field.Room}", "room-{screen.field.}", "room-{screen.field.room"]) {
+    const value = playlistWithVisibility({ enabled: true, data: { key } });
     assert.throws(() => validatePlaylistWrite(value, new Map()), CliError, key);
     assert.notDeepEqual(playlistIssues(value), [], key);
   }

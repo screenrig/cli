@@ -49,6 +49,28 @@ const SPINNING_BADGE_PAGE = {
 function playlist(primitive: Record<string, unknown> = {}) {
   return { name: "Local preflight", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [{ id: "media", primitive: "image", selector: { by: "all", one_at_a_time: true }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain", ...primitive }] }] };
 }
+test("card instance placements reject owned fields, including empty params", () => {
+  for (const prefix of ["", "stage_", "qa_", "development_"]) {
+    const value = playlist();
+    value.pages[0]!.primitives = [{ id: "door", primitive: "card", card: `${prefix}crd_room`, layout: "full", content_fit: "fill" }] as any;
+    assert.deepEqual(playlistIssues(value), [], prefix);
+    for (const [field, supplied] of Object.entries({ data: "room-{screen.field.room}", params: {}, major: 1 })) {
+      const invalid = structuredClone(value);
+      (invalid.pages[0]!.primitives[0] as Record<string, unknown>)[field] = supplied;
+      assert.deepEqual(playlistIssues(invalid), [{
+        path: `/pages/0/primitives/0/${field}`,
+        message: "belongs to the card instance; send only its UID",
+      }], `${prefix}${field}`);
+    }
+  }
+});
+test("inline room placements retain per-screen data and visibility keys", () => {
+  const value = playlist();
+  value.pages[0]!.primitives = [{ id: "door", primitive: "card", card: "room", layout: "full", content_fit: "fill", params: { room: "{screen.field.room}" }, data: "momentus-room-{screen.field.room}" }] as any;
+  (value.pages[0] as Record<string, unknown>).visibility = { enabled: true, data: { key: "momentus-room-{screen.field.room}" } };
+  value.pages.push({ ...playlist().pages[0]!, id: "fallback" });
+  assert.deepEqual(playlistIssues(value), []);
+});
 test("local canonical validation accepts dynamic selectors and application/iframe pages", () => {
   assert.doesNotThrow(() => assertPlaylistValid(playlist()));
   const p = playlist();

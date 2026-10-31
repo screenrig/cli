@@ -185,10 +185,10 @@ function validateVisibility(value: unknown, name: string): void {
     const dataName = `${name}.data`;
     const data = record(visibility.data, dataName);
     exact(data, ["key", "path", "equals"], dataName);
-    // {screen.weather} is the one key template: each screen's manifest fills in the weather conditions of its own location.
+    // Each screen fills its weather key or its own field tokens in a data key.
     if (data.key !== SCREEN_WEATHER_KEY) {
-      const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
-      if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+      const key = string(data, "key", dataName, 256).replace(/\{screen\.field\.[a-z0-9_]{1,32}\}/g, "x");
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
     }
     if (data.path !== undefined && (typeof data.path !== "string" || Buffer.byteLength(data.path, "utf8") > 256 ||
       (data.path !== "" && !data.path.startsWith("/")) || /~(?:[^01]|$)/.test(data.path) || data.path.split("/").length > 17)) {
