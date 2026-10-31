@@ -14,7 +14,9 @@ import {
   parseProbePayload,
   parseRate,
   pixelFormatHasAlpha,
+  probeMedia,
   resetFfmpegToolchainCache,
+  resolveFfmpegToolchain,
 } from "./ffmpeg.js";
 import { createProgressReporter, formatBytes, formatClock } from "./progress.js";
 import {
@@ -73,6 +75,7 @@ const FILTER_LISTING = [
   "  T.. = Timeline support",
   " .S tonemap           V->V       Conversion to/from different dynamic ranges.",
   " .S zscale            V->V       Apply resizing, colorspace and bit depth conversion.",
+  " TS colorspace        V->V       Convert between colorspaces.",
   " ... scale            V->V       Scale the input video size and/or convert the image format.",
   " TSC volume           A->A       Change input volume.",
 ].join("\n");
@@ -382,6 +385,24 @@ test("HDR sources tone map when the build allows it and warn when it does not", 
   assert.equal(videoFilterChain(capable, sdr, 3840).filter, `${boundedScaleFilter(3840)},setsar=1`);
 });
 
+test("tagged SDR converts pixels to Rec.709 and requires the colorspace filter", () => {
+  const source = parseProbePayload(probeJson({
+    color_primaries: "smpte170m", color_transfer: "smpte170m", color_space: "smpte170m", color_range: "tv",
+  }));
+  const capable = { filters: new Set(["colorspace"]) } as never;
+  const converted = videoFilterChain(capable, source, 3840);
+  assert.match(converted.filter, /colorspace=all=bt709:range=tv:format=yuv420p/);
+  assert.doesNotMatch(converted.filter, /tonemap/);
+  assert.deepEqual(converted.warnings, []);
+  assert.throws(() => videoFilterChain({ filters: new Set() } as never, source, 3840), /colorspace filter/);
+
+  for (const fields of [{}, { color_primaries: "bt709", color_transfer: "bt709", color_space: "bt709" },
+    { color_space: "smpte170m" }]) {
+    const probe = parseProbePayload(probeJson(fields));
+    assert.equal(videoFilterChain(capable, probe, 3840).filter, `${boundedScaleFilter(3840)},setsar=1`);
+  }
+});
+
 test("animation detection uses frame count then timeline", () => {
   assert.equal(isAnimated(parseProbePayload(probeJson({ nb_frames: "10" }))), true);
   assert.equal(isAnimated(parseProbePayload(probeJson({ nb_frames: "1" }), )), false);
@@ -561,7 +582,86 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   }
 });
 
-test("real video transcodes keep faststart, all 240 frames and zero-based track timelines", {
+test("real video transcodes convert SMPTE 170M pixels and retain SDR/HDR delivery", {
+  skip: process.env.SCREENRIG_TEST_FFMPEG !== "1" && "set SCREENRIG_TEST_FFMPEG=1 with libx264, libx265 and libzimg installed",
+  timeout: 90_000,
+}, async (t) => {
+  resetFfmpegToolchainCache();
+  const runtime = processRuntime();
+  const toolchain = await resolveFfmpegToolchain(runtime);
+  const dir = await testTemp("transcode-colour-");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const run = async (command: string, args: string[]) => {
+    const result = await runtime.runProcess!({ command, args, timeoutMs: 30_000 });
+    assert.equal(result.code, 0, result.spawnError ?? result.stderrTail);
+  };
+  // Broad, moderate-colour patches keep samples away from chroma boundaries and gamut clipping.
+  const patches = ["0x4d4d4d", "0x999999", "0xb35c4d", "0x4d995c", "0x4d66b3", "0xb3994d", "0x994d99", "0x4d9999"];
+  const picture = ["color=c=gray:s=192x128:r=30", ...patches.map((colour, i) =>
+    `drawbox=x=${i % 4 * 48}:y=${Math.floor(i / 4) * 64}:w=48:h=64:color=${colour}:t=fill`)].join(",");
+  const fixtures = [
+    { name: "170m-limited", primaries: "smpte170m", transfer: "smpte170m", matrix: "smpte170m", range: "tv" },
+    { name: "170m-full", primaries: "smpte170m", transfer: "smpte170m", matrix: "smpte170m", range: "pc" },
+    { name: "709-limited", primaries: "bt709", transfer: "bt709", matrix: "bt709", range: "tv" },
+    { name: "709-full", primaries: "bt709", transfer: "bt709", matrix: "bt709", range: "pc" },
+    { name: "601-matrix", primaries: "bt709", transfer: "bt709", matrix: "smpte170m", range: "tv" },
+    { name: "2020-sdr", primaries: "bt2020", transfer: "bt709", matrix: "bt2020nc", range: "tv" },
+    { name: "pq", primaries: "bt2020", transfer: "smpte2084", matrix: "bt2020nc", range: "tv" },
+    { name: "hlg", primaries: "bt2020", transfer: "arib-std-b67", matrix: "bt2020nc", range: "tv" },
+    { name: "untagged", primaries: "", transfer: "", matrix: "", range: "tv" },
+  ];
+  const linearSamples = async (file: string, name: string) => {
+    const raw = path.join(dir, `${name}.rgb`);
+    // Decode independently through zscale to compare actual linear Rec.709 colours, not tags alone.
+    await run(toolchain.ffmpeg, ["-v", "error", "-i", file, "-vf",
+      "zscale=p=bt709:t=linear:m=gbr:r=pc,format=gbrpf32le", "-frames:v", "1", "-f", "rawvideo", "-y", raw]);
+    const pixels = await readFile(raw);
+    return patches.flatMap((_, i) => [0, 1, 2].map((plane) =>
+      pixels.readFloatLE((plane * 192 * 128 + (Math.floor(i / 4) * 64 + 32) * 192 + i % 4 * 48 + 24) * 4)));
+  };
+  for (const fixture of fixtures) {
+    const source = path.join(dir, `${fixture.name}.mp4`);
+    const sourceTags = `setparams=range=${fixture.range}` + (fixture.primaries
+      ? `:color_primaries=${fixture.primaries}:color_trc=${fixture.transfer}:colorspace=${fixture.matrix}` : "");
+    await run(toolchain.ffmpeg, ["-v", "error", "-f", "lavfi", "-i", `${picture},${sourceTags}`, "-frames:v", "30",
+      "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", "-color_range", fixture.range,
+      ...(fixture.primaries ? ["-color_primaries", fixture.primaries, "-color_trc", fixture.transfer,
+        "-colorspace", fixture.matrix] : []), "-nostdin", "-y", source]);
+    const input = await probeMedia(runtime, toolchain, source);
+    assert.equal(input.colorPrimaries, fixture.primaries);
+    assert.equal(input.colorTransfer, fixture.transfer);
+    assert.equal(input.colorSpace, fixture.matrix);
+    assert.equal(input.colorRange, fixture.primaries ? fixture.range : "");
+    const compare = fixture.primaries && !["smpte2084", "arib-std-b67"].includes(fixture.transfer);
+    const reference = compare ? await linearSamples(source, `${fixture.name}-source`) : undefined;
+    for (const codec of ["h264", "hevc"] as const) await t.test(`${fixture.name}, ${codec}`, async () => {
+      const result = await transcodeForUpload({ runtime, filePath: source,
+        options: { ...defaultTranscodeOptions(), codec }, videoBytes: STANDARD_VIDEO_BYTES });
+      try {
+        assert.equal(result.passthrough, false);
+        const output = await probeMedia(runtime, toolchain, result.filePath);
+        assert.equal(output.colorPrimaries, "bt709");
+        assert.equal(output.colorTransfer, "bt709");
+        assert.equal(output.colorSpace, "bt709");
+        assert.equal(output.colorRange, "tv");
+        await run(toolchain.ffmpeg, ["-v", "error", "-xerror", "-i", result.filePath, "-f", "null", "-"]);
+        if (reference) {
+          const actual = await linearSamples(result.filePath, `${fixture.name}-${codec}`);
+          for (let i = 0; i < reference.length; i++) {
+            // BT.2020 colours outside the Rec.709 gamut clip at the delivery boundary.
+            const expected = Math.min(1, Math.max(0, reference[i]!));
+            assert.ok(Number.isFinite(actual[i]) && Math.abs(actual[i]! - expected) < 0.025,
+              `${fixture.name} sample ${i}: ${actual[i]} vs ${expected}`);
+          }
+        }
+      } finally {
+        if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("real video transcodes keep faststart, constant 30 fps and zero-based track timelines", {
   skip: process.env.SCREENRIG_TEST_FFMPEG !== "1" && "set SCREENRIG_TEST_FFMPEG=1 with libx264 and libx265 installed",
   timeout: 90_000,
 }, async (t) => {
@@ -637,7 +737,7 @@ test("real video transcodes keep faststart, all 240 frames and zero-based track 
       ]));
       assert.equal(probe.streams.length, audio ? 2 : 1);
       assert.equal(probe.streams[0].codec_name, codec);
-      assert.equal(Number(probe.streams[0].nb_read_frames), 240);
+      assert.equal(Number(probe.streams[0].nb_read_frames), 300, "ten seconds at the delivery rate of 30 fps");
       for (const stream of probe.streams) {
         assert.equal(Number(stream.start_time), 0, `${stream.codec_type} starts at time zero`);
         assert.ok(Math.abs(Number(stream.duration) - 10) < 0.05, "preserve the full ten-second timeline");

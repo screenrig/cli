@@ -705,6 +705,15 @@ export function videoFilterChain(
   // stream header identical whether or not the source carried a pixel aspect ratio.
   const scale = `${outputSize ? `scale=w=${outputSize.width}:h=${outputSize.height}` : boundedScaleFilter(maxEdge)},setsar=1`;
   if (!isHdr(probe)) {
+    const colour = [probe.colorPrimaries, probe.colorTransfer, probe.colorSpace];
+    // Encoder tags alone leave inherited frame properties (and pixels) unchanged.
+    // Convert known SDR colourimetry; keep the existing path for incomplete tags.
+    if (colour.every((value) => value !== "") && colour.some((value) => value !== "bt709")) {
+      if (!toolchain.filters.has("colorspace")) {
+        throw usageError("This ffmpeg build has no colorspace filter to convert the SDR source to Rec.709. Install an ffmpeg build with the colorspace filter.");
+      }
+      return { filter: `${scale},colorspace=all=bt709:range=tv:format=yuv420p`, warnings: [] };
+    }
     return { filter: scale, warnings: [] };
   }
   if (!toolchain.filters.has("zscale") || !toolchain.filters.has("tonemap")) {
