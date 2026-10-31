@@ -110,7 +110,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   requireOptionGroup(replaceRelease, "requires", ["--expect-impact", "--apply"]);
   requireOptionGroup(replaceRelease, "requires", ["--expect-rev", "--apply"]);
   requireOptionGroup(replaceRelease, "requires", ["--note", "--apply"]);
-  addCommandNotes(replaceRelease, "Defaults to a read-only preview including active and archived assigned screens. Apply writes directly; --expect-impact and --expect-rev are optional guards. Changed impact requires a fresh review. Screen assignments are a snapshot; a supplied playlist revision is checked atomically. Server validates release availability and ownership on apply.");
+  addCommandNotes(replaceRelease, "Defaults to a read-only preview including active, pairing-pending and archived screens whose default assignment, stored schedule entries, takeover or current effective playlist references the playlist. Current effective playlists include campaign and inherited-folder playback. Stored schedule references include paused and future entries. Apply writes directly; --expect-impact and --expect-rev are optional guards. Changed references or impact require a fresh review. References are a snapshot; a supplied playlist revision is checked atomically. Server validates release availability and ownership on apply.");
   addCommandExamples(replaceRelease, 'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW',
     'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply');
 
