@@ -8399,13 +8399,15 @@ paths:
     post:
       x-screenrig-access: write
       operationId: updateAdvertisingSlot
-      description: Updates one seller slot. If-Match carries the slot revision. A rate override change re-runs the pricing fence.
+      description: >-
+        Updates one seller slot. If-Match carries the slot revision. A rate override change re-runs the pricing fence. An optional Idempotency-Key replays the original committed result for 24 hours with the same slot, body and If-Match, even after later edits. Changed reuse returns idempotency_mismatch. A new stale write returns revision_conflict.
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -8419,6 +8421,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdvertisingSlot'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '412':
           description: revision_conflict.
           content:
@@ -9392,7 +9400,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getAdvertisingFillStats
-      description: The calling seller's ad slot supply for a window, per UTC day and in total. Each occurrence is filled by a direct campaign, a marketplace campaign or the VAST tag, or it is unfilled with the reason. The window is at most 35 days and defaults to the last 7.
+      description: The calling seller's ad slot supply for a window, per UTC day and in total. Each occurrence is filled by a direct campaign, a marketplace campaign or the VAST tag, or it is unfilled with the reason. The requested window is at most 35 days and defaults to the last 7. Supply has hourly precision. All UTC hours overlapping the requested half-open window are included in full; from is rounded down and to up to UTC hour boundaries. An already aligned to remains exclusive. The response returns these effective bounds, which can span up to 35 days plus one hour.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -30391,10 +30399,10 @@ components:
       type: object
       additionalProperties: false
       required: [from, to, occurrences, direct, marketplace, vast, unfilled, fill_rate, unfilled_reasons, days]
-      description: "The seller's ad slot supply for a window of at most 35 days: occurrences asked for, fills by source, and the unfilled occurrences with the reason of the first ask."
+      description: "The seller's ad slot supply for all UTC hours overlapping the requested window: occurrences asked for, fills by source, and the unfilled occurrences with the reason of the first ask. The request is at most 35 days; the effective bounds can span up to 35 days plus one hour."
       properties:
-        from: {type: string, format: date-time}
-        to: {type: string, format: date-time}
+        from: {type: string, format: date-time, description: "Inclusive effective start, rounded down to a UTC hour boundary."}
+        to: {type: string, format: date-time, description: "Exclusive effective end, rounded up to a UTC hour boundary; an already aligned end is unchanged."}
         occurrences: {type: integer, minimum: 0}
         direct: {type: integer, minimum: 0}
         marketplace: {type: integer, minimum: 0}

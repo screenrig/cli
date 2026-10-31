@@ -234,7 +234,7 @@ export function replaceMedia(input: ReplaceMediaInput): JSONObject {
     if (only.primitive === "image" && input.seconds !== undefined) result.advance = { mode: "duration", after_ms: Math.round(input.seconds * 1000) };
   } else {
     const rebuilt = buildMediaPage({ id: String(input.stored.id), mediaId: input.mediaId, kind: input.kind, fit: input.fit ?? "contain", seconds: input.seconds ?? DEFAULT_SECONDS, playlist: input.playlist });
-    result = { ...page, advance: rebuilt.advance, primitives: rebuilt.primitives };
+    result = { ...page, canvas: rebuilt.canvas, advance: rebuilt.advance, primitives: rebuilt.primitives };
   }
   if (input.always) {
     const visibility = withoutDates(page.visibility);

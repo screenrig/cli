@@ -218,6 +218,45 @@ test("playlist page replace --media reads the page and holds the write to the re
   assert.equal(writes.length, 3);
 });
 
+for (const [before, after] of [["image", "video"], ["video", "image"], ["image", "image"], ["video", "video"]] as const) {
+  test(`playlist page replace keeps mixed-canvas geometry coherent for ${before} to ${after}`, async (t) => {
+    const primitive = {
+      id: "media", primitive: before, selector: { by: "id", media_id: before === "image" ? IMAGE : VIDEO },
+      rect: { x: 0, y: 0, width: 640, height: 360 }, layer: 0, content_fit: "cover",
+      ...(before === "video" ? { muted: true } : {}),
+    };
+    const stored = storedImagePage({
+      canvas: { width: 640, height: 360, background: "#445566FF" }, primitives: [primitive],
+      advance: before === "image" ? { mode: "duration", after_ms: 7000 } : { mode: "media_end" },
+      visibility: { enabled: true, from: "2026-12-01T00:00", until: "2026-12-25T00:00" },
+    });
+    const first = {
+      ...stored, id: "first", canvas: { width: 1280, height: 720, background: "#112233FF" },
+      transition: { type: "crossfade", duration_ms: 600 },
+      primitives: [{ ...primitive, rect: { x: 0, y: 0, width: 1280, height: 720 } }],
+    };
+    const mediaId = "med_CCCCCCCCCCCCCCCCCCCCCCCC";
+    const writes: Record<string, unknown>[] = [];
+    const transport = new FakeTransport()
+      .on("GET", `/api/media/${mediaId}`, () => ({ status: 200, headers: {}, body: { id: mediaId, primitive: after } }))
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([first, stored]) }))
+      .on("PUT", `/api/playlists/${PLAYLIST}/pages/up-ab12cd34`, (request) => { writes.push(request.body as Record<string, unknown>); return playlistAnswer(); });
+    const answer = await (await cli(t, transport))(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--media", mediaId]);
+    assert.equal(answer.code, ExitCode.Success, answer.output);
+    assert.equal(writes.length, 1);
+    const page = writes[0]!;
+    assert.deepEqual(page.canvas, before === after ? stored.canvas : first.canvas);
+    const replacement = (page.primitives as Record<string, unknown>[])[0]!;
+    assert.equal(replacement.primitive, after);
+    assert.deepEqual(replacement.selector, { by: "id", media_id: mediaId });
+    assert.deepEqual(replacement.rect, before === after ? primitive.rect : first.primitives[0]!.rect);
+    assert.equal(page.id, stored.id);
+    assert.deepEqual(page.transition, stored.transition);
+    assert.deepEqual(page.visibility, stored.visibility);
+    assert.deepEqual(page.advance, after === "video" ? { mode: "media_end" } : { mode: "duration", after_ms: before === after ? 7000 : 10000 });
+  });
+}
+
 test("playlist page replace and remove validate their input before any request", async (t) => {
   const transport = new FakeTransport();
   const invoke = await cli(t, transport);
