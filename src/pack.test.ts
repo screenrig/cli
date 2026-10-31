@@ -277,6 +277,58 @@ test("hoists inline style and executable script into external files", () => {
   assert.ok(entries.every((entry) => entry.path.startsWith("_screenrig/inline/") || entry.path === "index.html"));
 });
 
+for (const [name, attributes] of [
+  ["named references", `data-label="R&amp;D &copy; &NotEqualTilde; &unknown;"`],
+  ["decimal references", `data-label='Caf&#233; &#128; &#0; &#1114112;'`],
+  ["hexadecimal references", `data-label="Caf&#xE9; &#x1F680;"`],
+  ["quotes and nested references", `data-label='"quoted" &quot; &apos; &#39; &amp;quot;'`],
+  ["unquoted references", `data-label=R&amp;D`],
+  ["references without semicolons", `data-label="&copy &amp=raw &notit; &#49"`],
+  ["attribute spelling and empty values", `DATA-Label = 'R&amp;D' data-flag data-empty=""`],
+] as const) {
+  test(`hoisted script preserves ${name} in attributes`, () => {
+    const script = "document.body.dataset.label = document.currentScript.dataset.label";
+    const entries = hoistInlineAssets([inlineEntry("index.html", `<script ${attributes}>${script}</script>`)]);
+    const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+    assert.ok(rewritten.startsWith(`<script ${attributes} src="`), rewritten);
+    assert.equal(entries.find((entry) => entry.path.endsWith(".js"))!.data!.toString("utf8"), script);
+  });
+}
+
+for (const media of ["screen and (min-width: &#49;px)", "screen and (width &gt; 1px)"]) {
+  test(`hoisted stylesheet preserves media="${media}"`, () => {
+    const entries = hoistInlineAssets([inlineEntry("index.html", `<style media="${media}" title='R&amp;D'>p{color:red}</style>`)]);
+    const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+    assert.match(rewritten, /^<link rel="stylesheet" href="[^"]+"/);
+    assert.ok(rewritten.endsWith(` media="${media}" title='R&amp;D'>`), rewritten);
+    assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:red}");
+  });
+}
+
+test("hoisted script still removes inline async and defer attributes", () => {
+  const entries = hoistInlineAssets([inlineEntry("index.html", `<script ASYNC defer="defer" data-label='R&amp;D'>void 0</script>`)]);
+  const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.ok(rewritten.startsWith(`<script data-label='R&amp;D' src="`), rewritten);
+  assert.doesNotMatch(rewritten, /async|defer/i);
+});
+
+test("packed archive preserves authored script and style attributes deterministically", async () => {
+  const dir = await tempDir();
+  const html = `<!doctype html><html><head><style media="screen and (min-width: &#49;px)">p{color:red}</style></head><body><script data-label='R&amp;D &quot;Caf&#233;&quot;'>void 0</script><script src="app.js" data-label="R&amp;D"></script></body></html>`;
+  await writeFile(path.join(dir, "index.html"), html);
+  try {
+    const packed = await packDirectory(dir);
+    assert.equal((await packDirectory(dir)).sha256, packed.sha256);
+    const unpacked = gunzipSync(packed.archive).toString("utf8");
+    assert.ok(unpacked.includes(` media="screen and (min-width: &#49;px)">`));
+    assert.ok(unpacked.includes(`<script data-label='R&amp;D &quot;Caf&#233;&quot;' src="`));
+    assert.ok(unpacked.includes(`<script src="app.js" data-label="R&amp;D"></script>`));
+    assert.equal(await readFile(path.join(dir, "index.html"), "utf8"), html);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("hoisted assets resolve relative to a nested HTML page", () => {
   const entries = hoistInlineAssets([inlineEntry("pages/board.html", "<style>p{margin:0}</style>")]);
   const rewritten = entries.find((entry) => entry.path === "pages/board.html")!.data!.toString("utf8");

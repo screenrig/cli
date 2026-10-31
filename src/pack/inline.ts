@@ -33,6 +33,8 @@ interface ScannedAttribute {
   value?: string;
   /** Offset of the attribute name within the HTML document. */
   offset: number;
+  /** Offset just past the authored attribute, including its value and quotes. */
+  end: number;
 }
 
 interface ScannedTag {
@@ -103,7 +105,8 @@ function scanTag(html: string, start: number): ScannedTag | null {
         value = html.slice(valueStart, index);
       }
     }
-    attributes.push({ name: attributeName.toLowerCase(), value, offset: attributeStart });
+    const end = value === undefined ? attributeStart + attributeName.length : index;
+    attributes.push({ name: attributeName.toLowerCase(), value, offset: attributeStart, end });
   }
   return { name, start, end: Math.min(index, html.length), attributes };
 }
@@ -124,11 +127,13 @@ function decodeEntities(value: string): string {
     .replace(/&(colon|tab|newline);/gi, (_match, name: string) => ({ colon: ":", tab: "\t", newline: "\n" })[name.toLowerCase()] ?? "");
 }
 
-function serializeAttributes(tag: ScannedTag, dropped: Set<string> = new Set()): string {
+function serializeAttributes(html: string, tag: ScannedTag, dropped: Set<string> = new Set()): string {
   let out = "";
   for (const attribute of tag.attributes) {
     if (dropped.has(attribute.name)) continue;
-    out += attribute.value === undefined ? ` ${attribute.name}` : ` ${attribute.name}="${attribute.value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`;
+    // Keep the original attribute context: the browser decodes references once.
+    // Re-escaping the scanned source changes values such as R&amp;D to R&amp;amp;D.
+    out += ` ${html.slice(attribute.offset, attribute.end)}`;
   }
   return out;
 }
@@ -214,12 +219,12 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
       if (tag.name === "style") {
         out += html.slice(cursor, tag.start);
         const href = emitAsset(generated, existing, path, "css", html.slice(tag.end, close.index));
-        out += `<link rel="stylesheet" href="${href}"${serializeAttributes(tag)}>`;
+        out += `<link rel="stylesheet" href="${href}"${serializeAttributes(html, tag)}>`;
         cursor = close.end;
       } else if (tag.name === "script" && attributeValue(tag, "src") === undefined && EXECUTABLE_SCRIPT_TYPES[scriptTypeName(attributeValue(tag, "type"))] === true) {
         out += html.slice(cursor, tag.start);
         const href = emitAsset(generated, existing, path, "js", html.slice(tag.end, close.index));
-        out += `<script${serializeAttributes(tag, SCRIPT_ATTRIBUTES_DROPPED)} src="${href}"></script>`;
+        out += `<script${serializeAttributes(html, tag, SCRIPT_ATTRIBUTES_DROPPED)} src="${href}"></script>`;
         cursor = close.end;
       }
       index = close.end;
