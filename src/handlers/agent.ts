@@ -9,7 +9,7 @@ import { preserveLogSocket, resolveConfig, isRetiredCredential, readConfigFile, 
 import { loggerOf } from "../log/index.js";
 import { accessClaims, accessFromScope, ACCESS_LEVELS, isSessionJwt, SCOPE_IDENTITY, type AccessLevel } from "../oauth.js";
 import { accessFields } from "../reviews.js";
-import { DeviceLogin, type LoginOutcome } from "../login.js";
+import { DeviceLogin, pendingSignIn, type LoginOutcome } from "../login.js";
 import { ensureCredential } from "../enrollment.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
@@ -251,6 +251,19 @@ export async function agentStatus(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   if (!resolved.token) {
+    const pending = pendingSignIn(resolved.login, runtime.now());
+    if (pending) {
+      return {
+        envelope: successEnvelope(pending),
+        exitCode: ExitCode.Success,
+        human: humanLines("Sign-in pending", [
+          ["status", pending.status],
+          ["open", pending.verification_uri_complete],
+          ["expires_at", pending.expires_at],
+          ["next", pending.next.command],
+        ]),
+      };
+    }
     const local = resolved.lastAgent;
     const status = local ? "disconnected" : "not_enrolled";
     return {

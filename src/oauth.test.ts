@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { readConfigFile, writeConfigAtomic, type ConfigFs, type ScreenRigConfig } from "./config.js";
+import { readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs, type PendingLogin, type ScreenRigConfig } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { DeviceLogin } from "./login.js";
+import { credentialCheck } from "./handlers/doctor.js";
 import { run, type CliRuntime } from "./main.js";
 import { OAuthClient } from "./oauth.js";
 import { OAuthSession } from "./oauth-session.js";
@@ -714,6 +715,25 @@ test("login --no-wait prints a resume handle with no secret, and --resume finish
     assert.equal((await h.read())?.login?.device_code, deviceCode);
     assert.equal(transport.oauthCalls.filter((call) => call.path === "/oauth/token").length, 0);
 
+    const saved = await readFile(h.configPath, "utf8");
+    const calls = transport.calls.length;
+    const status = await h.cli(["--json", "agent", "status"], transport);
+    assert.equal(status.code, 0, status.stdout);
+    const connection = JSON.parse(status.stdout).data;
+    assert.equal(connection.status, "connecting");
+    assert.equal(connection.login_id, data.login_id);
+    assert.equal(connection.user_code, data.user_code);
+    assert.equal(connection.verification_uri_complete, JSON.parse(pending.stdout).data.verification_uri_complete);
+    assert.deepEqual(connection.next, data.next);
+    assert.ok(!status.stdout.includes(deviceCode) && !status.stderr.includes(deviceCode));
+    const resolved = await resolveConfig({ flags: {}, fs: h.fs });
+    const tokenCheck = credentialCheck(resolved, NOW);
+    assert.equal(tokenCheck.status, "warn");
+    assert.equal(tokenCheck.path, "reconnect_existing");
+    assert.deepEqual(tokenCheck.next, data.next);
+    assert.equal(transport.calls.length, calls, "Inspecting a pending sign-in must not start or poll a connection");
+    assert.equal(await readFile(h.configPath, "utf8"), saved, "Status and doctor guidance preserve the exact pending config");
+
     await assert.rejects(Promise.resolve(h.cli(["--json", "login", "--resume", "login_AAAAAAAAAAAAAAAAAAAAAA"], transport)).then((r) => {
       if (r.code !== 0) throw new Error((JSON.parse(r.stdout) as { error: { code: string } }).error.code);
     }), /login_not_found/);
@@ -728,6 +748,66 @@ test("login --no-wait prints a resume handle with no secret, and --resume finish
     const stored = await h.read();
     assert.equal(stored?.login, undefined);
     assert.equal(stored?.project_name, "Screens");
+  } finally {
+    await h.done();
+  }
+});
+
+test("status and doctor do not resume expired or malformed pending sign-ins", async () => {
+  const login: PendingLogin = {
+    id: "login_AAAAAAAAAAAAAAAAAAAAAA", issuer: API, device_code: "private-device-code",
+    user_code: "BCDF-GHJK", verification_uri: "https://screenrig.ai/dashboard/connect",
+    verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK",
+    expires_at: new Date(NOW.getTime() + 600_000).toISOString(), interval: 5, access: "manage", project_id: PROJECT,
+  };
+  for (const patch of [
+    { expires_at: new Date(NOW.getTime() - 1).toISOString() },
+    { expires_at: NOW.toISOString() },
+    { expires_at: "invalid" },
+    { id: "login_invalid" },
+  ]) {
+    const h = await harness({ api_url: API, login: { ...login, ...patch } });
+    try {
+      const saved = await readFile(h.configPath, "utf8");
+      const transport = new FakeTransport();
+      const status = await h.cli(["agent", "status"], transport);
+      assert.equal(status.code, 0, status.stdout);
+      assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
+      const check = credentialCheck(await resolveConfig({ flags: {}, fs: h.fs }), NOW);
+      assert.equal(check.path, "first_run_enroll");
+      assert.equal(transport.calls.length, 0);
+      assert.equal(await readFile(h.configPath, "utf8"), saved);
+    } finally {
+      await h.done();
+    }
+  }
+});
+
+test("an active selected connection takes precedence over another pending sign-in", async () => {
+  const h = await harness(grantConfig({
+    login: {
+      id: "login_AAAAAAAAAAAAAAAAAAAAAA", issuer: API, device_code: "private-device-code",
+      user_code: "BCDF-GHJK", verification_uri: "https://screenrig.ai/dashboard/connect",
+      verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK",
+      expires_at: new Date(NOW.getTime() + 600_000).toISOString(), interval: 5, access: "manage", project_id: OTHER_PROJECT,
+    },
+  }, access()));
+  const transport = new FakeTransport().on("GET", "/api/agents/self", () => json(200, {
+    connection_ready: true,
+    agent: { id: AGENT, name: "Selected agent", agent_type: "project", state: "active", capabilities: ["screens"],
+      authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() },
+  }, { "cache-control": "private, no-store" }));
+  try {
+    const saved = await readFile(h.configPath, "utf8");
+    const status = await h.cli(["agent", "status"], transport);
+    assert.equal(status.code, 0, status.stdout);
+    const connection = JSON.parse(status.stdout).data;
+    assert.equal(connection.status, "active");
+    assert.equal(connection.login_id, undefined);
+    const check = credentialCheck(await resolveConfig({ flags: {}, fs: h.fs }), NOW);
+    assert.equal(check.status, "pass");
+    assert.equal(check.next, undefined);
+    assert.equal(await readFile(h.configPath, "utf8"), saved);
   } finally {
     await h.done();
   }

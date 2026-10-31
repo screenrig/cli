@@ -3,6 +3,7 @@ import { type Capabilities } from "../adapters/protocol.js";
 import { type ParsedArgs } from "../command-input.js";
 import { resolveConfig, describeTokenPresence, hasToken, readConfigFile, type ScreenRigConfig } from "../config.js";
 import { refreshExpiryDays } from "../oauth-session.js";
+import { pendingSignIn } from "../login.js";
 import { successEnvelope, type ProblemNext } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { CliError } from "../problems.js";
@@ -46,11 +47,21 @@ export interface DoctorCheck {
  * a missing toolchain piece a supported command needs, or an unreachable
  * control plane.
  */
-export function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): DoctorCheck {
+export function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>, now: Date = new Date()): DoctorCheck {
   if (hasToken(resolved.token)) {
     return { name: "token", status: "pass", detail: describeTokenPresence(resolved.token) };
   }
   const detail = describeTokenPresence(resolved.token);
+  const pending = pendingSignIn(resolved.login, now);
+  if (pending) {
+    return {
+      name: "token",
+      status: "warn",
+      detail: `${detail}; sign-in is pending until ${pending.expires_at}`,
+      path: "reconnect_existing",
+      next: pending.next,
+    };
+  }
   if (resolved.signedOut) {
     return {
       name: "token",
@@ -148,7 +159,7 @@ export async function doctor(
   } catch {
     checks.push({ name: "config_permissions", status: "pass", detail: "config file not present" });
   }
-  checks.push(credentialCheck(resolved));
+  checks.push(credentialCheck(resolved, runtime.now()));
   const grant = (await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }).catch(() => undefined))?.oauth;
   if (grant) checks.push(signInCheck(grant, runtime.now()));
   checks.push({

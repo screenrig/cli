@@ -10,6 +10,23 @@ import { selectProject } from "./project-state.js";
 export const LOGIN_MAX_INTERVAL_S = 60;
 const LOGIN_ID_RE = /^login_[A-Za-z0-9_-]{22}$/;
 
+/** Read-only guidance for an approval already in progress; never expose its device code. */
+export function pendingSignIn(login: PendingLogin | undefined, now: Date) {
+  if (!login || !LOGIN_ID_RE.test(login.id) || !(Date.parse(login.expires_at) > now.getTime())) return undefined;
+  const resume = ["login", "--resume", login.id];
+  return {
+    status: "connecting" as const,
+    login_id: login.id,
+    user_code: login.user_code,
+    verification_uri: login.verification_uri,
+    verification_uri_complete: login.verification_uri_complete,
+    expires_at: login.expires_at,
+    access: login.access,
+    ...(login.project_id ? { project_id: login.project_id } : {}),
+    next: { command: `screenrig ${resume.join(" ")}`, argv: resume, reason: "After the person approves the sign-in, this stores its tokens." },
+  };
+}
+
 export interface LoginRequest {
   access: AccessLevel;
   project?: string;

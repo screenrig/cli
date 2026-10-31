@@ -470,6 +470,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       identityWriteScope?: boolean;
       agentId?: string;
       enrollment?: ScreenRigConfig["enrollment"];
+      login?: PendingLogin;
       lastAgent?: ScreenRigConfig["last_agent"];
       /** Logout or an ended session left no credential: the next step is screenrig login. */
       signedOut?: boolean;
@@ -632,6 +633,7 @@ import { isResourceID } from "./generated/resource-ids.js";
         identityToken,
         agentId: file?.agent_id,
         enrollment: file?.enrollment,
+        login: file?.login,
         lastAgent: file?.last_agent,
         ...(file?.signed_out_at ? { signedOut: true } : {}),
         ...(file && !file.oauth && holdsRetiredCredential(file) ? { retiredCredential: true } : {}),
