@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { DEFAULT_ARCHIVE_LIMITS, walkDirectory, packDirectory, parseTar, gzipDeterministic, hoistInlineAssets } from "./pack/index.js";
 import { crc32 } from "./pack/archive.js";
 import { gunzipSync } from "node:zlib";
+import { createContext, runInContext } from "node:vm";
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { ArchiveSdkInjector, SDK_RUNTIME_PATH } from "./adapters/sdk-injection.js";
@@ -82,6 +83,85 @@ test("injector rejects duplicate, incompatible, and reserved-path collisions", a
   await assert.rejects(() => injector.inject(entry('<script defer src="./_screenrig/runtime.js" data-screenrig-sdk="1"></script>')), /incompatible/);
   await assert.rejects(() => injector.inject(entry('<script defer src="./other.js" data-screenrig-sdk="2"></script>')), /incompatible/);
   await assert.rejects(() => injector.inject([...entry("<html></html>"), { path: SDK_RUNTIME_PATH, type: "file" as const, data: Buffer.alloc(0), size: 0 }]), /reserved/);
+});
+
+test("packed applications install the SDK before customer startup scripts", async () => {
+  const root = await tempDir();
+  const runtime = Buffer.from("window.screenrig = { waitUntilActive: () => Promise.resolve() };");
+  const injector = new ArchiveSdkInjector(runtime);
+  const boot = "window.startup = { sdk: typeof window.screenrig, waiting: window.screenrig.waitUntilActive() instanceof Promise };";
+  const layouts = [
+    ["head-classic", '<html><head><script src="./boot.js"></script></head><body></body></html>'],
+    ["head-inline", `<html><head><script>${boot}</script></head><body></body></html>`],
+    ["body-classic", '<html><head></head><body><script src="./boot.js"></script></body></html>'],
+    ["head-deferred", '<html><head><script defer src="./boot.js"></script></head><body></body></html>'],
+    ["head-module", '<html><head><script type="module" src="./boot.js"></script></head><body></body></html>'],
+    ["head-async", '<html><head><script async src="./boot.js"></script></head><body></body></html>'],
+    ["no-head", '<html><script src="./boot.js"></script></html>'],
+    ["unclosed-head", '<html><head><script src="./boot.js"></script><body></body></html>'],
+  ] as const;
+  try {
+    for (const [layout, body] of layouts) {
+      const directory = path.join(root, layout);
+      await mkdir(directory);
+      const html = `<!doctype html>${body}`;
+      await writeFile(path.join(directory, "index.html"), html);
+      await writeFile(path.join(directory, "boot.js"), boot);
+      const packed = await packDirectory(directory, { injector });
+      assert.equal(packed.sha256, (await packDirectory(directory, { injector })).sha256, layout);
+      const tar = gunzipSync(packed.archive);
+      let offset = 0;
+      const entries = parseTar(tar).map((entry) => {
+        const start = offset + 512;
+        offset = start + Math.ceil(entry.size / 512) * 512;
+        return { ...entry, data: tar.subarray(start, start + entry.size) };
+      });
+      const packedHtml = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+      assert.ok(packedHtml.startsWith("<!doctype html>"), `${layout}: preserve document mode`);
+      const scripts = [...packedHtml.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/g)];
+      assert.equal(scripts.length, 2, layout);
+      assert.equal(scripts[0]![1], `./${SDK_RUNTIME_PATH}`, layout);
+      // Even an immediately executed customer script can call the installed SDK.
+      // Module/deferred scheduling can only delay startup further.
+      const window: { startup?: { sdk: string; waiting: boolean } } = {};
+      const context = createContext({ window });
+      for (const script of scripts) {
+        const source = entries.find((entry) => entry.path === script[1]!.replace(/^\.\//, ""))!.data!.toString("utf8");
+        runInContext(source, context);
+      }
+      assert.equal(window.startup?.sdk, "object", layout);
+      assert.equal(window.startup?.waiting, true, layout);
+      assert.equal(await readFile(path.join(directory, "index.html"), "utf8"), html, layout);
+      assert.equal(await readFile(path.join(directory, "boot.js"), "utf8"), boot, layout);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("SDK injection preserves the prologue and inert head metadata", async () => {
+  const prefix = '\ufeff<!doctype html><!-- <head><script src="fake.js"></script></head> -->\n'
+    + '<HTML lang="en"><HEAD data-label="a > b"><meta charset="utf-8">'
+    + '<meta http-equiv="Content-Security-Policy" content="script-src &#39;self&#39;">'
+    + '<base href="./"><link rel="stylesheet" href="./app.css">'
+    + '<title>Literal <script src="fake.js"></script></title>'
+    + '<style>/* <script src="fake.js"></script> */</style>'
+    + '<noscript><link rel="stylesheet" href="./fallback.css"></noscript>';
+  const suffix = '<script src="./boot.js"></script></HEAD><body></body></HTML>';
+  const html = prefix + suffix;
+  const result = await new ArchiveSdkInjector(Buffer.from("window.screenrig = {};")).inject([
+    { path: "index.html", type: "file", data: Buffer.from(html), size: Buffer.byteLength(html) },
+  ]);
+  const packedHtml = result.entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.equal(packedHtml, `${prefix}<script src="./${SDK_RUNTIME_PATH}" data-screenrig-sdk="1"></script>\n${suffix}`);
+});
+
+test("SDK injection leaves a compatible existing marker unchanged", async () => {
+  const html = `<!doctype html><html><head><script src="./${SDK_RUNTIME_PATH}" data-screenrig-sdk="1"></script><script src="./boot.js"></script></head></html>`;
+  const result = await new ArchiveSdkInjector(Buffer.from("window.screenrig = {};")).inject([
+    { path: "index.html", type: "file", data: Buffer.from(html), size: Buffer.byteLength(html) },
+  ]);
+  assert.equal(result.entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8"), html);
 });
 
 test("rejects missing index.html", async () => {

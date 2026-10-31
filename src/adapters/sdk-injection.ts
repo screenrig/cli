@@ -52,11 +52,20 @@ function injectTag(html: string): string {
     }
     return html;
   }
-  const closeHead = /<\/head\s*>/i.exec(html);
-  if (closeHead?.index !== undefined) {
-    return `${html.slice(0, closeHead.index)}${SDK_SCRIPT_TAG}\n${html.slice(closeHead.index)}`;
-  }
-  return `${SDK_SCRIPT_TAG}\n${html}`;
+  // Keep the prologue and inert head metadata (including charset, CSP and base)
+  // ahead of the runtime, then stop before any script or body content. Matching
+  // whole comments, quoted attributes and raw-text elements avoids fake tags.
+  // This also leaves the DOCTYPE first when the document omits <head>.
+  const tagEnd = `(?:[^"'<>]|"[^"]*"|'[^']*')*>`;
+  const prefix = new RegExp(
+    `(?:\\s+|<!--[\\s\\S]*?-->|<!doctype\\b${tagEnd}`
+      + `|<(?:html|head|meta|base|link)(?=[\\s/>])${tagEnd}`
+      + `|<(title|style|noscript)(?=[\\s/>])${tagEnd}[\\s\\S]*?<\\/\\1\\s*>)`,
+    "iy",
+  );
+  let offset = 0;
+  while (prefix.exec(html)) offset = prefix.lastIndex;
+  return `${html.slice(0, offset)}${SDK_SCRIPT_TAG}\n${html.slice(offset)}`;
 }
 
 export class ArchiveSdkInjector implements SdkInjector {
