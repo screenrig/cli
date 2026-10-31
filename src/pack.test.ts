@@ -277,6 +277,117 @@ test("hoists inline style and executable script into external files", () => {
   assert.ok(entries.every((entry) => entry.path.startsWith("_screenrig/inline/") || entry.path === "index.html"));
 });
 
+for (const artwork of [
+  `<svg><style>#tile{fill:rgb(12,34,56);stroke:rgb(90,80,70);opacity:0.6}</style><rect id="tile" width="150" height="70"/></svg>`,
+  `<svg><defs><style media="screen">#tile{fill:rgb(12,34,56)}</style></defs><rect id="tile"/></svg>`,
+  `<svg><g><g/><style>rect{fill:red}</style><rect/></g></svg>`,
+  `<svg><foreignObject><div><svg><style>rect{fill:red}</style><rect/></svg></div></foreignObject></svg>`,
+  `<svg><style/><rect/></svg>`,
+]) {
+  test(`preserves SVG styles and following shapes: ${artwork}`, () => {
+    const entry = inlineEntry("index.html", artwork);
+    assert.deepEqual(hoistInlineAssets([entry]), [entry]);
+  });
+}
+
+test("hoists HTML styles across SVG integration points and back into the document", () => {
+  const svgStyle = `<style>rect{fill:red}</style>`;
+  const htmlStyle = `<style>p{color:blue}</style>`;
+  const html = `<svg>${svgStyle}<foreignObject><div><br>${htmlStyle}</div></foreignObject><desc>${htmlStyle}</desc><title>${htmlStyle}</title>${svgStyle}</svg>${htmlStyle}<svg/>${htmlStyle}`;
+  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.equal(rewritten.split(svgStyle).length - 1, 2);
+  assert.ok(!rewritten.includes(htmlStyle));
+  assert.equal((rewritten.match(/<link rel="stylesheet"/g) ?? []).length, 5);
+  assert.equal(entries.filter((entry) => entry.path.endsWith(".css")).length, 1);
+  assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:blue}");
+});
+
+test("SVG-looking text in comments and HTML raw text does not change style handling", () => {
+  const html = `<!-- <svg> --><title><svg></title><textarea><svg></textarea><script type="application/json">"<svg>"</script><style>p{color:red}</style>`;
+  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:red}");
+});
+
+test("preserving SVG styles still checks unsafe attributes on following shapes", () => {
+  assert.throws(
+    () => hoistInlineAssets([inlineEntry("index.html", `<svg><style>rect{fill:red}</style><rect onclick="go()"/></svg>`)]),
+    (error: unknown) => error instanceof CliError && error.problem.code === "inline_event_handler",
+  );
+});
+
+test("packed archives preserve direct and defs SVG styles deterministically", async () => {
+  const dir = await tempDir();
+  try {
+    for (const artwork of [
+      `<svg><style>rect{fill:rgb(12,34,56);stroke:rgb(90,80,70);opacity:0.6}</style><rect width="150" height="70"/></svg>`,
+      `<svg><defs><style>rect{fill:rgb(12,34,56);stroke:rgb(90,80,70);opacity:0.6}</style></defs><rect width="150" height="70"/></svg>`,
+    ]) {
+      const html = `<!doctype html><html><head></head><body>${artwork}</body></html>`;
+      await writeFile(path.join(dir, "index.html"), html);
+      const packed = await packDirectory(dir);
+      assert.equal((await packDirectory(dir)).sha256, packed.sha256);
+      assert.ok(gunzipSync(packed.archive).toString("utf8").includes(artwork));
+      assert.ok(!packed.entries.some((entry) => entry.path.endsWith(".css")));
+      assert.equal(await readFile(path.join(dir, "index.html"), "utf8"), html);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const [name, attributes] of [
+  ["named references", `data-label="R&amp;D &copy; &NotEqualTilde; &unknown;"`],
+  ["decimal references", `data-label='Caf&#233; &#128; &#0; &#1114112;'`],
+  ["hexadecimal references", `data-label="Caf&#xE9; &#x1F680;"`],
+  ["quotes and nested references", `data-label='"quoted" &quot; &apos; &#39; &amp;quot;'`],
+  ["unquoted references", `data-label=R&amp;D`],
+  ["references without semicolons", `data-label="&copy &amp=raw &notit; &#49"`],
+  ["attribute spelling and empty values", `DATA-Label = 'R&amp;D' data-flag data-empty=""`],
+] as const) {
+  test(`hoisted script preserves ${name} in attributes`, () => {
+    const script = "document.body.dataset.label = document.currentScript.dataset.label";
+    const entries = hoistInlineAssets([inlineEntry("index.html", `<script ${attributes}>${script}</script>`)]);
+    const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+    assert.ok(rewritten.startsWith(`<script ${attributes} src="`), rewritten);
+    assert.equal(entries.find((entry) => entry.path.endsWith(".js"))!.data!.toString("utf8"), script);
+  });
+}
+
+for (const media of ["screen and (min-width: &#49;px)", "screen and (width &gt; 1px)"]) {
+  test(`hoisted stylesheet preserves media="${media}"`, () => {
+    const entries = hoistInlineAssets([inlineEntry("index.html", `<style media="${media}" title='R&amp;D'>p{color:red}</style>`)]);
+    const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+    assert.match(rewritten, /^<link rel="stylesheet" href="[^"]+"/);
+    assert.ok(rewritten.endsWith(` media="${media}" title='R&amp;D'>`), rewritten);
+    assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:red}");
+  });
+}
+
+test("hoisted script still removes inline async and defer attributes", () => {
+  const entries = hoistInlineAssets([inlineEntry("index.html", `<script ASYNC defer="defer" data-label='R&amp;D'>void 0</script>`)]);
+  const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.ok(rewritten.startsWith(`<script data-label='R&amp;D' src="`), rewritten);
+  assert.doesNotMatch(rewritten, /async|defer/i);
+});
+
+test("packed archive preserves authored script and style attributes deterministically", async () => {
+  const dir = await tempDir();
+  const html = `<!doctype html><html><head><style media="screen and (min-width: &#49;px)">p{color:red}</style></head><body><script data-label='R&amp;D &quot;Caf&#233;&quot;'>void 0</script><script src="app.js" data-label="R&amp;D"></script></body></html>`;
+  await writeFile(path.join(dir, "index.html"), html);
+  try {
+    const packed = await packDirectory(dir);
+    assert.equal((await packDirectory(dir)).sha256, packed.sha256);
+    const unpacked = gunzipSync(packed.archive).toString("utf8");
+    assert.ok(unpacked.includes(` media="screen and (min-width: &#49;px)">`));
+    assert.ok(unpacked.includes(`<script data-label='R&amp;D &quot;Caf&#233;&quot;' src="`));
+    assert.ok(unpacked.includes(`<script src="app.js" data-label="R&amp;D"></script>`));
+    assert.equal(await readFile(path.join(dir, "index.html"), "utf8"), html);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("hoisted assets resolve relative to a nested HTML page", () => {
   const entries = hoistInlineAssets([inlineEntry("pages/board.html", "<style>p{margin:0}</style>")]);
   const rewritten = entries.find((entry) => entry.path === "pages/board.html")!.data!.toString("utf8");
