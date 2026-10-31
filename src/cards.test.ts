@@ -342,11 +342,11 @@ test("editable card placements preserve static params, data and major while stri
 
 test("playlist show --output keeps card instance placements, so show, edit and update round trip without the inline form", async t => {
   const f = await fixture(t);
-  const placement = { id: "clock", primitive: "card", card: "crd_INSTANCE", layout: "corner", anchor: "top-left", content_fit: "fill" };
-  // A read expands the instance into the deprecated inline members and the derived rect.
+  const placement = { id: "clock", primitive: "card", card: "crd_INSTANCE", layout: "corner", anchor: "top-left", content_fit: "fill", data: "feed-key" };
+  // A read expands instance metadata and derived geometry while retaining the selected key.
   const stored = { id: "pl_MENU", revision: 4, name: "Menu", pages: [{ id: "lobby", canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [
-      { ...placement, type: "clock", major: 1, params: { title: "Stored" }, data: "feed-key", rect: { x: 30, y: 30, width: 270, height: 270 }, layer: 40, controller: false },
+      { ...placement, type: "clock", major: 1, params: { title: "Stored" }, rect: { x: 30, y: 30, width: 270, height: 270 }, layer: 40, controller: false },
     ] }] };
   f.transport.on("GET", "/api/playlists/pl_MENU", () => ok(stored));
   let put: any;
@@ -482,4 +482,17 @@ test("UID placements defer validation to the server without a catalogue fetch", 
   const transport = new FakeTransport();
   await validatePlaylistCards(new ApiClient({ transport, token: "test" }), { pages: [{ primitives: [{ primitive: "card", card: instanceId }] }] });
   assert.equal(transport.calls.length, 0);
+});
+
+
+test("editable instance placements preserve per-screen data selection", () => {
+  const input = playlist({});
+  const item = input.pages[0]!.primitives[0]!;
+  Object.assign(item, { card: "crd_ROOMS", data: "room-{screen.field.room}", type: "text", major: 1, params: { title: "Rooms" } });
+  const output = editablePlaylist(input).pages[0].primitives[0];
+  assert.equal(output.card, "crd_ROOMS");
+  assert.equal(output.data, "room-{screen.field.room}");
+  assert.equal(output.params, undefined);
+  assert.equal(output.major, undefined);
+  assert.equal(output.type, undefined);
 });

@@ -183,11 +183,12 @@ export function cardWebhookSecretResult(
 export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolved) => {
   const target = kvWebhookTarget(args, "create");
   const description = flagString(args.flags, "description");
+  const keyTemplate = flagString(args.flags, "key-template");
   const key = args.positionals[3];
   let body: KVWebhookCreate | CardKVWebhookCreate;
   if (target.kind === "app") {
-    if (flagString(args.flags, "map") !== undefined || flagBool(args.flags, "signing")) {
-      throw usageError("--map and --signing apply to a card webhook: pass --card CARD_ID instead of --app-id.");
+    if (flagString(args.flags, "map") !== undefined || flagString(args.flags, "key-template") !== undefined || flagBool(args.flags, "signing")) {
+      throw usageError("--map, --key-template and --signing apply to a card webhook: pass --card CARD_ID instead of --app-id.");
     }
     body = { key: kvWebhookKey(key), ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
   } else {
@@ -195,6 +196,7 @@ export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolv
     const map = flagString(args.flags, "map");
     body = {
       ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}),
+      ...(keyTemplate !== undefined ? { key_template: keyTemplate } : {}),
       ...(map !== undefined ? { mapping: kvWebhookMapping(await readAuthoringText(map, runtime, KV_WEBHOOK_MAPPING_MAX_BYTES)) } : {}),
       ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
     };
@@ -237,8 +239,11 @@ export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolv
   if (target.kind !== "card") throw usageError("kv webhook update changes a card webhook: pass --card CARD_ID.");
   const id = kvWebhookId(args.positionals[3], "update", target);
   const description = flagString(args.flags, "description");
+  const keyTemplate = flagString(args.flags, "key-template");
   const map = flagString(args.flags, "map");
   const body: CardKVWebhookUpdate = {
+    ...(keyTemplate !== undefined ? { key_template: keyTemplate } : {}),
+    ...(flagBool(args.flags, "clear-key-template") ? { key_template: "" } : {}),
     ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}),
     ...(map !== undefined ? { mapping: kvWebhookMapping(await readAuthoringText(map, runtime, KV_WEBHOOK_MAPPING_MAX_BYTES)) } : {}),
     ...(flagBool(args.flags, "clear-map") ? { mapping: null } : {}),

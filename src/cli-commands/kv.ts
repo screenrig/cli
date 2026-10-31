@@ -34,13 +34,14 @@ export function registerKvCommands(root: Command, bind: CommandActionBinder): vo
   const set = kv.commands.find(command => command.name() === "set")!;
   requireOptionGroup(set, "exactlyOne", ["--json-value", "--file", "--value-base64"]);
 
-  const webhook = kv.command("webhook").description("Let an outside system write one key, or a card's data document, with an HTTP POST");
-  addCommandNotes(webhook, "K/V webhooks:\n  A K/V webhook is a URL with its own srkw_ secret. An outside system (Zapier, Make,\n  a point of sale, a cron job, curl) posts to it with Authorization: Bearer <secret>,\n  or HTTP Basic with the webhook id and the secret. With --app-id the raw body\n  becomes the value of one application key and its Content-Type the content type;\n  apps read the key with screenrig.kv.get and see each change with\n  screenrig.kv.onChange. With --card the JSON or form body becomes the data\n  document of a card, as it is or through a --map template, and the card's own\n  validation decides whether it is shown. An application or a card has at most 20\n  webhooks.");
+  const webhook = kv.command("webhook").description("Let an outside system write one key, or keyed card documents, with an HTTP POST");
+  addCommandNotes(webhook, "K/V webhooks:\n  A K/V webhook is a URL with its own srkw_ secret. An outside system (Zapier, Make,\n  a point of sale, a cron job, curl) posts to it with Authorization: Bearer <secret>,\n  or HTTP Basic with the webhook id and the secret. With --app-id the raw body\n  becomes the value of one application key and its Content-Type the content type;\n  apps read the key with screenrig.kv.get and see each change with\n  screenrig.kv.onChange. With --card the JSON or form body becomes the data\n  document of a card, as it is or through a --map template, and the card's own\n  validation decides whether it is shown. With --key-template the mapped object\n  contains documents, each with fields and document; use the same template as the placement data to select by screen field.\n  Retry an interrupted batch with the identical body and Idempotency-Key.\n  An application or a card has at most 20\n  webhooks.");
 
   webhook.command("create").description("Create a K/V or card webhook and print its URL and secret")
     .argument("[key]", "With --app-id: the key every post writes; it need not exist yet")
     .option("--description <TEXT>", "Say what sends to it, at most 200 bytes", descriptionOption)
     .option("--map <FILE>", "With --card: the template that builds the card's data document from the posted body, a JSON file or - for stdin")
+    .option("--key-template <TEMPLATE>", "With --card: write documents keyed by fields, for example room-{screen.field.room}")
     .option("--signing", "With --card: also require a ScreenRig-Signature header on every post, and print the signing secret once")
     .action(bind(handleKvWebhookCreate));
 
@@ -67,13 +68,15 @@ export function registerKvCommands(root: Command, bind: CommandActionBinder): vo
     .option("--description <TEXT>", "Say what sends to it, at most 200 bytes", descriptionOption)
     .addOption(new Option("--map <FILE>", "Replace the template that builds the card's data document, a JSON file or - for stdin").conflicts(["clearMap"]))
     .addOption(new Option("--clear-map", "Remove the template: the posted object becomes the document").conflicts(["map"]))
+    .addOption(new Option("--key-template <TEMPLATE>", "Write keyed documents using fields from the mapped documents array").conflicts(["clearKeyTemplate"]))
+    .addOption(new Option("--clear-key-template", "Return to writing the card instance document").conflicts(["keyTemplate"]))
     .addOption(new Option("--enable", "Accept posts again").conflicts(["disable"]))
     .addOption(new Option("--disable", "Answer every post like a wrong secret until enabled again").conflicts(["enable"]))
     .option("--signing", "Require a ScreenRig-Signature header and print the new signing secret once")
     .option("--no-signing", "Stop requiring a ScreenRig-Signature header")
     .action(bind(handleKvWebhookUpdate));
   requireOptionGroup(webhook.commands.find(command => command.name() === "update")!, "atLeastOne",
-    ["--description", "--map", "--clear-map", "--enable", "--disable", "--signing", "--no-signing"]);
+    ["--description", "--map", "--clear-map", "--key-template", "--clear-key-template", "--enable", "--disable", "--signing", "--no-signing"]);
 
   webhook.command("deliveries").description("Read a card webhook's delivery log: why each post was written, unchanged or refused")
     .argument("<webhook_id>", "K/V webhook identifier")

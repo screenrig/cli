@@ -19986,7 +19986,7 @@ paths:
           maxLength: 200
     post:
       operationId: dashboardOrganizationsCreateMemberInvitations
-      description: A designated admin invites people by email to join the organization as members. Accepting sets the person's home organization to this one, from any previous home, and creates their login if they have none; it grants no project membership. An address whose person is already a home member of the organization is invalid_request; one whose person another organization manages is managed_elsewhere. Email invitations expire after seven days; an outstanding invitation to the same address is reused. The organization and inviter names must be fit for email. People only; agents and bearer credentials have no admin route.
+      description: A designated admin invites people by email to join the organization as members. Accepting sets the person's home organization to this one, from any previous home, and creates their login if they have none; it grants no project membership. An address whose person is already a home member of the organization is invalid_request; one whose person another organization manages is managed_elsewhere. Email invitations expire after seven days; an outstanding invitation to the same address is reused. The organization and inviter names must be fit for email. Accepting an invitation to the staff organization (plan_id staff) also makes the person staff, so only staff send those, one address per request with a staff_grant proof bound to it (reauthentication_required without one). People only; agents and bearer credentials have no admin route.
       security:
         - dashboardSession: []
       parameters:
@@ -28170,6 +28170,7 @@ components:
             format: email
             minLength: 3
             maxLength: 254
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "The staff organization only, with exactly one address in emails: a passkey proof of kind staff_grant bound to that address."}
     OrganizationMemberInvitation:
       type: object
       additionalProperties: false
@@ -32706,6 +32707,7 @@ components:
         updated_at: {type: string, format: date-time}
     SourceList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Source"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
     SourceCreate:
+      description: "JSON, CSV and Sheets config may set key_template, a card data key with {screen.field.NAME} tokens. Its mapping then produces {documents:[{fields:{NAME:VALUE},document:{...}}]} instead of one document. Each output is validated against the target card. Keys are unique and outside card-instance and feed namespaces; source test previews the envelope and validates every output. Each key uses the source stale period. Missing keys are retained with their existing expiry; storage failures can leave partial writes and the next run retries."
       type: object
       additionalProperties: false
       required: [name, kind, target, config]
@@ -32879,6 +32881,7 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$"}
         card_id: {type: string}
         description: {type: string, maxLength: 200}
+        key_template: {type: string, description: "Optional card data key template with {screen.field.NAME}. In keyed mode the mapping or posted body produces {documents:[{fields:{NAME:VALUE},document:{...}}]}; each output uses its fields to fill the template. Keys must be unique, valid and outside card-instance and feed namespaces. Every output is checked against the owning card before writes begin. An empty string restores the single-document mode on update."}
         mapping:
           anyOf:
             - {type: object, additionalProperties: true}
@@ -32903,6 +32906,7 @@ components:
       additionalProperties: false
       properties:
         description: {type: string, maxLength: 200}
+        key_template: {type: string, description: "Optional card data key template with {screen.field.NAME}. In keyed mode the mapping or posted body produces {documents:[{fields:{NAME:VALUE},document:{...}}]}; each output uses its fields to fill the template. Keys must be unique, valid and outside card-instance and feed namespaces. Every output is checked against the owning card before writes begin. An empty string restores the single-document mode on update."}
         mapping: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "The template, at most 64 KiB, checked when saved."}
         signing: {type: boolean, default: false}
     CardKVWebhookUpdate:
@@ -32910,6 +32914,7 @@ components:
       additionalProperties: false
       properties:
         description: {type: string, maxLength: 200}
+        key_template: {type: string, description: "Optional card data key template with {screen.field.NAME}. In keyed mode the mapping or posted body produces {documents:[{fields:{NAME:VALUE},document:{...}}]}; each output uses its fields to fill the template. Keys must be unique, valid and outside card-instance and feed namespaces. Every output is checked against the owning card before writes begin. An empty string restores the single-document mode on update."}
         mapping: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "Replaces the template; null removes it."}
         enabled: {type: boolean}
         signing: {type: boolean}
@@ -32921,8 +32926,23 @@ components:
     CardKVWebhookWriteResult:
       type: object
       additionalProperties: false
-      required: [status, revision, sha256]
+      required: [status]
+      oneOf:
+        - required: [revision, sha256]
+        - required: [documents]
       properties:
+        documents:
+          type: array
+          description: "Present in keyed mode, one result per concrete key. Status is written if any member was written. Storage failures can leave an accepted prefix; retry the identical batch with its Idempotency-Key to resume. Missing keys are retained with their existing expiry."
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, status, revision, sha256]
+            properties:
+              key: {type: string}
+              status: {type: string, enum: [written, unchanged]}
+              revision: {type: integer, minimum: 1}
+              sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
         status: {type: string, enum: [written, unchanged]}
         revision: {type: integer, minimum: 1}
         sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
@@ -35210,7 +35230,6 @@ components:
         properties:
           major: false
           params: false
-          data: false
       description: >-
         A built-in card the Player draws natively (clock, weather, menu board, ticker, KPI tiles and the rest of the vendored cards catalog, screenrig.cards.contract/v1). layout places it: full (the whole canvas), free (your own rect and layer), center (900 x 420), wide (the canvas inset 30 from the left and right and 80 from the top and bottom), header (the whole top edge, 80 high), footer (the whole bottom edge, 80 high), corner (270 square), chip (240 x 70) or strip (the whole edge, 120 high), in 1080p design units scaled by min(canvas width, canvas height) / 1080. corner and chip take an anchor corner (top-left, top-right, bottom-left, bottom-right) and strip an anchor edge (top, bottom, left, right); the other layouts take none. Except for free, the server derives rect and layer from the canvas, or from the frame displays cover: omit them, or send exactly what it derives. A page holds at most one full, center or wide card, one corner or chip card per corner, and one strip per edge (a card with presence may share an edge with a normal strip); a header takes the top edge's normal strip slot and a footer the bottom edge's, so a page holds at most one of each, no normal strip on that edge, and a card with presence may still share it. A corner or chip on an edge that holds a strip moves in past it by 120, and past a header or footer by 80. On a playlist with a format, displays is the frame the layout derives in (full is the frame, corner the frame's corner; free refuses displays), the card scale is the tile's min(width, height) / 1080 = 1 rather than derived from the frame, and two cards compete for a slot, or move in past each other's strips, only when their frames share a display (no displays is every display). A card's tier decides its layouts (GET /api/card-types): core takes all nine, fullscreen takes full. params holds the placement's static properties (theme, location, titles, column definitions) and changes only with a republish. A string in params may carry {screen.name}, {screen.timezone} and {screen.field.NAME}, and a location param may be the string {screen.location}; the backend expands them for each screen, so one playlist shows every screen its own values. data names a card data document (GET/PUT /api/card-data/{key}) that holds the card's dynamic properties (menu sections, ticker items, KPI tiles); agents change it without a republish. {screen.field.NAME} in a data key reads a per-screen document, for example menu-{screen.field.store_number}. With data, params may not carry dynamic properties; without it, params carry the whole configuration. Every string in params that begins with media: is a media reference, media:<id>, naming a ready image in this project that the card draws (spotlight people[].photo, product-grid products[].photo); a card never takes an image URL. Publish refuses an unknown card or major and invalid params (card_invalid), a layout, anchor, rect or layer the card may not carry (card_layout_invalid), cards that claim one place on the page (card_layout_conflict), a media reference that names no ready image of the project (card_media_invalid), and a bound key whose stored document the card rejects (card_data_invalid). The screens showing the placement are granted its media, and a live write approves pending media it names, as with a by:id selector. A card with a third-party feed (weather) reads it from the key the server derives from its static params.
       properties:
@@ -35218,10 +35237,10 @@ components:
         primitive: {type: string, enum: [card]}
         layout: {type: string, enum: [full, free, center, wide, header, footer, corner, chip, strip], description: "Where the card sits. Required."}
         anchor: {type: string, enum: [top-left, top-right, bottom-left, bottom-right, top, bottom, left, right], description: "Required for corner and chip (a corner) and strip (an edge); not allowed for full, free, center, wide, header and footer."}
-        card: {type: string, description: "Global crd_ UID: omit major, params and data, which belong to the instance. Inline catalogue type, major, params and data are deprecated for one release and converted on publish; an inline type such as room accepts a per-screen data key template."}
+        card: {type: string, description: "Global crd_ UID: omit major and params, which belong to the instance. Optional data selects a keyed document, including a {screen.field.NAME} template; absent selects the instance document. Inline catalogue type, major and params are deprecated for one release and converted on publish."}
         major: {type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins."}
         params: {type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>. A string may carry {screen.name}, {screen.timezone} and {screen.field.NAME}, and a location param may be the string {screen.location}; the backend expands them for each screen."}
-        data: {type: string, pattern: '^(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]+\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]+\}){0,255}$', description: "Card data key holding the dynamic properties. May not start with feed:. {screen.field.NAME} in the key reads a per-screen document, for example menu-{screen.field.store_number}: the backend fills in each screen's own field."}
+        data: {type: string, pattern: '^(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]+\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]+\}){0,255}$', description: "Card data key holding the dynamic properties, including on a crd_ instance placement. Absent selects the instance document. May not start with feed:. {screen.field.NAME} in the key reads a per-screen document, for example menu-{screen.field.store_number}: the backend fills in each screen's own field."}
         displays: {$ref: "#/components/schemas/PlaylistDisplays", description: "Playlists with a format only. The displays whose frame the layout derives in: full is the frame, corner the frame's corner, and so on. Ascending unique 1-based display numbers within 1..format.displays that fill a rectangle of the wall's tiles, such as [2] or [1, 2]. Absent is every display. Not allowed for layout free."}
         rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required for layout free. For every other layout omit it or send the rect the server derives; left and right strips are the band on that edge (120 units wide, canvas high), which the Player draws as a horizontal strip turned 90 degrees."}
         locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}

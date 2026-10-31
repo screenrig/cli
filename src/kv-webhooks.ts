@@ -208,6 +208,7 @@ export function cardWebhookLines(webhook: CardKVWebhook | undefined): string[] {
     `card_id: ${webhook.card_id}`,
     ...when(webhook.description, "description"),
     `mapping: ${mappingSummary(webhook)}`,
+    ...when(webhook.key_template, "key_template"),
     `enabled: ${webhook.enabled}`,
     `signing: ${webhook.signing}`,
     `url: ${webhook.url}`,
@@ -218,9 +219,9 @@ export function cardWebhookLines(webhook: CardKVWebhook | undefined): string[] {
 
 export function cardWebhookTableLines(items: CardKVWebhook[]): string[] {
   if (!items.length) return ["No card webhooks"];
-  return table(["ID", "ENABLED", "SIGNING", "MAPPING", "LAST_USED", "URL", "DESCRIPTION"], items.map((item) => [
+  return table(["ID", "ENABLED", "SIGNING", "MAPPING", "KEY_TEMPLATE", "LAST_USED", "URL", "DESCRIPTION"], items.map((item) => [
     item.id ?? "", String(item.enabled), String(item.signing), item.mapping === null || item.mapping === undefined ? "no" : "yes",
-    item.last_used_at ?? "-", item.url ?? "", item.description ?? "",
+    item.key_template || "-", item.last_used_at ?? "-", item.url ?? "", item.description ?? "",
   ]));
 }
 

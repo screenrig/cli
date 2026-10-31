@@ -292,6 +292,7 @@ test("kv webhook options pick exactly one target and refuse flags that belong to
     ["create", "menu", "--card", CARD],
     ["create", "--app-id", APP],
     ["create", "menu", "--app-id", APP, "--signing"],
+    ["create", "menu", "--app-id", APP, "--key-template", "room-{screen.field.room}"],
     ["create", "menu", "--app-id", APP, "--map", "m.json"],
     ["create", "--card", "scr_AAAAAAAAAAAAAAAAAAAAAAAA"],
     ["create", "--card", CARD, "--description", "x".repeat(201)],
@@ -304,6 +305,7 @@ test("kv webhook options pick exactly one target and refuse flags that belong to
     ["update", "kvw_AAAAAAAAAAAAAAAAAAAAAA", "--app-id", APP, "--disable"],
     ["update", "kvw_AAAAAAAAAAAAAAAAAAAAAA", "--card", CARD, "--enable", "--disable"],
     ["update", "kvw_AAAAAAAAAAAAAAAAAAAAAA", "--card", CARD, "--map", "m.json", "--clear-map"],
+    ["update", "kvw_AAAAAAAAAAAAAAAAAAAAAA", "--card", CARD, "--key-template", "room-{screen.field.room}", "--clear-key-template"],
     ["update", "bad_id", "--card", CARD, "--disable"],
     ["update", "--card", CARD, "--disable"],
     ["deliveries", "kvw_AAAAAAAAAAAAAAAAAAAAAA"],
@@ -331,8 +333,8 @@ test("kv webhook list, update, rotate-secret, deliveries and delete work on a ca
   assert.equal(webhookCalls(transport).at(-1)!.path, `/api/cards/${CARD}/kv-webhooks`);
   const listHuman = await cli(["--human", "kv", "webhook", "list", "--card", CARD], transport, env);
   assert.match(listHuman.stdout, /^Card webhooks \(1\)$/m);
-  assert.match(listHuman.stdout, /^ID\s+ENABLED\s+SIGNING\s+MAPPING\s+LAST_USED\s+URL\s+DESCRIPTION$/m);
-  assert.match(listHuman.stdout, new RegExp(`^${webhook.id}\\s+true\\s+false\\s+no\\s+-\\s+https://\\S+/write$`, "m"));
+  assert.match(listHuman.stdout, /^ID\s+ENABLED\s+SIGNING\s+MAPPING\s+KEY_TEMPLATE\s+LAST_USED\s+URL\s+DESCRIPTION$/m);
+  assert.match(listHuman.stdout, new RegExp(`^${webhook.id}\\s+true\\s+false\\s+no\\s+-\\s+-\\s+https://\\S+/write$`, "m"));
 
   // update sends only what it names, and the signing secret appears once.
   const file = await writeMap(env, "map.json", MAP);
@@ -424,4 +426,22 @@ test("whsec_ signing secrets are redacted from text and recognized as sensitive"
   const secret = "whsec_" + "Q".repeat(43);
   assert.equal(redactText(`signing ${secret}`), "signing whsec_***");
   assert.equal(isSensitiveValue(secret), true);
+});
+
+
+test("card webhook key selection is sent on create and can be replaced or cleared independently", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const template = "room-{screen.field.room}";
+  const created = await cli(["--json", "kv", "webhook", "create", "--card", CARD, "--key-template", template], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(webhookCalls(transport).at(-1)!.body, { key_template: template });
+  const id = created.envelope.data.id;
+  const updated = await cli(["--human", "kv", "webhook", "update", id, "--card", CARD, "--key-template", "hall-{screen.field.room}"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(webhookCalls(transport).at(-1)!.body, { key_template: "hall-{screen.field.room}" });
+  assert.match(updated.stdout, /key_template: hall-\{screen.field.room\}/);
+  const cleared = await cli(["--json", "kv", "webhook", "update", id, "--card", CARD, "--clear-key-template"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(webhookCalls(transport).at(-1)!.body, { key_template: "" });
 });

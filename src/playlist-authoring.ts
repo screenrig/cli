@@ -62,12 +62,11 @@ export function editablePlaylist(value: unknown): RecordValue {
       if (primitive.primitive === "card") {
         delete primitive.feed;
         delete primitive.resolved_media;
-        // A card instance placement is its crd_ UID plus where it sits. The type,
-        // major, params and data a read expands from the instance are the
-        // deprecated inline form: writing them back makes the server warn and
-        // restore the instance's stored params.
+        // The instance owns type, major and params. A placement may select a
+        // separate keyed document; preserve that selection during read/edit/write.
         if (typeof primitive.card === "string" && CARD_INSTANCE_UID.test(primitive.card)) {
-          for (const member of ["type", "major", "params", "data"]) delete primitive[member];
+          for (const member of ["type", "major", "params"]) delete primitive[member];
+          if (primitive.data === primitive.card) delete primitive.data;
           // The server derives rect and layer for every layout but free; leaving
           // them would turn an edit of layout or anchor into a stale-rect refusal.
           if (typeof primitive.layout === "string" && primitive.layout !== "free") {

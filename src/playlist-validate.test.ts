@@ -54,7 +54,7 @@ test("card instance placements reject owned fields, including empty params", () 
     const value = playlist();
     value.pages[0]!.primitives = [{ id: "door", primitive: "card", card: `${prefix}crd_room`, layout: "full", content_fit: "fill" }] as any;
     assert.deepEqual(playlistIssues(value), [], prefix);
-    for (const [field, supplied] of Object.entries({ data: "room-{screen.field.room}", params: {}, major: 1 })) {
+    for (const [field, supplied] of Object.entries({ params: {}, major: 1 })) {
       const invalid = structuredClone(value);
       (invalid.pages[0]!.primitives[0] as Record<string, unknown>)[field] = supplied;
       assert.deepEqual(playlistIssues(invalid), [{
@@ -63,6 +63,11 @@ test("card instance placements reject owned fields, including empty params", () 
       }], `${prefix}${field}`);
     }
   }
+});
+test("instance placements accept a per-screen data selection", () => {
+  const value = playlist();
+  value.pages[0]!.primitives = [{ id: "door", primitive: "card", card: "crd_room", layout: "full", content_fit: "fill", data: "room-{screen.field.room}" }] as any;
+  assert.deepEqual(playlistIssues(value), []);
 });
 test("inline room placements retain per-screen data and visibility keys", () => {
   const value = playlist();

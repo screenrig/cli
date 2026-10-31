@@ -2649,7 +2649,7 @@ export function memoryBackend(options: {
   transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => kvWebhookReplay(req, () => {
     const cardId = cardWebhookCard(req);
     if (!cardId) return cardMissing();
-    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; signing?: boolean };
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; signing?: boolean; key_template?: string };
     const invalid = mappingProblem(body.mapping);
     if (invalid) return invalid;
     if ([...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).length >= 20) {
@@ -2658,7 +2658,7 @@ export function memoryBackend(options: {
     kvWebhookSequence += 1;
     const id = `kvw_${String(kvWebhookSequence).padStart(22, "A")}`;
     const webhook: Record<string, unknown> = {
-      id, card_id: cardId, description: body.description ?? "", mapping: body.mapping ?? null, enabled: true, signing: body.signing === true,
+      id, card_id: cardId, description: body.description ?? "", mapping: body.mapping ?? null, key_template: body.key_template ?? "", enabled: true, signing: body.signing === true,
       url: `https://api.screenrig.ai/api/cards/${cardId}/kv-webhooks/${id}/write`,
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
@@ -2672,11 +2672,12 @@ export function memoryBackend(options: {
     if (!cardWebhookCard(req)) return cardMissing();
     const webhook = cardWebhookFor(req);
     if (!webhook) return cardWebhookMissing();
-    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; enabled?: boolean; signing?: boolean };
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; enabled?: boolean; signing?: boolean; key_template?: string };
     const invalid = mappingProblem(body.mapping);
     if (invalid) return invalid;
     if (body.description !== undefined) webhook.description = body.description;
     if (body.mapping !== undefined) webhook.mapping = body.mapping;
+    if (body.key_template !== undefined) webhook.key_template = body.key_template;
     if (body.enabled !== undefined) webhook.enabled = body.enabled;
     let signingSecret: string | undefined;
     if (body.signing !== undefined) {

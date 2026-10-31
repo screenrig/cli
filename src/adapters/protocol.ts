@@ -1399,6 +1399,7 @@ export interface CardKVWebhook {
   id: string;
   card_id: string;
   description: string;
+  key_template?: string;
   mapping: Record<string, unknown> | null;
   enabled: boolean;
   signing: boolean;
@@ -1419,12 +1420,14 @@ export interface CardKVWebhookList {
 
 export interface CardKVWebhookCreate {
   description?: string;
+  key_template?: string;
   mapping?: Record<string, unknown> | null;
   signing?: boolean;
 }
 
 export interface CardKVWebhookUpdate {
   description?: string;
+  key_template?: string;
   mapping?: Record<string, unknown> | null;
   enabled?: boolean;
   signing?: boolean;
