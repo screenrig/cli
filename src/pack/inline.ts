@@ -8,7 +8,7 @@ import type { ArchiveEntry } from "./types.js";
 // shapes. The release Content-Security-Policy permits these inline styles.
 // Inline event handlers and `javascript:` URLs cannot be hoisted safely and are
 // refused at pack time.
-const HOIST_DIRECTORY = "_screenrig/inline";
+const HOIST_PREFIX = "_screenrig-inline-";
 const HTML_PATH = /\.html?$/i;
 const RAW_TEXT_ELEMENTS: Readonly<Record<string, true>> = { style: true, script: true, textarea: true, title: true };
 const HTML_VOID_ELEMENTS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
@@ -184,7 +184,13 @@ function findCommentEnd(html: string, from: number): number {
 
 function emitAsset(generated: Map<string, ArchiveEntry>, existing: Set<string>, path: string, extension: "css" | "js", content: string): string {
   const hash = createHash("sha256").update(content, "utf8").digest("hex").slice(0, 32);
-  const assetPath = `${HOIST_DIRECTORY}/${hash}.${extension}`;
+  const filename = `${HOIST_PREFIX}${hash}.${extension}`;
+  // CSS URLs and module imports resolve from the external file's directory.
+  // Keep it beside the document so authored references retain their base,
+  // including dynamic imports and URL expressions we cannot rewrite statically.
+  // The directory also scopes deduplication: identical modules in different
+  // directories can import different dependencies.
+  const assetPath = `${path.slice(0, path.lastIndexOf("/") + 1)}${filename}`;
   if (existing.has(assetPath)) {
     throw packError("inline_asset_conflict", `${path} inline ${extension} hoists onto the reserved asset ${assetPath}; rename or remove that file.`);
   }
@@ -192,10 +198,7 @@ function emitAsset(generated: Map<string, ArchiveEntry>, existing: Set<string>, 
     const data = Buffer.from(content, "utf8");
     generated.set(assetPath, { path: assetPath, type: "file", data, size: data.length });
   }
-  // Reference the asset relative to the HTML document so nested pages resolve
-  // it too; `./` matches the SDK runtime tag the injector writes.
-  const depth = path.split("/").length - 1;
-  return `${depth === 0 ? "./" : "../".repeat(depth)}${assetPath}`;
+  return `./${filename}`;
 }
 
 function transformHtml(path: string, html: string, generated: Map<string, ArchiveEntry>, existing: Set<string>): string {
@@ -274,7 +277,8 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
 
 /**
  * Hoists HTML styles and executable inline scripts from every HTML entry into
- * deterministic files under `_screenrig/inline`. SVG styles stay in their
+ * deterministic files beside each document, preserving relative resource and
+ * module paths. SVG styles stay in their
  * original namespace under the release Content-Security-Policy. Inline event
  * handlers and `javascript:` URLs are refused with the file and line.
  */

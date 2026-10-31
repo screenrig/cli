@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, open, writeFile, readFile, readdir, symlink, link, rm } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -354,7 +354,7 @@ test("hoists inline style and executable script into external files", () => {
   assert.equal(content(link![1]!), "body{background:#123}");
   assert.equal(content(classic![1]!), 'console.log("hi")');
   assert.equal(content(module![1]!), "export default 1");
-  assert.ok(entries.every((entry) => entry.path.startsWith("_screenrig/inline/") || entry.path === "index.html"));
+  assert.ok(entries.every((entry) => entry.path.startsWith("_screenrig-inline-") || entry.path === "index.html"));
 });
 
 for (const artwork of [
@@ -473,8 +473,100 @@ test("hoisted assets resolve relative to a nested HTML page", () => {
   const rewritten = entries.find((entry) => entry.path === "pages/board.html")!.data!.toString("utf8");
   const href = /<link rel="stylesheet" href="([^"]+)">/.exec(rewritten)![1]!;
   const resolved = path.posix.normalize(path.posix.join("pages", href));
-  assert.ok(resolved.startsWith("_screenrig/inline/"));
+  assert.ok(resolved.startsWith("pages/_screenrig-inline-"));
   assert.equal(entries.find((entry) => entry.path === resolved)!.data!.toString("utf8"), "p{margin:0}");
+});
+
+test("packed inline CSS resources and module dependencies keep their document directory", async () => {
+  const source = await tempDir();
+  const unpacked = await tempDir();
+  const script = `import {label} from "./dep.js";
+export {label};
+export {extra} from "./extra.js";
+export const lazy = (await import("./lazy.js")).label;
+export const image = new URL("./assets/logo.png?v=1#logo", import.meta.url).href;`;
+  const documents = [
+    ["index.html", "./assets/logo.png?v=1#logo"],
+    ["pages/detail.html", "../assets/logo.png?v=1#logo"],
+    ["pages/other.html", "../assets/logo.png?v=1#logo"],
+  ] as const;
+  try {
+    for (const [document, image] of documents) {
+      const directory = path.dirname(path.join(source, document));
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(source, document), `<head><style>@import "./theme.css"; .logo{background:url("${image}")}</style></head><script type="module">${script}</script><link rel="stylesheet" href="./external.css"><script type="module" src="./external.js"></script>`);
+    }
+    await mkdir(path.join(source, "assets"));
+    await writeFile(path.join(source, "assets/logo.png"), "image fixture");
+    for (const directory of ["", "pages"]) {
+      const label = directory || "root";
+      for (const [name, content] of Object.entries({
+        "dep.js": `export const label = ${JSON.stringify(label)};`,
+        "extra.js": `export const extra = ${JSON.stringify(`${label}-extra`)};`,
+        "lazy.js": `export const label = ${JSON.stringify(`${label}-lazy`)};`,
+        "theme.css": ".logo{color:red}",
+        "external.css": ".external{color:blue}",
+        "external.js": 'import "./dep.js";',
+      })) await writeFile(path.join(source, directory, name), content);
+    }
+    const packed = await packDirectory(source);
+    assert.deepEqual((await packDirectory(source)).archive, packed.archive);
+    const tar = gunzipSync(packed.archive);
+    let offset = 0;
+    const files = new Map(parseTar(tar).map((entry) => {
+      const start = offset + 512;
+      offset = start + Math.ceil(entry.size / 512) * 512;
+      return [entry.path, tar.subarray(start, start + entry.size).toString("utf8")];
+    }));
+    // Execute the packed module files too, using the same relative-import
+    // resolution as the browser, without requiring a backend or a browser.
+    for (const [name, content] of files) {
+      if (!packed.entries.some((entry) => entry.path === name && entry.type === "file")) continue;
+      const destination = path.join(unpacked, name);
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, content);
+    }
+    const modules: string[] = [];
+    for (const [document, image] of documents) {
+      const html = files.get(document)!;
+      const documentURL = new URL(document, "https://release.example/");
+      const cssURL = new URL(/<link rel="stylesheet" href="([^"]+)"/.exec(html)![1]!, documentURL);
+      const moduleURL = new URL(/<script type="module" src="([^"]+)"/.exec(html)![1]!, documentURL);
+      const css = files.get(cssURL.pathname.slice(1))!;
+      assert.equal(files.get(moduleURL.pathname.slice(1)), script);
+      for (const reference of [image, "./theme.css"]) {
+        assert.ok(css.includes(`"${reference}"`));
+        const resolved = new URL(reference, cssURL);
+        assert.equal(resolved.href, new URL(reference, documentURL).href);
+        assert.ok(files.has(resolved.pathname.slice(1)), resolved.href);
+      }
+      assert.ok(html.includes('<link rel="stylesheet" href="./external.css">'));
+      assert.ok(html.includes('<script type="module" src="./external.js"></script>'));
+      const imported = await import(pathToFileURL(path.join(unpacked, moduleURL.pathname.slice(1))).href);
+      const label = document.startsWith("pages/") ? "pages" : "root";
+      assert.equal(imported.label, label);
+      assert.equal(imported.extra, `${label}-extra`);
+      assert.equal(imported.lazy, `${label}-lazy`);
+      assert.equal(imported.image, new URL("./assets/logo.png?v=1#logo", pathToFileURL(path.join(unpacked, document))).href);
+      modules.push(moduleURL.pathname);
+    }
+    assert.notEqual(modules[0], modules[1], "different directories keep distinct module bases");
+    assert.equal(modules[1], modules[2], "identical modules in the same directory still deduplicate");
+  } finally {
+    await rm(source, { recursive: true, force: true });
+    await rm(unpacked, { recursive: true, force: true });
+  }
+});
+
+test("refuses generated inline asset collisions beside root and nested documents", () => {
+  for (const document of ["index.html", "pages/detail.html"]) {
+    const html = inlineEntry(document, "<style>p{margin:0}</style>");
+    const asset = hoistInlineAssets([html]).find((entry) => entry.path.endsWith(".css"))!;
+    assert.throws(
+      () => hoistInlineAssets([html, inlineEntry(asset.path, "authored asset")]),
+      (error: unknown) => error instanceof CliError && error.problem.code === "inline_asset_conflict" && error.problem.detail.includes(asset.path),
+    );
+  }
 });
 
 test("leaves external scripts and non-executable script data blocks inline", () => {
@@ -505,8 +597,8 @@ test("app pack hoists inline blocks end to end and refuses inline handlers", asy
   await writeFile(path.join(hoisted, "index.html"), `<!doctype html><html><head><style>h1{color:red}</style></head><body><script>1+1</script></body></html>`);
   try {
     const result = await packDirectory(hoisted);
-    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig/inline/") && entry.path.endsWith(".css")));
-    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig/inline/") && entry.path.endsWith(".js")));
+    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig-inline-") && entry.path.endsWith(".css")));
+    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig-inline-") && entry.path.endsWith(".js")));
   } finally {
     await rm(hoisted, { recursive: true, force: true });
   }
