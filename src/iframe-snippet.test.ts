@@ -45,10 +45,10 @@ test("an embed code with no src is a usage error", () => {
   }
 });
 
-test("character references are decoded once and only the ones an attribute carries", () => {
+test("character references decode once with server HTML semantics", () => {
   assert.equal(decodeAttributeEntities("a&amp;b&lt;c&gt;d&quot;e&apos;f"), `a&b<c>d"e'f`);
   assert.equal(decodeAttributeEntities("&amp;amp;"), "&amp;");
-  assert.equal(decodeAttributeEntities("&#38;&#x26;&#0;&#1114112;&nbsp;&bogus;"), "&&&#0;&#1114112;&nbsp;&bogus;");
+  assert.equal(decodeAttributeEntities("&#38;&#x26;&#0;&#1114112;&nbsp;&bogus;"), "&&\uFFFD\uFFFD\u00A0&bogus;");
 });
 
 async function initInvoke(args: string[]) {
@@ -83,6 +83,25 @@ test("playlist init uses the iframe source after quoted title text", async (t) =
   assert.equal(result.code, 0, result.stdout);
   const document = JSON.parse(await readFile(path.join(result.dir, "out.json"), "utf8"));
   assert.deepEqual(document.pages.map((page: any) => page.primitives[0].src), [BOARD, BOARD, BOARD]);
+});
+
+test("playlist init entity decoding preserves the intended hostname", async (t) => {
+  const result = await initInvoke(['<iframe src="http:&sol;&sol;example.com:18880/"></iframe>']);
+  t.after(result.cleanup);
+  assert.equal(result.code, 0, result.stdout);
+  const document = JSON.parse(await readFile(path.join(result.dir, "out.json"), "utf8"));
+  const primitive = document.pages[0].primitives[0];
+  assert.equal(primitive.src, "http://example.com:18880/");
+  assert.equal(primitive.title, "example.com");
+});
+
+test("playlist init entity decoding accepts named and unterminated numeric colons", async (t) => {
+  const addresses = ["http&colon;//", "http&#58//", "http&#x3a//", "http&#58;//", "http://"];
+  const result = await initInvoke(addresses.map(prefix => `<iframe src="${prefix}example.com:18880/"></iframe>`));
+  t.after(result.cleanup);
+  assert.equal(result.code, 0, result.stdout);
+  const document = JSON.parse(await readFile(path.join(result.dir, "out.json"), "utf8"));
+  assert.deepEqual(document.pages.map((page: any) => page.primitives[0].src), addresses.map(() => "http://example.com:18880/"));
 });
 
 test("playlist init refuses an embed code with no usable address", async (t) => {

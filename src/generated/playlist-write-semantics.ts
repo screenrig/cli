@@ -1,6 +1,8 @@
 /** Backend-owned offline cross-field checks. Run the generated PlaylistWrite
  * JSON Schema first. Neither pass resolves project-owned references, dynamic
  * selector cardinality, media durations, or DNS; those remain server checks. */
+import { decodeHTML } from "entities";
+
 export interface PlaylistWriteIssue { path: string; message: string }
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value !== null && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : {};
@@ -25,7 +27,11 @@ function httpsWithoutCredentials(value: unknown): boolean {
   } catch { return false; }
 }
 
-const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+/** Decode once, like server html.UnescapeString, including legacy references
+ * without semicolons. The server uses HTML text decoding on the extracted src. */
+export function decodeAttributeEntities(text: string): string {
+  return decodeHTML(text);
+}
 
 /** The src of the first iframe of a pasted embed code, entities decoded (server embeddedSource); any other value is returned as it is. */
 function embeddedSource(value: unknown): unknown {
@@ -33,11 +39,7 @@ function embeddedSource(value: unknown): unknown {
   const match = /<iframe\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/is.exec(value);
   const source = match === null ? undefined : (match[1] ?? match[2] ?? match[3]);
   if (source === undefined) return value;
-  return source.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(amp|lt|gt|quot|apos));/gi, (entity, decimal?: string, hex?: string, name?: string) => {
-    if (name !== undefined) return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
-    const code = decimal !== undefined ? Number.parseInt(decimal, 10) : Number.parseInt(hex ?? "", 16);
-    return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
-  }).trim();
+  return decodeAttributeEntities(source).trim();
 }
 
 /** A screen token in an iframe src or an application param (server screenfacts.urlTokenPattern). */
