@@ -114,6 +114,33 @@ test("the existing report commands take --format and ask the server for the file
   assert.equal(stray.code, ExitCode.Usage, "--output without a file format is refused");
 });
 
+for (const format of ["xlsx", "pdf"] as const) {
+  test(`playback plays ${format} exports preserve continuation cursors and filters`, async () => {
+    const env = await enrolled();
+    const contentType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const bytes = Buffer.from(`export-${format}`);
+    const transport = new FakeTransport().onDownload("GET", "/api/playback/plays", () => file(contentType, bytes));
+    for (const cursor of [undefined, "pc_NEXT"]) {
+      const output = `${cursor ? "remaining" : "all"}.${format}`;
+      const result = await cli([
+        "--json", "playback", "plays",
+        "--from", "2026-10-28T02:00:00+02:00", "--to", "2026-10-29T02:00:00+02:00",
+        "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--media-id", "med_AAAAAAAAAAAAAAAAAAAAAA", "--tag", "Lobby",
+        ...(cursor ? ["--cursor", cursor] : []), "--format", format, "--output", output,
+      ], transport, env);
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      assert.deepEqual(JSON.parse(JSON.stringify(transport.calls.at(-1)!.query)), {
+        from: "2026-10-28T00:00:00Z", to: "2026-10-29T00:00:00Z",
+        screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA", media_id: "med_AAAAAAAAAAAAAAAAAAAAAA", tag: "Lobby",
+        ...(cursor ? { cursor } : {}), format,
+      });
+      assert.equal(result.envelope.data.path, path.join(env.cwd, output));
+      assert.deepEqual(await readFile(path.join(env.cwd, output)), bytes);
+    }
+    assert.equal(transport.calls.length, 2);
+  });
+}
+
 test("subscriptions create, update, send and delete through the report-subscriptions routes", async () => {
   const env = await enrolled();
   const subscription = {
