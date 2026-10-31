@@ -2,15 +2,17 @@ import { createHash } from "node:crypto";
 import { packError } from "./limits.js";
 import type { ArchiveEntry } from "./types.js";
 
-// The release host serves applications under `script-src 'self'; style-src
-// 'self'`, so inline `<style>` and executable inline `<script>` are dropped by
-// the browser with no error. The packer hoists them into deterministic external
-// files inside the archive and rewrites the tags, so a one-file static app
-// renders as authored. Inline event handlers and `javascript:` URLs cannot be
-// hoisted safely and are refused at pack time.
+// Hoist HTML styles and executable inline scripts into deterministic external
+// files. SVG styles keep their namespace and authored bytes: an HTML <link>
+// inserted there is an SVG element, not a stylesheet, and can swallow following
+// shapes. The release Content-Security-Policy permits these inline styles.
+// Inline event handlers and `javascript:` URLs cannot be hoisted safely and are
+// refused at pack time.
 const HOIST_DIRECTORY = "_screenrig/inline";
 const HTML_PATH = /\.html?$/i;
 const RAW_TEXT_ELEMENTS: Readonly<Record<string, true>> = { style: true, script: true, textarea: true, title: true };
+const HTML_VOID_ELEMENTS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+const SVG_HTML_INTEGRATION_POINTS = new Set(["foreignobject", "desc", "title"]);
 const EXECUTABLE_SCRIPT_TYPES: Readonly<Record<string, true>> = {
   "": true,
   "application/ecmascript": true,
@@ -44,6 +46,12 @@ interface ScannedTag {
   /** Offset just past the closing `>`. */
   end: number;
   attributes: ScannedAttribute[];
+  selfClosing: boolean;
+}
+
+interface OpenElement {
+  name: string;
+  namespace: "html" | "svg";
 }
 
 function isSpace(char: string | undefined): boolean {
@@ -63,6 +71,7 @@ function scanTag(html: string, start: number): ScannedTag | null {
   if (!nameMatch) return null;
   const name = nameMatch[1]!.toLowerCase();
   const attributes: ScannedAttribute[] = [];
+  let selfClosing = false;
   let index = start + nameMatch[0].length;
   while (index < html.length) {
     while (index < html.length && isSpace(html[index])) index += 1;
@@ -72,6 +81,7 @@ function scanTag(html: string, start: number): ScannedTag | null {
       break;
     }
     if (html[index] === "/" && html[index + 1] === ">") {
+      selfClosing = true;
       index += 2;
       break;
     }
@@ -108,7 +118,7 @@ function scanTag(html: string, start: number): ScannedTag | null {
     const end = value === undefined ? attributeStart + attributeName.length : index;
     attributes.push({ name: attributeName.toLowerCase(), value, offset: attributeStart, end });
   }
-  return { name, start, end: Math.min(index, html.length), attributes };
+  return { name, start, end: Math.min(index, html.length), attributes, selfClosing };
 }
 
 function attributeValue(tag: ScannedTag, name: string): string | undefined {
@@ -189,6 +199,7 @@ function emitAsset(generated: Map<string, ArchiveEntry>, existing: Set<string>, 
 }
 
 function transformHtml(path: string, html: string, generated: Map<string, ArchiveEntry>, existing: Set<string>): string {
+  const elements: OpenElement[] = [];
   let out = "";
   let cursor = 0;
   let index = 0;
@@ -201,7 +212,23 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
       index = html.startsWith("<!--", open) ? findCommentEnd(html, open + 4) : open + 1;
       continue;
     }
-    if (next === "/" || next === "?") {
+    if (next === "/") {
+      const close = /^<\/([a-zA-Z][a-zA-Z0-9:-]*)\s*>/.exec(html.slice(open));
+      if (close) {
+        const name = close[1]!.toLowerCase();
+        for (let depth = elements.length - 1; depth >= 0; depth -= 1) {
+          if (elements[depth]!.name === name) {
+            elements.length = depth;
+            break;
+          }
+        }
+        index = open + close[0].length;
+      } else {
+        index = open + 1;
+      }
+      continue;
+    }
+    if (next === "?") {
       index = open + 1;
       continue;
     }
@@ -211,12 +238,17 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
       continue;
     }
     rejectUnsafeAttributes(path, html, tag);
-    if (RAW_TEXT_ELEMENTS[tag.name] === true) {
+    const parent = elements.at(-1);
+    const namespace = tag.name === "svg" || (parent?.namespace === "svg" && !SVG_HTML_INTEGRATION_POINTS.has(parent.name)) ? "svg" : "html";
+    // In foreign content, the slash closes an element. HTML ignores it except
+    // on void elements. SVG title/desc/foreignObject contain HTML children.
+    const selfClosing = namespace === "svg" && tag.selfClosing;
+    if (!selfClosing && RAW_TEXT_ELEMENTS[tag.name] === true && (namespace === "html" || tag.name === "style" || tag.name === "script")) {
       const close = findRawClose(html, tag.end, tag.name);
       if (!close) {
         throw packError("inline_unterminated", `${path}:${lineAt(html, tag.start)}: unterminated <${tag.name}> element.`);
       }
-      if (tag.name === "style") {
+      if (tag.name === "style" && namespace === "html") {
         out += html.slice(cursor, tag.start);
         const href = emitAsset(generated, existing, path, "css", html.slice(tag.end, close.index));
         out += `<link rel="stylesheet" href="${href}"${serializeAttributes(html, tag)}>`;
@@ -230,6 +262,9 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
       index = close.end;
       continue;
     }
+    if (!selfClosing && !(namespace === "html" && HTML_VOID_ELEMENTS.has(tag.name))) {
+      elements.push({ name: tag.name, namespace });
+    }
     index = tag.end;
   }
   if (cursor < html.length) out += html.slice(cursor);
@@ -238,9 +273,9 @@ function transformHtml(path: string, html: string, generated: Map<string, Archiv
 }
 
 /**
- * Hoists inline styles and executable inline scripts from every HTML entry into
- * deterministic files under `_screenrig/inline`, rewriting the tags so the
- * application renders under the release Content-Security-Policy. Inline event
+ * Hoists HTML styles and executable inline scripts from every HTML entry into
+ * deterministic files under `_screenrig/inline`. SVG styles stay in their
+ * original namespace under the release Content-Security-Policy. Inline event
  * handlers and `javascript:` URLs are refused with the file and line.
  */
 export function hoistInlineAssets(entries: ArchiveEntry[]): ArchiveEntry[] {
