@@ -30655,6 +30655,7 @@ components:
           type: string
           maxLength: 256
           pattern: '^(?:\{screen\.weather\}|(?:[A-Za-z0-9]|\{screen\.field\.[a-z0-9_]{1,32}\})(?:[A-Za-z0-9._:/-]|\{screen\.field\.[a-z0-9_]{1,32}\})*)$'
+          not: {pattern: '^feed:'}
           description: >-
             Project card data key or card instance ID; feed keys are not accepted. A {screen.field.NAME} token reads the screen's own field, for example momentus-room-{screen.field.room}. The key {screen.weather} reads the weather conditions of each screen's own location: the document has condition (clear, cloud, fog, rain, snow, storm or wind), band (freezing below 0 degrees Celsius, cold 0 to 9, mild 10 to 17, warm 18 to 24, hot from 25), temperatureC (whole degrees) and isDay. Point path at one of them, for example path /condition with equals rain. The condition is the current observation for the screen's 0.25 degree cell, about hourly, not a forecast. A screen without a location never matches.
         path: {type: string, maxLength: 256, description: "RFC 6901 pointer with at most 16 segments; absent or empty tests the document itself."}
