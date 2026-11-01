@@ -24,8 +24,8 @@ export function registerAlertsCommands(root: Command, bind: CommandActionBinder)
     "  for maintenance: their alerts still open and resolve, marked muted, and",
     "  never need attention. A notification (screenrig notifications) skips a",
     "  notice whose alert is acknowledged or snoozed while the notice is in its",
-    "  hold, and every notice about a muted screen. A project has at most 50",
-    "  current mutes.",
+    "  hold, and every notice about a muted screen. An organization has at most 50",
+    "  current mutes across its projects.",
   ].join("\n"));
 
   alerts.command("list").description("List this project's screen alerts, open first, with the counts the dashboard shows")

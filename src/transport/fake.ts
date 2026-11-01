@@ -1872,7 +1872,7 @@ export function memoryBackend(options: {
     body: { items: feedback.get("feature") ?? [] },
   }));
 
-  // Customer webhooks: at most 20 per project (email notifications count too),
+  // Customer webhooks: at most 50 per organization (email notifications count too),
   // secret only on create and rotate-secret, and an exact Idempotency-Key
   // replay returns the same answer (secret included), like the server's
   // 24-hour idempotency record.
@@ -1916,7 +1916,7 @@ export function memoryBackend(options: {
     const body = (req.body ?? {}) as { url?: string; event_types?: string[]; enabled?: boolean; description?: string };
     const rejected = webhookUrlRejected(body.url);
     if (rejected) return rejectedUrl(rejected);
-    if (webhooks.size + notifications.size >= 20) return problem(409, "webhook_limit_reached", "The project already has the maximum of 20 notifications.");
+    if (webhooks.size + notifications.size >= 50) return problem(409, "webhook_limit_reached", "The organization already has the maximum of 50 notifications.");
     webhookSequence += 1;
     const webhook: Record<string, unknown> = {
       id: `whk_${String(webhookSequence).padStart(20, "A")}`,
@@ -2101,7 +2101,7 @@ export function memoryBackend(options: {
     };
     const refusal = notificationRefusal(notification);
     if (refusal) return refusal;
-    if (webhooks.size + notifications.size >= 20) return problem(409, "notification_limit_reached", "The project already has the maximum of 20 notifications.");
+    if (webhooks.size + notifications.size >= 50) return problem(409, "notification_limit_reached", "The organization already has the maximum of 50 notifications.");
     notifications.set(notification.id as string, notification);
     notificationDeliveries.set(notification.id as string, []);
     return { status: 201, headers: { "cache-control": "no-store" }, body: email || chat ? { ...notification } : { ...notification, secret: webhookSecret() } };
@@ -2212,7 +2212,7 @@ export function memoryBackend(options: {
   // Screen alerts and mutes. An alert's muted and attention are derived on every
   // read from its acknowledgement, its snooze and the current mutes, as the
   // server derives them. Acknowledge is for an open alert (alert_not_open), an
-  // end is at most 30 days ahead, a project has at most 50 current mutes, and an
+  // end is at most 30 days ahead, an organization has at most 50 current mutes, and an
   // exact Idempotency-Key replay returns the same answer.
   const alerts = new Map<string, Record<string, unknown>>();
   const alertMutes = new Map<string, Record<string, unknown>>();
@@ -2290,7 +2290,7 @@ export function memoryBackend(options: {
     if (!screenIds.length && !tags.length) return invalidRequest("A mute needs at least one screen id or tag.", "screen_ids");
     if (screenIds.length > 100) return invalidRequest("screen_ids takes at most 100 screens.", "screen_ids");
     if (typeof body.note === "string" && [...body.note].length > 200) return invalidRequest("note takes at most 200 characters.", "note");
-    if (currentMutes().length >= 50) return problem(409, "alert_mute_limit_reached", "The project already has the maximum of 50 current mutes.");
+    if (currentMutes().length >= 50) return problem(409, "alert_mute_limit_reached", "The organization already has the maximum of 50 current mutes.");
     alertMuteSequence += 1;
     const mute: Record<string, unknown> = {
       id: `amt_${String(alertMuteSequence).padStart(20, "D")}`, screen_ids: screenIds, tags, until: body.until,
@@ -2308,7 +2308,7 @@ export function memoryBackend(options: {
     return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
   }));
 
-  // Fleet links: at most 50 per project; url carries the secret in the
+  // Fleet links: at most 50 per organization; url carries the secret in the
   // #fleet= fragment, rotate replaces it, and an exact Idempotency-Key replay
   // returns the same answer.
   const fleetLinks = new Map<string, Record<string, unknown>>();
@@ -2341,7 +2341,7 @@ export function memoryBackend(options: {
     const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string; max_screens?: number; expires_at?: string };
     const unknown = unknownPlaylist(body.playlist_id);
     if (unknown) return unknown;
-    if (fleetLinks.size >= 50) return problem(409, "fleet_link_limit_reached", "The project has the maximum of 50 fleet links.");
+    if (fleetLinks.size >= 50) return problem(409, "fleet_link_limit_reached", "The organization has the maximum of 50 fleet links.");
     fleetLinkSequence += 1;
     const link: Record<string, unknown> = {
       id: `flk_${String(fleetLinkSequence).padStart(16, "A")}`,
@@ -2397,7 +2397,7 @@ export function memoryBackend(options: {
     return { status: 200, headers: { etag: `"${link.revision}"`, "cache-control": "no-store" }, body: { ...link } };
   }));
 
-  // CAP triggers: at most 20 per project; the password is returned only by
+  // CAP triggers: at most 20 per organization; the password is returned only by
   // create and rotate-secret, test shows a 60-second Exercise alert, and an
   // exact Idempotency-Key replay returns the same answer.
   const triggers = new Map<string, Record<string, unknown>>();
@@ -2433,7 +2433,7 @@ export function memoryBackend(options: {
       kind?: string; label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number; pull?: Record<string, unknown>;
       overlay?: { show?: string; edge?: string; style?: Record<string, unknown>; mapping?: Record<string, unknown>; signing?: boolean };
     };
-    if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The project has the maximum of 20 triggers.");
+    if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The organization has the maximum of 20 triggers.");
     if (body.kind === "overlay" && !body.overlay?.show) return problem(400, "invalid_request", "overlay.show is required: bar or takeover.");
     triggerSequence += 1;
     const id = `trg_${String(triggerSequence).padStart(16, "A")}`;
@@ -2714,7 +2714,7 @@ export function memoryBackend(options: {
     return { status: 200, headers: {}, body: { items: items.slice(0, limit) } };
   });
 
-  // Content campaigns: at most 100 per project, listed in precedence order
+  // Content campaigns: at most 100 per organization, listed in precedence order
   // (priority, then newest). A write bumps the revision, If-Match guards it,
   // and an exact Idempotency-Key replay returns the same answer. A playlist id
   // starting pl_UNAPPROVED has no approved version. A screen's standing is
@@ -2814,7 +2814,7 @@ export function memoryBackend(options: {
     const audience = campaignAudienceProblem(body.audience);
     if (audience) return audience;
     if (typeof body.from === "string" && typeof body.until === "string" && body.until <= body.from) return campaignInvalid("until", "must be later than from");
-    if (campaigns.size >= 100) return problem(409, "campaign_limit_reached", "The project already has the maximum of 100 campaigns.");
+    if (campaigns.size >= 100) return problem(409, "campaign_limit_reached", "The organization already has the maximum of 100 campaigns.");
     const unknown = unknownPlaylist(body.playlist_id);
     if (unknown) return unknown;
     if (body.playlist_id.startsWith("pl_UNAPPROVED")) return problem(409, "playlist_not_approved", "The playlist has no approved version: a person approves its review before any screen uses it.");

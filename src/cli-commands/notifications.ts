@@ -72,7 +72,7 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  Slack, Teams, PagerDuty and Telegram post one message per outage and screen and",
     "  a recovery after it; their credential is sealed, never shown again (only a",
     "  masked destination_hint), and a - value reads it from stdin. A",
-    "  project has at most 20 notifications of every channel, and a new",
+    "  organization has at most 50 notifications of every channel across its projects, and a new",
     "  project starts with one email to its owner for screens that go offline.",
   ].join("\n"));
 

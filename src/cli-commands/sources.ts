@@ -22,7 +22,7 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
     "  A data source reads an outside address on a schedule and writes the result to",
     "  one card's dynamic properties, so the card stays current without anyone",
     "  republishing: screens refetch the document when it changes. One source writes",
-    "  one card, and a project has at most 200. Kinds: ics (iCalendar and webcal://",
+    "  one card, and an organization has at most 200 across its projects. Kinds: ics (iCalendar and webcal://",
     "  addresses: Google, Outlook, iCloud and Nextcloud calendars into an events card,",
     "  or a study-rooms card with one room per calendar), sheets, csv, json,",
     "  microsoft365, google_calendar, momentus, square and shopify.",
@@ -123,7 +123,7 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
     .option("--set <KEY=VALUE>", SET_HELP, accumulate(setPairCheck))
     .option("--secret <NAME=VALUE>", SECRET_HELP, accumulate(secretPairCheck))
     .action(bind(handleSourceTest));
-  addCommandNotes(test, "Prints the document the source would write, whether the card accepts it, and what the run noticed (a time zone it could not place, events cut at a limit). At most 30 previews a minute per project.");
+  addCommandNotes(test, "Prints the document the source would write, whether the card accepts it, and what the run noticed (a time zone it could not place, events cut at a limit). At most 30 previews a minute per organization.");
   addCommandExamples(test,
     "screenrig source test --kind ics --card crd_CARD --set calendars='[{\"key\":\"lobby\"}]' --secret calendar_url.lobby=@lobby.url",
     "screenrig source test src_SOURCE",

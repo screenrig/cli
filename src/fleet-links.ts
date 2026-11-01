@@ -126,7 +126,7 @@ export function fleetLinkProblem(error: unknown, id?: string): unknown {
   if (problem.code === "fleet_link_limit_reached") {
     return new CliError({
       ...problem,
-      detail: `This project already has the maximum of ${FLEET_LINKS_MAX} fleet links. Nothing was created.`,
+      detail: `This organization already has the maximum of ${FLEET_LINKS_MAX} fleet links across its projects. Nothing was created.`,
       next: problem.next ?? {
         command: "screenrig fleet-links list",
         reason: "Delete a fleet link you no longer need with screenrig fleet-links delete ID, then rerun create. Screens it created stay.",

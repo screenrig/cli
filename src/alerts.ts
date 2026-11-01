@@ -13,7 +13,7 @@ export const ALERT_MUTE_ID_PATTERN = /^(?:(?:stage|qa|development)_)?amt_[A-Za-z
 export const ALERT_STATES = ["open", "resolved", "all"] as const;
 export const ALERTS_LIMIT_MAX = 200;
 const ALERTS_CURSOR_MAX = 200;
-/** A project has at most this many current mutes. */
+/** An organization has at most this many current mutes. */
 export const ALERT_MUTES_MAX = 50;
 export const ALERT_MUTE_SCREENS_MAX = 100;
 export const ALERT_NOTE_MAX = 200;
@@ -140,7 +140,7 @@ export function alertProblem(error: unknown, id?: string): unknown {
     return withNext("screenrig alerts list", `${id ? `Alert ${id} has resolved` : "The alert has resolved"}, so there is nothing to acknowledge or snooze. List the open alerts and pick one of those.`);
   }
   if (problem.code === "alert_mute_limit_reached") {
-    return withNext("screenrig alerts mutes", `A project has at most ${ALERT_MUTES_MAX} current mutes. End one with screenrig alerts unmute MUTE_ID, or cover more screens with one mute by tag, then rerun mute. Nothing was created.`);
+    return withNext("screenrig alerts mutes", `An organization has at most ${ALERT_MUTES_MAX} current mutes across its projects. End one with screenrig alerts unmute MUTE_ID, or cover more screens with one mute by tag, then rerun mute. Nothing was created.`);
   }
   if (problem.code === "not_found" && id !== undefined) {
     return ALERT_MUTE_ID_PATTERN.test(id)

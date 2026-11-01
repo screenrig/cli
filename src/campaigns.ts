@@ -511,7 +511,7 @@ export function campaignProblem(error: unknown, id?: string, subject: "campaign"
   if (problem.code === "campaign_limit_reached") {
     return new CliError({
       ...problem,
-      detail: `This project already has the maximum of ${CAMPAIGNS_MAX} campaigns. Nothing was created.`,
+      detail: `This organization already has the maximum of ${CAMPAIGNS_MAX} campaigns across its projects. Nothing was created.`,
       next: problem.next ?? {
         command: "screenrig campaign list",
         reason: "Delete a campaign you no longer need with screenrig campaign delete ID, then rerun create.",

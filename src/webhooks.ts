@@ -107,7 +107,7 @@ export function webhookProblem(error: unknown, id?: string): unknown {
   if (problem.code === "webhook_limit_reached") {
     return new CliError({
       ...problem,
-      detail: "This project already has the maximum of 20 notifications, email and webhook together. Nothing was created.",
+      detail: "This organization already has the maximum of 50 notifications, email and webhook together, across its projects. Nothing was created.",
       next: problem.next ?? {
         command: "screenrig notifications list",
         reason: "Delete a notification you no longer need with screenrig notifications delete ID, then rerun create.",

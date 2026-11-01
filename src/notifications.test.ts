@@ -317,14 +317,14 @@ test("webhook_url_rejected shows the server's reason, exits 8, and clears the re
 test("notification_limit_reached counts both channels: exit 5, guidance, no saved key", async () => {
   const env = await enrolled();
   const transport = memoryBackend();
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < 50; index += 1) {
     if (index % 2) await createWebhook(transport, env, "--description", `hook ${index}`);
     else await createEmail(transport, env, "--description", `mail ${index}`);
   }
   const refused = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "screen_offline"], transport, env);
   assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
   assert.equal(refused.envelope.error!.code, "notification_limit_reached");
-  assert.match(refused.envelope.error!.detail, /maximum of 20 notifications of every channel together/);
+  assert.match(refused.envelope.error!.detail, /maximum of 50 notifications of every channel together/);
   assert.equal(refused.envelope.error!.next!.command, "screenrig notifications list");
   assert.match(refused.envelope.error!.next!.reason, /notifications delete ID/);
   assert.equal(refused.envelope.warnings, undefined);

@@ -10,7 +10,7 @@ const outputOption = () => new Option("--output <FILE>", "File to write (with --
 
 export function registerPlaybackCommands(root: Command, bind: CommandActionBinder): void {
   const playback = root.command("playback").description("Inspect playback records");
-  addCommandNotes(playback, "Billing and limits:\n  Each JSON page and each CSV stream is one billed API request. playback plays\n  --all bills one request per page it follows. Every plays request and every\n  CSV export also spends the playback export budget (30 per minute per project);\n  past it the answer is rate_limited (exit 7) with retry_after_seconds.");
+  addCommandNotes(playback, "Billing and limits:\n  Each JSON page and each CSV stream is one billed API request. playback plays\n  --all bills one request per page it follows. Every plays request and every\n  CSV export also spends the playback export budget (30 per minute per organization);\n  past it the answer is rate_limited (exit 7) with retry_after_seconds.");
 
   playback.command("list").description("List daily playback aggregates, or export them as CSV")
     .option("--screen-id <ID>", "Filter playback by screen")
