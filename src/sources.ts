@@ -315,7 +315,7 @@ export function sourceProblem(error: unknown, id?: string): unknown {
         : withNext("screenrig help source create", name ? `Enter ${name} with --secret ${name}=@FILE (or - for stdin).` : "Enter each secret the kind needs with --secret NAME=@FILE.");
     }
     case "source_limit_reached":
-      return withNext("screenrig source list", "A project has at most 200 data sources. Delete one with screenrig source delete SOURCE_ID, then rerun create. Nothing was created.");
+      return withNext("screenrig source list", "An organization has at most 200 data sources across its projects. Delete one with screenrig source delete SOURCE_ID, then rerun create. Nothing was created.");
     case "source_has_no_rooms":
       return withNext("screenrig source list", "Only a source that reads a booking system's rooms (kind momentus) has a room mapping. Pick one of that kind.");
     case "source_busy":

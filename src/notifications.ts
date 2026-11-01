@@ -10,7 +10,7 @@ import { table } from "./webhooks.js";
 
 /** Backend Notification.id shape (vendor/openapi.yaml): whk_ for a webhook, ntf_ for every other channel. */
 export const NOTIFICATION_ID_PATTERN = /^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$/;
-export const NOTIFICATIONS_MAX = 20;
+export const NOTIFICATIONS_MAX = 50;
 /** The chat and pager channels and the create flag that names each one's credential (NotificationWrite.destination). */
 export const NOTIFICATION_CHAT_CHANNELS = [
   { channel: "slack", flag: "slack" }, { channel: "teams", flag: "teams" },
@@ -290,7 +290,7 @@ export function notificationProblem(error: unknown, id?: string): unknown {
   if (problem.code === "notification_limit_reached") {
     return new CliError({
       ...problem,
-      detail: `This project already has the maximum of ${NOTIFICATIONS_MAX} notifications of every channel together. Nothing was created.`,
+      detail: `This organization already has the maximum of ${NOTIFICATIONS_MAX} notifications of every channel together, across its projects. Nothing was created.`,
       next: problem.next ?? {
         command: "screenrig notifications list",
         reason: "Delete a notification you no longer need with screenrig notifications delete ID, then rerun create.",

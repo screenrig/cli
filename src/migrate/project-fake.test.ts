@@ -183,7 +183,7 @@ export function fakeProject(options: { linkCap?: number; campaignCap?: number } 
 
   route("GET", "/api/fleet-links", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...links.values()].map((link) => ({ ...link })) } }));
   route("POST", "/api/fleet-links", keyed((req) => {
-    if (links.size >= (options.linkCap ?? 50)) return problem(409, "fleet_link_limit_reached", "This project already has the maximum of 50 fleet links.");
+    if (links.size >= (options.linkCap ?? 50)) return problem(409, "fleet_link_limit_reached", "This organization already has the maximum of 50 fleet links.");
     const link: Row = { ...body(req), id: next("flk"), enabled: true, tags: body(req).tags ?? [], screens_created: 0, revision: 1, url: `https://play.screenrig.ai/player/#fleet=srfl_${"A".repeat(43)}` };
     links.set(link.id, link);
     return { status: 201, headers: {}, body: link };
@@ -195,7 +195,7 @@ export function fakeProject(options: { linkCap?: number; campaignCap?: number } 
 
   route("GET", "/api/campaigns", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...campaigns.values()] } }));
   route("POST", "/api/campaigns", keyed((req) => {
-    if (campaigns.size >= (options.campaignCap ?? 100)) return problem(409, "campaign_limit_reached", "This project already has the maximum of 100 campaigns.");
+    if (campaigns.size >= (options.campaignCap ?? 100)) return problem(409, "campaign_limit_reached", "This organization already has the maximum of 100 campaigns.");
     const campaign: Row = { ...body(req), id: next("cmp"), paused: false, revision: 1 };
     campaigns.set(campaign.id, campaign);
     return { status: 201, headers: {}, body: campaign };

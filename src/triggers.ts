@@ -151,7 +151,7 @@ export function triggerProblem(error: unknown, id?: string): unknown {
   if (problem.code === "trigger_limit_reached") {
     return new CliError({
       ...problem,
-      detail: `This project already has the maximum of ${TRIGGERS_MAX} triggers. Nothing was created.`,
+      detail: `This organization already has the maximum of ${TRIGGERS_MAX} triggers across its projects. Nothing was created.`,
       next: problem.next ?? {
         command: "screenrig triggers list",
         reason: "Delete a trigger you no longer need with screenrig triggers delete ID, then rerun create.",

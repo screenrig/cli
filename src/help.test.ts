@@ -663,7 +663,7 @@ test("notifications help, JSON help and preflight agree on option relationships 
     assert.match(commandHelp(["notifications", name]).notes.join("\n"), /needs Manage access/i, `${name} states its write scope`);
   }
   assert.deepEqual(commandHelp(["notifications"]).commands.map((child) => child.name), ["create", "list", "show", "update", "delete", "rotate-secret", "test", "resubscribe", "deliveries"]);
-  assert.match(commandHelp(["notifications"]).usage, /at most 20\s+notifications of every channel/);
+  assert.match(commandHelp(["notifications"]).usage, /at most 50\s+notifications of every channel/);
   assert.match(commandHelp(["webhooks"]).usage, /Email and screen alerts[\s\S]*are screenrig notifications/);
 });
 

@@ -10,7 +10,7 @@ const nameOption = (value: string): string => { fleetLinkName(value); return val
 
 export function registerFleetLinksCommands(root: Command, bind: CommandActionBinder): void {
   const links = root.command("fleet-links").description("Turn every device that opens one Player URL into a screen");
-  addCommandNotes(links, "Fleet links:\n  A fleet link is one Player URL (https://play.<domain>/player/#fleet=...) for a\n  device manager, such as a Google Admin console kiosk app. Every device that\n  opens it becomes its own screen in this project, without a pairing code, with\n  the link's tags and playlist and a label from the device (its administrator\n  asset ID, then location). A device keeps its one screen across reloads. The\n  URL is a credential that creates screens: give it only to the device manager.\n  A link can expire at a set time. A project has at most 50.");
+  addCommandNotes(links, "Fleet links:\n  A fleet link is one Player URL (https://play.<domain>/player/#fleet=...) for a\n  device manager, such as a Google Admin console kiosk app. Every device that\n  opens it becomes its own screen in this project, without a pairing code, with\n  the link's tags and playlist and a label from the device (its administrator\n  asset ID, then location). A device keeps its one screen across reloads. The\n  URL is a credential that creates screens: give it only to the device manager.\n  A link can expire at a set time. An organization has at most 50 across its projects.");
 
   links.command("create").description("Create a fleet link and print its Player URL")
     .requiredOption("--name <NAME>", "Name the link, 1 to 80 characters (required)", nameOption)

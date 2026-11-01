@@ -63,8 +63,8 @@ export function registerReportsCommands(root: Command, bind: CommandActionBinder
     "  the seven days before, or last month. Recipients are members of the project,",
     "  named by user id or by the email address of the member; anyone else is",
     "  refused, and a member who leaves stops receiving it. A failed run is retried",
-    "  and shows in the subscription as last_status failed with last_error. A project",
-    "  has at most 50 subscriptions. Reading needs the project capability.",
+    "  and shows in the subscription as last_status failed with last_error. An organization",
+    "  has at most 50 subscriptions across its projects. Reading needs the project capability.",
   ].join("\n"));
 
   subscriptions.command("list").description("List this project's report subscriptions").action(bind(handleReportSubscriptionsList));

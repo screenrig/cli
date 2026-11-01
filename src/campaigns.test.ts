@@ -760,7 +760,7 @@ test("campaign writes surface the server's refusals with the next step", async (
   assert.equal(earlierUntil.envelope.error?.errors?.[0]?.field, "until");
 });
 
-test("campaign create at the project limit names campaign delete", async () => {
+test("campaign create at the organization limit names campaign delete", async () => {
   const env = await enrolled();
   const transport = backend();
   for (let index = 0; index < 100; index += 1) {
@@ -770,7 +770,7 @@ test("campaign create at the project limit names campaign delete", async () => {
   const limited = await cli(["--json", "campaign", "create", "--name", "One more", "--playlist-id", PLAYLIST, "--tag", "Lobby"], transport, env);
   assert.equal(limited.code, ExitCode.Conflict, limited.stdout);
   assert.equal(limited.envelope.error?.code, "campaign_limit_reached");
-  assert.match(limited.envelope.error?.detail ?? "", /maximum of 100 campaigns\. Nothing was created\./);
+  assert.match(limited.envelope.error?.detail ?? "", /maximum of 100 campaigns across its projects\. Nothing was created\./);
   assert.equal(limited.envelope.error?.next?.command, "screenrig campaign list");
   assert.match(limited.envelope.error?.next?.reason ?? "", /campaign delete ID/);
 });

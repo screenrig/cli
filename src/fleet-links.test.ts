@@ -163,12 +163,12 @@ test("an unknown playlist and the fleet link limit are definite refusals with gu
 
   const limited = new FakeTransport().on("POST", "/api/fleet-links", () => ({
     status: 409, headers: { "content-type": "application/problem+json" },
-    body: { status: 409, code: "fleet_link_limit_reached", title: "Project has the maximum fleet links", detail: "The project has the maximum of 50 fleet links." },
+    body: { status: 409, code: "fleet_link_limit_reached", title: "Organization has the maximum fleet links", detail: "The organization has the maximum of 50 fleet links." },
   }));
   const refused = await cli(["--json", "fleet-links", "create", "--name", "Lobby"], limited, env);
   assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
   assert.equal(refused.envelope.error!.code, "fleet_link_limit_reached");
-  assert.match(refused.envelope.error!.detail, /maximum of 50 fleet links\. Nothing was created\./);
+  assert.match(refused.envelope.error!.detail, /maximum of 50 fleet links across its projects\. Nothing was created\./);
   assert.equal(refused.envelope.error!.next!.command, "screenrig fleet-links list");
   assert.match(refused.envelope.error!.next!.reason, /screenrig fleet-links delete ID/);
   assert.equal(refused.envelope.warnings, undefined);
