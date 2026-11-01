@@ -46,7 +46,7 @@ function fakeApi(calls: Calls, overrides: Partial<Record<string, unknown>> = {})
     "/api/notifications": { items: [{ id: "ntf_1", url: "https://hooks.invalid/services/T0/B0/XXXX", secret: "whsec_1", recipients: ["owner"] }] },
     "/api/alert-mutes": { items: [] },
     "/api/webhooks": { items: [{ id: "whk_1", url: "https://example.invalid/receive?key=abc" }] },
-    "/api/applications": [{ id: "app_1" }],
+    "/api/applications": [],
     "/api/triggers": { items: [] },
     "/api/report-subscriptions": { items: [{ id: "rsub_1" }] },
     "/api/media": [{ id: "med_1", filename: "a.jpg", content_type: "image/jpeg", primitive: "image", bytes: IMAGE.length, sha256: sha(IMAGE), tags: [] }],
@@ -152,6 +152,53 @@ test("card documents and their metadata survive exports with and without media",
       }
     });
   }
+});
+
+test("published application files are reported as omitted on exports and refreshes, including without media", async () => {
+  await inTemp(async (directory) => {
+    const application = { id: "app_1", latest_ready_release: "rel_2", revision: 3 };
+    const playlist = (release: string) => ({ id: "pl_1", pages: [{ primitives: [{ primitive: "application", release_id: release }] }] });
+    const firstRevision = { revision: { revision: 1 }, playlist: playlist("rel_1") };
+    const latestRevision = { revision: { revision: 2 }, playlist: playlist("rel_2") };
+    for (const media of [true, false, true]) {
+      const result = await runProjectExport(fakeApi({ gets: [], files: [], appends: [] }, {
+        "/api/applications": [application],
+        "/api/playlists/pl_1": playlist("rel_2"),
+        "/api/playlists/pl_1/revisions/1": firstRevision,
+        "/api/playlists/pl_1/revisions/2": latestRevision,
+      }), { directory, media, now: NOW });
+      assert.equal(result.failed, 1, "missing application content makes the export incomplete");
+      const omitted = result.sections.find((section) => section.name === "application files");
+      assert.equal(omitted?.status, "failed");
+      assert.equal(omitted?.code, "application_content_omitted");
+      assert.match(omitted?.detail ?? "", /original application archives/i);
+      const read = async (relative: string): Promise<unknown> => JSON.parse(await readFile(path.join(directory, relative), "utf8")) as unknown;
+      assert.deepEqual(await read("applications.json"), [application], "metadata remains recoverable");
+      assert.deepEqual(await read("triggers.json"), [], "triggers still export");
+      assert.deepEqual(await read("playlists/pl_1/revisions/1.json"), firstRevision, "the old release pin is preserved");
+      assert.deepEqual(await read("playlists/pl_1/revisions/2.json"), latestRevision, "the current release pin is preserved");
+      const manifest = await read("export.json") as { sections: unknown };
+      assert.deepEqual(manifest.sections, result.sections, "the on-disk copy records the omission too");
+      const entry = result.files.find((file) => file.path === "applications.json");
+      assert.ok(entry);
+      assert.equal(entry.sha256, sha(await readFile(path.join(directory, entry.path))));
+    }
+  });
+});
+
+test("an empty application catalog does not hide release files referenced only by a playlist revision", async () => {
+  await inTemp(async (directory) => {
+    const api = fakeApi({ gets: [], files: [], appends: [] });
+    let result = await runProjectExport(api, { directory, media: false, now: NOW });
+    assert.equal(result.failed, 0, "a project without applications needs no application files");
+    const get = api.get.bind(api);
+    api.get = async (route, query) => route === "/api/playlists/pl_1/revisions/1"
+      ? { revision: { revision: 1 }, playlist: { pages: [{ primitives: [{ primitive: "application", release_id: "rel_OLD" }] }] } }
+      : get(route, query);
+    result = await runProjectExport(api, { directory, media: false, now: NOW });
+    assert.equal(result.failed, 1);
+    assert.equal(result.sections.find((section) => section.name === "application files")?.status, "failed");
+  });
 });
 
 test("a listed card or document that cannot be read fails the section instead of skipping missing content", async () => {

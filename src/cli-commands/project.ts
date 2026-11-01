@@ -45,7 +45,7 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     .addOption(reportFormatOption())
     .addOption(reportOutputOption("health-trend.FORMAT"))
     .action(bind(handleProjectHealthTrend));
-  const exportCommand = project.command("export").description("Write a complete copy of this project to a directory in open formats")
+  const exportCommand = project.command("export").description("Write this project's data to a directory in open formats with each section's outcome")
     .argument("<DIR>", "Directory to write (created if needed; a rerun continues and refreshes it)")
     .option("--no-media", "Skip the original media files (the manifest still lists them with their hashes)")
     .option("--since <YYYY-MM-DD>", "First UTC day of the plays, uptime and playback CSV and of the event log (default: as far back as the plan keeps the CSV data, and the whole log)");
@@ -55,14 +55,18 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     "  DIR gets JSON for the project, screens, screen folders, tags, per-screen",
     "  schedules, playlists with every revision, campaigns, direct campaigns, cards and",
     "  their data, sources (credentials never included), notifications, webhooks (no",
-    "  signing secrets or receiver URLs), mutes, applications, triggers and report",
+    "  signing secrets or receiver URLs), mutes, application metadata, triggers and report",
     "  subscriptions; the original media files (media/files) with media/manifest.json",
     "  holding each file's SHA-256; CSV for plays, playback, uptime and alerts (data/);",
     "  and the project event log (log/events.jsonl). export.json lists every file with",
     "  its size and SHA-256. A rerun keeps media files that are complete and continues",
     "  partial ones. It reads through the project's own routes, so it needs the",
     "  access those reads need; a section the credential cannot read is reported as",
-    "  skipped. Each request is a billed API request, and media downloads are egress.",
+    "  skipped. Application files are reported as omitted with complete:false and",
+    "  an export_application_content_omitted warning, including with --no-media.",
+    "  Retain original application archives alongside the export for recovery;",
+    "  rerunning refreshes metadata. Each request is a billed API request, and",
+    "  media downloads are egress.",
   ].join("\n"));
   project.command("rename").description("Rename this project")
     .argument("<NAME>", "Project display name")

@@ -275,7 +275,8 @@ export const handleProjectExport = commandHandler(async (args, runtime, resolved
     progress: (line) => runtime.stderr.write(`${line}\n`),
   });
   const warnings: Warning[] = result.sections.filter((section) => section.status !== "ok").map((section) => ({
-    code: section.status === "failed" ? "export_section_failed" : "export_section_skipped",
+    code: section.code === "application_content_omitted" ? "export_application_content_omitted"
+      : section.status === "failed" ? "export_section_failed" : "export_section_skipped",
     message: `${section.name}: ${section.detail ?? section.status}`,
   }));
   const data = {
@@ -290,7 +291,7 @@ export const handleProjectExport = commandHandler(async (args, runtime, resolved
       `  files: ${data.files} (${formatBytes(data.bytes)}), listed in export.json with their SHA-256`,
       `  media: ${result.media.listed} listed, ${result.media.downloaded} downloaded, ${result.media.kept} already complete, ${result.media.failed} failed`,
       ...result.sections.filter((section) => section.status !== "ok").map((section) => `  ${section.status}: ${section.name}: ${section.detail ?? ""}`),
-      result.failed > 0 ? "  Run the same command again to continue: finished files are kept." : "  Run the same command again at any time to refresh the copy.",
+      result.failed > 0 ? "  Check each section's recovery steps before rerunning; finished files are kept." : "  Run the same command again at any time to refresh the copy.",
     ].join("\n"),
   };
 });

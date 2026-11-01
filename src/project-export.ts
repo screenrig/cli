@@ -5,10 +5,10 @@ import path from "node:path";
 import { CliError } from "./problems.js";
 
 /**
- * `project export DIR`: a complete copy of a project in open formats, composed
+ * `project export DIR`: project data in open formats with section outcomes, composed
  * from the project's own read routes. JSON for the configuration (screens,
  * folders, tags, playlists with revisions, schedules, campaigns, cards, sources,
- * notifications, webhooks, applications, triggers), the original media files
+ * notifications, webhooks, application metadata, triggers), the original media files
  * with a manifest of hashes, CSV for plays, uptime and alerts, and the event log
  * as JSON lines. Secrets are never read back by the routes (a webhook's signing
  * secret, a source's credentials) and are stripped again here.
@@ -167,11 +167,22 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
   const say = options.progress ?? (() => undefined);
   const sections: ExportSection[] = [];
   const written = new Set<string>();
+  let playlistHasApplications = false;
   const result: ExportResult = { directory: root, sections, files: [], media: { listed: 0, downloaded: 0, kept: 0, failed: 0 }, failed: 0 };
 
   const json = async (relative: string, value: unknown): Promise<void> => {
     await writeAtomic(path.join(root, relative), `${JSON.stringify(value, null, 2)}\n`);
     written.add(relative);
+    if (relative.startsWith("playlists/")) {
+      // Revision details wrap the historical playlist; the catalog and current
+      // playlist do not. Old pins still need files even after an app is deleted.
+      for (const item of Array.isArray(value) ? asArray(value) : [asRecord(value)]) {
+        const playlist = asRecord(item.playlist ?? item);
+        if (asArray(playlist.pages).some((page) => asArray(page.primitives).some((primitive) => primitive.primitive === "application"))) {
+          playlistHasApplications = true;
+        }
+      }
+    }
   };
   const requiredGet = async (pathName: string): Promise<unknown> => {
     try {
@@ -287,11 +298,21 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     return 1;
   });
 
+  let applications: Array<Record<string, unknown>> = [];
   await section("applications", async () => {
-    await json("applications.json", asArray(await api.list("/api/applications")));
+    applications = asArray(await api.list("/api/applications"));
+    await json("applications.json", applications);
     await json("triggers.json", asArray(asRecord(await api.get("/api/triggers")).items).map(stripSecrets));
     return 2;
   });
+
+  if (applications.length > 0 || playlistHasApplications) {
+    sections.push({
+      name: "application files", status: "failed", files: 0, code: "application_content_omitted",
+      detail: "Published application files (HTML, scripts, stylesheets and other release assets), including playlist-pinned releases, are omitted. Retain the original application archives alongside this export; rerunning does not add these files.",
+    });
+    result.failed += 1;
+  }
 
   await section("report subscriptions", async () => {
     await json("report-subscriptions.json", asArray(asRecord(await api.get("/api/report-subscriptions")).items));
