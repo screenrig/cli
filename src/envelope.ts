@@ -31,7 +31,7 @@ export interface NormalizedProblem {
   feature?: string;
   /** feature_not_in_plan only: the project's plan. */
   plan?: string;
-  /** feature_not_in_plan, member_limit_reached and quota_exceeded: the lowest plan that lifts the refusal. */
+  /** feature_not_in_plan, member_limit_reached, quota_exceeded and project_limit_reached: the lowest plan that lifts the refusal. */
   required_plan?: string;
   /** Server 5xx only: whether retrying the unchanged request may succeed. */
   retryable?: boolean;

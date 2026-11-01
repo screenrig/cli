@@ -157,8 +157,8 @@ test("a server hint on feature_not_in_plan is kept and gains the plan that inclu
   assert.equal(withPlanGuidance({ ...bare, hint: "Server hint." }).hint, "Server hint.");
 });
 
-test("member_limit_reached and quota_exceeded name the plan the server says has room", () => {
-  for (const [code, status] of [["member_limit_reached", 409], ["quota_exceeded", 413]] as const) {
+test("member_limit_reached, quota_exceeded and project_limit_reached name the plan the server says has room", () => {
+  for (const [code, status] of [["member_limit_reached", 409], ["quota_exceeded", 413], ["project_limit_reached", 409]] as const) {
     const problem = withPlanGuidance({ ...PLAN_BASE, code, status, hint: "The project is at its limit.", required_plan: "enterprise" });
     assert.match(problem.hint ?? "", /^The project is at its limit\. The Enterprise plan raises this limit/, code);
     assert.doesNotMatch(problem.hint ?? "", /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$|\d/i, code);

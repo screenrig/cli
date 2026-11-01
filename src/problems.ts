@@ -531,7 +531,7 @@ function planTitle(id: string): string {
  * Plan guidance. feature_not_in_plan is a 402 that credit does not unlock, so
  * it must not read like the credit 402s above: the feature belongs to the plan
  * `required_plan` names, retrying is refused the same way, and the task goes on
- * without it. member_limit_reached and quota_exceeded that carry
+ * without it. member_limit_reached, quota_exceeded and project_limit_reached that carry
  * `required_plan` also name the plan that has room. Server guidance is kept;
  * the plan is added to a hint that does not already name it.
  */
@@ -552,7 +552,7 @@ export function withPlanGuidance(problem: NormalizedProblem): NormalizedProblem 
     }
     return guided;
   }
-  if ((problem.code === "member_limit_reached" || problem.code === "quota_exceeded") && plan && problem.hint && !problem.hint.includes(plan)) {
+  if ((problem.code === "member_limit_reached" || problem.code === "quota_exceeded" || problem.code === "project_limit_reached") && plan && problem.hint && !problem.hint.includes(plan)) {
     return { ...problem, hint: `${problem.hint} The ${plan} plan raises this limit; tell the user if more is needed.` };
   }
   return guided;
@@ -603,7 +603,7 @@ const DEFAULT_HINTS: Record<string, string> = {
   application_in_use: "A screen is showing one of this application's releases. Assign those screens other content, then retry.",
   rate_limited: "Too many requests. Wait before retrying; retry_after_seconds says how long when the server sent it.",
   quota_exceeded: "The project is at a limit. Free space or use a smaller input, then retry.",
-  free_organization_limit: "This person already holds their free Standard organization, which takes any number of projects. Create the project there: screenrig organization list shows it, then screenrig project create NAME --organization-id ID. A second organization needs Premium or Enterprise; the user asks sales@screenrig.ai.",
+  free_organization_limit: "This person already holds their free Standard organization. Create the project there: screenrig organization list shows it, then screenrig project create NAME --organization-id ID. A second organization needs Premium or Enterprise; the user asks sales@screenrig.ai.",
   organization_plan_required: "This organization admits no new screens until a Premium or Enterprise plan pays for it. Move the project into the person's free organization with screenrig project moves and screenrig project move --organization-id ID, or the user asks sales@screenrig.ai for a plan.",
   feature_unavailable: "This project cannot use this feature. Do not retry; tell the user.",
   not_ready: "The resource is still being prepared. Wait a few seconds and retry, or follow its operation with screenrig operations wait OPERATION_ID.",
