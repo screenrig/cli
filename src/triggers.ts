@@ -3,6 +3,7 @@ import { CliError, usageError } from "./problems.js";
 import type { Trigger, TriggerAlert, TriggerDelivery, TriggerOverlay } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
 import { screenTag } from "./screen-fleet.js";
+import { verifyLines } from "./webhook-verify.js";
 
 /** Backend Trigger.id shape (vendor/openapi.yaml). */
 export const TRIGGER_ID_PATTERN = /^(?:(?:stage|qa|development)_)?trg_[A-Za-z0-9_-]{1,64}$/;
@@ -257,6 +258,7 @@ export function overlayLines(overlay: TriggerOverlay | undefined): string[] {
     `show: ${overlay.show}${overlay.edge ? ` on the ${overlay.edge} edge` : ""}`,
     `enabled: ${overlay.enabled}`,
     `signing: ${overlay.signing}`,
+    ...verifyLines(overlay.verify, overlay.handshake),
     ...when(overlay.card_id, "card_id"),
     ...(overlay.mapping ? ["mapping: set"] : []),
     ...(Object.keys(overlay.style ?? {}).length ? [`style: ${JSON.stringify(overlay.style)}`] : []),
@@ -318,7 +320,10 @@ export function triggerTableLines(items: Trigger[]): string[] {
 
 export function triggerDeliveryTableLines(items: TriggerDelivery[]): string[] {
   if (!items.length) return ["No deliveries in the last seven days"];
-  return table(["AT", "OUTCOME", "REASON", "STATUS", "BYTES", "ALERT", "DETAIL"], items.map((item) => [
-    item.at ?? "", item.outcome ?? "", item.reason ?? "-", String(item.status ?? ""), String(item.bytes ?? ""), item.alert_id ?? "-", item.detail ?? "",
+  // FILES appears only when a multipart post carried file parts, which are ignored and only counted.
+  const files = items.some((item) => item.files !== undefined);
+  return table(["AT", "OUTCOME", "REASON", "STATUS", "BYTES", "ALERT", ...(files ? ["FILES"] : []), "DETAIL"], items.map((item) => [
+    item.at ?? "", item.outcome ?? "", item.reason ?? "-", String(item.status ?? ""), String(item.bytes ?? ""), item.alert_id ?? "-",
+    ...(files ? [item.files === undefined ? "-" : String(item.files)] : []), item.detail ?? "",
   ]));
 }

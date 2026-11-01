@@ -18,8 +18,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources, bi, schedule, audit and reports add fifteen immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 64);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources, connections, bi, schedule, audit and reports add sixteen immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 65);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -350,6 +350,7 @@ test("root help is compact and every command is discoverable through immediate c
     "bi connection create grafana",
     "bi connection create powerbi",
     "bi connection create tableau",
+    "bi connection create web",
     "bi connection list",
     "bi connection show",
     "bi connection update",
@@ -362,8 +363,17 @@ test("root help is compact and every command is discoverable through immediate c
     "bi view update",
     "bi view test",
     "bi view delete",
+    "connection list",
+    "connection show",
+    "connection create microsoft",
+    "connection create google",
+    "connection update",
+    "connection test",
+    "connection connect",
+    "connection delete",
     "source list",
     "source show",
+    "source presets",
     "source create",
     "source update",
     "source test",
@@ -568,7 +578,13 @@ test("the canonical vocabulary is the only vocabulary", async () => {
     const webhookSelector = help.options.find(option => option.name === "--app-id");
     assert.equal(webhookSelector?.required, false, action);
     assert.equal(help.options.some(option => option.name === "--card"), true, action);
-    assert.deepEqual(help.relationships?.map(({ kind, options }) => ({ kind, options })), [{ kind: "exactlyOne", options: ["--app-id", "--card"] }], action);
+    const relationships = help.relationships?.map(({ kind, options }) => ({ kind, options }));
+    // Only create has the vendor flags, whose own relationships come first: each describes the vendor named by --verify.
+    const vendor = action === "create"
+      ? [["--verify-secret-file", "--verify"], ["--verify-header", "--verify"], ["--verify-encoding", "--verify"], ["--verify-timestamp-header", "--verify"], ["--verify-tolerance", "--verify-timestamp-header"]]
+        .map((options) => ({ kind: "requires", options }))
+      : [];
+    assert.deepEqual(relationships, [...vendor, { kind: "exactlyOne", options: ["--app-id", "--card"] }], action);
   }
   for (const action of ["update", "deliveries"]) {
     const card = commandHelp(["kv", "webhook", action]).options.find(option => option.name === "--card");

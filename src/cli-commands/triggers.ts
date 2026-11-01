@@ -4,12 +4,14 @@ import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleTriggersClear, handleTriggersCreate, handleTriggersDelete, handleTriggersDeliveries, handleTriggersList, handleTriggersRotateSecret, handleTriggersShow, handleTriggersTest, handleTriggersUpdate } from "../handlers/triggers.js";
 import { triggerDeliveriesLimit, triggerHoldOption, triggerName, triggerScreenIds, triggerTag } from "../triggers.js";
+import { addVerifyOptions, type VerifyOptionsTarget } from "./verify-options.js";
 
 const nameOption = (value: string): string => { triggerName(value); return value; };
+const OVERLAY_VERIFY: VerifyOptionsTarget = { scope: "Overlay", secret: "the trigger's srtg_ secret" };
 
 export function registerTriggersCommands(root: Command, bind: CommandActionBinder): void {
   const triggers = root.command("triggers").description("Show alerts from outside systems on screens");
-  addCommandNotes(triggers, "Triggers:\n  A trigger is a URL with its own secret that an outside system posts to. Two kinds.\n  CAP (the default): an emergency notification system (Everbridge, Rave, Alertus, an\n  IPAWS relay) posts CAP 1.2 alerts with HTTP Basic; an Alert takes the target screens\n  over with a full-screen card coloured by severity until the alert's <expires>, else\n  --for, and a Cancel or AllClear gives them back. Overlay (--kind overlay): Home\n  Assistant, a sensor hub or an alerting tool posts a few words (alert_id, title,\n  message, duration, clear) with Authorization: Bearer; --show bar draws a strip over\n  whatever plays, --show takeover plays the alert full screen. The same alert_id\n  updates one alert instead of stacking, a clear ends it, and every post holds its\n  alert for its duration from that post. The target is a tag or up to 500 screen ids.\n  An organization has at most 20 triggers across its projects, overlay triggers included.");
+  addCommandNotes(triggers, "Triggers:\n  A trigger is a URL with its own secret that an outside system posts to. Two kinds.\n  CAP (the default): an emergency notification system (Everbridge, Rave, Alertus, an\n  IPAWS relay) posts CAP 1.2 alerts with HTTP Basic; an Alert takes the target screens\n  over with a full-screen card coloured by severity until the alert's <expires>, else\n  --for, and a Cancel or AllClear gives them back. Overlay (--kind overlay): Home\n  Assistant, a sensor hub or an alerting tool posts a few words (alert_id, title,\n  message, duration, clear) with Authorization: Bearer; --show bar draws a strip over\n  whatever plays, --show takeover plays the alert full screen. The same alert_id\n  updates one alert instead of stacking, a clear ends it, and every post holds its\n  alert for its duration from that post. The target is a tag or up to 500 screen ids.\n  An organization has at most 20 triggers across its projects, overlay triggers included.\n  An overlay trigger also takes posts straight from GitHub, Stripe, Shopify, Slack, Linear, Vercel,\n  Asana and any sender that signs with an HMAC, with no relay: --verify VENDOR --verify-secret-file FILE\n  makes the vendor's own signature authenticate a post, and the srtg_ secret keeps working beside it;\n  --handshake VENDOR answers the setup challenge of Microsoft Graph, monday.com, Trello or Azure Event Grid.");
 
   const create = triggers.command("create").description("Create a trigger and print its URL and secret")
     .requiredOption("--name <NAME>", "Name the trigger, 1 to 80 characters (required)", nameOption)
@@ -26,6 +28,7 @@ export function registerTriggersCommands(root: Command, bind: CommandActionBinde
     .action(bind(handleTriggersCreate));
   requireOptionGroup(create, "exactlyOne", ["--tag", "--screen-id"]);
   requireOptionGroup(create, "requires", ["--edge", "--show"]);
+  addVerifyOptions(create, OVERLAY_VERIFY, false);
 
   const update = triggers.command("update").description("Change a trigger's name, target, hold or overlay without a new URL or secret")
     .argument("<id>", "Trigger identifier")
@@ -46,8 +49,10 @@ export function registerTriggersCommands(root: Command, bind: CommandActionBinde
     .option("--no-signing", "Overlay: stop requiring a ScreenRig-Signature header")
     .option("--expect-rev <REVISION>", "Optionally require this trigger revision", revision)
     .action(bind(handleTriggersUpdate));
+  addVerifyOptions(update, OVERLAY_VERIFY, true);
   requireOptionGroup(update, "atLeastOne", [
     "--name", "--tag", "--screen-id", "--for", "--pull", "--no-pull", "--edge", "--style", "--clear-style", "--map", "--clear-map", "--enable", "--disable", "--signing", "--no-signing",
+    "--verify", "--clear-verify", "--handshake", "--clear-handshake",
   ]);
 
   triggers.command("list").description("List this project's triggers and their latest alerts")

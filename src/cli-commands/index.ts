@@ -44,6 +44,7 @@ export const TOP_LEVEL_COMMANDS: Record<string, CommandBundle> = {
   card: "playlists",
   feeds: "playlists",
   source: "media",
+  connection: "integrations",
   comment: "playlists",
   operations: "monitoring",
   events: "monitoring",

@@ -11,11 +11,14 @@ import { ExitCode } from "./exit-codes.js";
 import { snoozeDurationMs } from "./notifications.js";
 import { CliError, usageError } from "./problems.js";
 import { table } from "./webhooks.js";
+import { biWebLoginUrl, readTotpSeed, readWebCookies, readWebPassword, readWebSteps, webConnectionLines, type BiWebLoginMode, type BiWebSession, type BiWebStep } from "./bi-web.js";
+import { singleStdin } from "./webhook-verify.js";
 
 // BI dashboards on screens: /api/bi-connections (a project's access to a BI
 // system, with a sealed secret the server never returns) and /api/bi-views (one
 // dashboard, panel, report or public link). A view plays through an iframe
-// primitive that shows its embed_url. Kinds: Grafana, Power BI and Tableau.
+// primitive that shows its embed_url. Kinds: Grafana, Power BI, Tableau and web
+// (a signed-in page of any site, bi-web.ts).
 
 const CONNECTIONS_PATH = "/api/bi-connections";
 const VIEWS_PATH = "/api/bi-views";
@@ -41,9 +44,19 @@ export interface BiCheck { name: string; ok: boolean; warn?: boolean; detail?: s
 export interface BiTestReport { at: string; ok: boolean; checks: BiCheck[]; width?: number; height?: number; bytes?: number }
 export interface BiConnection {
   id: string; project_id?: string; kind: string; name: string;
-  config: { url?: string; org_id?: number; tenant_id?: string; client_id?: string; site?: string; secret_id?: string; username?: string };
+  config: {
+    url?: string; org_id?: number; tenant_id?: string; client_id?: string; site?: string; secret_id?: string; username?: string;
+    /** Power BI: the Microsoft connection (pcn_) it signs in with. */
+    connection_id?: string;
+    /** Web: how it signs in, where, and the script of login_mode steps. */
+    login_mode?: string; login_url?: string; steps?: BiWebStep[];
+  };
   embed_origin: string | null;
   secret: { set: boolean; hint: string };
+  /** Web: whether an authenticator key is stored; its hint is always empty. */
+  totp_secret?: { set: boolean; hint?: string };
+  /** Web: the standing of the stored cookies and sign-in. */
+  session?: BiWebSession;
   last_test: BiTestReport | null;
   revision: number; created_at?: string; updated_at?: string;
 }
@@ -52,10 +65,14 @@ export interface BiTarget {
   vars?: Record<string, string>; theme?: string; timezone?: string; public_url?: string;
   workspace_id?: string; report_id?: string; pages?: string[]; rotate_all_pages?: boolean;
   view?: string; rotate_sheets?: boolean;
+  /** Web: the page's https address. */
+  url?: string;
 }
 export interface BiView {
   id: string; project_id?: string; connection_id?: string; kind: string; name: string; target: BiTarget;
   refresh_s: number; rotate_s?: number; fit: string; revision: number;
+  /** Web: the element that shows when the page is ready and signed in, the wait after it, and the part of the page drawn. */
+  wait_for?: string; wait_ms?: number; clip?: string;
   status: { last_ok_at: string | null; last_error: { at: string; code: string; detail: string } | null };
   embed_url: string | null; created_at?: string; updated_at?: string;
 }
@@ -170,10 +187,10 @@ export function biSite(value: string): string {
   return text;
 }
 
-/** --username: the Tableau user the screens' views are shown as. */
+/** --username: the Tableau user the screens' views are shown as, or the service account a web connection signs in as. */
 export function biUsername(value: string): string {
   const text = value.trim();
-  if (!text || [...text].length > 320 || /\p{Cc}/u.test(text)) throw usageError("--username takes the Tableau user the screens' views are shown as (an email address on Tableau Cloud).");
+  if (!text || [...text].length > 320 || /\p{Cc}/u.test(text)) throw usageError("--username takes the Tableau user the screens' views are shown as (an email address on Tableau Cloud), or the service account a web connection signs in as.");
   return text;
 }
 
@@ -279,6 +296,9 @@ export function biProblem(error: unknown, id?: string): unknown {
     return withNext(connection ? `screenrig bi connection test ${id}` : "screenrig bi connection list",
       "Check that the system is reachable (Grafana: its address and the Image Renderer plugin or a remote rendering service; Tableau: the server or Tableau Cloud pod address), then test the connection again. Nothing was changed.");
   }
+  if (problem.code === "bi_web_unavailable") {
+    return withNext("screenrig bi connection list", "This server has no page renderer, so a web connection or view cannot be made here. Nothing was changed; the other kinds are unaffected.");
+  }
   if (problem.code === "resource_conflict" && connection) {
     return withNext("screenrig bi view list", "Delete the views the detail names (bi view delete ID), then delete the connection.");
   }
@@ -312,12 +332,16 @@ export function connectionLines(connection: BiConnection | undefined): string[] 
     `name: ${connection.name}`,
     `kind: ${connection.kind}`,
     ...(connection.kind === "powerbi"
-      ? [`tenant: ${dash(connection.config?.tenant_id)}`, `app (client id): ${dash(connection.config?.client_id)}`]
+      ? (connection.config?.connection_id
+        ? [`connection: ${connection.config.connection_id} (a Microsoft connection signs in; this one holds no secret)`]
+        : [`tenant: ${dash(connection.config?.tenant_id)}`, `app (client id): ${dash(connection.config?.client_id)}`])
       : connection.kind === "tableau"
         ? [`url: ${dash(connection.config?.url)}`, `site: ${connection.config?.site || "(default site)"}`, `app (client id): ${dash(connection.config?.client_id)}`,
           `secret id: ${dash(connection.config?.secret_id)}`, `user: ${dash(connection.config?.username)}`]
-        : [`url: ${dash(connection.config?.url)}`, `org: ${connection.config?.org_id ?? 1}`]),
-    `secret: ${connection.secret?.set ? `set${connection.secret.hint ? ` (ends ${connection.secret.hint})` : ""}` : "not set"}`,
+        : connection.kind === "web"
+          ? webConnectionLines(connection)
+          : [`url: ${dash(connection.config?.url)}`, `org: ${connection.config?.org_id ?? 1}`]),
+    `${connection.kind === "web" ? "password" : "secret"}: ${connection.secret?.set ? `set${connection.secret.hint ? ` (ends ${connection.secret.hint})` : ""}` : "not set"}`,
     ...(connection.embed_origin ? [`embed origin: ${connection.embed_origin}`] : []),
     `last test: ${test ? `${test.ok ? "ok" : "failed"} at ${test.at}` : "never"}`,
     ...(test ? checkLines(test.checks) : []),
@@ -327,8 +351,10 @@ export function connectionLines(connection: BiConnection | undefined): string[] 
 
 export function connectionTableLines(items: BiConnection[]): string[] {
   if (!items.length) return ["No connections"];
+  const where = (item: BiConnection): string => item.kind === "powerbi" ? (item.config?.connection_id ?? item.config?.tenant_id ?? "")
+    : item.kind === "web" ? (item.config?.login_url ?? "") : (item.config?.url ?? "");
   return table(["ID", "KIND", "NAME", "URL OR TENANT", "TEST"], items.map((item) => [
-    item.id, item.kind, item.name, dash(item.kind === "powerbi" ? item.config?.tenant_id : item.config?.url), item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
+    item.id, item.kind, item.name, dash(where(item)), item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
   ]));
 }
 
@@ -339,6 +365,7 @@ function targetText(view: BiView): string {
     if (target.rotate_sheets) parts.push(view.rotate_s ? `every sheet each ${view.rotate_s}s` : "every sheet");
     return parts.join(", ");
   }
+  if (view.kind === "web" || target.url) return `page ${target.url ?? "?"}`;
   if (target.public_url) return `public link ${target.public_url}`;
   if (view.kind === "powerbi" || target.report_id) {
     const parts = [`report ${target.report_id ?? "?"}`, `workspace ${target.workspace_id ?? "?"}`];
@@ -365,6 +392,9 @@ export function viewLines(view: BiView | undefined): string[] {
     `shows: ${targetText(view)}`,
     `refresh: ${view.refresh_s === 0 ? "never" : `every ${view.refresh_s}s`}`,
     ...(view.kind === "powerbi" || view.kind === "tableau" ? [] : [`fit: ${view.fit}`]),
+    ...(view.wait_for ? [`wait for: ${view.wait_for}`] : []),
+    ...(view.wait_ms ? [`wait after: ${view.wait_ms} ms`] : []),
+    ...(view.clip ? [`clip: ${view.clip}`] : []),
     `status: ${status.last_error ? `${status.last_error.code} (${status.last_error.detail})` : status.last_ok_at ? `ok since ${status.last_ok_at}` : "not shown yet"}`,
     `embed_url: ${view.embed_url ?? "(none: this server has no embed host)"}`,
     `revision: ${view.revision}`,
@@ -426,14 +456,63 @@ export const handleBiConnectionCreatePowerBI = commandHandler(async (args: Args,
   const tenant = flagString(args.flags, "tenant-id");
   const clientId = flagString(args.flags, "client-id");
   const secretFile = flagString(args.flags, "secret-file");
-  if (tenant === undefined || clientId === undefined || secretFile === undefined) {
-    throw usageError("bi connection create powerbi requires --tenant-id, --client-id and --secret-file.");
+  const connectionId = flagString(args.flags, "connection-id");
+  const name = biName(flagString(args.flags, "name") ?? "Power BI");
+  let body: Record<string, unknown>;
+  if (connectionId !== undefined) {
+    // A Microsoft connection of the project signs in: no tenant, app or secret of this connection's own.
+    if (tenant !== undefined || clientId !== undefined || secretFile !== undefined) {
+      throw usageError("--connection-id replaces --tenant-id, --client-id and --secret-file: the Microsoft connection holds them.");
+    }
+    body = { name, kind: "powerbi", config: { connection_id: connectionId } };
+  } else {
+    if (tenant === undefined || clientId === undefined || secretFile === undefined) {
+      throw usageError("bi connection create powerbi requires --connection-id, or --tenant-id, --client-id and --secret-file.");
+    }
+    body = { name, kind: "powerbi", config: { tenant_id: tenant, client_id: clientId }, secret: await readToken(secretFile, runtime, "client secret") };
   }
-  const secret = await readToken(secretFile, runtime, "client secret");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await biCall(client, { method: "POST", path: CONNECTIONS_PATH, idempotent: true, body });
+  const created = response.body as BiConnection | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Created connection ${created?.id ?? ""}`.trimEnd(), ...connectionLines(created),
+      "", `Next: screenrig bi connection test ${created?.id ?? "ID"}`].join("\n"),
+  };
+});
+
+export const handleBiConnectionCreateWeb = commandHandler(async (args: Args, runtime: Runtime, resolved) => {
+  const mode = flagString(args.flags, "login-mode") as BiWebLoginMode | undefined;
+  const loginUrl = flagString(args.flags, "login-url");
+  const username = flagString(args.flags, "username");
+  const passwordFile = flagString(args.flags, "password-file");
+  const totpFile = flagString(args.flags, "totp-file");
+  const stepsFile = flagString(args.flags, "steps");
+  const cookiesFile = flagString(args.flags, "cookies-file");
+  if (mode === undefined) throw usageError("bi connection create web requires --login-mode auto, steps or none.");
+  if (mode === "none") {
+    const unused = ([["--login-url", loginUrl], ["--username", username], ["--password-file", passwordFile], ["--totp-file", totpFile], ["--steps", stepsFile]] as const).filter(([, value]) => value !== undefined).map(([flag]) => flag);
+    if (unused.length) throw usageError(`--login-mode none does not sign in, so ${unused.join(", ")} would not be used: give --cookies-file with the jar, or choose --login-mode auto or steps.`);
+  } else {
+    if (loginUrl === undefined) throw usageError(`--login-mode ${mode} needs --login-url: the page where the sign-in happens. The password is typed only there, never into a view's address.`);
+    if (mode === "auto" && (username === undefined || passwordFile === undefined)) throw usageError("--login-mode auto fills the sign-in form on --login-url: it needs --username and --password-file.");
+    if (mode === "steps" && stepsFile === undefined) throw usageError("--login-mode steps runs a script: give it as --steps FILE, a JSON array of steps.");
+    if (mode === "auto" && stepsFile !== undefined) throw usageError("--steps is the script of --login-mode steps; auto fills the form without one.");
+  }
+  singleStdin([["--password-file", passwordFile], ["--totp-file", totpFile], ["--steps", stepsFile], ["--cookies-file", cookiesFile]]);
+  const steps = stepsFile !== undefined ? await readWebSteps(stepsFile, runtime) : undefined;
+  const secret = passwordFile !== undefined ? await readWebPassword(passwordFile, runtime) : undefined;
+  const totp = totpFile !== undefined ? await readTotpSeed(totpFile, runtime) : undefined;
+  const cookies = cookiesFile !== undefined ? await readWebCookies(cookiesFile, runtime) : undefined;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await biCall(client, {
     method: "POST", path: CONNECTIONS_PATH, idempotent: true,
-    body: { name: biName(flagString(args.flags, "name") ?? "Power BI"), kind: "powerbi", config: { tenant_id: tenant, client_id: clientId }, secret },
+    body: {
+      name: biName(flagString(args.flags, "name") ?? (loginUrl !== undefined ? biHostName(loginUrl, "Web page") : "Web page")), kind: "web",
+      config: { login_mode: mode, ...(loginUrl !== undefined ? { login_url: biWebLoginUrl(loginUrl) } : {}), ...(username !== undefined ? { username } : {}), ...(steps ? { steps } : {}) },
+      ...(secret !== undefined ? { secret } : {}), ...(totp !== undefined ? { totp_secret: totp } : {}), ...(cookies ? { cookies } : {}),
+    },
   });
   const created = response.body as BiConnection | undefined;
   return {
@@ -520,20 +599,39 @@ export const handleBiConnectionUpdate = commandHandler(async (args: Args, runtim
   const username = flagString(args.flags, "username");
   const tokenFile = flagString(args.flags, "token-file");
   const secretFile = flagString(args.flags, "secret-file");
-  if (tokenFile !== undefined && secretFile !== undefined) throw usageError("Give --token-file or --secret-file, not both: each is the connection's secret.");
-  const secretSource = tokenFile ?? secretFile;
-  if ([name, url, orgId, tenant, clientId, site, secretId, username, secretSource].every((value) => value === undefined)) {
-    throw usageError("bi connection update requires --name, --url, --org-id, --tenant-id, --client-id, --site, --default-site, --secret-id, --username, --token-file or --secret-file.");
+  const passwordFile = flagString(args.flags, "password-file");
+  const loginMode = flagString(args.flags, "login-mode");
+  const loginUrl = flagString(args.flags, "login-url");
+  const stepsFile = flagString(args.flags, "steps");
+  const totpFile = flagString(args.flags, "totp-file");
+  const cookiesFile = flagString(args.flags, "cookies-file");
+  const clearPassword = flagBool(args.flags, "clear-password");
+  const clearTotp = flagBool(args.flags, "clear-totp");
+  const clearCookies = flagBool(args.flags, "clear-cookies");
+  if ([tokenFile, secretFile, passwordFile].filter((file) => file !== undefined).length + (clearPassword ? 1 : 0) > 1) {
+    throw usageError("Give one of --token-file, --secret-file, --password-file or --clear-password: each is the connection's secret.");
   }
+  const secretSource = tokenFile ?? secretFile ?? passwordFile;
+  if ([name, url, orgId, tenant, clientId, site, secretId, username, secretSource, loginMode, loginUrl, stepsFile, totpFile, cookiesFile].every((value) => value === undefined) && !clearPassword && !clearTotp && !clearCookies) {
+    throw usageError("bi connection update requires --name, --url, --org-id, --tenant-id, --client-id, --site, --default-site, --secret-id, --username, --token-file, --secret-file, --login-mode, --login-url, --password-file, --clear-password, --totp-file, --clear-totp, --steps, --cookies-file or --clear-cookies.");
+  }
+  singleStdin([["--token-file", tokenFile], ["--secret-file", secretFile], ["--password-file", passwordFile], ["--totp-file", totpFile], ["--steps", stepsFile], ["--cookies-file", cookiesFile]]);
   const config = {
     ...(url !== undefined ? { url } : {}), ...(orgId !== undefined ? { org_id: Number(orgId) } : {}),
     ...(tenant !== undefined ? { tenant_id: tenant } : {}), ...(clientId !== undefined ? { client_id: clientId } : {}),
     ...(site !== undefined ? { site } : {}), ...(secretId !== undefined ? { secret_id: secretId } : {}), ...(username !== undefined ? { username } : {}),
+    ...(loginMode !== undefined ? { login_mode: loginMode } : {}), ...(loginUrl !== undefined ? { login_url: biWebLoginUrl(loginUrl) } : {}),
+    ...(stepsFile !== undefined ? { steps: await readWebSteps(stepsFile, runtime) } : {}),
   };
+  // On a web connection an empty secret or authenticator key and an empty jar remove what is stored.
   const body = {
     ...(name !== undefined ? { name: biName(name) } : {}),
     ...(Object.keys(config).length ? { config } : {}),
-    ...(secretSource !== undefined ? { secret: await readToken(secretSource, runtime, secretFile !== undefined ? "client secret" : "token") } : {}),
+    ...(passwordFile !== undefined ? { secret: await readWebPassword(passwordFile, runtime) }
+      : secretSource !== undefined ? { secret: await readToken(secretSource, runtime, secretFile !== undefined ? "client secret" : "token") }
+      : clearPassword ? { secret: "" } : {}),
+    ...(totpFile !== undefined ? { totp_secret: await readTotpSeed(totpFile, runtime) } : clearTotp ? { totp_secret: "" } : {}),
+    ...(cookiesFile !== undefined ? { cookies: await readWebCookies(cookiesFile, runtime) } : clearCookies ? { cookies: [] } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (url !== undefined && secretSource === undefined) {
@@ -646,7 +744,9 @@ function nameFromAddress(url: string | undefined, dashboard: string | undefined,
   if (path !== undefined) return [..."Tableau " + path].slice(0, NAME_MAX).join("");
   if (report !== undefined || (url !== undefined && /\/reports\/|reportEmbed/i.test(url))) return "Power BI report";
   const uid = dashboard ?? (url ? /\/d(?:-solo)?\/([^/?#]+)/.exec(url)?.[1] : undefined);
-  return uid ? `Grafana ${uid}` : "Grafana dashboard";
+  if (uid) return `Grafana ${uid}`;
+  // An address that names no Grafana dashboard is a page of a web connection: named after its host.
+  return url !== undefined ? biHostName(url, "Grafana dashboard") : "Grafana dashboard";
 }
 
 /** The kind of a view of a public link: Power BI links are on powerbi.com, Tableau Public links on public.tableau.com, anything else is Grafana. */
@@ -733,8 +833,15 @@ export const handleBiViewCreate = commandHandler(async (args: Args, runtime: Run
   const refresh = flagString(args.flags, "refresh");
   const rotate = flagString(args.flags, "rotate");
   const fit = flagString(args.flags, "fit");
+  const waitFor = flagString(args.flags, "wait-for");
+  const waitMs = flagString(args.flags, "wait-ms");
+  const clip = flagString(args.flags, "clip");
+  const webFlags = [...(waitFor !== undefined ? ["--wait-for"] : []), ...(waitMs !== undefined ? ["--wait-ms"] : []), ...(clip !== undefined ? ["--clip"] : [])];
   // --rotate-sheets sits beside --url and --public-url: the address names the view, the flag turns its sheets.
   const given = viewTargetFlagsGiven(args).filter((flag) => flag !== "--rotate-sheets");
+  if (webFlags.length && (publicUrl !== undefined || dashboard !== undefined || report !== undefined || workspace !== undefined || tableauView !== undefined)) {
+    throw usageError(`${webFlags.join(", ")} apply to a view of a web connection, which takes the page's address as --url.`);
+  }
   let body: Record<string, unknown>;
   if (publicUrl !== undefined) {
     if (connectionId !== undefined || url !== undefined || dashboard !== undefined || given.length) {
@@ -763,6 +870,9 @@ export const handleBiViewCreate = commandHandler(async (args: Args, runtime: Run
   if (refresh !== undefined) body.refresh_s = biRefreshSeconds(refresh);
   if (rotate !== undefined) body.rotate_s = biRotateSeconds(rotate);
   if (fit !== undefined) body.fit = fit;
+  if (waitFor !== undefined) body.wait_for = waitFor;
+  if (waitMs !== undefined) body.wait_ms = Number(waitMs);
+  if (clip !== undefined) body.clip = clip;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await biCall(client, { method: "POST", path: VIEWS_PATH, idempotent: true, body }, connectionId);
   const created = response.body as BiView | undefined;
@@ -808,11 +918,17 @@ export const handleBiViewUpdate = commandHandler(async (args: Args, runtime: Run
   const refresh = flagString(args.flags, "refresh");
   const rotate = flagString(args.flags, "rotate");
   const fit = flagString(args.flags, "fit");
+  const waitFor = flagString(args.flags, "wait-for");
+  const waitMs = flagString(args.flags, "wait-ms");
+  const clip = flagString(args.flags, "clip");
+  const clearWaitFor = flagBool(args.flags, "clear-wait-for");
+  const clearClip = flagBool(args.flags, "clear-clip");
+  const webChange = waitFor !== undefined || waitMs !== undefined || clip !== undefined || clearWaitFor || clearClip;
   // --rotate-sheets sits beside --url and --public-url, and on its own turns the current view's sheets.
   const given = viewTargetFlagsGiven(args).filter((flag) => flag !== "--rotate-sheets");
   const changesTarget = url !== undefined || dashboard !== undefined || publicUrl !== undefined || given.length > 0 || rotateSheets;
-  if (name === undefined && refresh === undefined && rotate === undefined && fit === undefined && !changesTarget) {
-    throw usageError("bi view update requires something to change: --name, --refresh, --rotate, --fit, --url, --dashboard, --workspace, --report, --view, --page, --all-pages, --rotate-sheets, --public-url or a target flag.");
+  if (name === undefined && refresh === undefined && rotate === undefined && fit === undefined && !changesTarget && !webChange) {
+    throw usageError("bi view update requires something to change: --name, --refresh, --rotate, --fit, --url, --dashboard, --workspace, --report, --view, --page, --all-pages, --rotate-sheets, --public-url, --wait-for, --clear-wait-for, --wait-ms, --clip, --clear-clip or a target flag.");
   }
   if (dashboard !== undefined && (workspace !== undefined || report !== undefined)) throw usageError("Give --dashboard (Grafana), --workspace and --report (Power BI) or --view (Tableau), not several.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -821,6 +937,12 @@ export const handleBiViewUpdate = commandHandler(async (args: Args, runtime: Run
   if (refresh !== undefined) body.refresh_s = biRefreshSeconds(refresh);
   if (rotate !== undefined) body.rotate_s = biRotateSeconds(rotate);
   if (fit !== undefined) body.fit = fit;
+  // On a web view an empty wait_for or clip, and a wait_ms of 0, remove the setting.
+  if (waitFor !== undefined) body.wait_for = waitFor;
+  else if (clearWaitFor) body.wait_for = "";
+  if (waitMs !== undefined) body.wait_ms = Number(waitMs);
+  if (clip !== undefined) body.clip = clip;
+  else if (clearClip) body.clip = "";
   if (publicUrl !== undefined) {
     if (url !== undefined || dashboard !== undefined || given.length) throw usageError("--public-url replaces the whole target: give it without the other target flags.");
     body.target = { public_url: publicUrl, ...(rotateSheets ? { rotate_sheets: true } : {}) };

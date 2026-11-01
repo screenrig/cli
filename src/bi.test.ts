@@ -415,8 +415,14 @@ test("the help names the renderer, the secret rule and carries examples that run
   await writeFile(path.join(env.cwd, "new-token.txt"), `${TOKEN}\n`);
   await writeFile(path.join(env.cwd, "secret.txt"), `${TOKEN}\n`);
   await writeFile(path.join(env.cwd, "new-secret.txt"), `${TOKEN}\n`);
+  // The web examples read a password, an authenticator key, a sign-in script and a cookie jar.
+  await writeFile(path.join(env.cwd, "password.txt"), "correct horse battery staple\n");
+  await writeFile(path.join(env.cwd, "new-password.txt"), "another horse battery staple\n");
+  await writeFile(path.join(env.cwd, "totp.txt"), "JBSWY3DPEHPK3PXP\n");
+  await writeFile(path.join(env.cwd, "steps.json"), JSON.stringify([{ action: "goto", url: "https://login.example.com/signin" }, { action: "fill", selector: "#user", value: "{{username}}" }, { action: "fill", selector: "#pass", value: "{{password}}" }, { action: "click", selector: "button[type=submit]" }]));
+  await writeFile(path.join(env.cwd, "cookies.json"), JSON.stringify([{ name: "sid", value: "abc", domain: ".example.com", path: "/", secure: true, httpOnly: true, sameSite: "lax", expirationDate: 1893456000.5 }]));
   const leaves = [
-    ["bi", "connection", "create", "grafana"], ["bi", "connection", "create", "powerbi"], ["bi", "connection", "create", "tableau"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
+    ["bi", "connection", "create", "grafana"], ["bi", "connection", "create", "powerbi"], ["bi", "connection", "create", "tableau"], ["bi", "connection", "create", "web"], ["bi", "connection", "list"], ["bi", "connection", "show"], ["bi", "connection", "test"], ["bi", "connection", "update"],
     ["bi", "connection", "browse"], ["bi", "connection", "delete"], ["bi", "view", "create"], ["bi", "view", "list"], ["bi", "view", "show"], ["bi", "view", "update"],
     ["bi", "view", "test"], ["bi", "view", "delete"],
   ];

@@ -7,19 +7,24 @@ import { quotedRevision } from "./if-match.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
+import { presetSettingValue } from "./source-presets.js";
 import { table } from "./webhooks.js";
 
 /** Backend Source.id (vendor/openapi.yaml). */
 export const SOURCE_ID_PATTERN = /^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$/;
 /** SourceKind: where the data comes from. `ics` reads iCalendar and webcal:// addresses. */
-export const SOURCE_KINDS = ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify", "momentus"] as const;
+export const SOURCE_KINDS = ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify", "momentus", "toast"] as const;
+/** The kinds that read through a project connection (config.connection_id) instead of credentials of their own. */
+const CONNECTION_KINDS: readonly string[] = ["microsoft365", "google_calendar"];
 /** SourceCreate.refresh_seconds: half a minute to one day (a kind sets its own floor). */
 export const SOURCE_REFRESH_MIN_S = 30;
 export const SOURCE_REFRESH_MAX_S = 86_400;
 /** SourceStaleAfter: one minute to seven days, or none. */
 export const SOURCE_STALE_MIN_S = 60;
 export const SOURCE_STALE_MAX_S = 604_800;
-const SECRET_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+/** A secret name starts with a lower-case letter or digit and goes on in any case: header.X-Api-Key is one. */
+const SECRET_NAME_PATTERN = /^[a-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const SECRET_NAME_RULE = "A secret name starts with a lower-case letter or digit, then letters, digits, . _ and -, up to 64 characters, such as calendar_url.lobby or header.X-Api-Key.";
 /** Config, secrets and files a command reads are bounded like the request the server accepts. */
 const INPUT_MAX_BYTES = 1 << 20;
 const SOURCES_PATH = "/api/sources";
@@ -48,6 +53,10 @@ export interface Source {
   target: { card_id: string };
   enabled: boolean;
   config: Record<string, unknown>;
+  /** The source preset it was made from (source presets), null or absent for a source that is not. Typed here: the vendored contract has no presets. */
+  preset?: string | null;
+  /** A preset source's field values, by field name; null or absent without a preset. Typed here: the vendored contract has no presets. */
+  settings?: Record<string, unknown> | null;
   secrets: Record<string, SourceSecretView>;
   refresh_seconds: number;
   /** How long the card keeps the last good data when the source cannot refresh; null keeps it until the next refresh. */
@@ -82,6 +91,8 @@ export interface SourceTestResult {
   warnings: string[];
   stats: Record<string, number>;
   fetched_at: string;
+  /** A csv or json source: the first request as it went out, its placeholders filled in and every secret masked. */
+  request?: { method: string; url: string; headers?: string[]; body?: string; pages: number };
 }
 
 export function sourceId(value: string | undefined, command: string): string {
@@ -166,16 +177,12 @@ export function secretPairCheck(value: string): void {
   const at = value.indexOf("=");
   if (at < 1) throw usageError("--secret takes NAME=VALUE, NAME=@FILE or NAME=-, such as calendar_url.lobby=@lobby.url.");
   const name = value.slice(0, at);
-  if (!SECRET_NAME_PATTERN.test(name)) {
-    throw usageError("A secret name is lower-case letters, digits, . _ and -, up to 64 characters, such as calendar_url.lobby.");
-  }
+  if (!SECRET_NAME_PATTERN.test(name)) throw usageError(SECRET_NAME_RULE);
   if (value.slice(at + 1) === "") throw usageError(`--secret ${name}= has no value; use NAME=@FILE or NAME=- to read it, or --unset-secret ${name} to remove it.`);
 }
 
 export function unsetSecretCheck(value: string): void {
-  if (!SECRET_NAME_PATTERN.test(value)) {
-    throw usageError("A secret name is lower-case letters, digits, . _ and -, up to 64 characters, such as calendar_url.lobby.");
-  }
+  if (!SECRET_NAME_PATTERN.test(value)) throw usageError(SECRET_NAME_RULE);
 }
 
 /** A `--set` value: JSON when it parses (14, true, [..], {..}), else the text itself. */
@@ -217,14 +224,14 @@ async function configFrom(source: string, inputs: Inputs): Promise<Record<string
   return parsed as Record<string, unknown>;
 }
 
-/** The `--set` pairs as members, rejecting a key given twice. */
-export function setMembers(pairs: string[]): Record<string, unknown> {
+/** The `--set` pairs as members, rejecting a key given twice. A preset's fields read their values with presetSettingValue. */
+export function setMembers(pairs: string[], read: (text: string) => unknown = setValue): Record<string, unknown> {
   const members: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const pair of pairs) {
     const at = pair.indexOf("=");
     const key = pair.slice(0, at);
     if (Object.hasOwn(members, key)) throw usageError(`--set ${key} is given twice.`);
-    members[key] = setValue(pair.slice(at + 1));
+    members[key] = read(pair.slice(at + 1));
   }
   return { ...members };
 }
@@ -251,13 +258,52 @@ async function secretsFrom(pairs: string[], unset: string[], inputs: Inputs): Pr
   return Object.keys(secrets).length ? secrets : undefined;
 }
 
+/** The members the command sets: each `--set`, and `--connection-id` as the member connection_id. */
+function setPairs(args: ParsedArgs): string[] {
+  const connection = flagString(args.flags, "connection-id");
+  return [...accumulated(args.flags, "set"), ...(connection !== undefined ? [`connection_id=${connection}`] : [])];
+}
+
 /** The config the command sends: `--settings` as given, else the saved one, then the `--set` members on top. */
 async function mergedConfig(args: ParsedArgs, inputs: Inputs, saved: () => Promise<Record<string, unknown>>): Promise<Record<string, unknown> | undefined> {
   const given = flagString(args.flags, "settings");
-  const pairs = accumulated(args.flags, "set");
+  const pairs = setPairs(args);
   if (given === undefined && !pairs.length) return undefined;
   const base = given !== undefined ? await configFrom(given, inputs) : await saved();
   return { ...base, ...setMembers(pairs) };
+}
+
+/** The fields of a new or previewed preset source: `--settings`, then the `--set` members on top. */
+async function presetSettings(args: ParsedArgs, inputs: Inputs): Promise<Record<string, unknown>> {
+  const given = flagString(args.flags, "settings");
+  return { ...(given !== undefined ? await configFrom(given, inputs) : {}), ...setMembers(accumulated(args.flags, "set"), presetSettingValue) };
+}
+
+/** A change to a saved source's settings: its new config, or for a source made from a preset the fields to merge into its own. */
+interface SavedEdit {
+  config?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+  /** The revision the config was merged from, which guards the write unless another is named. */
+  readRevision?: number;
+}
+
+/**
+ * What `--settings`, `--set` and `--connection-id` change in a saved source. The
+ * saved source is read first: a source made from a preset takes its fields as
+ * settings, which the server merges into the saved ones, and any other source
+ * takes a config, whole with --settings, else the saved one with the members on top.
+ */
+async function savedEdit(args: ParsedArgs, inputs: Inputs, read: () => Promise<Source>): Promise<SavedEdit> {
+  const given = flagString(args.flags, "settings");
+  const pairs = setPairs(args);
+  if (given === undefined && !pairs.length) return {};
+  const saved = await read();
+  if (typeof saved.preset === "string" && saved.preset !== "") {
+    if (flagString(args.flags, "connection-id") !== undefined) throw usageError("--connection-id applies to a microsoft365 or google_calendar source; this source is made from a preset.");
+    return { settings: { ...(given !== undefined ? await configFrom(given, inputs) : {}), ...setMembers(pairs, presetSettingValue) } };
+  }
+  const base = given !== undefined ? await configFrom(given, inputs) : saved.config ?? {};
+  return { config: { ...base, ...setMembers(pairs) }, ...(given === undefined ? { readRevision: saved.revision } : {}) };
 }
 
 async function sourceCall(
@@ -324,6 +370,11 @@ export function sourceProblem(error: unknown, id?: string): unknown {
       return id ? withNext(`screenrig source show ${id}`, "Read the current revision, then rerun with --expect-rev REVISION if the change still applies.") : error;
     case "not_found":
       return id ? withNext("screenrig source list", "List this project's data sources; a deleted source does not come back.") : error;
+    case "invalid_request":
+      // A preset's source takes settings, never a config: the server names the member config itself.
+      return problem.errors.some((entry) => (entry as { field?: unknown } | null)?.field === "config")
+        ? withNext(id ? `screenrig source show ${id}` : "screenrig source presets", "If this source is made from a preset, change its fields with --set FIELD=VALUE (or --settings): source show names its preset, and source presets NAME its fields. A config belongs to a source that has no preset.")
+        : error;
     default:
       return error;
   }
@@ -359,6 +410,7 @@ export function sourceLines(source: Source | undefined): string[] {
     `id: ${source.id}`,
     `name: ${source.name}`,
     `kind: ${source.kind}`,
+    ...(source.preset ? [`preset: ${source.preset}`] : []),
     `card_id: ${source.target?.card_id}`,
     `enabled: ${source.enabled}`,
     `refresh: ${refreshText(source.refresh_seconds)}`,
@@ -376,6 +428,7 @@ export function sourceLines(source: Source | undefined): string[] {
     ...(Object.keys(status.stats ?? {}).length ? [`stats: ${statsText(status.stats)}`] : []),
     ...(status.warnings?.length ? ["warnings:", ...status.warnings.map((warning) => `  - ${warning}`)] : []),
     ...(secrets.length ? ["secrets:", ...secrets.map(([name, view]) => `  ${name}: ${view.hint}`)] : []),
+    ...(source.preset && source.settings ? [`settings: ${clip(JSON.stringify(source.settings), 400)}`] : []),
     `config: ${clip(JSON.stringify(source.config ?? {}), 400)}`,
   ];
 }
@@ -398,6 +451,11 @@ export function sourceTestLines(result: SourceTestResult | undefined): string[] 
       ? "The card accepts this document."
       : `The card refuses this document at ${result.validation_error?.path || "the document"}: ${result.validation_error?.reason ?? "invalid"}`,
     `fetched_at: ${result.fetched_at}`,
+    ...(result.request ? [
+      `request: ${result.request.method} ${result.request.url}${result.request.pages > 1 ? ` (${result.request.pages} pages read)` : ""}`,
+      ...(result.request.headers?.length ? [`  headers sent: ${result.request.headers.join(", ")} (names only)`] : []),
+      ...(result.request.body ? [`  body: ${clip(result.request.body, 200)}`] : []),
+    ] : []),
     ...(Object.keys(result.stats ?? {}).length ? [`stats: ${statsText(result.stats)}`] : []),
     ...(result.warnings?.length ? ["warnings:", ...result.warnings.map((warning) => `  - ${warning}`)] : []),
     "document:",
@@ -440,13 +498,23 @@ export const handleSourceCreate = commandHandler(async (args, runtime, resolved)
   const inputs = new Inputs(runtime);
   const refresh = flagString(args.flags, "refresh");
   const staleAfter = flagString(args.flags, "stale-after");
-  const config = await mergedConfig(args, inputs, async () => ({}));
+  const kind = flagString(args.flags, "kind");
+  const preset = flagString(args.flags, "preset");
+  if ((kind === undefined) === (preset === undefined)) throw usageError("source create takes --kind, or --preset NAME for a ready-made configuration (screenrig source presets), and not both.");
+  const connection = flagString(args.flags, "connection-id");
+  if (connection !== undefined && preset !== undefined) throw usageError("--connection-id applies to a microsoft365 or google_calendar source, not to a preset.");
+  if (connection !== undefined && (kind === undefined || !CONNECTION_KINDS.includes(kind))) {
+    throw usageError("--connection-id applies to a microsoft365 or google_calendar source: it reads through a project connection (screenrig connection list) instead of credentials of its own.");
+  }
+  // A preset source is made of its fields (settings), any other of the kind's config.
+  const members = preset !== undefined
+    ? { preset, settings: await presetSettings(args, inputs) }
+    : { kind, config: (await mergedConfig(args, inputs, async () => ({}))) ?? {} };
   const secrets = await secretsFrom(accumulated(args.flags, "secret"), [], inputs);
   const body = {
     name: sourceName(flagString(args.flags, "name") ?? ""),
-    kind: flagString(args.flags, "kind"),
+    ...members,
     target: { card_id: flagString(args.flags, "card") },
-    config: config ?? {},
     ...(secrets ? { secrets } : {}),
     ...(refresh !== undefined ? { refresh_seconds: sourceRefreshSeconds(refresh) } : {}),
     ...(staleAfter !== undefined ? { stale_after_seconds: sourceStaleAfterSeconds(staleAfter) } : {}),
@@ -471,19 +539,16 @@ export const handleSourceUpdate = commandHandler(async (args, runtime, resolved)
   const staleAfter = flagString(args.flags, "stale-after");
   const expect = flagString(args.flags, "expect-rev");
   // --set edits the saved config: the whole config is read, merged and sent,
-  // guarded by the revision read unless --expect-rev names another.
-  let readRevision: number | undefined;
-  const config = await mergedConfig(args, inputs, async () => {
-    const response = await sourceCall(client, { method: "GET", path: `${SOURCES_PATH}/${id}` }, id);
-    const saved = response.body as Source;
-    readRevision = saved.revision;
-    return saved.config ?? {};
-  });
+  // guarded by the revision read unless --expect-rev names another. A source made
+  // from a preset takes the fields as settings and the server merges them.
+  const edit = await savedEdit(args, inputs, async () => (await sourceCall(client, { method: "GET", path: `${SOURCES_PATH}/${id}` }, id)).body as Source);
+  const readRevision = edit.readRevision;
   const secrets = await secretsFrom(accumulated(args.flags, "secret"), accumulated(args.flags, "unset-secret"), inputs);
   const body = {
     ...(name !== undefined ? { name: sourceName(name) } : {}),
     ...(card !== undefined ? { target: { card_id: card } } : {}),
-    ...(config !== undefined ? { config } : {}),
+    ...(edit.config !== undefined ? { config: edit.config } : {}),
+    ...(edit.settings !== undefined ? { settings: edit.settings } : {}),
     ...(secrets ? { secrets } : {}),
     ...(refresh !== undefined ? { refresh_seconds: sourceRefreshSeconds(refresh) } : {}),
     ...(staleAfter !== undefined ? { stale_after_seconds: sourceStaleAfterSeconds(staleAfter) } : {}),
@@ -491,7 +556,7 @@ export const handleSourceUpdate = commandHandler(async (args, runtime, resolved)
     ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
   };
   if (!Object.keys(body).length) {
-    throw usageError("source update requires at least one change: --name, --card, --settings, --set, --secret, --unset-secret, --refresh, --stale-after, --enable or --disable.");
+    throw usageError("source update requires at least one change: --name, --card, --settings, --set, --connection-id, --secret, --unset-secret, --refresh, --stale-after, --enable or --disable.");
   }
   const response = await sourceCall(client, {
     method: "PATCH", path: `${SOURCES_PATH}/${id}`, idempotent: true, body,
@@ -510,23 +575,32 @@ export const handleSourceTest = commandHandler(async (args, runtime, resolved) =
   const id = args.positionals[2];
   const kind = flagString(args.flags, "kind");
   const card = flagString(args.flags, "card");
-  if (id !== undefined) sourceId(id, "test");
-  else if (kind === undefined || card === undefined) {
-    throw usageError("source test takes a saved <source_id>, or --kind and --card to preview a source that is not saved.");
+  const preset = flagString(args.flags, "preset");
+  const connection = flagString(args.flags, "connection-id");
+  if (id !== undefined) {
+    sourceId(id, "test");
+    if (preset !== undefined) throw usageError("--preset describes a source that is not saved: a saved source already has its preset, and --set changes its fields for this preview.");
+  } else if (card === undefined || (kind === undefined && preset === undefined)) {
+    throw usageError("source test takes a saved <source_id>, or --kind and --card (--preset NAME instead of --kind) to preview a source that is not saved.");
+  }
+  if (connection !== undefined && preset !== undefined) throw usageError("--connection-id applies to a microsoft365 or google_calendar source, not to a preset.");
+  if (connection !== undefined && kind !== undefined && !CONNECTION_KINDS.includes(kind)) {
+    throw usageError("--connection-id applies to a microsoft365 or google_calendar source: it reads through a project connection (screenrig connection list) instead of credentials of its own.");
   }
   const inputs = new Inputs(runtime);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const config = await mergedConfig(args, inputs, async () => {
-    if (id === undefined) return {};
-    const response = await sourceCall(client, { method: "GET", path: `${SOURCES_PATH}/${id}` }, id);
-    return (response.body as Source).config ?? {};
-  });
+  let edit: SavedEdit;
+  if (preset !== undefined) edit = { settings: await presetSettings(args, inputs) };
+  else if (id === undefined) edit = { config: await mergedConfig(args, inputs, async () => ({})) };
+  else edit = await savedEdit(args, inputs, async () => (await sourceCall(client, { method: "GET", path: `${SOURCES_PATH}/${id}` }, id)).body as Source);
   const secrets = await secretsFrom(accumulated(args.flags, "secret"), [], inputs);
   const body = {
     ...(id !== undefined ? { source_id: id } : {}),
     ...(kind !== undefined ? { kind } : {}),
+    ...(preset !== undefined ? { preset } : {}),
     ...(card !== undefined ? { target: { card_id: card } } : {}),
-    ...(config !== undefined ? { config } : {}),
+    ...(edit.config !== undefined ? { config: edit.config } : {}),
+    ...(edit.settings !== undefined ? { settings: edit.settings } : {}),
     ...(secrets ? { secrets } : {}),
   };
   const response = await sourceCall(client, { method: "POST", path: `${SOURCES_PATH}/test`, body }, id);

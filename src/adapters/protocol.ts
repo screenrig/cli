@@ -1403,6 +1403,8 @@ export interface CardKVWebhook {
   mapping: Record<string, unknown> | null;
   enabled: boolean;
   signing: boolean;
+  verify?: WebhookVerify;
+  handshake?: WebhookHandshake;
   url: string;
   created_at: string;
   updated_at: string;
@@ -1423,6 +1425,8 @@ export interface CardKVWebhookCreate {
   key_template?: string;
   mapping?: Record<string, unknown> | null;
   signing?: boolean;
+  verify?: WebhookVerifyWrite;
+  handshake?: WebhookHandshake;
 }
 
 export interface CardKVWebhookUpdate {
@@ -1431,16 +1435,50 @@ export interface CardKVWebhookUpdate {
   mapping?: Record<string, unknown> | null;
   enabled?: boolean;
   signing?: boolean;
+  /** Replaces the vendor verification; null removes it, and its secret with it. */
+  verify?: WebhookVerifyWrite | null;
+  /** Sets the handshake the URL answers; null removes it. */
+  handshake?: WebhookHandshake | null;
+}
+
+/** A vendor whose own signature authenticates a post in place of the webhook's secret (WebhookVerifyVendor). */
+export type WebhookVerifyVendor = "github" | "stripe" | "shopify" | "slack" | "linear" | "vercel" | "asana" | "generic_hmac";
+
+/** A vendor handshake the URL answers (WebhookHandshake). */
+export type WebhookHandshake = "microsoft_graph" | "monday" | "trello" | "azure_event_grid";
+
+/** WebhookVerifyWrite: header, encoding, timestamp_header and tolerance_seconds apply to generic_hmac only; secret is write-only and optional for asana and for an update that keeps the vendor. */
+export interface WebhookVerifyWrite {
+  vendor: WebhookVerifyVendor;
+  secret?: string;
+  header?: string;
+  encoding?: "hex" | "base64";
+  timestamp_header?: string;
+  tolerance_seconds?: number;
+}
+
+/** WebhookVerify, as a read shows it: the secret only as whether it is held and its last characters. */
+export interface WebhookVerify {
+  vendor: WebhookVerifyVendor;
+  header?: string;
+  encoding?: "hex" | "base64";
+  timestamp_header?: string;
+  tolerance_seconds?: number;
+  secret: { set: boolean; hint?: string; updated_at?: string };
 }
 
 /** One post to a card webhook: how it ended and why, never what it carried. */
 export interface KVWebhookDelivery {
   at: string;
-  outcome: "written" | "unchanged" | "refused" | "invalid";
-  reason?: "credentials" | "signature" | "disabled" | "body" | "mapping" | "card_data_invalid" | "rate_limited" | "payment_required" | "internal";
+  /** handshake: a vendor's handshake, answered; it wrote nothing, was not billed and took no rate budget. */
+  outcome: "written" | "unchanged" | "refused" | "invalid" | "handshake";
+  reason?: "credentials" | "signature" | "signature_missing" | "signature_invalid" | "timestamp_missing" | "timestamp_stale" | "secret_pending" | "handshake_invalid"
+    | "disabled" | "body" | "mapping" | "card_data_invalid" | "rate_limited" | "payment_required" | "internal";
   detail?: string;
   status: number;
   bytes: number;
+  /** The file parts of a multipart post, which are ignored. */
+  files?: number;
   revision?: number;
   request_id: string;
 }
@@ -1593,7 +1631,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing" | "source_failed" | "source_stale";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing" | "source_failed" | "source_stale" | "reach_dropped" | "group_empty" | "card_data_stale";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty
@@ -1994,6 +2032,8 @@ export interface TriggerOverlay {
   mapping?: Record<string, unknown>;
   enabled: boolean;
   signing: boolean;
+  verify?: WebhookVerify;
+  handshake?: WebhookHandshake;
   card_id?: string;
   alerts: TriggerOverlayAlert[];
   screens: TriggerOverlayScreens;
@@ -2048,6 +2088,8 @@ export interface TriggerOverlayWrite {
   style?: TriggerOverlayStyle;
   mapping?: Record<string, unknown>;
   signing?: boolean;
+  verify?: WebhookVerifyWrite;
+  handshake?: WebhookHandshake;
 }
 
 export interface TriggerWrite {
@@ -2071,6 +2113,10 @@ export interface TriggerPatch {
     mapping?: Record<string, unknown> | null;
     enabled?: boolean;
     signing?: boolean;
+    /** Replaces the vendor verification; null removes it, and its secret with it. */
+    verify?: WebhookVerifyWrite | null;
+    /** Sets the handshake the URL answers; null removes it. */
+    handshake?: WebhookHandshake | null;
   };
 }
 
@@ -2093,11 +2139,15 @@ export interface TriggerOverlayReceipt {
 /** One post to an overlay trigger, as its seven-day log keeps it: never the body, headers or credentials. */
 export interface TriggerDelivery {
   at: string;
+  /** shown, updated, unchanged, ended, ignored, refused, invalid or handshake (a vendor's handshake, answered: it changed no alert and took no rate budget). */
   outcome: string;
+  /** Beside credentials, signature, disabled, body, mapping, field, rate_limited, payment_required and internal: signature_missing, signature_invalid, timestamp_missing, timestamp_stale, secret_pending and handshake_invalid. */
   reason?: string;
   detail?: string;
   status: number;
   bytes: number;
+  /** The file parts of a multipart post, which are ignored. */
+  files?: number;
   alert_id?: string;
   request_id: string;
 }

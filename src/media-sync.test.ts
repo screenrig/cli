@@ -398,6 +398,54 @@ test("help names the account flow, the secret file and the folder selector", () 
   }
   const add = commandHelp(["media", "sync", "account", "add", "microsoft365"]);
   assert.match(add.notes.join("\n"), /never an argument/);
-  assert.ok(add.examples.every((text) => text.includes("--secret-file")), "the example reads the secret from a file");
+  assert.ok(add.examples.every((text) => text.includes("--secret-file") || text.includes("--connection-id")), "the example reads the secret from a file, or holds none because a connection signs in");
   assert.ok(add.options.some((option: { flags?: string; name?: string }) => (option.flags ?? option.name ?? "").includes("--secret-file")));
+});
+
+test("media sync account add microsoft365 reads through a Microsoft connection instead of an app of its own", async () => {
+  const env = await enrolled();
+  const bodies: Array<Record<string, any>> = [];
+  const transport = new FakeTransport()
+    .on("POST", "/api/media-sync-accounts", (req) => {
+      bodies.push(req.body as Record<string, any>);
+      const body = req.body as { name: string; config: { connection_id?: string } };
+      return json(201, account({ name: body.name, config: body.config, secret: { set: false, hint: "" } }), { etag: '"1"' });
+    })
+    .on("GET", "/api/media-sync-accounts", () => json(200, { items: [account({ config: { connection_id: "pcn_CONNECTION" }, secret: { set: false, hint: "" } }), account({ id: "msa_OWNAAAAAAAAAAAAAAAA" })], next_cursor: null }));
+  const created = await cli(["--human", "media", "sync", "account", "add", "microsoft365", "--name", "Contoso", "--connection-id", "pcn_CONNECTION"], transport, env);
+  assert.equal(created.code, 0, created.stdout + created.stderr);
+  assert.deepEqual(bodies.at(-1), { kind: "microsoft365", name: "Contoso", config: { connection_id: "pcn_CONNECTION" } }, "no tenant, app or secret: the connection holds them");
+  assert.equal(lastCall(transport).headers?.["idempotency-key"] !== undefined, true, "a create is an idempotent write");
+  assert.match(created.stdout, /^connection: pcn_CONNECTION \(a Microsoft connection signs in; this account holds no secret\)$/m);
+  assert.ok(!/^tenant:|^secret:/m.test(created.stdout), "an account that reads through a connection shows neither tenant nor secret");
+  assert.match(created.stdout, /Next: screenrig media sync account test msa_/);
+
+  const own = await cli(["--json", "media", "sync", "account", "add", "microsoft365", "--name", "Contoso", "--tenant-id", TENANT, "--client-id", CLIENT, "--secret-file", "-"], transport, env, { stdin: Readable.from([Buffer.from(`${SECRET}\n`)]), isStdinTty: () => false });
+  assert.equal(own.code, 0, own.stdout + own.stderr);
+  assert.deepEqual(bodies.at(-1), { kind: "microsoft365", name: "Contoso", config: { tenant_id: TENANT, client_id: CLIENT }, secret: SECRET });
+
+  const listed = await cli(["--human", "media", "sync", "account", "list"], transport, env);
+  assert.match(listed.stdout, /^msa_ACCOUNTAAAAAAAAAAAA\s+Contoso\s+pcn_CONNECTION\s+via connection\s+never$/m);
+  assert.match(listed.stdout, /^msa_OWNAAAAAAAAAAAAAAAA\s+Contoso\s+contoso\.onmicrosoft\.com\s+…Wxyz\s+never$/m);
+
+  const before = bodies.length;
+  for (const [argv, pattern] of [
+    [["--name", "Contoso", "--connection-id", "pcn_CONNECTION", "--tenant-id", TENANT], /--connection-id|--tenant-id/],
+    [["--name", "Contoso", "--connection-id", "pcn_CONNECTION", "--secret-file", "secret.txt"], /--connection-id|--secret-file/],
+    [["--name", "Contoso", "--connection-id", "bic_CONNECTION"], /--connection-id takes a connection id \(pcn_…\)/],
+    [["--name", "Contoso"], /Provide exactly one of --connection-id or --tenant-id/],
+    [["--name", "Contoso", "--tenant-id", TENANT, "--client-id", CLIENT], /--tenant-id and --client-id and --secret-file together/],
+    [["--connection-id", "pcn_CONNECTION"], /required option '--name <NAME>' not specified|--name/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "media", "sync", "account", "add", "microsoft365", ...argv], transport, env);
+    assert.equal(refused.code, 2, argv.join(" "));
+    assert.match(refused.envelope.error?.detail ?? refused.stderr, pattern, argv.join(" "));
+  }
+  assert.equal(bodies.length, before, "nothing was sent");
+  const help = commandHelp(["media", "sync", "account", "add", "microsoft365"]);
+  assert.ok(help.options.some((option: { name: string }) => option.name === "--connection-id"));
+  assert.ok(help.options.find((option: { name: string }) => option.name === "--tenant-id")!.required === false);
+  assert.ok(help.examples.some((example) => example.includes("--connection-id pcn_CONNECTION")));
+  assert.match(help.notes.join("\n"), /Microsoft connection of this project, in either mode/);
+  assert.match(commandHelp(["media", "sync"]).usage, /Microsoft connection of the project/);
 });

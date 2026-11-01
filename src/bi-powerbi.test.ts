@@ -157,7 +157,7 @@ test("connection create powerbi reads the secret from a file or stdin and never 
     [["--tenant-id", TENANT, "--client-id", APP], /requires --secret-file|--secret-file/],
     [["--tenant-id", "common", "--client-id", APP, "--secret-file", "secret.txt"], /--tenant-id takes/],
     [["--tenant-id", TENANT, "--client-id", "my-app", "--secret-file", "secret.txt"], /--client-id takes/],
-    [["--tenant-id", TENANT, "--client-id", APP, "--secret", SECRET], /unknown option|requires --secret-file/],
+    [["--tenant-id", TENANT, "--client-id", APP, "--secret", SECRET], /unknown option|does not accept --secret|requires --secret-file/],
     [["--tenant-id", TENANT, "--client-id", APP, "--secret-file", "missing.txt"], /does not exist/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", "bi", "connection", "create", "powerbi", ...args], transport, env);

@@ -5,6 +5,7 @@ import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMe
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { CREDIT_HELP } from "../help-text.js";
+import { connectionIdOption } from "../connection-ids.js";
 import {
   handleMediaSyncAccountAdd, handleMediaSyncAccountDelete,
   handleMediaSyncAccountList, handleMediaSyncAccountShow, handleMediaSyncAccountTest, handleMediaSyncAccountUpdate, handleMediaSyncCreate,
@@ -190,17 +191,23 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     "  SharePoint reads through your own Microsoft Entra app (an account):",
     "  application permission Sites.Selected, granted on each site, or Files.Read.All,",
     "  with admin consent. The client secret is sealed on the server and never shown.",
+    "  An account may instead read through a Microsoft connection of the project",
+    "  (--connection-id; connection create microsoft), which holds the app once for",
+    "  data sources and Power BI too, in either mode.",
     "  Play the media folder with a folder selector in a playlist.",
   ].join("\n"));
 
   const account = sync.command("account").description("Add, test and manage the Microsoft Entra apps a project's syncs read through");
   const add = account.command("add").description("Add the credentials of your own app");
-  add.command("microsoft365").description("Add a Microsoft Entra app: its tenant, application id and a client secret")
+  const addMicrosoft = add.command("microsoft365").description("Add a Microsoft Entra app: its tenant, application id and a client secret, or a Microsoft connection of this project")
     .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
-    .requiredOption("--tenant-id <TENANT>", "Your organization's directory (tenant) id, or its primary domain such as contoso.onmicrosoft.com", mediaSyncTenant)
-    .requiredOption("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
-    .requiredOption("--secret-file <FILE>", `${SECRET_FILE}; the file holds only the secret's Value`)
+    .option("--tenant-id <TENANT>", "Your organization's directory (tenant) id, or its primary domain such as contoso.onmicrosoft.com", mediaSyncTenant)
+    .option("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
+    .option("--secret-file <FILE>", `${SECRET_FILE}; the file holds only the secret's Value`)
+    .addOption(new Option("--connection-id <ID>", "Sign in through a Microsoft connection of this project, in either mode (pcn_..., screenrig connection list), instead of --tenant-id, --client-id and --secret-file").argParser(connectionIdOption).conflicts(["tenantId", "clientId", "secretFile"]))
     .action(bind(handleMediaSyncAccountAdd));
+  requireOptionGroup(addMicrosoft, "exactlyOne", ["--connection-id", "--tenant-id"]);
+  requireOptionGroup(addMicrosoft, "together", ["--tenant-id", "--client-id", "--secret-file"]);
   account.command("list").description("List this project's media sync accounts").action(bind(handleMediaSyncAccountList));
   account.command("show").description("Inspect one account and its last test")
     .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountShow));

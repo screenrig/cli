@@ -37,7 +37,7 @@ export interface MediaSyncCheck { name: string; ok: boolean; warn?: boolean; det
 export interface MediaSyncTest { at: string; ok: boolean; checks: MediaSyncCheck[] }
 export interface MediaSyncAccount {
   id: string; project_id?: string; kind: string; name: string;
-  config: { tenant_id?: string; client_id?: string };
+  config: { tenant_id?: string; client_id?: string; connection_id?: string };
   secret: { set: boolean; hint: string };
   state: string; last_test?: MediaSyncTest | null;
   revision: number; created_at?: string; updated_at?: string;
@@ -204,9 +204,10 @@ export function accountLines(account: MediaSyncAccount | undefined): string[] {
     `id: ${account.id}`,
     `name: ${account.name}`,
     `kind: ${account.kind}`,
-    `tenant: ${dash(account.config?.tenant_id)}`,
-    `client: ${dash(account.config?.client_id)}`,
-    `secret: ${account.secret?.set ? `set${account.secret.hint ? ` (ends ${account.secret.hint})` : ""}` : "not set"}`,
+    ...(account.config?.connection_id
+      ? [`connection: ${account.config.connection_id} (a Microsoft connection signs in; this account holds no secret)`]
+      : [`tenant: ${dash(account.config?.tenant_id)}`, `client: ${dash(account.config?.client_id)}`,
+        `secret: ${account.secret?.set ? `set${account.secret.hint ? ` (ends ${account.secret.hint})` : ""}` : "not set"}`]),
     `state: ${account.state}`,
     `last test: ${test ? `${test.ok ? "ok" : "failed"} at ${test.at}` : "never"}`,
     ...(test ? checkLines(test.checks) : []),
@@ -218,8 +219,8 @@ function accountTableLines(items: MediaSyncAccount[]): string[] {
   if (!items.length) return ["No media sync accounts"];
   return table(["ID", "NAME", "TENANT", "SECRET", "TEST"], items.map((item) => [
     item.id, item.name,
-    dash(item.config?.tenant_id),
-    item.secret?.set ? `…${item.secret.hint}` : "not set",
+    dash(item.config?.tenant_id ?? item.config?.connection_id),
+    item.config?.connection_id ? "via connection" : item.secret?.set ? `…${item.secret.hint}` : "not set",
     item.last_test ? (item.last_test.ok ? "ok" : "failed") : "never",
   ]));
 }
@@ -296,15 +297,23 @@ export const handleMediaSyncAccountAdd = commandHandler(async (args, runtime, re
   const tenant = flagString(args.flags, "tenant-id");
   const client = flagString(args.flags, "client-id");
   const secretFile = flagString(args.flags, "secret-file");
-  if (name === undefined || tenant === undefined || client === undefined || secretFile === undefined) {
-    throw usageError("media sync account add microsoft365 requires --name, --tenant-id, --client-id and --secret-file.");
+  const connectionId = flagString(args.flags, "connection-id");
+  if (name === undefined) throw usageError("media sync account add microsoft365 requires --name.");
+  let body: Record<string, unknown>;
+  if (connectionId !== undefined) {
+    // A Microsoft connection of the project (either mode) signs in and holds the secret.
+    if (tenant !== undefined || client !== undefined || secretFile !== undefined) {
+      throw usageError("--connection-id replaces --tenant-id, --client-id and --secret-file: the Microsoft connection holds them.");
+    }
+    body = { kind: "microsoft365", name: mediaSyncName(name), config: { connection_id: connectionId } };
+  } else {
+    if (tenant === undefined || client === undefined || secretFile === undefined) {
+      throw usageError("media sync account add microsoft365 requires --connection-id, or --tenant-id, --client-id and --secret-file.");
+    }
+    body = { kind: "microsoft365", name: mediaSyncName(name), config: { tenant_id: mediaSyncTenant(tenant), client_id: mediaSyncClientId(client) }, secret: await readSecret(secretFile, runtime) };
   }
-  const secret = await readSecret(secretFile, runtime);
   const api = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await syncCall(api, {
-    method: "POST", path: ACCOUNTS_PATH, idempotent: true,
-    body: { kind: "microsoft365", name: mediaSyncName(name), config: { tenant_id: mediaSyncTenant(tenant), client_id: mediaSyncClientId(client) }, secret },
-  });
+  const response = await syncCall(api, { method: "POST", path: ACCOUNTS_PATH, idempotent: true, body });
   const created = response.body as MediaSyncAccount | undefined;
   return {
     envelope: jsonBody(response, api.requestId),

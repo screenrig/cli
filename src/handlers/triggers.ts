@@ -10,6 +10,7 @@ import { CliError, makeProblem, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
 import { clientFor, commandHandler, jsonBody, writeRecoveries, type CommandResult } from "../commands.js";
+import { singleStdin, verifyMembers } from "../webhook-verify.js";
 
 
 // Triggers: /api/triggers. A CAP trigger takes an emergency system's alerts; an
@@ -117,7 +118,7 @@ export function triggerTargetBody(args: ParsedArgs): TriggerTarget | undefined {
 
 /** The kind-only options of create: usage errors name the kind they need. */
 export function triggerOverlayOptionsOnly(args: ParsedArgs, kind: string): void {
-  for (const flag of ["show", "edge", "style", "map", "signing"]) {
+  for (const flag of ["show", "edge", "style", "map", "signing", "verify", "verify-secret-file", "verify-header", "verify-encoding", "verify-timestamp-header", "verify-tolerance", "handshake"]) {
     const given = flag === "signing" ? flagBool(args.flags, flag) : flagString(args.flags, flag) !== undefined;
     if (given && kind !== "overlay") throw usageError(`--${flag} applies to an overlay trigger: add --kind overlay.`);
   }
@@ -141,6 +142,9 @@ export const handleTriggersCreate = commandHandler(async (args, runtime, resolve
     if (edge !== undefined && show !== "bar") throw usageError("--edge applies to a bar: use --show bar.");
     const styleFile = flagString(args.flags, "style");
     const mapFile = flagString(args.flags, "map");
+    if (signing && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
+    singleStdin([["--style", styleFile], ["--map", mapFile], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
+    const vendor = await verifyMembers(args, runtime, { create: true, subject: "the trigger" });
     body = {
       kind: "overlay", label, target,
       ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold, "overlay") } : {}),
@@ -150,6 +154,8 @@ export const handleTriggersCreate = commandHandler(async (args, runtime, resolve
         ...(styleFile !== undefined ? { style: triggerStyle(await readAuthoringText(styleFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
         ...(mapFile !== undefined ? { mapping: triggerMapping(await readAuthoringText(mapFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
         ...(signing ? { signing: true } : {}),
+        ...(vendor.verify ? { verify: vendor.verify } : {}),
+        ...(vendor.handshake ? { handshake: vendor.handshake } : {}),
       },
     };
   } else {
@@ -173,6 +179,9 @@ export const handleTriggersUpdate = commandHandler(async (args, runtime, resolve
   const edge = flagString(args.flags, "edge");
   const styleFile = flagString(args.flags, "style");
   const mapFile = flagString(args.flags, "map");
+  if (flagBool(args.flags, "signing") && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
+  singleStdin([["--style", styleFile], ["--map", mapFile], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
+  const vendor = await verifyMembers(args, runtime, { create: false, subject: "the trigger" });
   const overlay: NonNullable<TriggerPatch["overlay"]> = {
     ...(edge !== undefined ? { edge: edge as "top" | "bottom" } : {}),
     ...(styleFile !== undefined ? { style: triggerStyle(await readAuthoringText(styleFile, runtime, TRIGGER_MAPPING_MAX_BYTES)) } : {}),
@@ -183,6 +192,8 @@ export const handleTriggersUpdate = commandHandler(async (args, runtime, resolve
     ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
     ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
     ...(flagBool(args.flags, "no-signing") ? { signing: false } : {}),
+    ...(vendor.verify !== undefined ? { verify: vendor.verify } : {}),
+    ...(vendor.handshake !== undefined ? { handshake: vendor.handshake } : {}),
   };
   const body: TriggerPatch = {
     ...(name !== undefined ? { label: triggerName(name) } : {}),

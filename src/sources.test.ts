@@ -7,7 +7,7 @@ import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help-tree.js";
 import { run, type CliRuntime } from "./main.js";
-import { accumulate, refreshText, secretPairCheck, setMembers, setPairCheck, SOURCE_ID_PATTERN, sourceRefreshSeconds, sourceStaleAfterSeconds, sourceTestLines, type Source, type SourceRooms } from "./sources.js";
+import { accumulate, refreshText, secretPairCheck, setMembers, setPairCheck, SOURCE_ID_PATTERN, sourceRefreshSeconds, sourceStaleAfterSeconds, sourceTestLines, unsetSecretCheck, type Source, type SourceRooms } from "./sources.js";
 import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -162,7 +162,14 @@ test("--secret names are the server's and a bare name is refused", () => {
   secretPairCheck("calendar_url.lobby=@lobby.url");
   secretPairCheck("access_token=-");
   assert.throws(() => secretPairCheck("novalue"), /--secret takes NAME=VALUE/);
-  assert.throws(() => secretPairCheck("Bad Name=x"), /A secret name is lower-case/);
+  assert.throws(() => secretPairCheck("Bad Name=x"), /A secret name starts with a lower-case letter or digit/);
+  // The name of a header or query secret goes on in any case: header.X-Api-Key is the secret of the header X-Api-Key.
+  secretPairCheck("header.X-Api-Key=@key.txt");
+  secretPairCheck("query.apiKey=@key.txt");
+  assert.throws(() => secretPairCheck("Header.x=1"), /A secret name starts with/);
+  assert.throws(() => secretPairCheck("header.X Api=1"), /A secret name starts with/);
+  assert.throws(() => unsetSecretCheck("-header"), /A secret name starts with/);
+  unsetSecretCheck("header.X-Api-Key");
   assert.throws(() => secretPairCheck("token="), /has no value/);
 });
 
@@ -561,4 +568,110 @@ test("an ambiguous source create reruns with the saved key and holds no address 
   assert.equal(posts.length, 2);
   assert.equal(posts[1]!.headers["idempotency-key"], posts[0]!.headers["idempotency-key"], "the rerun reuses the saved key");
   assert.doesNotMatch(await readFile(env.configPath, "utf8"), /pending_writes/);
+});
+
+test("source create takes the toast kind and every secret name an HTTP request uses", async () => {
+  const env = await enrolled();
+  const { transport, bodies } = scripted();
+  const toast = await cli([
+    "--json", "source", "create", "--kind", "toast", "--card", CARD, "--name", "Toast menu", "--settings", '{"restaurant":"7f0c4b1e-0000-4000-8000-000000000001","client_id":"abc","environment":"production"}',
+    "--secret", "client_secret=toast-client-secret", "--stale-after", "1h",
+  ], transport, env);
+  assert.equal(toast.code, 0, toast.stdout);
+  const sentToast = bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!;
+  assert.equal(sentToast.body.kind, "toast");
+  assert.deepEqual(sentToast.body.secrets, { client_secret: "toast-client-secret" });
+  assert.equal(sentToast.body.stale_after_seconds, 3600);
+
+  await writeFile(path.join(env.cwd, "orders.key"), "key-1234567890\n");
+  const http = await cli([
+    "--json", "source", "create", "--kind", "json", "--card", CARD, "--name", "Open orders",
+    "--settings", JSON.stringify({ url: "https://api.example.com/graphql", graphql: { query: "{ orders { id } }" }, auth: "basic", username: "screens", pagination: { type: "cursor", param: "after", path: "page.next", max_pages: 3 }, format: "json" }),
+    "--secret", "password=hunter2-hunter2", "--secret", "header.X-Api-Key=@orders.key", "--secret", "query.api_key=q-1234567890", "--secret", "client_secret=cs-1234567890",
+  ], transport, env);
+  assert.equal(http.code, 0, http.stdout);
+  const sent = bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!;
+  assert.deepEqual(sent.body.secrets, { password: "hunter2-hunter2", "header.X-Api-Key": "key-1234567890", "query.api_key": "q-1234567890", client_secret: "cs-1234567890" });
+  assert.deepEqual(sent.body.config.graphql, { query: "{ orders { id } }" });
+  assert.deepEqual(sent.body.config.pagination, { type: "cursor", param: "after", path: "page.next", max_pages: 3 });
+  assert.ok(!http.stdout.includes("hunter2") && !http.stdout.includes("q-1234567890"), "the answer carries masked hints only");
+
+  const removed = await cli(["--json", "source", "update", SOURCE, "--unset-secret", "header.X-Api-Key", "--unset-secret", "query.api_key"], transport, env);
+  assert.equal(removed.code, 0, removed.stdout);
+  assert.deepEqual(bodies.filter((call) => call.method === "PATCH").at(-1)!.body, { secrets: { "header.X-Api-Key": null, "query.api_key": null } });
+  for (const bad of ["Header.X-Api-Key", "header.X Api", "-header.x", `h${"x".repeat(64)}`]) {
+    const refused = await cli(["--json", "source", "create", "--kind", "json", "--card", CARD, "--name", "n", "--secret", `${bad}=v`], transport, env);
+    assert.equal(refused.envelope.error?.code, "usage_error", bad);
+  }
+});
+
+test("source test shows the request a csv or json source sent, with its secrets masked", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/sources/test", () => ({
+    status: 200, headers: {},
+    body: {
+      document: { orders: [{ id: "1" }] }, valid: true, warnings: [], stats: { orders: 1, pages: 2 }, fetched_at: NOW.toISOString(),
+      request: { method: "POST", url: "https://api.example.com/graphql?since=2026-11-01&api_key=***", headers: ["X-Api-Key", "X-Client-Id"], body: '{"query":"{ orders { id } }"}', pages: 2 },
+    },
+  }));
+  const human = await cli(["--human", "source", "test", "--kind", "json", "--card", CARD, "--settings", '{"url":"https://api.example.com/graphql"}', "--secret", "query.api_key=q-1234567890"], transport, env);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /^request: POST https:\/\/api\.example\.com\/graphql\?since=2026-11-01&api_key=\*\*\* \(2 pages read\)$/m);
+  assert.match(human.stdout, /^ {2}headers sent: X-Api-Key, X-Client-Id \(names only\)$/m);
+  assert.match(human.stdout, /^ {2}body: \{"query":"\{ orders \{ id \} \}"\}$/m);
+  assert.ok(!human.stdout.includes("q-1234567890"));
+  const json = await cli(["--json", "source", "test", "--kind", "json", "--card", CARD, "--settings", "{}"], transport, env);
+  assert.equal(json.envelope.data.request.pages, 2);
+  const plain = sourceTestLines({ document: {}, valid: true, warnings: [], stats: {}, fetched_at: NOW.toISOString() });
+  assert.ok(!plain.some((line) => line.startsWith("request:")), "a kind that sends no request shows none");
+});
+
+test("--connection-id reads a microsoft365 or google_calendar source through a project connection", async () => {
+  const env = await enrolled();
+  const { transport, bodies } = scripted();
+  const rooms = JSON.stringify({ rooms: [{ key: "a", email: "a@example.com" }], days: 7 });
+  const created = await cli(["--json", "source", "create", "--kind", "microsoft365", "--card", CARD, "--name", "Rooms", "--settings", rooms, "--connection-id", "pcn_CONNECTION"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  const sent = bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!;
+  assert.deepEqual(sent.body.config, { rooms: [{ key: "a", email: "a@example.com" }], days: 7, connection_id: "pcn_CONNECTION" });
+  assert.ok(!("secrets" in sent.body), "the connection holds the credentials");
+  const bare = await cli(["--json", "source", "create", "--kind", "google_calendar", "--card", CARD, "--name", "Rooms", "--connection-id", "pcn_CONNECTION", "--set", "days=14"], transport, env);
+  assert.equal(bare.code, 0, bare.stdout);
+  assert.deepEqual(bodies.filter((call) => call.method === "POST" && call.path === "/api/sources").at(-1)!.body.config, { days: 14, connection_id: "pcn_CONNECTION" });
+
+  const preview = await cli(["--json", "source", "test", "--kind", "microsoft365", "--card", CARD, "--settings", rooms, "--connection-id", "pcn_CONNECTION"], transport, env);
+  assert.equal(preview.code, 0, preview.stdout);
+  assert.deepEqual(bodies.at(-1)!.body.config, { rooms: [{ key: "a", email: "a@example.com" }], days: 7, connection_id: "pcn_CONNECTION" });
+
+  const moved = await cli(["--json", "source", "update", SOURCE, "--connection-id", "pcn_OTHER"], transport, env);
+  assert.equal(moved.code, 0, moved.stdout);
+  const patch = bodies.filter((call) => call.method === "PATCH").at(-1)!;
+  assert.deepEqual(patch.body.config, { calendars: [{ key: "lobby" }], days: 7, time_zone: "America/Vancouver", connection_id: "pcn_OTHER" }, "the saved config keeps its members and names the connection");
+  assert.equal(patch.headers["if-match"], '"3"', "merged from a read, so guarded by its revision");
+
+  const before = bodies.length;
+  for (const [argv, pattern] of [
+    [["create", "--kind", "ics", "--card", CARD, "--name", "n", "--connection-id", "pcn_CONNECTION"], /--connection-id applies to a microsoft365 or google_calendar source/],
+    [["create", "--kind", "microsoft365", "--card", CARD, "--name", "n", "--connection-id", "bic_CONNECTION"], /--connection-id takes a connection id \(pcn_…\)/],
+    [["create", "--kind", "microsoft365", "--card", CARD, "--name", "n", "--connection-id", "pcn_CONNECTION", "--set", "connection_id=pcn_OTHER"], /--set connection_id is given twice/],
+    [["test", "--kind", "csv", "--card", CARD, "--connection-id", "pcn_CONNECTION"], /--connection-id applies to a microsoft365 or google_calendar source/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "source", ...argv], transport, env);
+    assert.equal(refused.code, 2, argv.join(" "));
+    assert.match(refused.envelope.error?.detail ?? "", pattern, argv.join(" "));
+  }
+  assert.equal(bodies.length, before, "refused commands send nothing");
+});
+
+test("source help describes the HTTP request settings, the secret names, the toast kind and the calendar keywords", () => {
+  const help = commandHelp(["source"]).usage;
+  for (const text of ["toast", "header.NAME", "query.NAME", "password", "client_secret", "oauth2", "token_request", "pagination", "graphql", "include and exclude", "stats.filtered", "--connection-id pcn_"]) {
+    assert.ok(help.includes(text), text);
+  }
+  assert.ok(commandHelp(["source", "create"]).examples.some((example) => example.includes("--kind toast")));
+  assert.ok(commandHelp(["source", "create"]).examples.some((example) => example.includes("--set exclude=")));
+  assert.ok(commandHelp(["source", "create"]).examples.some((example) => example.includes("--secret header.X-Api-Key=@")));
+  assert.deepEqual(commandHelp(["source", "create"]).options.find((option) => option.name === "--kind")!.choices, ["ics", "sheets", "csv", "json", "microsoft365", "google_calendar", "square", "shopify", "momentus", "toast"]);
+  assert.match(commandHelp(["source", "test"]).notes.join("\n"), /data\.request/);
 });

@@ -1,6 +1,6 @@
 import { type Command, Argument, Option } from "commander";
 import {
-  cardId, cardUid, feedListOption, FEED_AREA_UNKNOWN, FEED_CERTAINTIES, FEED_FAMILIES, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
+  cardId, cardUid, feedListOption, FEED_AREA_UNKNOWN, FEED_CATEGORIES, FEED_CERTAINTIES, FEED_FAMILIES, FEED_PROVIDERS, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
 } from "../cards.js";
 import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleFeedsGet } from "../handlers/cards.js";
 import { positiveInteger, revision } from "./options.js";
@@ -57,8 +57,16 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
   const feeds = root.command("feeds").description("Read third-party data fetched and cached by screenRIG");
   const get = feeds.command("get").description("Read a feed once; report pending and its retry time")
     .addArgument(new Argument("<family>", "Feed family").choices([...FEED_FAMILIES]))
-    .option("--lat <DEGREES>", "Latitude for weather, airquality, alerts, earthquakes, cyclones or cap")
-    .option("--lon <DEGREES>", "Longitude for weather, airquality, alerts, earthquakes, cyclones or cap")
+    .option("--lat <DEGREES>", "Latitude for weather, airquality, alerts, earthquakes, cyclones, cap, tides, almanac, outdoorsafety or bikeshare")
+    .option("--lon <DEGREES>", "Longitude for weather, airquality, alerts, earthquakes, cyclones, cap, tides, almanac, outdoorsafety or bikeshare")
+    .option("--station <ID>", "Tides: a NOAA tide prediction station id, such as 9414290; without it --lat and --lon pick the nearest station within 100 km")
+    .option("--country <CODE>", "Drugalerts: us, ca or gb (required). Respiratory: us or gb (required). Almanac: the ISO 3166-1 country whose public holidays it lists")
+    .addOption(new Option("--category <CATEGORY>", "Drugalerts: drug (default) or food").choices([...FEED_CATEGORIES]))
+    .option("--region <NAME>", "Respiratory: a US state, territory or DC by name or postal code, or England or a UKHSA region; the nation without it")
+    .option("--date <YYYY-MM-DD>", "Almanac: one fixed day instead of the days around today")
+    .addOption(new Option("--provider <PROVIDER>", "Departures: the transit provider of the stops (required): tfl, entur or digitransit").choices([...FEED_PROVIDERS]))
+    .option("--stops <IDS>", "Departures: one to four stop ids of the provider, comma-separated (required): TfL StopPoint ids such as 940GZZLUOXC, Entur NSR:StopPlace:337 or NSR:Quay:568, Digitransit gtfsIds such as HSL:1040129")
+    .option("--system <ID>", "Bikeshare: a bike share system id, such as Mobibikes_CA_Vancouver; without it the nearest listed system that covers --lat and --lon serves")
     .option("--radius-km <KM>", "Earthquake radius (default 500) or cyclone area, 10–20000 km")
     .option("--min-magnitude <MAGNITUDE>", "Earthquakes: least magnitude, 0–9 (default 2.5)")
     .option("--hours <HOURS>", "Earthquakes: window in hours, 1–168 (default 24)")
@@ -78,7 +86,7 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .addOption(new Option("--sender <NAME>", "Cap: only alerts from this sender (repeatable)").argParser(feedListOption("sender", 120)))
     .addOption(new Option("--status <STATUS>", "Cap: alert status to read, default Actual (repeatable)").choices([...FEED_STATUSES]).argParser(feedListOption("status", 16, FEED_STATUSES)))
     .addOption(new Option("--scope <SCOPE>", "Cap: alert scope to read, default Public (repeatable)").choices([...FEED_SCOPES]).argParser(feedListOption("scope", 16, FEED_SCOPES)))
-    .addOption(new Option("--language <TAG>", "Cap: language preference, the first present wins (repeatable)").argParser(feedListOption("language", 35)))
+    .addOption(new Option("--language <TAG>", "Cap: language preference, the first present wins (repeatable). Almanac: the On This Day edition, ar, bs, cs, de, en, es, fr, it, pt, ru, sv, tr, uk or zh (default en)").argParser(feedListOption("language", 35)))
     .addOption(new Option("--area-unknown <MODE>", "Cap: an alert told only by area codes the location lacks: hide (default) or show").choices([...FEED_AREA_UNKNOWN]))
     .action(bind(handleFeedsGet));
   requireOptionGroup(get, "together", ["--lat", "--lon"]);

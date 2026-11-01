@@ -184,7 +184,8 @@ test("feeds get refuses CAP, cyclone and earthquake flags that break their rules
 test("feeds get help names the new families, choices, repeatable flags and relationships", () => {
   const help = commandHelp(["feeds", "get"]);
   const option = (name: string) => help.options.find(candidate => candidate.name === name);
-  assert.deepEqual(help.arguments[0]!.choices, ["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap"]);
+  assert.deepEqual(help.arguments[0]!.choices, ["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap",
+    "tides", "launches", "drugalerts", "respiratory", "almanac", "outdoorsafety", "departures", "bikeshare"]);
   for (const name of ["--min-magnitude", "--hours", "--basins", "--public", "--geocode", "--min-severity", "--max-severity", "--min-urgency", "--min-certainty",
     "--event", "--exclude-event", "--sender", "--status", "--scope", "--language", "--area-unknown"]) assert.ok(option(name), name);
   assert.deepEqual(option("--min-severity")!.choices, ["minor", "moderate", "severe", "extreme"]);
@@ -195,6 +196,110 @@ test("feeds get help names the new families, choices, repeatable flags and relat
   assert.ok(help.relationships.some(group => group.kind === "requires" && group.options.join() === "--geocode,--lat,--lon"));
   assert.throws(() => parseArgv(["feeds", "get", "cap", "--lat", "1", "--lon", "1", "--public", "--public"]), /only once/);
   assert.throws(() => parseArgv(["feeds", "get", "cap", "--lat", "1", "--lon", "1", "--min-severity", "minor", "--min-severity", "severe"]), /only once/);
+});
+
+test("feeds get reads tides, launches, drug alerts, respiratory activity, the almanac, outdoor safety, departures and bike share", async t => {
+  const f = await fixture(t);
+  const doc = { schema: "screenrig.tides/v1", fetchedAt: "2026-10-15T11:58:00Z", attribution: { text: "Data provider" } };
+  const cases: Array<[string, string[], Record<string, string>]> = [
+    ["tides", ["--station", "9414290"], { station: "9414290" }],
+    ["tides", ["--lat", "37.8", "--lon", "-122.4"], { lat: "37.8", lon: "-122.4" }],
+    ["launches", [], {}],
+    ["drugalerts", ["--country", "us"], { country: "us" }],
+    ["drugalerts", ["--country", "GB", "--category", "food"], { country: "GB", category: "food" }],
+    ["respiratory", ["--country", "us", "--region", "WA"], { country: "us", region: "WA" }],
+    ["respiratory", ["--country", "gb"], { country: "gb" }],
+    ["almanac", [], {}],
+    ["almanac", ["--country", "US", "--language", "fr", "--lat", "49.25", "--lon", "-123", "--date", "2026-12-25"], { country: "US", language: "fr", lat: "49.25", lon: "-123", date: "2026-12-25" }],
+    ["outdoorsafety", ["--lat", "33.4", "--lon", "-112"], { lat: "33.4", lon: "-112" }],
+    ["departures", ["--provider", "tfl", "--stops", "940GZZLUOXC, 940GZZLUVIC"], { provider: "tfl", stops: "940GZZLUOXC,940GZZLUVIC" }],
+    ["departures", ["--provider", "entur", "--stops", "NSR:StopPlace:337"], { provider: "entur", stops: "NSR:StopPlace:337" }],
+    ["bikeshare", ["--lat", "49.28", "--lon", "-123.12"], { lat: "49.28", lon: "-123.12" }],
+    ["bikeshare", ["--lat", "49.28", "--lon", "-123.12", "--system", "Mobibikes_CA_Vancouver"], { lat: "49.28", lon: "-123.12", system: "Mobibikes_CA_Vancouver" }],
+  ];
+  let expected: Record<string, string> = {};
+  for (const family of ["tides", "launches", "drugalerts", "respiratory", "almanac", "outdoorsafety", "departures", "bikeshare"]) {
+    f.transport.on("GET", `/api/feeds/${family}`, request => {
+      assert.deepEqual(request.query, expected, family);
+      assert.equal(request.queryRepeated, undefined, `${family} repeats nothing`);
+      return ok(doc, { "screenrig-feed-key": `feed:${family}.v1:example` });
+    });
+  }
+  for (const [family, flags, query] of cases) {
+    expected = query;
+    const result = await f.invoke(["feeds", "get", family, ...flags]);
+    assert.equal(result.code, 0, `${family} ${flags.join(" ")}: ${result.stdout}`);
+    assert.equal(result.body.data.fetchedAt, doc.fetchedAt);
+    assert.equal(result.body.data.key, `feed:${family}.v1:example`);
+  }
+  assert.equal(f.transport.calls.length, cases.length);
+});
+
+test("feeds get refuses a flag its family does not use, and a family without what it needs, before any request", async t => {
+  const f = await fixture(t);
+  const refused: Array<[string[], RegExp]> = [
+    [["tides"], /tides requires --station, or --lat and --lon/],
+    [["tides", "--station", "941429"], /--station takes a NOAA tide prediction station id of seven letters or digits/],
+    [["tides", "--station", "9414290", "--country", "us"], /--country does not apply to tides/],
+    [["launches", "--lat", "1", "--lon", "1"], /--lat does not apply to launches/],
+    [["launches", "--station", "9414290"], /--station does not apply to launches/],
+    [["drugalerts"], /drugalerts requires --country/],
+    [["drugalerts", "--country", "fr"], /--country takes us, ca, gb for drugalerts/],
+    [["drugalerts", "--country", "us", "--region", "WA"], /--region does not apply to drugalerts/],
+    [["drugalerts", "--country", "us", "--category", "wine"], /category/],
+    [["respiratory"], /respiratory requires --country/],
+    [["respiratory", "--country", "ca"], /--country takes us, gb for respiratory/],
+    [["respiratory", "--country", "usa"], /--country takes us, gb for respiratory/],
+    [["respiratory", "--country", "us", "--category", "food"], /--category does not apply to respiratory/],
+    [["respiratory", "--country", "us", "--region", "x".repeat(49)], /--region takes at most 48 characters/],
+    [["almanac", "--date", "2026-02-30"], /--date takes one day as YYYY-MM-DD/],
+    [["almanac", "--date", "12/25/2026"], /--date takes one day as YYYY-MM-DD/],
+    [["almanac", "--country", "USA"], /--country takes an ISO 3166-1 alpha-2 country code/],
+    [["almanac", "--language", "en", "--language", "fr"], /almanac takes one --language/],
+    [["almanac", "--lat", "49"], /--lat and --lon together/],
+    [["almanac", "--provider", "tfl"], /--provider does not apply to almanac/],
+    [["outdoorsafety"], /outdoorsafety requires --lat/],
+    [["outdoorsafety", "--lat", "1", "--lon", "1", "--station", "9414290"], /--station does not apply to outdoorsafety/],
+    [["departures", "--stops", "X"], /departures requires --provider/],
+    [["departures", "--provider", "tfl"], /departures requires --stops/],
+    [["departures", "--provider", "tfl", "--stops", "a,b,c,d,e"], /--stops takes one to 4 stop ids/],
+    [["departures", "--provider", "tfl", "--stops", "a,,b"], /--stops takes one to 4 stop ids/],
+    [["departures", "--provider", "tfl", "--stops", "a b"], /--stops takes one to 4 stop ids/],
+    [["departures", "--provider", "rail", "--stops", "x"], /provider/],
+    [["bikeshare"], /bikeshare requires --lat/],
+    [["bikeshare", "--lat", "1", "--lon", "1", "--system", "x".repeat(65)], /--system takes a bike share system id of at most 64 characters/],
+    [["weather", "--lat", "1", "--lon", "1", "--system", "x"], /--system does not apply to weather/],
+    [["weather", "--lat", "1", "--lon", "1", "--country", "us"], /--country does not apply to weather/],
+    [["cap", "--lat", "1", "--lon", "1", "--provider", "tfl"], /--provider does not apply to cap/],
+    [["rates", "--stops", "a"], /--stops does not apply to rates/],
+  ];
+  for (const [argv, message] of refused) {
+    const result = await f.invoke(["feeds", "get", ...argv]);
+    assert.equal(result.code, 2, `${argv.join(" ")}: ${result.stdout}`);
+    assert.match(result.body.error.detail, message, argv.join(" "));
+  }
+  assert.equal(f.transport.calls.length, 0);
+});
+
+test("feeds get help names every new family, its flags and an example of each", () => {
+  const help = commandHelp(["feeds", "get"]);
+  const option = (name: string) => help.options.find(candidate => candidate.name === name);
+  for (const name of ["--station", "--country", "--category", "--region", "--date", "--provider", "--stops", "--system"]) assert.ok(option(name), name);
+  assert.deepEqual(option("--category")!.choices, ["drug", "food"]);
+  assert.deepEqual(option("--provider")!.choices, ["tfl", "entur", "digitransit"]);
+  for (const family of ["tides", "almanac", "outdoorsafety", "bikeshare"]) assert.ok(option("--lat")!.description.includes(family), `--lat names ${family}`);
+  assert.match(option("--language")!.description, /Almanac: the On This Day edition/);
+  assert.match(option("--country")!.description, /Drugalerts: us, ca or gb \(required\)/);
+  assert.match(option("--stops")!.description, /one to four stop ids/);
+  for (const family of ["tides", "launches", "drugalerts", "respiratory", "almanac", "outdoorsafety", "departures", "bikeshare"]) {
+    assert.ok(help.examples.some(example => example.startsWith(`screenrig feeds get ${family}`)), `an example of ${family}`);
+  }
+  const notes = help.notes.join("\n");
+  for (const text of ["Tides takes --station", "Launches takes no flag", "Drugalerts requires --country", "respiratory requires --country", "Almanac takes", "Outdoorsafety requires --lat and --lon", "Departures requires --provider", "Bikeshare requires --lat and --lon", "A flag a family does not use is refused before any request"]) {
+    assert.ok(notes.includes(text), text);
+  }
+  assert.throws(() => parseArgv(["feeds", "get", "almanac", "--language", "en", "--language", "fr", "--language", "fr", "--date", "2026-12-25", "--date", "2026-12-26"]), /only once/);
+  assert.equal(parseArgv(["feeds", "get", "almanac", "--language", "en", "--language", "fr"]).flags.language, "en\nfr", "the almanac check is the command's, not a parse error");
 });
 
 test("pending feed returns retry seconds/time with one read and no polling", async t => {

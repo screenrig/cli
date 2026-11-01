@@ -37,12 +37,14 @@ import type { OperationLogger } from "./log/types.js";
  * with, a K/V webhook answer the secret its sender authenticates with, a data
  * source request the addresses and credentials it reads with, a screen link
  * answer the URL that opens its screen, a media sync
- * account the client secret of the customer's own Entra app, and a media sync
- * create the sharing link of the folder it reads.
+ * account the client secret of the customer's own Entra app, a media sync
+ * create the sharing link of the folder it reads, and a connection the client
+ * secret or service account key of the customer's own application and, once
+ * made, the one-time consent link of a person's consent.
  */
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
-  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers|sources|media-sync-accounts|media-syncs)(?:\/|$)/.test(path)
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers|sources|connections|media-sync-accounts|media-syncs)(?:\/|$)/.test(path)
     || /^\/api\/(?:applications|cards)\/[^/]+\/kv-webhooks(?:\/|$)/.test(path)
     || /^\/api\/screens\/[^/]+\/link$/.test(path);
 }

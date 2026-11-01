@@ -1,6 +1,7 @@
 import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import type { CardKVWebhook, KVWebhook, KVWebhookDelivery } from "./adapters/protocol.js";
+import { verifyLines } from "./webhook-verify.js";
 
 /** Backend KVWebhook.id and secret shapes (vendor/openapi.yaml). */
 export const KV_WEBHOOK_ID_PATTERN = /^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$/;
@@ -211,6 +212,7 @@ export function cardWebhookLines(webhook: CardKVWebhook | undefined): string[] {
     ...when(webhook.key_template, "key_template"),
     `enabled: ${webhook.enabled}`,
     `signing: ${webhook.signing}`,
+    ...verifyLines(webhook.verify, webhook.handshake),
     `url: ${webhook.url}`,
     ...when(webhook.created_at, "created_at"),
     ...when(webhook.last_used_at, "last_used_at"),
@@ -219,16 +221,21 @@ export function cardWebhookLines(webhook: CardKVWebhook | undefined): string[] {
 
 export function cardWebhookTableLines(items: CardKVWebhook[]): string[] {
   if (!items.length) return ["No card webhooks"];
-  return table(["ID", "ENABLED", "SIGNING", "MAPPING", "KEY_TEMPLATE", "LAST_USED", "URL", "DESCRIPTION"], items.map((item) => [
-    item.id ?? "", String(item.enabled), String(item.signing), item.mapping === null || item.mapping === undefined ? "no" : "yes",
+  // The vendor columns appear only once a webhook of the card has one.
+  const vendors = items.some((item) => item.verify || item.handshake);
+  return table(["ID", "ENABLED", "SIGNING", ...(vendors ? ["VERIFY", "HANDSHAKE"] : []), "MAPPING", "KEY_TEMPLATE", "LAST_USED", "URL", "DESCRIPTION"], items.map((item) => [
+    item.id ?? "", String(item.enabled), String(item.signing), ...(vendors ? [item.verify?.vendor ?? "-", item.handshake ?? "-"] : []),
+    item.mapping === null || item.mapping === undefined ? "no" : "yes",
     item.key_template || "-", item.last_used_at ?? "-", item.url ?? "", item.description ?? "",
   ]));
 }
 
 export function kvWebhookDeliveryTableLines(items: KVWebhookDelivery[]): string[] {
   if (!items.length) return ["No deliveries in the last seven days"];
-  return table(["AT", "OUTCOME", "REASON", "STATUS", "BYTES", "REVISION", "DETAIL"], items.map((item) => [
+  // FILES appears only when a multipart post carried file parts, which are ignored and only counted.
+  const files = items.some((item) => item.files !== undefined);
+  return table(["AT", "OUTCOME", "REASON", "STATUS", "BYTES", "REVISION", ...(files ? ["FILES"] : []), "DETAIL"], items.map((item) => [
     item.at ?? "", item.outcome ?? "", item.reason ?? "-", String(item.status ?? ""), String(item.bytes ?? ""),
-    item.revision === undefined ? "-" : String(item.revision), item.detail ?? "",
+    item.revision === undefined ? "-" : String(item.revision), ...(files ? [item.files === undefined ? "-" : String(item.files)] : []), item.detail ?? "",
   ]));
 }

@@ -170,13 +170,18 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
 }
 
 /** Feed families GET /api/feeds/{family} serves. */
-export const FEED_FAMILIES = ["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap"] as const;
+export const FEED_FAMILIES = [
+  "weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap",
+  "tides", "launches", "drugalerts", "respiratory", "almanac", "outdoorsafety", "departures", "bikeshare",
+] as const;
 export const FEED_SEVERITIES = ["minor", "moderate", "severe", "extreme"] as const;
 export const FEED_URGENCIES = ["past", "future", "expected", "immediate"] as const;
 export const FEED_CERTAINTIES = ["unlikely", "possible", "likely", "observed"] as const;
 export const FEED_STATUSES = ["Actual", "Exercise", "Test", "System"] as const;
 export const FEED_SCOPES = ["Public", "Restricted", "Private"] as const;
 export const FEED_AREA_UNKNOWN = ["hide", "show"] as const;
+export const FEED_CATEGORIES = ["drug", "food"] as const;
+export const FEED_PROVIDERS = ["tfl", "entur", "digitransit"] as const;
 /** Flags that repeat; each value travels as its own query parameter. */
 export const FEED_REPEATABLE_FLAGS = ["url", "geocode", "event", "exclude-event", "sender", "status", "scope", "language"] as const;
 
@@ -187,12 +192,30 @@ const FEED_FLAGS: Record<string, readonly string[]> = {
   rates: ["base"], crypto: ["symbols", "currency"], headlines: ["url"],
   cap: ["url", "public", "lat", "lon", "geocode", "min-severity", "max-severity", "min-urgency", "min-certainty",
     "event", "exclude-event", "sender", "status", "scope", "language", "area-unknown"],
+  tides: ["station", "lat", "lon"],
+  launches: [],
+  drugalerts: ["country", "category"],
+  respiratory: ["country", "region"],
+  almanac: ["country", "language", "lat", "lon", "date"],
+  outdoorsafety: ["lat", "lon"],
+  departures: ["provider", "stops"],
+  bikeshare: ["lat", "lon", "system"],
 };
 const FEED_RANGES: Record<string, readonly [number, number]> = {
   lat: [-90, 90], lon: [-180, 180], "radius-km": [10, 20000], "min-magnitude": [0, 9], hours: [1, 168],
 };
+/** The families that cannot be read without a flag, as the flags they need. */
+const FEED_REQUIRED: Record<string, readonly string[]> = {
+  weather: ["lat", "lon"], airquality: ["lat", "lon"], alerts: ["lat", "lon"], earthquakes: ["lat", "lon"],
+  crypto: ["symbols"], headlines: ["url"],
+  drugalerts: ["country"], respiratory: ["country"],
+  outdoorsafety: ["lat", "lon"], bikeshare: ["lat", "lon"], departures: ["provider", "stops"],
+};
+/** The countries a family has data for: the recall agencies, and the health agencies of the respiratory feed. */
+const FEED_COUNTRIES: Record<string, readonly string[]> = { drugalerts: ["us", "ca", "gb"], respiratory: ["us", "gb"] };
 const CYCLONE_BASINS = ["at", "ep", "cp", "wp"];
 const CAP_SOURCES_MAX = 5;
+const DEPARTURE_STOPS_MAX = 4;
 
 /** A repeatable feed flag: each value is checked as it is read and the values accumulate newline-separated. */
 export function feedListOption(name: string, maxLength: number, choices?: readonly string[]): (value: string, previous?: string) => string {
@@ -217,7 +240,7 @@ export function feedQuery(args: ParsedArgs): FeedRequest {
   const query: Record<string, string> = {};
   const repeated: Record<string, string[]> = {};
   for (const name of new Set(Object.values(FEED_FLAGS).flat())) {
-    const value = name === "public" ? (flagBool(args.flags, name) ? "true" : undefined) : flagString(args.flags, name);
+    let value = name === "public" ? (flagBool(args.flags, name) ? "true" : undefined) : flagString(args.flags, name);
     if (value === undefined) continue;
     if (!names.includes(name)) throw usageError(`--${name} does not apply to ${family}.`);
     const range = FEED_RANGES[name];
@@ -238,6 +261,25 @@ export function feedQuery(args: ParsedArgs): FeedRequest {
         }
       }
     }
+    if (name === "station" && !/^[A-Za-z0-9]{7}$/.test(value)) {
+      throw usageError("--station takes a NOAA tide prediction station id of seven letters or digits, such as 9414290.");
+    }
+    if (name === "country") {
+      const countries = FEED_COUNTRIES[family];
+      if (!/^[A-Za-z]{2}$/.test(value) || (countries && !countries.includes(value.toLowerCase()))) {
+        throw usageError(countries ? `--country takes ${countries.join(", ")} for ${family}.` : "--country takes an ISO 3166-1 alpha-2 country code, such as US or GB.");
+      }
+    }
+    if (name === "region" && (value.length > 48 || /\p{Cc}/u.test(value))) throw usageError("--region takes at most 48 characters: a US state, territory or DC by name or postal code, or England or a UKHSA region.");
+    if (name === "date" && !validDay(value)) throw usageError("--date takes one day as YYYY-MM-DD, such as 2026-12-25.");
+    if (name === "system" && (value.length > 64 || /\p{Cc}/u.test(value))) throw usageError("--system takes a bike share system id of at most 64 characters, such as Mobibikes_CA_Vancouver.");
+    if (name === "stops") {
+      const stops = value.split(",").map((stop) => stop.trim());
+      if (value.length > 200 || stops.length > DEPARTURE_STOPS_MAX || stops.some((stop) => !stop || /[\s\p{Cc}]/u.test(stop))) {
+        throw usageError(`--stops takes one to ${DEPARTURE_STOPS_MAX} stop ids, comma-separated, such as 940GZZLUOXC (TfL), NSR:StopPlace:337 (Entur) or HSL:1040129 (Digitransit).`);
+      }
+      value = stops.join(",");
+    }
     const param = name.replaceAll("-", "_");
     if ((FEED_REPEATABLE_FLAGS as readonly string[]).includes(name)) repeated[param] = value.split("\n");
     else query[param] = value;
@@ -249,12 +291,25 @@ export function feedQuery(args: ParsedArgs): FeedRequest {
     delete repeated.url;
   }
   if (urls && family === "cap" && urls.length > CAP_SOURCES_MAX) throw usageError(`--url takes at most ${CAP_SOURCES_MAX} CAP source URLs.`);
+  // The almanac reads one On This Day edition; a cap feed lists the languages it prefers.
+  if (family === "almanac" && repeated.language) {
+    if (repeated.language.length > 1) throw usageError("almanac takes one --language: the On This Day edition (ar, bs, cs, de, en, es, fr, it, pt, ru, sv, tr, uk or zh).");
+    query.language = repeated.language[0]!;
+    delete repeated.language;
+  }
   const has = (param: string): boolean => query[param] !== undefined || repeated[param] !== undefined;
-  const required = ["weather", "airquality", "alerts", "earthquakes"].includes(family) ? ["lat", "lon"] : family === "crypto" ? ["symbols"] : family === "headlines" ? ["url"] : [];
-  for (const name of required) if (!has(name)) throw usageError(`${family} requires --${name}.`);
+  for (const name of FEED_REQUIRED[family] ?? []) if (!has(name)) throw usageError(`${family} requires --${name}.`);
+  if (family === "tides" && !has("station") && !has("lat")) throw usageError("tides requires --station, or --lat and --lon for the nearest tide prediction station within 100 km.");
   if (family === "cyclones" && ["lat", "lon", "radius_km"].some(has) && !["lat", "lon", "radius_km"].every(has)) {
     throw usageError("cyclones takes --lat, --lon and --radius-km together for the storms near a place, or none of them for every storm.");
   }
   if (family === "cap" && !has("url") && !has("lat")) throw usageError("cap requires --url, or --lat and --lon for the public alert feeds.");
   return { query, repeated };
+}
+
+/** A calendar day written YYYY-MM-DD. */
+function validDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(day.getTime()) && day.toISOString().startsWith(value);
 }

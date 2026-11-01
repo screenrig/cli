@@ -11,6 +11,7 @@ import type { CliRuntime } from "../runtime.js";
 import { kvWriteFromArgs } from "../kv-write.js";
 import { quotedRevision } from "../if-match.js";
 import { cardUid } from "../cards.js";
+import { singleStdin, verifyFlagsGiven, verifyMembers } from "../webhook-verify.js";
 import { clientFor, commandHandler, humanLines, jsonBody, simpleGet, simpleList, writeRecoveries, type CommandResult } from "../commands.js";
 
 
@@ -190,15 +191,21 @@ export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolv
     if (flagString(args.flags, "map") !== undefined || flagString(args.flags, "key-template") !== undefined || flagBool(args.flags, "signing")) {
       throw usageError("--map, --key-template and --signing apply to a card webhook: pass --card CARD_ID instead of --app-id.");
     }
+    if (verifyFlagsGiven(args).length) throw usageError(`${verifyFlagsGiven(args).join(", ")} apply to a card webhook: pass --card CARD_ID instead of --app-id.`);
     body = { key: kvWebhookKey(key), ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
   } else {
     if (key !== undefined) throw usageError("A card webhook writes the card's data document, not a key: omit <key>.");
     const map = flagString(args.flags, "map");
+    if (flagBool(args.flags, "signing") && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
+    singleStdin([["--map", map], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
+    const vendor = await verifyMembers(args, runtime, { create: true, subject: "the webhook" });
     body = {
       ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}),
       ...(keyTemplate !== undefined ? { key_template: keyTemplate } : {}),
       ...(map !== undefined ? { mapping: kvWebhookMapping(await readAuthoringText(map, runtime, KV_WEBHOOK_MAPPING_MAX_BYTES)) } : {}),
       ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
+      ...(vendor.verify ? { verify: vendor.verify } : {}),
+      ...(vendor.handshake ? { handshake: vendor.handshake } : {}),
     };
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -241,6 +248,9 @@ export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolv
   const description = flagString(args.flags, "description");
   const keyTemplate = flagString(args.flags, "key-template");
   const map = flagString(args.flags, "map");
+  if (flagBool(args.flags, "signing") && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
+  singleStdin([["--map", map], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
+  const vendor = await verifyMembers(args, runtime, { create: false, subject: "the webhook" });
   const body: CardKVWebhookUpdate = {
     ...(keyTemplate !== undefined ? { key_template: keyTemplate } : {}),
     ...(flagBool(args.flags, "clear-key-template") ? { key_template: "" } : {}),
@@ -251,6 +261,8 @@ export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolv
     ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
     ...(flagBool(args.flags, "signing") ? { signing: true } : {}),
     ...(flagBool(args.flags, "no-signing") ? { signing: false } : {}),
+    ...(vendor.verify !== undefined ? { verify: vendor.verify } : {}),
+    ...(vendor.handshake !== undefined ? { handshake: vendor.handshake } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await kvWebhookCall(client, { method: "PATCH", path: `${kvWebhooksPath(target)}/${id}`, idempotent: true, body }, target, id);

@@ -1362,3 +1362,49 @@ test("a group_empty delivery names the tag or folder in an AUDIENCE_GROUP column
   const update = commandHelp(["notifications", "update"]);
   assert.deepEqual(update.options.find((option) => option.name === "--clear-reach-drop")?.conflicts, ["--reach-drop-screens", "--reach-drop-percent"]);
 });
+
+test("card_data_stale is a condition of every notification, with a severity of its own, and the help says what it watches", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "card_data_stale,screen_offline", "--severity", "card_data_stale=error"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { conditions: string[] }).conditions, ["card_data_stale", "screen_offline"]);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { severity: unknown }).severity, { card_data_stale: "error" });
+  const id = created.envelope.data.id as string;
+  const shown = await cli(["--human", "notifications", "show", id], transport, env);
+  assert.match(shown.stdout, /^conditions: card_data_stale, screen_offline$/m);
+  const only = await cli(["--json", "notifications", "create", "--webhook", URL_OK, "--conditions", "card_data_stale"], transport, env);
+  assert.equal(only.code, 0, only.stdout);
+  assert.deepEqual((notificationCalls(transport).at(-1)!.body as { conditions: string[] }).conditions, ["card_data_stale"]);
+  const updated = await cli(["--json", "notifications", "update", id, "--conditions", "card_data_stale"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(notificationCalls(transport).filter((call) => call.method === "PATCH").at(-1)!.body, { conditions: ["card_data_stale"] });
+  const list = await cli(["--human", "notifications", "list"], transport, env);
+  assert.match(list.stdout, /card_data_stale/);
+
+  // The vendored enum is the list: a name that is not in it is still refused before any request.
+  const count = notificationCalls(transport).length;
+  for (const [args, message] of [
+    [["create", "--email", "owner", "--conditions", "card_data_old"], /--conditions does not take "card_data_old"; use .*card_data_stale/],
+    [["create", "--email", "owner", "--conditions", "card_data_stale,card_data_stale"], /--conditions must not repeat a condition/],
+    [["create", "--email", "owner", "--conditions", "screen_offline", "--severity", "card_data_old=error"], /--severity does not take the condition "card_data_old"; use .*card_data_stale/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "notifications", ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, args.join(" "));
+    assert.match(refused.envelope.error?.detail ?? "", message, args.join(" "));
+  }
+  assert.equal(notificationCalls(transport).length, count, "refused commands send nothing");
+
+  for (const words of [["notifications", "create"], ["notifications", "update"]]) {
+    assert.match(commandHelp(words).options.find((option) => option.name === "--conditions")?.description ?? "", /group_empty, card_data_stale/, words.join(" "));
+  }
+  assert.match(commandHelp(["notifications", "create"]).options.find((option) => option.name === "--severity")?.description ?? "", /card_data_stale/);
+  const notes = commandHelp(["notifications"]).usage;
+  assert.match(notes, /card_data_stale says a card went blank/);
+  assert.match(notes, /card data put --ttl/);
+  const createNotes = commandHelp(["notifications", "create"]).notes.join("\n");
+  assert.match(createNotes, /card_data_stale is about a card, not a screen/);
+  assert.match(createNotes, /source_stale instead/);
+  assert.ok(commandHelp(["notifications", "create"]).examples.some((example) => example.includes("--conditions card_data_stale")));
+  assert.ok(commandHelp(["notifications", "update"]).examples.some((example) => example.includes("card_data_stale")));
+});
