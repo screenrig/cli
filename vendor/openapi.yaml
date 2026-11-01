@@ -16,7 +16,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes, and the same change through a screen (its playlist, a schedule, a takeover) or the provisioning of a screen. A key/value write (card data and application key/value, by an agent or a webhook), a read, and a command to a screen that changes nothing it plays (screenshot, live view, reload, reboot, toast, display) are never refused for balance: they are charged and remaining may go negative. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -4745,6 +4745,140 @@ paths:
           $ref: '#/components/responses/ScreenScopePlays'
         default:
           $ref: '#/components/responses/Problem'
+  /api/tab-shares:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: startTabShare
+      x-rate-limit-policies:
+        - name: screen-control-project
+          quota: 600
+          windowSeconds: 60
+        - name: screen-control-screen
+          quota: 20
+          windowSeconds: 60
+        - name: screen-control-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Shows browser tabs on screens. Makes one temporary playlist of a full-canvas 1920x1080 iframe page per tab and takes every target screen over with it (reason "Shared browser tab") until until, at most 24 hours ahead (the default). Targets are the union of screen_ids, every active screen in folder_ids and the folders inside them, and every active screen carrying any of tags; offline screens are included and show the share when they return. A caller limited to screens (docs/screen-scope.md) reaches only the screens in its scope: a screen outside it is skipped (outside_screen_scope), and the schedule of the request is otherwise the same. One tab stays up until the share ends; several advance after each tab's duration_s. reload_s reloads every page. qr adds a QR code of the page address, about 14% of the canvas height, in the bottom-right corner. cookies are the sender's sign-in for the pages: they are sealed at rest, never returned by any read, event, audit entry or revision, and served only in the runtime manifest of a screen showing the share (the iframe cookies member); a Player that cannot set them ignores them, and the web Player and the shells that hand off to it do. A target that cannot be taken over (protected folder, no default playlist, archived, not found, format mismatch, outside scope, rate limited) is listed in skipped and does not fail the request. A screen already showing an earlier share is taken over by this one, and the earlier playlist is deleted once no screen shows it. When no target is taken over the temporary playlist is deleted and the answer is the problem of the one target, or 409 resource_conflict naming the reasons. warnings lists tab addresses the backend could not embed (embedding_blocked: X-Frame-Options or frame-ancestors refuse the Player web app), checked once per address with a 3 second budget; it never blocks the share. The screen-control rate limits apply per target screen (project and screen), and the IP limit once per request. Every call is a new share; an Idempotency-Key replays nothing. The change is live: refused with insufficient_access under Propose access, and on the dashboard lane with approver_required to a member who cannot approve reviews. On the dashboard lane the session's current project is used (no_project when none), and the request may come from the dashboard origin or from a Chrome or Firefox extension origin (chrome-extension://ID, moz-extension://UUID) with Sec-Fetch-Site absent, same-origin or none; a present X-ScreenRig-CSRF header must match csrf_token from GET /api/session. Only this route, DELETE /api/tab-shares/{id}, POST /api/playlists/{id}/pages and POST /api/screens/{id}/screenshot take an extension origin.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TabShareWrite'
+      responses:
+        '200':
+          description: The share. At least one screen was taken over.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TabShare'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/tab-shares/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getTabShare
+      description: >-
+        Reads a share: its end time and the screens whose takeover is still its playlist (a screen someone took over since, or that was archived, is not listed). 404 not_found once the share ended, expired or never was. A caller limited to screens (docs/screen-scope.md) sees only the screens in its scope. No extension-origin rule applies to a read.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The share and the screens still showing it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TabShareState'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: stopTabShare
+      x-rate-limit-policies:
+        - name: screen-control-project
+          quota: 600
+          windowSeconds: 60
+        - name: screen-control-screen
+          quota: 20
+          windowSeconds: 60
+        - name: screen-control-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Ends a share: clears the takeover of every screen whose takeover is still its playlist (screen.takeover_ended with reason cleared, the schedule, else the assigned playlist, becoming effective with the same manifest signalling) and deletes the playlist. Allowed on screens in protected folders. A screen someone took over since is left alone. 404 not_found when the share already ended; a client treats that as ended. One unit of each screen-control limit is spent per request. A caller limited to screens clears only the screens in its scope. The lanes, access rules and extension-origin rule are those of POST /api/tab-shares.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The screens that were cleared.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TabShareStopped'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/play-page:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -7368,7 +7502,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Requests one still screenshot of the named active screen. Latest-wins: a new request replaces any in-flight capture_id and does not 409. The current ready slot is kept until a later upload succeeds. capture_id is an optional environment prefix, then shot_ and a random suffix. expires_at is thirty seconds after accept. The durable event type is screen.screenshot_requested on the existing runtime SSE stream; runtime scan never delivers it after expires_at. Event details name capture_id, expires_at, max_width_divisor 2, max_height_divisor 2, format image/webp, quality 80, and max_bytes 2097152. Image bytes never appear on SSE. Prepaid remaining credit is not a gate, and this screen-message path is exempt from the 1-credit API meter. An exact Idempotency-Key retry returns the original capture_id and expires_at for twenty-four hours.'
+      description: 'Requests one still screenshot of the named active screen. Latest-wins: a new request replaces any in-flight capture_id and does not 409. The current ready slot is kept until a later upload succeeds. capture_id is an optional environment prefix, then shot_ and a random suffix. expires_at is thirty seconds after accept. The durable event type is screen.screenshot_requested on the existing runtime SSE stream; runtime scan never delivers it after expires_at. Event details name capture_id, expires_at, max_width_divisor 2, max_height_divisor 2, format image/webp, quality 80, and max_bytes 2097152. Image bytes never appear on SSE. Prepaid remaining credit is not a gate, and this screen-message path is exempt from the 1-credit API meter. An exact Idempotency-Key retry returns the original capture_id and expires_at for twenty-four hours. On the dashboard lane the request may come from a Chrome or Firefox extension origin as POST /api/tab-shares may, to confirm a shared tab (GET /api/screens/{id}/screenshot/status and GET /api/screens/{id}/screenshot need no origin rule).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10046,6 +10180,343 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: listOrganizationNotifications
+      description: >-
+        The organization's notifications, of every channel, oldest first (at most 50). A notification belongs to the organization and covers every project of it, including projects added later (project_ids absent), or the chosen projects (project_ids); it acts on the screens, sources and campaigns of those projects exactly as a project notification does. status is failing while any covered project's deliveries are, and failing_since, last_success_at and last_failure_at fold the covered projects' (the earliest failure start, the latest success and failure). A webhook's signing secret is never returned here. Requires an administrator of the organization; anyone else is not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationNotificationList'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createOrganizationNotification
+      description: >-
+        Creates a notification of the organization, with the members of POST /api/notifications and the projects it covers: project_ids absent or null covers every project of the organization (those it has and those it gets), a list covers exactly those, each a live project of this organization (invalid_request otherwise). An email notification's recipients are owner (each covered project's owner), or user_ids of people of the organization (its admins and home members) or members of a covered project; each project still mails only the people who are members of it. An organization has at most 50 notifications, not counting the defaults the system makes (notification_limit_reached). The same plan features gate the channels, rules and conditions as on the project routes, judged on the organization's plan. Each covered project gets notification.created, and the change is recorded in the organization's audit log. A webhook's signing secret is returned only in this answer and in rotate-secret; one secret signs every covered project's deliveries. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationNotificationWrite'
+      responses:
+        '201':
+          description: Created. A webhook's secret is shown only here and on rotate-secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request, webhook_url_rejected or notification_destination_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: feature_not_in_plan — as on POST /api/notifications, for the organization's plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: notification_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getOrganizationNotification
+      description: One notification of the organization, as GET /api/organizations/{org_id}/notifications shows it.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One notification.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      operationId: updateOrganizationNotification
+      description: >-
+        Changes any member PATCH /api/notifications/{id} changes, in the notification and in every covered project, and project_ids: absent leaves the projects, null covers every project, a list covers exactly those. A project that gains the notification starts at its current event (nothing earlier is sent); one that loses it has the notification deleted. Each covered project gets notification.updated, and the change is recorded in the organization's audit log. A change that makes the notification cover a project it does not cover now is gated like a create of the notification as it will be (its channel, rules and glass conditions, on the organization's plan); covering fewer projects is never gated, and switching a list to every project always covers more. If-Match guards the revision.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationNotificationPatch'
+      responses:
+        '200':
+          description: Updated notification.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request, webhook_url_rejected or notification_destination_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: feature_not_in_plan — as on PATCH /api/notifications/{id}, for the organization's plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteOrganizationNotification
+      description: Deletes the notification from every project it covers, with notification.deleted in each, and records it in the organization's audit log. Pending notices are failed with webhook_deleted.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}/rotate-secret:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: rotateOrganizationNotificationSecret
+      description: 'Webhook notifications only (any other channel is invalid_request). Replaces the signing secret in every covered project at once, so one receiver keeps verifying one secret, and returns the notification with the new one in secret. As on POST /api/notifications/{id}/rotate-secret, at most one attempt per project already in flight may still arrive signed with the old secret. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The notification and its new secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request — the notification is not a webhook.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}/test:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testOrganizationNotification
+      x-rate-limit-policies:
+        - name: notification-test-project
+          quota: 20
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Sends one notification.test through the first project the notification covers (by project id), as POST /api/notifications/{id}/test sends one through its project: one delivery, whose outcome the deliveries list shows, attempted once. Every covered project has the same receiver, destination and secret, so one test proves the channel; the email of a test goes to the recipients of that project. A notification that covers no project is invalid_request.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          description: The queued test delivery.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDelivery'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}/deliveries:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listOrganizationNotificationDeliveries
+      description: The delivery logs of every project the notification covers, as one list, newest first by when each row was queued. Each row names its project (project_id), and its id opens GET .../deliveries/{delivery_id}/attempts. Pass next_cursor back as before for the next page.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationNotificationDeliveriesBefore'
+        - $ref: '#/components/parameters/WebhookDeliveriesLimit'
+      responses:
+        '200':
+          description: One page of deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryList'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}/deliveries/{delivery_id}/attempts:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/WebhookDeliveryID'
+    get:
+      operationId: listOrganizationNotificationDeliveryAttempts
+      description: One delivery's attempts, newest first, the most recent 20. A delivery that is not one of this notification's is not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The delivery's kept attempts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryAttemptList'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/notifications/{id}/unsubscribed/{user_id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/NotificationUnsubscribedUserID'
+    delete:
+      operationId: resubscribeOrganizationNotificationUser
+      description: >-
+        Mails an email notification's person again after they stopped it with the unsubscribe link in its mail, in every project the notification covers (the link stops them in all of them). Idempotent: a person who is not stopped changes nothing, and the answer is the notification as it is. A change bumps the revision and appends notification.updated with details change resubscribed, user_id and via api to each covered project.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The notification, without the person in unsubscribed.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/reports:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10374,6 +10845,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KVEntry'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -10519,7 +10992,7 @@ paths:
       - $ref: '#/components/parameters/KVWebhookID'
     post:
       operationId: receiveKVWebhook
-      description: 'The URL an outside system posts one key''s new value to. It authenticates with the webhook''s own secret in the Authorization header only: Bearer <secret>, or HTTP Basic with the webhook id as the username and the secret as the password. A secret in the URL or query is never accepted. An unknown webhook, one of another application and a wrong secret all answer the same 401. The raw body, at most 1 MiB, becomes the value of the webhook''s key, and the Content-Type header its content_type (application/octet-stream when absent; a header that is not one media type is invalid_request). The write is PUT /api/applications/{application_id}/kv/{key} without If-Match: it replaces the value, increments the revision, is metered and quota-checked like any K/V write, is one billed API request (payment_required when no credit is left), and appends kv.updated. Idempotency-Key (8 to 200 characters) deduplicates a sender''s retries of one write for twenty-four hours, and the same key with another body or content type is idempotency_mismatch; without it every post is a new write. The answer is the key''s new metadata, never its value. At most 120 writes per minute per webhook.'
+      description: 'The URL an outside system posts one key''s new value to. It authenticates with the webhook''s own secret in the Authorization header only: Bearer <secret>, or HTTP Basic with the webhook id as the username and the secret as the password. A secret in the URL or query is never accepted. An unknown webhook, one of another application and a wrong secret all answer the same 401. The raw body, at most 1 MiB, becomes the value of the webhook''s key, and the Content-Type header its content_type (application/octet-stream when absent; a header that is not one media type is invalid_request). The write is PUT /api/applications/{application_id}/kv/{key} without If-Match: it replaces the value, increments the revision, is metered and quota-checked like any K/V write, is one billed API request that is never refused for balance, and appends kv.updated. Idempotency-Key (8 to 200 characters) deduplicates a sender''s retries of one write for twenty-four hours, and the same key with another body or content type is idempotency_mismatch; without it every post is a new write. The answer is the key''s new metadata, never its value. At most 120 writes per minute per webhook; each also counts toward the project''s and the key''s write rates (PUT /api/card-data/{key}).'
       security:
         - kvWebhookBearer: []
         - kvWebhookBasic: []
@@ -10671,6 +11144,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardInstance'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
       requestBody:
@@ -10783,6 +11258,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardInstance'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
       requestBody:
@@ -10930,6 +11407,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardDataEntry'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
       requestBody:
@@ -11200,7 +11679,7 @@ paths:
       - $ref: '#/components/parameters/KVWebhookID'
     post:
       operationId: receiveCardKVWebhook
-      description: 'The url an outside system posts a card''s data document to. It authenticates with the webhook''s own secret in the Authorization header: Bearer <secret>, or HTTP Basic with the webhook id as the username. When the webhook signs, ScreenRig-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the signing secret> is also required, and t must be within five minutes of the server''s clock. An unknown card or webhook, a wrong or missing secret, a disabled webhook, a bad signature and every GET answer the same 404 not_found; the project sees the reason in the delivery log. The body, at most 1 MiB, is JSON or application/x-www-form-urlencoded (a repeated name is an array). With no mapping the object is the document; with one, the template builds it from body and query. The document is checked as the card''s data (card_data_invalid names the path), and one equal to the current document is not written (status unchanged). An accepted post is one billed API request and appends the card data events. Idempotency-Key (8 to 200 characters) deduplicates a sender''s retries for twenty-four hours. At most 120 posts per minute per webhook.'
+      description: 'The url an outside system posts a card''s data document to. It authenticates with the webhook''s own secret in the Authorization header: Bearer <secret>, or HTTP Basic with the webhook id as the username. When the webhook signs, ScreenRig-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the signing secret> is also required, and t must be within five minutes of the server''s clock. An unknown card or webhook, a wrong or missing secret, a disabled webhook, a bad signature and every GET answer the same 404 not_found; the project sees the reason in the delivery log. The body, at most 1 MiB, is JSON or application/x-www-form-urlencoded (a repeated name is an array). With no mapping the object is the document; with one, the template builds it from body and query. The document is checked as the card''s data (card_data_invalid names the path), and one equal to the current document is not written (status unchanged). An accepted post is one billed API request and appends the card data events. Idempotency-Key (8 to 200 characters) deduplicates a sender''s retries for twenty-four hours. At most 120 posts per minute per webhook; each also counts toward the project''s and the card''s write rates (PUT /api/card-data/{key}).'
       security:
         - kvWebhookBearer: []
         - kvWebhookBasic: []
@@ -11252,7 +11731,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: payment_required — the project has no credit left.
+          description: payment_required — the project is deleted. A post is never refused for the project's balance.
           content:
             application/problem+json:
               schema:
@@ -11334,7 +11813,7 @@ paths:
       x-screenrig-access: write
       operationId: putCardData
       description: >-
-        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's.
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per project by plan (Standard 60 a minute, Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
       security:
         - projectBearer: []
       parameters:
@@ -11353,6 +11832,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardDataEntry'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -11902,6 +12383,11 @@ paths:
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - name: project_id
+          in: query
+          required: false
+          description: "With dashboardSession, the project shown when creating the folder. If supplied, must match the session's selected project, otherwise resource_conflict; an empty or repeated value is invalid_request. Omission preserves older dashboard clients. Project bearer requests use their authorized project."
+          schema: {type: string, minLength: 1, maxLength: 200}
       requestBody:
         required: true
         content:
@@ -14101,7 +14587,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listWebhooks
-      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 20); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
+      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 50); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14117,7 +14603,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createWebhook
-      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 20 notifications, email and webhook (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
+      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 50 notifications across every channel (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -14148,7 +14634,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: webhook_limit_reached or idempotency_mismatch.
+          description: webhook_limit_reached, idempotency_mismatch, or resource_conflict when the project belongs to no organization.
           content:
             application/problem+json:
               schema:
@@ -14553,7 +15039,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listNotifications
-      description: Lists the project's notifications, of every channel, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      description: Lists the organization's notifications that cover the project, of every channel, oldest first (at most 50). status, failing_since, last_success_at and last_failure_at are this project's. A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14569,7 +15055,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createNotification
-      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. The notification covers this project alone; an organization has at most 50 notifications, not counting the defaults the system makes (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14607,7 +15093,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: notification_limit_reached or idempotency_mismatch.
+          description: notification_limit_reached, idempotency_mismatch, or resource_conflict when the project belongs to no organization.
           content:
             application/problem+json:
               schema:
@@ -14644,7 +15130,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateNotification
-      description: Changes any of description (empty clears it), conditions, screen_tags, audience, min_severity, severity, active_hours (null clears each of these), hold_minutes, recipients (email), url and event_types (webhook), destination and telegram_chat_id (Slack, Teams, PagerDuty and Telegram), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
+      description: Changes any of description (empty clears it), conditions, screen_tags, audience, min_severity, severity, active_hours (null clears each of these), hold_minutes, recipients (email), url and event_types (webhook), destination and telegram_chat_id (Slack, Teams, PagerDuty and Telegram), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision. Only a notification that covers this project alone changes here; one that covers other projects of the organization too is notification_covers_other_projects and changes from the organization's Notifications page.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14680,6 +15166,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '409':
+          description: notification_covers_other_projects — the notification covers other projects of the organization too, so it changes only from the organization's Notifications page.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '412':
           description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
           content:
@@ -14691,7 +15183,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteNotification
-      description: Deletes the notification and appends notification.deleted. Its pending notices are failed with webhook_deleted; its delivery log is no longer addressable and expires with event retention.
+      description: Deletes the notification and appends notification.deleted. Its pending notices are failed with webhook_deleted; its delivery log is no longer addressable and expires with event retention. Only a notification that covers this project alone is deleted here (notification_covers_other_projects otherwise).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14707,6 +15199,12 @@ paths:
                 type: string
                 enum:
                   - no-store
+        '409':
+          description: notification_covers_other_projects — the notification covers other projects of the organization too, so it changes only from the organization's Notifications page.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '412':
           description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
           content:
@@ -14747,6 +15245,12 @@ paths:
                 $ref: '#/components/schemas/Notification'
         '400':
           description: invalid_request — the notification is not a webhook.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: notification_covers_other_projects — the notification covers other projects of the organization too, so it changes only from the organization's Notifications page.
           content:
             application/problem+json:
               schema:
@@ -14877,6 +15381,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+        '409':
+          description: notification_covers_other_projects — the notification covers other projects of the organization too, so it changes only from the organization's Notifications page.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -15193,7 +15703,7 @@ paths:
               schema:
                 type: string
                 enum:
-                  - false
+                  - "no"
           content:
             text/event-stream:
               schema:
@@ -15520,7 +16030,7 @@ paths:
               schema:
                 type: string
                 enum:
-                  - false
+                  - "no"
           content:
             text/event-stream:
               schema:
@@ -15691,7 +16201,7 @@ paths:
               schema:
                 type: string
                 enum:
-                  - false
+                  - "no"
           content:
             text/event-stream:
               schema:
@@ -16045,7 +16555,7 @@ paths:
               schema:
                 type: string
                 enum:
-                  - false
+                  - "no"
           content:
             text/event-stream:
               schema:
@@ -19854,7 +20364,7 @@ paths:
           maxLength: 200
     get:
       operationId: dashboardOrganizationsPeople
-      description: A designated admin reads the organization's people. Read-only. projects lists the organization's live projects, ordered by name, at most 500. people is the union of the organization's home members (member true), the active memberships of those projects (suspended memberships are left out) and the designated admins. It is ordered admins first, then home members, then external people (those who are not home members), each group by display name then email. Each person carries their role in each project (owner or member), whether they are an admin, a home member (member), managed by the organization (managed), and, for an external person, whether the current guest policy would not admit them (outside_guest_policy). An admin or home member in no project appears with an empty projects list. email is empty for a person whose address is not verified. Deactivated people and agents never appear. At most 500 people are returned, admins always among them; truncated is true when people, projects or memberships were left out. Anyone else is refused as on the other organization admin routes. People only; agents and bearer credentials have no route.
+      description: A designated admin reads the organization's people. Read-only. projects lists the organization's live projects, ordered by name, at most 500. people is the union of the organization's home members (member true), the active memberships of those projects (suspended memberships are left out) and the designated admins. It is ordered admins first, then home members, then external people (those who are not home members), each group by display name then email. Each person carries their role in each project (owner or member), whether they can approve reviews there (can_approve) and whether they are limited to screens or uploads (limited), whether they are an admin, a home member (member), managed by the organization (managed), and, for an external person, whether the current guest policy would not admit them (outside_guest_policy). An admin or home member in no project appears with an empty projects list. email is empty for a person whose address is not verified. Deactivated people and agents never appear. At most 500 people are returned, admins always among them; truncated is true when people, projects or memberships were left out. Anyone else is refused as on the other organization admin routes. People only; agents and bearer credentials have no route.
       security:
         - dashboardSession: []
       responses:
@@ -20153,6 +20663,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationGuestPolicyResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/project-access:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsSetProjectAccess
+      description: A designated admin sets the access of many people to many of the organization's live projects in one request, without joining any of them. Each of 1 to 500 changes names a project, a person and an access, with no (project_id, user_id) pair twice. member makes the person a member of the project who cannot approve reviews (added when they are not one; an approver loses approval), approver a member who can approve (added when they are not one), and none no member (removed when they are one). Everything is applied in order in one transaction, and one refusal undoes the whole batch; each refusal blames changes[i] (the project or the person) or changes[i].access in errors[].field. A project that is not a live project of this organization is not_found; a person who is not a live person (an agent, a deactivated person, an unknown id) or who is staff, a suspended membership, and a person added who is not one of the organization's people (its admins, its home members and the active members of its other live projects; anyone else joins through an invitation) are invalid_request; the owner is never set to member or none (owner_cannot_leave); an uploader never approves (resource_conflict, as PUT /api/members/{user_id}/approver answers); removing the admin themself is forbidden (an admin leaves through DELETE /api/members/{user_id}); and a person who is added is admitted as an invitation admits them, so home members and the organization's admins always and an external person only where the guest policy admits them now (guest_not_allowed). The project's 200-member limit and its plan's member cap apply to what is added (member_limit_reached). The answer repeats every change in request order; changed is false for one whose access was already in effect, which writes and records nothing. Each change is recorded in the organization audit (organization.project_member_added, organization.project_member_approver_changed or organization.project_member_removed) and in the project's events (member.added_by_organization_admin, project.member_approver_changed or member.removed, marked as the organization admin's), and each project's owner is emailed once for the batch unless they made it. People only; agents and bearer credentials have no admin route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationProjectAccessRequest'
+      responses:
+        '200':
+          description: The changes as applied, in request order.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectAccessResult'
         default:
           $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/projects/{project_id}/access:
@@ -22496,6 +23043,64 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/tab-shares:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: write
+      operationId: startTabShareInProject
+      x-rate-limit-policies:
+        - name: screen-control-project
+          quota: 600
+          windowSeconds: 60
+        - name: screen-control-screen
+          quota: 20
+          windowSeconds: 60
+        - name: screen-control-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Shows browser tabs on screens in the named project; the request, answer, access and limits are those of POST /api/tab-shares.
+      security:
+        - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TabShareWrite'
+      responses:
+        '200':
+          description: The share. At least one screen was taken over.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TabShare'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/campaigns:
     parameters:
       - name: project_id
@@ -24412,7 +25017,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listWebhooksInProject
-      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 20); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
+      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 50); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
       security:
         - projectBearer: []
       responses:
@@ -24428,7 +25033,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createWebhookInProject
-      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 20 notifications, email and webhook (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
+      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 50 notifications across every channel (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -24459,7 +25064,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: webhook_limit_reached or idempotency_mismatch.
+          description: webhook_limit_reached, idempotency_mismatch, or resource_conflict when the project belongs to no organization.
           content:
             application/problem+json:
               schema:
@@ -24568,7 +25173,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listNotificationsInProject
-      description: Lists the project's notifications, of every channel, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      description: Lists the organization's notifications that cover the project, of every channel, oldest first (at most 50). status, failing_since, last_success_at and last_failure_at are this project's. A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
       security:
         - projectBearer: []
       responses:
@@ -24583,7 +25188,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createNotificationInProject
-      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen, or audience says which screens in the rules of a campaign audience. min_severity and severity filter and rate the notices, and active_hours holds or drops them outside its windows. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. The notification covers this project alone; an organization has at most 50 notifications, not counting the defaults the system makes (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -24620,7 +25225,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: notification_limit_reached or idempotency_mismatch.
+          description: notification_limit_reached, idempotency_mismatch, or resource_conflict when the project belongs to no organization.
           content:
             application/problem+json:
               schema:
@@ -24903,7 +25508,7 @@ paths:
       x-screenrig-access: write
       operationId: projectScoped_putCardData
       description: >-
-        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's.
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per project by plan (Standard 60 a minute, Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
       security:
         - projectBearer: []
       parameters:
@@ -24922,6 +25527,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardDataEntry'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -25621,6 +26228,7 @@ components:
     OptionalIdempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, minLength: 8, maxLength: 200}, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically."}
     WebhookDeliveriesBefore: {name: before, in: query, required: false, schema: {type: string, pattern: "^whc1_[0-9a-z]{1,16}$"}, description: next_cursor of the previous deliveries page.}
     WebhookDeliveriesLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    OrganizationNotificationDeliveriesBefore: {name: before, in: query, required: false, schema: {type: string, pattern: "^whc3_[0-9a-z]{1,16}_[A-Za-z0-9_-]{1,200}$"}, description: next_cursor of the previous deliveries page.}
     NotificationDeliveriesBefore: {name: before, in: query, required: false, schema: {type: string, pattern: "^whc[12]_[0-9a-z]{1,16}(_[a-z][a-z_]{0,39})?$"}, description: next_cursor of the previous deliveries page. A page that ends among the notices of one event names the last one's condition in its cursor.}
     ArchiveSHA256: {name: ScreenRig-Archive-SHA256, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{64}$"}}
     ExpandedBytes: {name: ScreenRig-Expanded-Bytes, in: header, required: true, schema: {type: integer, minimum: 1, maximum: 262144000}}
@@ -26787,6 +27395,75 @@ components:
         joined:
           type: boolean
           description: True when this request made the admin a member of the project; false when they already were one and nothing changed.
+    OrganizationProjectAccessChange:
+      type: object
+      additionalProperties: false
+      required:
+        - project_id
+        - user_id
+        - access
+      properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: A live project of the organization.
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: A live person who is not staff.
+        access:
+          type: string
+          enum:
+            - member
+            - approver
+            - none
+          description: member is a member of the project who cannot approve reviews (added when absent; an approver loses approval). approver is a member who can approve (added when absent; refused for an uploader). none is no membership (removed when present). The project's owner is always an approver and cannot be set to member or none.
+    OrganizationProjectAccessRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - changes
+      properties:
+        changes:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/OrganizationProjectAccessChange'
+          description: The changes, applied in order; no (project_id, user_id) pair appears twice.
+    OrganizationProjectAccessResult:
+      type: object
+      additionalProperties: false
+      required:
+        - changes
+      properties:
+        changes:
+          type: array
+          description: Every change of the request, in request order.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - project_id
+              - user_id
+              - access
+              - changed
+            properties:
+              project_id:
+                type: string
+              user_id:
+                type: string
+              access:
+                type: string
+                enum:
+                  - member
+                  - approver
+                  - none
+              changed:
+                type: boolean
+                description: False when the person already had this access and nothing was written or recorded.
     OrganizationProjectOwnerUpdate:
       type: object
       additionalProperties: false
@@ -26887,6 +27564,7 @@ components:
       required:
         - project_id
         - role
+        - can_approve
       properties:
         project_id:
           type: string
@@ -26896,6 +27574,15 @@ components:
             - owner
             - member
           description: owner for the project's owner, member otherwise.
+        can_approve:
+          type: boolean
+          description: The member decides reviews and grants Manage access in this project. The owner always does.
+        limited:
+          type: string
+          enum:
+            - screens
+            - uploads
+          description: screens for a member limited to chosen screen folders and screens, uploads for an uploader. Absent for a member of the whole project.
     OrganizationList:
       type: object
       additionalProperties: false
@@ -31205,6 +31892,95 @@ components:
         playlist_id: {type: string, minLength: 1}
         until: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "Strictly in the future and at most 7 days ahead. null or omitted holds the takeover until it is cleared."}
         reason: {type: string, maxLength: 120, description: Operator note carried on the takeover and its events. No control characters.}
+    TabShareWrite:
+      type: object
+      additionalProperties: false
+      description: The tabs to show and the screens to show them on. At least one of screen_ids, folder_ids and tags.
+      required: [tabs]
+      properties:
+        screen_ids: {type: array, maxItems: 100, items: {type: string, minLength: 1}, description: Screens by id. Duplicates collapse.}
+        folder_ids: {type: array, maxItems: 20, items: {type: string}, description: "Screen folders; each includes every folder inside it."}
+        tags: {type: array, maxItems: 20, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: A screen carrying any of the tags.}
+        tabs:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [url]
+            properties:
+              url: {type: string, minLength: 1, description: "The address of the tab (http or https, checked as any playlist iframe address is; at most 1024 characters when qr is true)."}
+              title: {type: string, maxLength: 120, description: Optional name of the tab. No control characters. The address's host when omitted.}
+              duration_s: {type: integer, minimum: 5, maximum: 3600, description: "Seconds the page stays up before the next tab; 30 when omitted. Ignored when there is one tab."}
+        cookies: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/TabShareCookie"}, description: "The sender's cookies for the pages, at most 64 KiB encoded. Secrets; see POST /api/tab-shares."}
+        reload_s: {type: integer, description: "0 (never, the default) or 60 to 86400: every page's iframe reloads this often."}
+        until: {type: string, format: date-time, description: "Strictly in the future and at most 24 hours ahead; 24 hours from now when omitted. The end of the takeover on every target and the expiry of the temporary playlist."}
+        qr: {type: boolean, description: "When true every page carries a QR code of its address in the bottom-right corner. Default false."}
+    TabShareCookie:
+      type: object
+      additionalProperties: false
+      required: [name, value, domain]
+      description: One cookie in the shape of the browser cookies API. The value is a secret.
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256, description: "No control characters, semicolon or equals sign."}
+        value: {type: string, maxLength: 4096, description: No control characters. Never returned.}
+        domain: {type: string, minLength: 1, maxLength: 253, description: "A host name or address; a leading dot makes a domain cookie."}
+        path: {type: string, maxLength: 1024, description: "Starts with /. / when omitted."}
+        secure: {type: boolean}
+        http_only: {type: boolean}
+        same_site: {type: string, enum: [no_restriction, lax, strict, unspecified, none], description: "The browser cookies API values; Firefox's none is no_restriction. unspecified when omitted."}
+        expires_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "null or omitted is a session cookie. A cookie already expired is left out."}
+    TabShareScreen:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+    TabShareSkip:
+      type: object
+      additionalProperties: false
+      required: [id, label, code, detail]
+      description: A target that was not taken over. code is the problem code taking that screen over on its own would answer.
+      properties:
+        id: {type: string}
+        label: {type: string, description: Empty for a screen the project does not hold or the caller cannot see.}
+        code: {type: string}
+        detail: {type: string}
+    TabShareWarning:
+      type: object
+      additionalProperties: false
+      required: [code, url, detail]
+      properties:
+        code: {type: string, enum: [embedding_blocked]}
+        url: {type: string, description: The tab address.}
+        detail: {type: string}
+    TabShare:
+      type: object
+      additionalProperties: false
+      required: [id, until, screens, skipped, warnings]
+      properties:
+        id: {type: string, description: "The id of the share: the temporary playlist's."}
+        until: {type: string, format: date-time}
+        screens: {type: array, items: {$ref: "#/components/schemas/TabShareScreen"}, description: The screens taken over.}
+        skipped: {type: array, items: {$ref: "#/components/schemas/TabShareSkip"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/TabShareWarning"}}
+    TabShareState:
+      type: object
+      additionalProperties: false
+      required: [id, until, screens]
+      properties:
+        id: {type: string}
+        until: {type: string, format: date-time}
+        screens: {type: array, items: {$ref: "#/components/schemas/TabShareScreen"}, description: The screens whose takeover is still the share.}
+    TabShareStopped:
+      type: object
+      additionalProperties: false
+      required: [id, screens]
+      properties:
+        id: {type: string}
+        screens: {type: array, items: {$ref: "#/components/schemas/TabShareScreen"}, description: The screens whose takeover was cleared.}
     ScreenTakeover:
       type: object
       additionalProperties: false
@@ -33565,9 +34341,11 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification. A campaign's notice also carries reach {published, current} (reach_dropped: the screens the campaign reached when it was published and reaches when the notice is sent) or audience_group {kind: tag or folder, value: the tag or the folder id} (group_empty); email and chat say the same in words. A notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        An organization's notification, as a project or the organization reads it. It covers every project of the organization or the chosen ones (project_ids), and acts on each covered project's screens, sources and campaigns. A project reads (and, when the notification covers it alone, changes) the notifications that cover it by the same id, with its own status and failure times; the organization reads the whole of it. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification. A campaign's notice also carries reach {published, current} (reach_dropped: the screens the campaign reached when it was published and reaches when the notice is sent) or audience_group {kind: tag or folder, value: the tag or the folder id} (group_empty); email and chat say the same in words. A notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
-        project_id: {type: string}
+        project_id: {type: string, description: "The project the notification is read through; absent on the organization routes."}
+        organization_id: {type: string, description: The organization the notification belongs to.}
+        project_ids: {$ref: "#/components/schemas/NotificationProjectIDs", description: "The projects the notification covers. Absent covers every project of the organization, including projects added later; an empty list covers none."}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
         channel: {type: string, description: "email, webhook, slack, teams, pagerduty or telegram. Readers treat another value as a channel they cannot edit."}
         description: {type: string}
@@ -33699,7 +34477,75 @@ components:
     ReportSubscriptionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ReportSubscription"}}}}
     ReportSubscriptionWrite: {type: object, additionalProperties: false, required: [name, kind, schedule, format, recipients], properties: {name: {type: string, minLength: 1, maxLength: 100}, kind: {type: string, enum: [fleet_health, uptime, publishing, alerts, alert_log, proof_of_play]}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}, description: "The report's filters other than the days (GET /api/reports lists them)."}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}, description: "user_id or email address of project members."}, enabled: {type: boolean, default: true}}}
     ReportSubscriptionPatch: {type: object, additionalProperties: false, properties: {name: {type: string, minLength: 1, maxLength: 100}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}}, enabled: {type: boolean}}}
-    NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Notification"}}}}
+    OrganizationNotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}}}}
+    OrganizationNotificationWrite:
+      type: object
+      additionalProperties: false
+      required: [channel]
+      description: >-
+        A NotificationWrite and the projects the notification covers. Absent or null project_ids covers every project of the organization, including projects added later; a list covers exactly those projects, each a live project of the organization.
+      properties:
+        channel: {type: string, enum: [email, webhook, slack, teams, pagerduty, telegram]}
+        description: {type: string, maxLength: 200, description: A name for people.}
+        conditions: {$ref: "#/components/schemas/NotificationConditions"}
+        screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: "As on NotificationWrite."}
+        min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: "As on NotificationWrite."}
+        severity: {$ref: "#/components/schemas/NotificationSeverityOverrides"}
+        active_hours: {$ref: "#/components/schemas/NotificationActiveHours"}
+        reach_drop: {$ref: "#/components/schemas/NotificationReachDrop", description: "reach_dropped only. Absent notifies any drop."}
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440, default: 10, description: "How long a condition must last before it notifies. crashing is never held."}
+        recipients: {$ref: "#/components/schemas/NotificationRecipients"}
+        url: {type: string, maxLength: 2048, format: uri, description: "Webhook only: https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment."}
+        event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        destination: {$ref: "#/components/schemas/NotificationDestination"}
+        telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        enabled: {type: boolean, default: true}
+        project_ids:
+          oneOf: [{$ref: "#/components/schemas/NotificationProjectIDs"}, {type: "null"}]
+          description: The projects the notification covers; null or absent covers every project of the organization.
+    OrganizationNotificationPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: A NotificationPatch and project_ids.
+      properties:
+        description: {type: string, maxLength: 200, description: An empty string clears the description.}
+        conditions: {$ref: "#/components/schemas/NotificationConditions"}
+        screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        audience:
+          oneOf: [{$ref: "#/components/schemas/CampaignAudience"}, {type: "null"}]
+          description: As on NotificationPatch.
+        min_severity:
+          oneOf: [{$ref: "#/components/schemas/NotificationSeverity"}, {type: "null"}]
+          description: As on NotificationPatch.
+        severity:
+          oneOf: [{$ref: "#/components/schemas/NotificationSeverityOverrides"}, {type: "null"}]
+          description: Replaces every override; null or an empty object clears them.
+        active_hours:
+          oneOf: [{$ref: "#/components/schemas/NotificationActiveHours"}, {type: "null"}]
+          description: Replaces the hours; null clears them.
+        reach_drop:
+          oneOf: [{$ref: "#/components/schemas/NotificationReachDrop"}, {type: "null"}]
+          description: Replaces the threshold; null clears it.
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440}
+        recipients: {$ref: "#/components/schemas/NotificationRecipients"}
+        url: {type: string, maxLength: 2048, format: uri}
+        event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        destination: {$ref: "#/components/schemas/NotificationDestination"}
+        telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        enabled: {type: boolean}
+        snoozed_until:
+          oneOf: [{type: string, format: date-time}, {type: "null"}]
+          description: Send nothing until this instant, at most 30 days ahead; null ends the snooze.
+        project_ids:
+          oneOf: [{$ref: "#/components/schemas/NotificationProjectIDs"}, {type: "null"}]
+          description: Absent leaves the projects the notification covers, null covers every project of the organization, a list covers exactly those projects.
+    NotificationProjectIDs:
+      type: array
+      items: {type: string}
+      description: Live projects of the organization, each named once. An empty list covers none.
+    NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}}}}
     NotificationUnsubscription: {type: object, additionalProperties: false, required: [user_id, at], properties: {user_id: {type: string}, at: {type: string, format: date-time, description: When the person stopped the notification's mail.}}}
     NotificationDelivery:
       type: object
@@ -35315,12 +36161,26 @@ components:
         title: {type: string}
         reloadMs: {type: integer, minimum: 60000, maximum: 86400000, description: "Milliseconds between reloads while the page is on glass, each from src again (a recovered src replaces the fallback). Absent means the page never reloads."}
         fallbackSrc: {type: string, minLength: 1, description: "The page to load in src's place when src does not load (docs/player-compatibility.md, iframe pages). Absent means no fallback. A BI view of the screen's project carries the screen's ticket here as in src."}
+        cookies: {type: array, minItems: 1, items: {$ref: "#/components/schemas/RuntimeIframeCookie"}, description: "Present on the pages of a shared browser tab that was sent with cookies (POST /api/tab-shares). A Player that supports it sets every cookie in the web engine's cookie store for this placement before the first load of src and before each reload, keyed to the http(s) URL built from the cookie's domain, path and secure (docs/player-compatibility.md, iframe pages). A secret: never log a value. A Player that does not know the key, and the web Player and the shells that hand off to it, ignore it."}
         navigationAllowlist: {type: array, minItems: 1, items: {type: string}, description: "Present when the page's navigation is restricted: the authored entries, then src and fallbackSrc as entries of their own (scheme://host[:port]/path, without credentials, query or fragment, the default port left out), without repeats. A Player uses it as the whole list: the page's own document may navigate only to an address that matches an entry as a CSP host-source (docs/player-compatibility.md, Iframe navigation allowlist). Absent means no restriction."}
         rect: {$ref: "#/components/schemas/RuntimeRect"}
         layer: {type: integer, minimum: 0, maximum: 1024}
         contentFit: {type: string, enum: [fill]}
         enter: {$ref: "#/components/schemas/PrimitiveEnter"}
         motion: {$ref: "#/components/schemas/PrimitiveMotion"}
+    RuntimeIframeCookie:
+      type: object
+      required: [name, value, domain, path, secure, httpOnly, sameSite]
+      description: One cookie of a shared browser tab, in the shape of the browser cookies API. The value is a secret.
+      properties:
+        name: {type: string}
+        value: {type: string}
+        domain: {type: string, description: "A host name or address; a leading dot is a domain cookie."}
+        path: {type: string}
+        secure: {type: boolean}
+        httpOnly: {type: boolean}
+        sameSite: {type: string, enum: [no_restriction, lax, strict, unspecified]}
+        expiresAt: {type: string, format: date-time, description: Absent for a session cookie.}
     RuntimeMediaSelector:
       oneOf:
         - {$ref: "#/components/schemas/RuntimeMediaSelectorByID"}
@@ -36410,6 +37270,7 @@ x-problem-codes:
   - primitive_locked
   - webhook_limit_reached
   - notification_limit_reached
+  - notification_covers_other_projects
   - alert_not_open
   - alert_mute_limit_reached
   - report_subscription_limit_reached
