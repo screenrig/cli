@@ -8,7 +8,7 @@ import { CliError } from "./problems.js";
  * `project export DIR`: project data in open formats with section outcomes, composed
  * from the project's own read routes. JSON for the configuration (screens,
  * folders, tags, playlists with revisions, schedules, campaigns, cards, sources,
- * notifications, webhooks, application metadata, triggers), the original media files
+ * notifications, webhooks, application metadata and K/V, triggers), the original media files
  * with a manifest of hashes, CSV for plays, uptime and alerts, and the event log
  * as JSON lines. Secrets are never read back by the routes (a webhook's signing
  * secret, a source's credentials) and are stripped again here.
@@ -191,6 +191,13 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
       throw new RequiredExportReadError(`Could not export ${pathName}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   };
+  const requiredList = async (pathName: string): Promise<unknown[]> => {
+    try {
+      return await api.list(pathName);
+    } catch (error) {
+      throw new RequiredExportReadError(`Could not export ${pathName}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+  };
   const section = async (name: string, run: () => Promise<number>): Promise<void> => {
     say(`exporting ${name}`);
     try {
@@ -303,7 +310,17 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     applications = asArray(await api.list("/api/applications"));
     await json("applications.json", applications);
     await json("triggers.json", asArray(asRecord(await api.get("/api/triggers")).items).map(stripSecrets));
-    return 2;
+    for (const application of applications) {
+      const id = encodeURIComponent(String(application.id));
+      const kvPath = `/api/applications/${id}/kv`;
+      const entries = asArray(await requiredList(kvPath));
+      // The list holds metadata only. Preserve the binary-safe value and its
+      // metadata from every detail read, including an empty value. Read the
+      // whole application before replacing its file on a refresh.
+      const values = await mapLimit(entries, CONCURRENCY, (entry) => requiredGet(`${kvPath}/${encodeURIComponent(String(entry.key))}`));
+      await json(`applications/${id}/kv.json`, values);
+    }
+    return applications.length + 2;
   });
 
   if (applications.length > 0 || playlistHasApplications) {

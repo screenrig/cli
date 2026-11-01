@@ -186,6 +186,93 @@ test("published application files are reported as omitted on exports and refresh
   });
 });
 
+const kvEntry = (key: string, value: Buffer, contentType = "application/octet-stream", revision = 1) => ({
+  application_id: "app_1", key, value_base64: value.toString("base64"), content_type: contentType,
+  bytes: value.length, sha256: sha(value), revision,
+});
+
+test("application K/V exports recover exact values and metadata in every export mode", async () => {
+  const values = [
+    kvEntry("menu/title", Buffer.from("Crème brûlée — 日本語"), "text/plain; charset=utf-8", 3),
+    kvEntry("settings", Buffer.from('{"enabled":true,"secret":"ordinary application state","rows":[1,null]}'), "application/json", 2),
+    kvEntry("binary", Buffer.from([0, 255, 128, 13, 10, 0])),
+    kvEntry("empty", Buffer.alloc(0)),
+  ];
+  for (const options of [{ media: true }, { media: false }, { media: true, since: "2026-10-29" }]) {
+    await inTemp(async (directory) => {
+      const calls: Calls = { gets: [], files: [], appends: [] };
+      const api = fakeApi(calls, {
+        "/api/applications": [{ id: "app_1" }, { id: "app_empty" }],
+        "/api/applications/app_1/kv": values.map(({ value_base64: _value, ...metadata }) => metadata),
+        ...Object.fromEntries(values.map((entry) => [`/api/applications/app_1/kv/${encodeURIComponent(entry.key)}`, entry])),
+      });
+      const result = await runProjectExport(api, { directory, ...options, now: NOW });
+      assert.deepEqual(result.sections.find((section) => section.name === "applications"), { name: "applications", status: "ok", files: 4 });
+      assert.equal(result.failed, 1, "the separate application-release omission remains explicit");
+      const exported = JSON.parse(await readFile(path.join(directory, "applications/app_1/kv.json"), "utf8")) as typeof values;
+      assert.deepEqual(exported, values);
+      for (const entry of exported) {
+        const bytes = Buffer.from(entry.value_base64, "base64");
+        assert.equal(bytes.length, entry.bytes);
+        assert.equal(sha(bytes), entry.sha256);
+      }
+      assert.deepEqual(JSON.parse(await readFile(path.join(directory, "applications/app_empty/kv.json"), "utf8")), []);
+      assert.ok(calls.gets.includes("/api/applications/app_1/kv/menu%2Ftitle"), "keys stay in JSON, not filesystem paths");
+      for (const relative of ["applications/app_1/kv.json", "applications/app_empty/kv.json"]) {
+        const file = result.files.find((entry) => entry.path === relative);
+        assert.ok(file, `${relative} is in the manifest`);
+        const bytes = await readFile(path.join(directory, relative));
+        assert.equal(file.bytes, bytes.length);
+        assert.equal(file.sha256, sha(bytes));
+      }
+    });
+  }
+});
+
+test("refresh replaces changed and deleted K/V entries, preserving the last snapshot on a read failure", async () => {
+  await inTemp(async (directory) => {
+    const read = () => readFile(path.join(directory, "applications/app_1/kv.json"), "utf8");
+    const initial = [kvEntry("menu/title", Buffer.from("Old title")), kvEntry("binary", Buffer.from([0, 255]))];
+    const updated = [kvEntry("menu/title", Buffer.from("New title"), "text/plain", 2), kvEntry("new-item", Buffer.from("Added"))];
+    const apiFor = (values: typeof initial, failure?: Error): ExportApi => fakeApi({ gets: [], files: [], appends: [] }, {
+      "/api/applications": [{ id: "app_1" }],
+      "/api/applications/app_1/kv": values.map(({ value_base64: _value, ...metadata }) => metadata),
+      ...Object.fromEntries(values.map((entry) => [`/api/applications/app_1/kv/${encodeURIComponent(entry.key)}`, failure ?? entry])),
+    });
+    await runProjectExport(apiFor(initial), { directory, media: false, now: NOW });
+    assert.deepEqual(JSON.parse(await read()), initial);
+    await runProjectExport(apiFor(updated), { directory, media: false, now: NOW });
+    assert.deepEqual(JSON.parse(await read()), updated, "deleted keys disappear instead of lingering in the backup");
+    const snapshot = await read();
+    const result = await runProjectExport(apiFor(updated, new CliError(makeProblem("not_found", "Not found", 404, "Entry disappeared"))), { directory, media: false, now: NOW });
+    assert.equal(result.sections.find((section) => section.name === "applications")?.status, "failed");
+    assert.equal(await read(), snapshot, "a failed refresh leaves the previous complete per-application file");
+    assert.equal(result.files.some((file) => file.path === "applications/app_1/kv.json"), false, "the manifest does not certify a stale snapshot");
+  });
+});
+
+test("unreadable application K/V lists or values fail the section instead of silently skipping state", async () => {
+  const entry = kvEntry("menu/title", Buffer.from("Lunch"));
+  for (const route of ["/api/applications/app_1/kv", "/api/applications/app_1/kv/menu%2Ftitle"]) {
+    for (const [code, status] of [["forbidden", 403], ["not_found", 404], ["dependency_unavailable", 503]] as const) {
+      await inTemp(async (directory) => {
+        const result = await runProjectExport(fakeApi({ gets: [], files: [], appends: [] }, {
+          "/api/applications": [{ id: "app_1" }],
+          "/api/applications/app_1/kv": [entry],
+          "/api/applications/app_1/kv/menu%2Ftitle": entry,
+          [route]: new CliError(makeProblem(code, "Read failed", status, "Application state could not be read")),
+        }), { directory, media: false, now: NOW });
+        const applications = result.sections.find((section) => section.name === "applications");
+        assert.equal(applications?.status, "failed", `${route}: ${status} makes the copy incomplete`);
+        assert.equal(applications?.code, code);
+        assert.equal(result.failed, 2, "K/V failure is distinct from the existing release-content omission");
+        assert.equal(result.files.some((file) => file.path === "applications/app_1/kv.json"), false);
+        assert.equal(result.sections.find((section) => section.name === "report subscriptions")?.status, "ok");
+      });
+    }
+  }
+});
+
 test("an empty application catalog does not hide release files referenced only by a playlist revision", async () => {
   await inTemp(async (directory) => {
     const api = fakeApi({ gets: [], files: [], appends: [] });
