@@ -20,7 +20,6 @@ test("status works without enrollment, never reads config, and sends no project 
   const runtime = processRuntime();
   runtime.now = () => new Date("2026-10-01T12:00:00Z");
   runtime.homedir = () => { throw new Error("status must not resolve project configuration"); };
-  runtime.env = { SCREENRIG_TOKEN: "project-secret" };
   const transport = new FakeTransport().on("GET", "/api/status", (request) => {
     assert.equal(request.query?.environment, "production");
     assert.equal(request.headers?.Authorization, undefined);

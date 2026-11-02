@@ -95,7 +95,7 @@ interface Harness {
 
 async function harness(config?: ScreenRigConfig): Promise<Harness> {
   const dir = await testTemp("oauth-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   const configPath = path.join(dir, "screenrig", "config.json");
   if (config) await writeConfigAtomic(configPath, config, fs);
   const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 20)));
@@ -109,7 +109,7 @@ async function harness(config?: ScreenRigConfig): Promise<Harness> {
       stdout.on("data", (chunk) => chunks.out.push(Buffer.from(chunk)));
       stderr.on("data", (chunk) => chunks.err.push(Buffer.from(chunk)));
       const code = await run({
-        argv, env: fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir,
+        argv, settings: fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir,
         cwd: () => process.cwd(), fs, transport, ...extra,
       });
       return { code, stdout: Buffer.concat(chunks.out).toString("utf8"), stderr: Buffer.concat(chunks.err).toString("utf8") };
@@ -1149,7 +1149,7 @@ test("project token requires explicit enrollment and sends nothing on a fresh in
 test("login and agent enroll send the plugin helper's install source", async () => {
   const source = "claude/claude-plugins-official";
   const signIn = await harness({ api_url: API });
-  signIn.fs.env.SCREENRIG_INSTALL_SOURCE = source;
+  signIn.fs.settings.SCREENRIG_INSTALL_SOURCE = source;
   const sent: Array<string | null> = [];
   const devices = withDiscovery(new FakeTransport())
     .on("POST", "/oauth/device_authorization", (req) => {
@@ -1166,7 +1166,7 @@ test("login and agent enroll send the plugin helper's install source", async () 
   } finally { await signIn.done(); }
 
   const enroll = await harness();
-  enroll.fs.env.SCREENRIG_INSTALL_SOURCE = source;
+  enroll.fs.settings.SCREENRIG_INSTALL_SOURCE = source;
   const pair = { access: access({ project: OTHER_PROJECT, sid: "grt_BBBB" }), refresh: "opaque-install-source" };
   const bodies: unknown[] = [];
   const enrollments = new FakeTransport()

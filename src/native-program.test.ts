@@ -13,7 +13,7 @@ import { FakeTransport } from "./transport/fake.js";
 
 async function runtimeFor(argv: string[], transport: FakeTransport, authenticated: boolean) {
   const configDir = await testTemp("native-program-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   if (authenticated) {
     await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
       api_url: "https://api.screenrig.ai",
@@ -27,7 +27,7 @@ async function runtimeFor(argv: string[], transport: FakeTransport, authenticate
   stdout.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
   stderr.on("data", (chunk: Buffer) => { errors += chunk.toString("utf8"); });
   const runtime: CliRuntime = {
-    argv: ["--json", ...argv], env: fs.env, stdout, stderr, fs, transport,
+    argv: ["--json", ...argv], settings: fs.settings, stdout, stderr, fs, transport,
     now: () => new Date("2026-09-10T12:00:00Z"), sleep: async () => undefined,
     homedir: fs.homedir, cwd: () => configDir,
   };

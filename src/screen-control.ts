@@ -552,7 +552,7 @@ export function takeoverForProblem(error: unknown): unknown {
     ...error.problem,
     next: {
       command: "rerun with a shorter --for, such as --for 6d23h",
-      reason: "--for is converted with this computer's clock, which may differ from the server's. Check the clock, shorten --for, or pass --until as an exact instant.",
+      reason: "--for is converted with this computer's clock, which may differ from the server's. Check the clock, shorten --for, or add --until as an exact instant.",
     },
   }, error.exitCode, error.warnings);
 }

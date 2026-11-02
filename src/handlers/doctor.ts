@@ -160,7 +160,7 @@ export async function doctor(
     checks.push({ name: "config_permissions", status: "pass", detail: "config file not present" });
   }
   checks.push(credentialCheck(resolved, runtime.now()));
-  const grant = (await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }).catch(() => undefined))?.oauth;
+  const grant = (await readConfigFile(resolved.configPath, { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir }).catch(() => undefined))?.oauth;
   if (grant) checks.push(signInCheck(grant, runtime.now()));
   checks.push({
     name: "api_url",
@@ -172,8 +172,8 @@ export async function doctor(
     status: "pass",
     detail: resolved.logSocket ?? "(none)",
   });
-  const lookup = ffmpegLookup(runtime.env);
-  const webpLookup = cwebpLookup(runtime.env);
+  const lookup = ffmpegLookup(runtime.settings);
+  const webpLookup = cwebpLookup(runtime.settings);
   let toolchain: FfmpegToolchain | undefined;
   let toolchainDetail: string | undefined;
   try {

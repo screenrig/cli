@@ -27,7 +27,7 @@ async function fixture(prefix: string) {
     const chunks: Buffer[] = [], errors: Buffer[] = [];
     stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     stderr.on("data", (chunk) => errors.push(Buffer.from(chunk)));
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], env: {}, cwd: () => dir, transport, stdout, stderr });
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], settings: {}, cwd: () => dir, transport, stdout, stderr });
     const text = Buffer.concat(chunks).toString("utf8");
     let body: any;
     try { body = JSON.parse(text); } catch { /* human output */ }

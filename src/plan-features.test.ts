@@ -26,7 +26,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function invoke(argv: string[], transport: FakeTransport): Promise<{ code: number; stdout: string; stderr: string }> {
   const home = await testTemp("plan-features-");
   try {
-    const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+    const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
     await writeConfigAtomic(
       path.join(home, "screenrig", "config.json"),
       { api_url: "https://api.screenrig.ai", token: TOKEN, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization" },
@@ -37,7 +37,7 @@ async function invoke(argv: string[], transport: FakeTransport): Promise<{ code:
     const outP = collect(stdout);
     const errP = collect(stderr);
     const runtime: CliRuntime = {
-      argv, env: fs.env, stdout, stderr, now: () => new Date("2026-10-30T12:00:00.000Z"), sleep: async () => undefined,
+      argv, settings: fs.settings, stdout, stderr, now: () => new Date("2026-10-30T12:00:00.000Z"), sleep: async () => undefined,
       homedir: fs.homedir, cwd: () => home, fs, transport,
     };
     const code = await run(runtime);

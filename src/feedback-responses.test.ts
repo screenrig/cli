@@ -40,13 +40,13 @@ async function feedbackList(argv: string[], bugs: unknown[], features: unknown[]
 async function feedbackRun(argv: string[], transport: FakeTransport) {
   const configDir = await testTemp("feedback-responses-");
   try {
-    const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
     await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const out = collect(stdout);
     const err = collect(stderr);
-    const runtime: CliRuntime = { argv, env: fs.env, stdout, stderr, now: () => new Date("2026-10-16T12:00:00.000Z"), sleep: async () => undefined, homedir: fs.homedir, cwd: () => configDir, fs, transport };
+    const runtime: CliRuntime = { argv, settings: fs.settings, stdout, stderr, now: () => new Date("2026-10-16T12:00:00.000Z"), sleep: async () => undefined, homedir: fs.homedir, cwd: () => configDir, fs, transport };
     const code = await run(runtime);
     stdout.end();
     stderr.end();

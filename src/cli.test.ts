@@ -63,11 +63,11 @@ async function withRuntime(
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   };
   const runtime: CliRuntime = {
     argv,
-    env: fsLike.env,
+    settings: fsLike.settings,
     stdout,
     stderr,
     now: () => new Date("2026-08-14T17:00:00.000Z"),
@@ -98,10 +98,10 @@ async function withAuthenticatedRuntime(
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   };
-  const configPath = fsLike.env.SCREENRIG_CONFIG
-    ?? path.join(fsLike.env.XDG_CONFIG_HOME ?? fsLike.homedir(), "screenrig", "config.json");
+  const configPath = fsLike.settings.SCREENRIG_CONFIG
+    ?? path.join(fsLike.settings.XDG_CONFIG_HOME ?? fsLike.homedir(), "screenrig", "config.json");
   const existing = await readConfigFile(configPath, fsLike);
   if (!existing?.token) {
     await writeConfigAtomic(configPath, {
@@ -124,7 +124,7 @@ async function withAuthenticatedRuntime(
 test("--request-id goes on the first HTTP request of the invocation and every request gets its own id", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("request-id-per-request-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const requested = "req_CALLERCORRELATION01";
   const enrolled = await withRuntime(["--json", "--request-id", requested, "agent", "enroll", "--organization", "Example organization", "--email", "Owner@example.com"], transport, { fs: fsLike });
   assert.equal(enrolled.code, 0, enrolled.stdout);
@@ -139,7 +139,7 @@ test("--request-id goes on the first HTTP request of the invocation and every re
 test("pairing requires explicit enrollment and then preserves the original pairing behavior", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("explicit-enrollment-pair-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(missing.code, ExitCode.Auth);
   const blocked = JSON.parse(missing.stdout) as { error: { code: string; next: { command: string } } };
@@ -198,7 +198,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   });
   assert.equal(config?.project_id, "prj_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.ok(config?.token);
@@ -239,13 +239,13 @@ test("agent enroll preserves a generic invalid_request with no invented next", a
 
 test("enrollment sends no beta_key: the flag is gone and SCREENRIG_BETA_KEY is not read", async () => {
   const configDir = await testTemp("enroll-no-beta-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "ignored" } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "ignored" } };
   const transport = memoryBackend();
   try {
     const { code, stdout } = await withRuntime(
       ["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
       transport,
-      { fs: fsLike, env: fsLike.env },
+      { fs: fsLike, settings: fsLike.settings },
     );
     assert.equal(code, 0, stdout);
     const body = transport.calls.find((call) => call.path === "/api/enrollments")?.body as Record<string, unknown>;
@@ -263,7 +263,7 @@ test("agent enroll --agentid-claim sends the claim instead of an email and store
   const transport = memoryBackend();
   const claim = `agid_${"K".repeat(43)}`;
   const configDir = await testTemp("enroll-agentid-claim-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const result = await withRuntime(
     ["--json", "agent", "enroll", "--agentid-claim", claim, "--organization", "Example organization"],
     transport,
@@ -292,7 +292,7 @@ test("a pending AgentID claim enrollment resumes without flags and reuses the sa
   const transport = memoryBackend();
   const claim = `agid_${"R".repeat(43)}`;
   const configDir = await testTemp("enroll-agentid-resume-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     enrollment: { client_id: `cli_${"S".repeat(43)}`, idempotency_key: "enroll-agentid-resume", credential_format: "oauth", agentid_claim: claim },
@@ -336,7 +336,7 @@ test("agentid_claim_invalid names signing in at the API host or enrolling by ema
 test("an AgentID enrollment refused as feature_unavailable leaves no pending claim behind", async () => {
   const claim = `agid_${"F".repeat(43)}`;
   const configDir = await testTemp("enroll-agentid-off-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const off = new FakeTransport().on("POST", "/api/enrollments", () => ({
     status: 404, headers: { "content-type": "application/problem+json" },
     body: { status: 404, code: "feature_unavailable", title: "Feature unavailable", detail: "AgentID enrollment is not enabled here.", retryable: false },
@@ -428,7 +428,7 @@ test("agent enroll --setup-code sends upper-case XXXX-XXXX with an email or an A
 
 test("agent enroll rejects a malformed --setup-code before the network and leaves a pending enrollment as it was", async () => {
   const configDir = await testTemp("enroll-setup-code-malformed-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const pending = {
     client_id: `cli_${"T".repeat(43)}`,
@@ -486,7 +486,7 @@ test("an interrupted enrollment replays the same setup code under the same idemp
     [...ENROLL_BY_EMAIL, "--setup-code", "k7qx2mpd"],
   ]) {
     const configDir = await testTemp("enroll-setup-code-replay-");
-    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
     const configPath = path.join(configDir, "screenrig", "config.json");
     const transport = backendLosingFirstEnrollment();
     try {
@@ -518,7 +518,7 @@ test("a pending enrollment refuses a different or added setup code before the ne
     [[], "K7QX-2MPD", /started without a setup code/],
   ] as const) {
     const configDir = await testTemp("enroll-setup-code-refused-");
-    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
     const configPath = path.join(configDir, "screenrig", "config.json");
     const transport = backendLosingFirstEnrollment();
     try {
@@ -542,7 +542,7 @@ test("a pending enrollment refuses a different or added setup code before the ne
 
 test("agent enroll --force replaces a pending enrollment's setup code instead of carrying it over", async () => {
   const configDir = await testTemp("enroll-setup-code-force-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const pending = {
     api_url: "https://api.screenrig.ai",
@@ -651,7 +651,7 @@ test("every authenticated command reports not_enrolled instead of enrolling", as
 
 test("revoked agent history without a pending reconnect directs authenticated commands to enroll", async () => {
   const configDir = await testTemp("revoked-prefers-enroll-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     last_agent: {
@@ -698,7 +698,7 @@ test("unsupported auth aliases do not make requests or enroll", async () => {
 test("agent status reports whether a persisted passkey can authorize another agent", async () => {
   const transport = new FakeTransport();
   const configDir = await testTemp("agent-status-ready-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_status_${"S".repeat(43)}`,
@@ -755,7 +755,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
     },
   }));
   const configDir = await testTemp("agent-disconnect-unauthorized-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
@@ -797,7 +797,7 @@ test("agent status names disconnect --yes when the stored credential is rejected
     },
   }));
   const configDir = await testTemp("agent-status-unauthorized-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_rejected_${"S".repeat(43)}`,
@@ -832,7 +832,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
     return { status: 204, headers: { "cache-control": "private, no-store" }, body: undefined };
   });
   const configDir = await testTemp("agent-disconnect-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_disconnect_${"D".repeat(43)}`,
@@ -877,7 +877,7 @@ test("agent disconnect keeps the credential on lockout risk and names the explic
     },
   }));
   const configDir = await testTemp("agent-lockout-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const token = `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_lockout_${"L".repeat(43)}`;
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
@@ -895,7 +895,7 @@ test("agent disconnect keeps the credential on lockout risk and names the explic
 test("existing credential skips enrollment and directly runs the original command", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("existing-command-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -911,7 +911,7 @@ test("existing credential skips enrollment and directly runs the original comman
 test("agent disconnect requires explicit confirmation and never auto-enrolls", async () => {
   const transport = new FakeTransport();
   const configDir = await testTemp("revoke-confirm-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const original = { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret" };
   await writeConfigAtomic(configPath, original, fsLike);
@@ -943,7 +943,7 @@ test("agent disconnect confirms server success before atomically removing all lo
     body: undefined,
   }));
   const configDir = await testTemp("revoke-success-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const token = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret";
   await writeConfigAtomic(configPath, {
@@ -997,7 +997,7 @@ test("agent disconnect retains local state on a server failure and gives a safe 
     },
   }));
   const configDir = await testTemp("revoke-failure-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const original = {
     api_url: "https://api.screenrig.ai",
@@ -1032,7 +1032,7 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
   }));
   const configDir = await testTemp("revoke-cleanup-failure-");
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const realFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const realFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const original = {
     api_url: "https://api.screenrig.ai",
     token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret",
@@ -1085,7 +1085,7 @@ test("agent disconnect shares the last-agent guard and explicit allow-lockout ov
     };
   });
   const configDir = await testTemp("auth-revoke-lockout-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const token = `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_auth_lockout_${"L".repeat(43)}`;
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", token, agent_id: TEST_AGENT.id }, fsLike);
@@ -1173,7 +1173,7 @@ test("screen provision reports the created screen and withholds an unsafe URL in
 
 test("browser setup on stage accepts the stage Player /s/ URL and reports the claimed screen", async () => {
   const configDir = await testTemp("stage-setup-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.stage.screenrig.ai" }, fsLike);
   const claim = (publicUrl: string) => new FakeTransport().on("POST", "/api/project/browser-links/claim", () => ({
     status: 201,
@@ -1226,7 +1226,7 @@ test("screen provision --open launches by argv and returns only safe fields", as
   assert.equal(provision?.headers?.["idempotency-key"]?.length !== 0, true);
   assert.deepEqual(provision?.body, { label: "Demo" });
   const configPath = path.join(result.configDir, "screenrig", "config.json");
-  assert.equal((await readConfigFile(configPath, { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } }))?.screen_provision, undefined);
+  assert.equal((await readConfigFile(configPath, { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, settings: { XDG_CONFIG_HOME: result.configDir } }))?.screen_provision, undefined);
   await rm(result.configDir, { recursive: true, force: true });
 });
 
@@ -1249,7 +1249,7 @@ test("screen provision --print-url explicitly returns the one-time URL without o
 test("failed browser launch retains only the exact retry key and label", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("provision-retry-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const argv = ["--json", "screen", "provision", "--open", "--name", "Retry demo"];
   const first = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   const second = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
@@ -1289,7 +1289,7 @@ test("an enrolled agent completes browser setup with safe fragment-free output",
   const config = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
     mkdir, open, rename, rm, chmod, stat,
     homedir: () => result.configDir,
-    env: { XDG_CONFIG_HOME: result.configDir },
+    settings: { XDG_CONFIG_HOME: result.configDir },
   });
   assert.equal(config?.browser_setup, undefined);
   await rm(result.configDir, { recursive: true, force: true });
@@ -1317,7 +1317,7 @@ test("browser setup --open on the stage API opens the stage apex handoff", async
   const transport = memoryBackend();
   const opened: string[] = [];
   const configDir = await testTemp("stage-handoff-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.stage.screenrig.ai" }, fsLike);
   try {
     const result = await withAuthenticatedRuntime(
@@ -1334,7 +1334,7 @@ test("browser setup --open on the stage API opens the stage apex handoff", async
 
 test("a stored credential is never sent to another --api-url or SCREENRIG_API_URL origin", async () => {
   const configDir = await testTemp("credential-origin-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } as Record<string, string> };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } as Record<string, string> };
   try {
     for (const [argv, env] of [
       [["--api-url", "http://127.0.0.1:18977"], {}],
@@ -1342,7 +1342,7 @@ test("a stored credential is never sent to another --api-url or SCREENRIG_API_UR
       [[], { SCREENRIG_API_URL: "https://api.stage.screenrig.ai" }],
     ] as const) {
       const transport = new FakeTransport();
-      const result = await withAuthenticatedRuntime(["--json", "project", "show", ...argv], transport, { fs: { ...fsLike, env: { ...fsLike.env, ...env } } });
+      const result = await withAuthenticatedRuntime(["--json", "project", "show", ...argv], transport, { fs: { ...fsLike, settings: { ...fsLike.settings, ...env } } });
       assert.equal(result.code, ExitCode.Config, result.stdout);
       const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
       assert.equal(envelope.error.code, "config_error");
@@ -1360,7 +1360,7 @@ test("a stored credential is never sent to another --api-url or SCREENRIG_API_UR
 
 test("a config without api_url binds its credential to the default origin", async () => {
   const configDir = await testTemp("credential-origin-default-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
   await writeFile(configPath, JSON.stringify({ token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }), { mode: 0o600 });
@@ -1403,7 +1403,7 @@ test("dashboard and dashboard open launch the public origin without authenticati
       assert.equal(transport.calls.length, 0);
       assert.equal(await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
         mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir,
-        env: { XDG_CONFIG_HOME: result.configDir },
+        settings: { XDG_CONFIG_HOME: result.configDir },
       }), undefined);
     } finally {
       await rm(result.configDir, { recursive: true, force: true });
@@ -1555,7 +1555,7 @@ for (const refusal of [
   for (const nested of [false, true]) {
     test(`browser setup releases ${refusal.code} (${nested ? "nested" : "flat"}) retries for a replacement code`, async () => {
       const configDir = await testTemp("browser-claim-refusal-");
-      const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+      const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
       const configPath = path.join(configDir, "screenrig", "config.json");
       try {
         await withAuthenticatedRuntime(["--json", "version"], new FakeTransport(), { fs: fsLike });
@@ -1645,7 +1645,7 @@ const browserClaimFailures: Array<{ name: string; response?: TransportResponse; 
 for (const failure of browserClaimFailures) {
   test(`browser setup retains its exact retry after ${failure.name}`, async () => {
     const configDir = await testTemp("browser-claim-uncertain-");
-    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
     const configPath = path.join(configDir, "screenrig", "config.json");
     const transport = new FakeTransport().on("POST", "/api/project/browser-links/claim", () => {
       if (failure.error) throw failure.error;
@@ -1697,7 +1697,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
     body: { status: 503, code: "dependency_unavailable", title: "Unavailable", detail: "Retry." },
   }));
   const configDir = await testTemp("browser-claim-retry-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
   const claims = transport.calls.filter((call) => call.path === "/api/project/browser-links/claim");
@@ -1723,7 +1723,7 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
     },
   }));
   const configDir = await testTemp("expired-enrollment-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const retryState = {
     client_id: `cli_${"E".repeat(43)}`,
@@ -1768,7 +1768,7 @@ test("refuses group-readable config unless repairing", async () => {
       chmod,
       stat,
       homedir: () => configDir,
-      env: { XDG_CONFIG_HOME: configDir },
+      settings: { XDG_CONFIG_HOME: configDir },
     },
   });
   assert.equal(code, ExitCode.Config);
@@ -1801,10 +1801,10 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
-    { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } },
   );
   const { code, stdout } = await withRuntime(["--json", "project", "show"], transport, {
-    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } },
   });
   assert.equal(code, ExitCode.Precondition);
   const envelope = JSON.parse(stdout) as { ok: false; error: { code: string; next: { command: string } } };
@@ -1832,10 +1832,10 @@ test("operations wait polls until a terminal success", async () => {
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
-    { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } },
   );
   const { code, stdout } = await withRuntime(["--json", "operations", "wait", "op_wait", "--poll-ms", "1"], transport, {
-    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } },
   });
   assert.equal(code, 0);
   assert.ok(calls >= 2);
@@ -1847,7 +1847,7 @@ test("operations wait polls until a terminal success", async () => {
 test("events list sends after and limit when the user supplies them", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("ev-list-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -1877,7 +1877,7 @@ test("events list sends after and limit when the user supplies them", async () =
 test("events list treats a null next_cursor as the end of history and surfaces the server's limit bound", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("ev-page-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2153,7 +2153,7 @@ test("events list prints data or silence", async () => {
     },
   }));
   const configDir = await testTemp("ev-list-human-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2189,7 +2189,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
     "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"screen.paired\",\"severity\":\"info\",\"message\":\"paired\",\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
   );
   const configDir = await testTemp("ev-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2237,7 +2237,7 @@ test("events follow writes a human line before the stream closes", async () => {
     });
   };
   const configDir = await testTemp("ev-live-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2251,7 +2251,7 @@ test("events follow writes a human line before the stream closes", async () => {
   }) as typeof stdout.write;
   const code = await run({
     argv: ["--human", "events", "follow", "--timeout", "50"],
-    env: fsLike.env,
+    settings: fsLike.settings,
     stdout,
     stderr: new PassThrough(),
     now: () => new Date("2026-08-14T17:00:00.000Z"),
@@ -2270,7 +2270,7 @@ test("events follow writes a human line before the stream closes", async () => {
 test("events follow is silent when no events arrive", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("ev-empty-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2318,7 +2318,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
     body: { items: [event], next_cursor: "ev1_9" },
   }));
   const configDir = await testTemp("ev-json-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2367,7 +2367,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
     "id: ev1_4\nevent: message\ndata: {\"cursor\":\"ev1_4\",\"type\":\"\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"at\":\"\"}\n\n",
   );
   const configDir = await testTemp("ev-details-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2397,7 +2397,7 @@ test("events follow reconnects after the stream ends and prints both connections
     chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
   });
   const configDir = await testTemp("ev-reconnect-done-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2431,7 +2431,7 @@ test("events follow reconnects after a mid-stream network error", async () => {
     chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
   });
   const configDir = await testTemp("ev-reconnect-net-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2463,7 +2463,7 @@ test("events follow resumes with after equal to the last SSE id", async () => {
     chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
   });
   const configDir = await testTemp("ev-reconnect-after-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2488,7 +2488,7 @@ test("events follow does not retry a persistent 401", async () => {
     throw new CliError(makeProblem("unauthorized", "Unauthorized", 401, "Bearer is not valid."));
   };
   const configDir = await testTemp("ev-reconnect-401-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2515,7 +2515,7 @@ test("events follow --timeout exits during backoff without hanging", async () =>
     throw networkError("ECONNRESET");
   };
   const configDir = await testTemp("ev-reconnect-timeout-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2665,7 +2665,7 @@ async function doctorWithToolchain(
       : request(req);
   }
   const configDir = await testTemp(prefix);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2863,7 +2863,7 @@ test("doctor fails a missing libx264 because it is the default video profile", a
 test("doctor reports a configured credential as presence only", async () => {
   resetFfmpegToolchainCache();
   const configDir = await testTemp("doctor-token-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -2925,7 +2925,7 @@ test("doctor warns, exits 0, and names agent enroll when a fresh install has no 
 test("doctor treats revoked agent history without a pending reconnect as first-run enrollment", async () => {
   resetFfmpegToolchainCache();
   const configDir = await testTemp("doctor-revoked-enroll-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     last_agent: {
@@ -2952,7 +2952,7 @@ test("doctor treats revoked agent history without a pending reconnect as first-r
 test("doctor points a config holding only a retired credential at screenrig login", async () => {
   resetFfmpegToolchainCache();
   const configDir = await testTemp("doctor-retired-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
@@ -2975,7 +2975,7 @@ test("doctor points a config holding only a retired credential at screenrig logi
 test("control-plane payloads and mutation idempotency match the v0.2 architecture", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("contract-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3047,7 +3047,7 @@ function lossyWebpFixture(width = 8, height = 8): Buffer {
 test("media upload returns usage error and makes no /media/uploads call", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-upload-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3064,7 +3064,7 @@ test("media upload returns usage error and makes no /media/uploads call", async 
 test("media upload refuses lossless WebP before declare", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-lossless-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3090,7 +3090,7 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
   resetFfmpegToolchainCache();
   const transport = memoryBackend();
   const configDir = await testTemp("media-transcode-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3211,7 +3211,7 @@ test("media upload refuses a --content-type the bytes contradict before ffprobe,
   resetFfmpegToolchainCache();
   const transport = memoryBackend();
   const configDir = await testTemp("media-mismatch-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3288,7 +3288,7 @@ test("media download writes the verified original rendition to --output or ./<id
     .on("GET", `/api/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
     .onDownload("GET", `/api/media/${id}/content`, () => ({ status: 200, headers, body: byteStream(bytes) }));
   const configDir = await testTemp("media-download-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3357,7 +3357,7 @@ test("media download writes the verified original rendition to --output or ./<id
 test("feedback takes its kind from the route, carries no argv, and stays idempotent", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("feedback-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3421,7 +3421,7 @@ test("feedback takes its kind from the route, carries no argv, and stays idempot
 test("feedback refuses a --command that could carry an argument value", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("feedback-command-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3486,7 +3486,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
     },
   }));
   const configDir = await testTemp("feedback-429-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3520,7 +3520,7 @@ async function withTokenConfig(
   extra?: Partial<CliRuntime>,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const configDir = await testTemp("credits-cfg-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -3769,7 +3769,7 @@ test("unified ad-buyer invitations preserve scope, filter listings, and revoke t
 
 test("invitations create posts an idempotent request for the current project and reports request status, not delivery", async () => {
   const configDir = await testTemp("invite-cfg-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const transport = inviteTransport();
   try {
     const json = await withAuthenticatedRuntime(["--json", "invitations", "create", "--email", "guest@example.com"], transport, { fs: fsLike });
@@ -3792,7 +3792,7 @@ test("invitations create posts an idempotent request for the current project and
 
 test("invitations create surfaces the outstanding-invitation cap without retrying", async () => {
   const configDir = await testTemp("invite-cap-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
   transport.on("POST", "/api/invitations", () => {
@@ -3825,7 +3825,7 @@ test("invitations create surfaces the outstanding-invitation cap without retryin
 
 test("invitations create reuses its saved idempotency key after an ambiguous failure", async () => {
   const configDir = await testTemp("invite-retry-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
   transport.on("POST", "/api/invitations", (req) => {
@@ -3917,7 +3917,7 @@ test("dashboard reset-sign-in posts an unauthenticated idempotent request and re
 
 test("dashboard reset-sign-in never sends a stored credential and leaves credential state untouched", async () => {
   const configDir = await testTemp("recover-credential-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   const token = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   await writeConfigAtomic(configPath, {
@@ -3949,7 +3949,7 @@ test("dashboard reset-sign-in never sends a stored credential and leaves credent
 
 test("dashboard reset-sign-in reuses its saved idempotency key after an ambiguous failure on a fresh install", async () => {
   const configDir = await testTemp("recover-retry-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
   transport.on("POST", "/api/sign-in-resets", () => {
@@ -4121,7 +4121,7 @@ test("an project quota rejection explains itself and points at the remaining all
     },
   }));
   const configDir = await testTemp("media-quota-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4162,7 +4162,7 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
     },
   }));
   const configDir = await testTemp("media-payment-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4210,7 +4210,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
     },
   }));
   const configDir = await testTemp("media-payment-header-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4251,7 +4251,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
 test("media upload validates transcode flags even when transcoding is off", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-flags-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4277,7 +4277,7 @@ test("media upload validates transcode flags even when transcoding is off", asyn
 test("media upload warns on a low-information filename without blocking the upload", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-filename-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4316,7 +4316,7 @@ test("media upload warns on a low-information filename without blocking the uplo
 test("media upload rerun returns the existing media instead of uploading again, and reports stage timing", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-reuse-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4386,7 +4386,7 @@ test("credits_low appends beside generic_filename instead of replacing it", asyn
   const transport = memoryBackend();
   transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "999" };
   const configDir = await testTemp("media-filename-credits-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4416,7 +4416,7 @@ test("credits_low appends beside generic_filename instead of replacing it", asyn
 test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("kv-contract-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4479,7 +4479,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
 test("comment show, set, and delete bind word commands to /api/comment routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("comment-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4596,7 +4596,7 @@ test("comment show, set, and delete bind word commands to /api/comment routes", 
 test("comment set rejects non-objects, oversize payloads, and last-write-wins flags before calling the server", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("comment-usage-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4630,7 +4630,7 @@ test("comment set rejects non-objects, oversize payloads, and last-write-wins fl
 test("screen toast posts the closed write body and does not echo the text", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("toast-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4709,7 +4709,7 @@ test("screen toast defaults omitted --level to info", async () => {
   assert.match(commandHelp(["screen", "toast"]).usage, /screen toast \[options\] \[id\.\.\.\]/);
   const transport = memoryBackend();
   const configDir = await testTemp("toast-default-level-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4745,7 +4745,7 @@ test("screen toast defaults omitted --level to info", async () => {
 test("screen toast rejects invalid level, text, and duration before calling the server", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("toast-usage-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4800,7 +4800,7 @@ test("screen toast rejects invalid level, text, and duration before calling the 
 test("media, operation, screen credential, and K/V revision commands bind the frozen routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("parity-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -4881,7 +4881,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
 test("screen archive, unarchive, archived list, and retired unbind drive the real handlers", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("screen-archive-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
@@ -5008,7 +5008,7 @@ test("readConfigFile can repair permissions", async () => {
   const cfgPath = path.join(configDir, "config.json");
   await writeFile(cfgPath, JSON.stringify({ api_url: "https://api.screenrig.ai" }), { mode: 0o644 });
   await chmod(cfgPath, 0o644);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: {} };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: {} };
   const cfg = await readConfigFile(cfgPath, fsLike, { repair: true });
   assert.equal(cfg?.api_url, "https://api.screenrig.ai");
   const st = await stat(cfgPath);
@@ -5024,7 +5024,7 @@ test("readConfigFile can repair permissions", async () => {
  */
 async function scheduledPlaylistFixture(scheduled: boolean, dir: string, visibility: unknown = { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] }) {
   const configDir = await testTemp(dir);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5136,7 +5136,7 @@ test("assigning a scheduled playlist to a screen with no timezone is refused bef
 test("a page disabled outright assigns without a screen timezone", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("tz-disabled-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5369,7 +5369,7 @@ test("screen show prints optional player-reported observation", async () => {
     body: screen,
   }));
   const configDir = await testTemp("screen-show-observation-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5403,7 +5403,7 @@ test("screen show still works when observation is absent", async () => {
   const transport = memoryBackend();
   const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
 
   const result = await withRuntime(
     ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
@@ -5422,7 +5422,7 @@ test("screen update cannot send observation", async () => {
   const transport = memoryBackend();
   const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   transport.calls.length = 0;
 
   const result = await withRuntime(
@@ -5468,7 +5468,7 @@ test("screen show includes online and optional last_online_at and last_ip", asyn
     body: screen,
   }));
   const configDir = await testTemp("screen-show-online-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5533,7 +5533,7 @@ test("screen show still works when last_online_at and last_ip are absent", async
     body: screen,
   }));
   const configDir = await testTemp("screen-show-offline-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5564,7 +5564,7 @@ test("screen update cannot send online, last_online_at, or last_ip", async () =>
   const transport = memoryBackend();
   const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   transport.calls.length = 0;
 
   const result = await withRuntime(
@@ -5620,7 +5620,7 @@ function hostScreen(extra: Record<string, unknown> = {}) {
 
 async function hostConfigFs(prefix: string) {
   const configDir = await testTemp(prefix);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -5666,7 +5666,7 @@ test("screen show omits absent host fields and the whole block without a host", 
   const memory = memoryBackend();
   const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], memory);
   assert.equal(paired.code, ExitCode.Success);
-  const pairedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
+  const pairedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, settings: { XDG_CONFIG_HOME: paired.configDir } };
   const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], memory, { fs: pairedFs });
   assert.equal(human.code, ExitCode.Success, human.stdout);
   assert.match(projectHumanBody(human.stdout), /^Screen\n\{/);
@@ -6140,7 +6140,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
   const transport = memoryBackend({ now: () => new Date("2026-08-14T17:00:00.000Z") });
   const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(paired.code, ExitCode.Success, paired.stdout);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, settings: { XDG_CONFIG_HOME: paired.configDir } };
   const reloadCalls = () => transport.calls.filter((call) => call.path === "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/reload");
   try {
     // A screen still waiting to pair has no Player; the refusal points at screen show.
@@ -6323,7 +6323,7 @@ test("screen recover through the memory backend clears recovery_pending", async 
   const transport = memoryBackend();
   const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const notOffered = await withRuntime(["--json", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
   assert.equal(notOffered.code, ExitCode.NotFound);
   assert.equal((JSON.parse(notOffered.stdout) as { error: { code: string } }).error.code, "recovery_not_offered");
@@ -6406,7 +6406,7 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
 
 test("app upload given a packed archive or a missing path is a usage error naming the directory requirement", async () => {
   const configDir = await testTemp("upload-archive-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -6437,7 +6437,7 @@ test("app upload given a packed archive or a missing path is a usage error namin
 test("app upload reports the release id an application primitive needs", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("release-id-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -6509,7 +6509,7 @@ test("app update publishes to the existing application with revision and release
     return { status: 202, headers: {}, body: { id: "app_EXISTING", release_id: "rel_NEW", operation_id: "op_NEW" } };
   });
   const configDir = await testTemp("app-update-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" }, fsLike);
   const appDir = path.join(configDir, "app");
   await mkdir(appDir);
@@ -6539,7 +6539,7 @@ test("playlist help lists extended transitions and their authoring rules", () =>
 test("playlist create forwards swipe transition and object enter on a full page", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-motion-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -6583,7 +6583,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
 test("playlist create refuses a text primitive and points at media generate and cards", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-text-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -6610,7 +6610,7 @@ test("playlist create refuses a text primitive and points at media generate and 
 test("playback list, media filters, media update, and app --name bind the consumer routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("consumer-surface-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
@@ -6782,7 +6782,7 @@ for (const argv of [
 ]) test(`revision is optional on ${argv.slice(0,2).join(" ")}`, async () => {
  const transport = new FakeTransport();
  const configDir = await testTemp("optional-revision-");
- const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+ const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret"}, fsLike);
  const mutations: any[] = [];
  const paths = ["/api/screens/scr_TEST", "/api/screens/scr_TEST/archive", "/api/screens/scr_TEST/unarchive", "/api/screens/scr_TEST/public-id/rotate", "/api/media/med_TEST", "/api/playlists/pl_TEST", "/api/applications/app_TEST", "/api/applications/app_TEST/kv/key"];
@@ -6802,7 +6802,7 @@ for (const argv of [
 test("app delete guards the revision and reports application_in_use", async () => {
  const transport = new FakeTransport();
  const configDir = await testTemp("app-delete-");
- const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+ const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret"}, fsLike);
  let inUse = false;
  transport.on("DELETE", "/api/applications/app_TEST", (): TransportResponse => inUse
@@ -6839,7 +6839,7 @@ for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pai
     return { ...response, body: qualify(response.body) };
   };
   const configDir = await testTemp("environment-enrollment-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   try {
     const enrolled = await withRuntime(["agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(enrolled.code, 0, enrolled.stdout);

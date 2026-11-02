@@ -121,7 +121,7 @@ test("AAC priming is allowed while excessive audio bursts and extra streams fall
 function fakeRuntime(dir: string, failure?: string): { runtime: CliRuntime; calls: RunProcessRequest[]; snapshots: string[] } {
   const calls: RunProcessRequest[] = [], snapshots: string[] = [];
   let output = "";
-  const runtime: CliRuntime = { argv: [], env: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: () => new Date(),
+  const runtime: CliRuntime = { argv: [], settings: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: () => new Date(),
     sleep: async () => {}, homedir: () => dir, cwd: () => dir, fs: {} as CliRuntime["fs"],
     runProcess: async (request) => {
       calls.push(request);

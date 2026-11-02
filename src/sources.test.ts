@@ -38,7 +38,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function enrolled(): Promise<Env> {
   const configDir = await testTemp("sources-cfg-");
   const cwd = await testTemp("sources-cwd-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   return { fs, cwd, configPath };
@@ -51,7 +51,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, stdin?: s
   const errP = collect(stderr);
   const input = stdin === undefined ? undefined : new PassThrough();
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr, stdin: input, isStdinTty: () => false,
+    argv, settings: env.fs.settings, stdout, stderr, stdin: input, isStdinTty: () => false,
     now: () => NOW,
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,

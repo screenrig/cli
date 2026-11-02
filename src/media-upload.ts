@@ -586,7 +586,7 @@ function uploadWarnings(prepared: PreparedMediaUpload, transcode: TranscodeResul
       message:
         `${prepared.declaration.source_filename ?? prepared.declaration.filename} was ${sourceWidth}x${sourceHeight} and was ` +
         `scaled down to ${width}x${height} to fit the ${maxEdge} px bound on each edge. The stored still is smaller ` +
-        "than the source; pass --max-edge to tighten the bound further, or supply a smaller source to keep control of the result.",
+        "than the source; add --max-edge to tighten the bound further, or supply a smaller source to keep control of the result.",
     });
   }
   // Quote the name the caller chose. After a transcode the declared name is a

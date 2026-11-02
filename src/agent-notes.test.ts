@@ -21,7 +21,7 @@ const AGENT = {
 
 async function invoke(argv: string[], transport: FakeTransport, extra: Partial<CliRuntime> = {}) {
   const dir = await testTemp("notes-cfg-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
@@ -33,7 +33,7 @@ async function invoke(argv: string[], transport: FakeTransport, extra: Partial<C
   const err: Buffer[] = [];
   stdout.on("data", (chunk) => out.push(Buffer.from(chunk)));
   stderr.on("data", (chunk) => err.push(Buffer.from(chunk)));
-  const runtime: CliRuntime = { argv, env: fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: fs.homedir, cwd: () => dir, fs, transport, ...extra };
+  const runtime: CliRuntime = { argv, settings: fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: fs.homedir, cwd: () => dir, fs, transport, ...extra };
   try {
     const code = await run(runtime);
     stdout.end();

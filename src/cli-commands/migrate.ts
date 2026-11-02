@@ -24,7 +24,7 @@ function canvas(value: string): string {
 
 export function registerMigrateCommands(root: Command, bind: CommandActionBinder): void {
   const migrate = root.command("migrate").description("Import media, playlists and screens from another signage system");
-  addCommandNotes(migrate, "Migration:\n  migrate runs in this CLI, on this machine. The vendor's key is read from the environment or a --credentials FILE, goes only to that vendor, and is never stored, printed or sent to screenRIG. Steps: migrate vendors (what each system takes), migrate scan (read the account and report what can and cannot come over; needs no sign-in), migrate apply --dry-run, migrate apply, then migrate pair for each display.");
+  addCommandNotes(migrate, "Migration:\n  migrate runs in this CLI, on this machine. The vendor's key is read from a --credentials FILE of NAME=VALUE lines, goes only to that vendor, and is never stored, printed or sent to screenRIG. Steps: migrate vendors (what each system takes), migrate scan (read the account and report what can and cannot come over; needs no sign-in), migrate apply --dry-run, migrate apply, then migrate pair for each display.");
 
   migrate.command("vendors").description("List the systems migrate reads, what each takes and how to make its read-only key")
     .argument("[vendor]", "One system's id")
@@ -36,7 +36,7 @@ export function registerMigrateCommands(root: Command, bind: CommandActionBinder
     .option("--region <REGION>", "The region of a hosted account, where the system has regions")
     .option("--timezone <ZONE>", "An IANA time zone for screens that have none, such as America/Toronto")
     .option("--files <PATH>", "A folder or .zip of the originals the system's API cannot hand out")
-    .option("--credentials <FILE>", "NAME=VALUE lines holding the vendor's key, instead of the environment")
+    .option("--credentials <FILE>", "NAME=VALUE lines holding the vendor's key")
     .option("--dir <DIR>", "The migration directory (default ./screenrig-migration-VENDOR)")
     .action(bind(handleMigrateScan));
 

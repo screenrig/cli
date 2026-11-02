@@ -48,7 +48,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function enrolled(): Promise<Env> {
   const configDir = await testTemp("campaigns-cfg-");
   const cwd = await testTemp("campaigns-cwd-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   return { fs, cwd, configPath };
@@ -60,7 +60,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, stdin?: s
   const outP = collect(stdout);
   const errP = collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr,
+    argv, settings: env.fs.settings, stdout, stderr,
     now: () => new Date("2026-08-14T17:00:00.000Z"),
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
@@ -851,7 +851,7 @@ test("campaign help names the audience flags, the screens it schedules and how t
     const option = commandHelp(["campaign", action]).options.find((item) => item.name === "--expect-rev");
     assert.equal(option?.type, "value", action);
   }
-  assert.match(commandHelp(["campaign", "screens"]).usage, /pass data\.next_cursor back as --cursor/);
+  assert.match(commandHelp(["campaign", "screens"]).usage, /send data\.next_cursor back as --cursor/);
   assert.match(commandHelp(["campaign", "explain"]).usage, /Read only\./);
   const explain = commandHelp(["campaign", "explain"]);
   assert.deepEqual(explain.options.filter((option) => option.name === "--at" || option.name === "--to").map((option) => option.name), ["--at", "--to"]);

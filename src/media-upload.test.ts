@@ -361,12 +361,12 @@ test("signed PUT never retries a one-shot stream or beyond session expiry", asyn
 
 /** Runs the CLI against `transport` with an enrolled config in `dir` and returns the exit code and envelope. */
 async function runCli(dir: string, argv: string[], transport: FakeTransport, signedRawPut: SignedRawPut): Promise<{ code: number; envelope: Record<string, any> }> {
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   let output = "";
   const stdout = new Writable({ write(chunk, _encoding, callback) { output += chunk; callback(); } });
   const stderr = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   const code = await run({
-    argv: ["--json", ...argv], env: fs.env, stdout, stderr, fs, homedir: fs.homedir, cwd: () => dir, transport,
+    argv: ["--json", ...argv], settings: fs.settings, stdout, stderr, fs, homedir: fs.homedir, cwd: () => dir, transport,
     now: () => new Date("2026-08-14T17:00:00Z"), sleep: async () => undefined, signedRawPut,
   });
   return { code, envelope: JSON.parse(output) };
@@ -375,7 +375,7 @@ async function runCli(dir: string, argv: string[], transport: FakeTransport, sig
 test("media upload cancels the declared upload whose bytes could not be sent, so the rerun starts clean", async (t) => {
   const dir = await testTemp("media-put-cut-");
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
@@ -417,7 +417,7 @@ test("media upload cancels the declared upload whose bytes could not be sent, so
 test("media upload holds a video to the limit its project's plan states and asks for it only for a video", async (t) => {
   const dir = await testTemp("media-plan-limit-");
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",

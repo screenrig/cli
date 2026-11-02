@@ -41,7 +41,7 @@ function collect(stream: PassThrough): Promise<string> {
 }
 
 function realFs(home: string): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
 }
 
 async function withRuntime(
@@ -56,7 +56,7 @@ async function withRuntime(
   const fsLike = extra.fs ?? realFs(extra.configDir);
   const runtime: CliRuntime = {
     argv,
-    env: fsLike.env,
+    settings: fsLike.settings,
     stdout,
     stderr,
     now: extra.now ?? (() => new Date("2026-08-14T17:00:00.000Z")),

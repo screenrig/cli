@@ -189,12 +189,15 @@ export function cardWebhookSigningWarning(id: string, target: KvWebhookTarget): 
   };
 }
 
-/** A command an operator can paste to post one JSON document to a card webhook; a signing webhook's example signs the body. */
+/**
+ * A command an operator can paste to post one JSON document to a card webhook.
+ * A signing webhook's example carries the signature header with placeholders:
+ * v1 is the hex HMAC-SHA256 of "<t>.<raw body>" keyed with the signing secret.
+ */
 export function cardWebhookExample(url: string, secret: string | undefined, signing: boolean): string {
   const bearer = secret ? `Bearer ${secret}` : "Bearer <secret>";
-  if (!signing) return `curl -X POST "${url}" -H "Authorization: ${bearer}" -H "Content-Type: application/json" --data '{"message":"Hello"}'`;
-  return `body='{"message":"Hello"}'; t=$(date +%s); sig=$(printf '%s.%s' "$t" "$body" | openssl dgst -sha256 -hmac "$SIGNING_SECRET" -hex | sed 's/^.* //'); `
-    + `curl -X POST "${url}" -H "Authorization: ${bearer}" -H "ScreenRig-Signature: t=$t,v1=$sig" -H "Content-Type: application/json" --data "$body"`;
+  const signed = signing ? ` -H "ScreenRig-Signature: t=<unix seconds>,v1=<hmac>"` : "";
+  return `curl -X POST "${url}" -H "Authorization: ${bearer}"${signed} -H "Content-Type: application/json" --data '{"message":"Hello"}'`;
 }
 
 function mappingSummary(webhook: CardKVWebhook): string {

@@ -254,13 +254,13 @@ export const anthias: VendorAdapter = {
   name: NAME,
   inputs: { url: "required" },
   credentials: [
-    { env: "ANTHIAS_USERNAME", secret: false, required: false, help: "The device's operator name, only when authentication is on." },
-    { env: "ANTHIAS_PASSWORD", secret: true, required: false, help: "The device's operator password, only when authentication is on." },
+    { name: "ANTHIAS_USERNAME", secret: false, required: false, help: "The device's operator name, only when authentication is on." },
+    { name: "ANTHIAS_PASSWORD", secret: true, required: false, help: "The device's operator password, only when authentication is on." },
   ],
   connect: [
     "Use the device's address, such as http://192.168.1.50 (the same address you open in a browser).",
     "A new Anthias install has authentication off: no username or password is needed.",
-    "With authentication on, put the operator ANTHIAS_USERNAME and ANTHIAS_PASSWORD in a file and pass it with --credentials. Both go to that device only.",
+    "With authentication on, put the operator ANTHIAS_USERNAME and ANTHIAS_PASSWORD in a file and name it with --credentials. Both go to that device only.",
   ],
   maps: [
     "The enabled loop, in play order, becomes one playlist; image and video files become media, web pages become web page items, and the shuffle setting is kept as a note.",

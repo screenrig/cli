@@ -1,4 +1,5 @@
-import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { writeConfigAtomic, type ConfigFs } from "../config.js";
@@ -214,13 +215,13 @@ function collect(stream: PassThrough): Promise<string> {
   });
 }
 
-function realFs(home: string, env: NodeJS.Dict<string>): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home, ...env } };
+function realFs(home: string): ConfigFs {
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
 }
 
 export interface Harness {
-  /** Runs `screenrig ARGV` and parses the envelope. */
-  invoke(argv: string[], extra?: { env?: NodeJS.Dict<string>; vendorFetch?: typeof fetch; signedRawPut?: CliRuntime["signedRawPut"]; sleep?: (ms: number) => Promise<void> }): Promise<{ code: number; stdout: string; stderr: string; json: Record<string, any> }>;
+  /** Runs `screenrig ARGV` and parses the envelope. `credentials` become a --credentials file outside the migration and config directories. */
+  invoke(argv: string[], extra?: { credentials?: Record<string, string>; vendorFetch?: typeof fetch; signedRawPut?: CliRuntime["signedRawPut"]; sleep?: (ms: number) => Promise<void> }): Promise<{ code: number; stdout: string; stderr: string; json: Record<string, any> }>;
   configDir: string;
   cwd: string;
 }
@@ -230,7 +231,7 @@ export async function harness(project: FakeProject, configDir: string, cwd: stri
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: API_URL, token: TOKEN, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", project_id: PROJECT_ID },
-    realFs(configDir, {}),
+    realFs(configDir),
   );
   return {
     configDir,
@@ -240,10 +241,16 @@ export async function harness(project: FakeProject, configDir: string, cwd: stri
       const stderr = new PassThrough();
       const out = collect(stdout);
       const err = collect(stderr);
-      const fsLike = realFs(configDir, extra.env ?? {});
+      const fsLike = realFs(configDir);
+      if (extra.credentials && !argv.includes("--credentials")) {
+        const holder = await mkdtemp(path.join(tmpdir(), "screenrig-vendor-keys-"));
+        const file = path.join(holder, "keys.txt");
+        await writeFile(file, Object.entries(extra.credentials).map(([name, value]) => `${name}=${value}\n`).join(""), { mode: 0o600 });
+        argv = [...argv, "--credentials", file];
+      }
       const runtime: CliRuntime = {
         argv,
-        env: fsLike.env,
+        settings: fsLike.settings,
         stdout,
         stderr,
         now: () => new Date("2026-10-28T10:00:00.000Z"),

@@ -12,7 +12,7 @@ for (const action of ["upload", "update"] as const) {
   test(`app ${action} keeps canonical and compatibility output paths across waiting modes`, async (t) => {
     const configDir = await testTemp("app-output-");
     t.after(() => rm(configDir, { recursive: true, force: true }));
-    const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
     await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
       api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret",
     }, fs);
@@ -38,7 +38,7 @@ for (const action of ["upload", "update"] as const) {
         ...(noWait ? ["--no-wait"] : ["--poll-ms", "1"]),
       ];
       const code = await run({
-        argv, env: fs.env, stdout, stderr, fs, homedir: fs.homedir,
+        argv, settings: fs.settings, stdout, stderr, fs, homedir: fs.homedir,
         cwd: () => configDir, transport,
         now: () => new Date("2026-09-10T00:00:00Z"), sleep: async () => undefined,
       });

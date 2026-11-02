@@ -35,14 +35,14 @@ function collect(stream: PassThrough): Promise<string> {
 
 async function cli(argv: string[], transport: FakeTransport): Promise<{ code: number; stdout: string }> {
   const configDir = await testTemp("outage-cfg-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const out = collect(stdout);
   void collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: fs.env, stdout, stderr, now: () => new Date("2026-10-28T09:10:00Z"), sleep: async () => undefined,
+    argv, settings: fs.settings, stdout, stderr, now: () => new Date("2026-10-28T09:10:00Z"), sleep: async () => undefined,
     homedir: fs.homedir, cwd: () => configDir, fs, transport,
   };
   const code = await run(runtime);

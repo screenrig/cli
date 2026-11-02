@@ -16,7 +16,7 @@ const DIRECT = { application_direct_uploads: true };
 async function appFixture(t: { after: (fn: () => Promise<void>) => void }) {
   const configDir = await testTemp("app-upload-");
   t.after(() => rm(configDir, { recursive: true, force: true }));
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret",
   }, fs);
@@ -38,7 +38,7 @@ async function runApp(
   const stdout = new Writable({ write(chunk, _encoding, callback) { output += chunk; callback(); } });
   const stderr = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   const code = await run({
-    argv: ["--json", ...argv], env: fixture.fs.env, stdout, stderr, fs: fixture.fs, homedir: fixture.fs.homedir,
+    argv: ["--json", ...argv], settings: fixture.fs.settings, stdout, stderr, fs: fixture.fs, homedir: fixture.fs.homedir,
     cwd: () => fixture.configDir, transport,
     now: () => new Date("2026-09-10T00:00:00Z"), sleep: async () => undefined,
     signedRawPut: async (request) => { puts.push(request); return put ? put() : { status: putStatus }; },

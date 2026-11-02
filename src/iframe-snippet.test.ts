@@ -61,7 +61,7 @@ async function initInvoke(args: string[]) {
   const stdout = new PassThrough(), stderr = new PassThrough();
   const chunks: Buffer[] = [];
   stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-  const code = await run({ ...processRuntime(), argv: ["--config", config, "--json", "playlist", "init", ...args, "--name", "Lobby", "--output", "out.json", "--target-width", "1920", "--target-height", "1080"], env: {}, cwd: () => dir, transport: new FakeTransport(), stdout, stderr });
+  const code = await run({ ...processRuntime(), argv: ["--config", config, "--json", "playlist", "init", ...args, "--name", "Lobby", "--output", "out.json", "--target-width", "1920", "--target-height", "1080"], settings: {}, cwd: () => dir, transport: new FakeTransport(), stdout, stderr });
   return { dir, code, stdout: Buffer.concat(chunks).toString("utf8"), cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 

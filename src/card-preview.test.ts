@@ -51,7 +51,7 @@ function stubPublicRenderer(t: TestContext, directory: string, script: string): 
     assert.ok(assets.has(pathname), `unexpected asset ${pathname}`);
     return new Response(assets.get(pathname));
   });
-  return { ...processRuntime(), homedir: () => directory, env: { ...process.env, TMPDIR: directory, SCREENRIG_BROWSER: process.env.SCREENRIG_TEST_BROWSER } };
+  return { ...processRuntime(), homedir: () => directory, settings: { ...process.env, TMPDIR: directory, SCREENRIG_BROWSER: process.env.SCREENRIG_TEST_BROWSER } };
 }
 
 test("standalone card pixels occupy the reported layout rectangle, as in a playlist", {

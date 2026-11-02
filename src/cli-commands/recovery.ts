@@ -10,7 +10,7 @@ const guidance = "Inspect the remote outcome before reconciling. Reconcile remov
 
 function handler(action: "list" | "show" | "reconcile"): CommandHandler {
   return async (args, runtime) => {
-    const resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir } });
+    const resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir } });
     const entries = await manageWriteRecovery(resolved, runtime, action, args.positionals[2]);
     const data = action === "list" ? { entries, guidance }
       : action === "show" ? { entry: entries[0], guidance }

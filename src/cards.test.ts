@@ -34,7 +34,7 @@ async function fixture(t: TestContext, enrolled = true) {
   const transport = new FakeTransport();
   async function invoke(argv: string[], input?: string) {
     let stdout = "", stderr = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], env: {}, cwd: () => dir, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], settings: {}, cwd: () => dir, transport,
       now: () => new Date("2026-10-15T12:00:00Z"), sleep: async () => { throw new Error("Feed must not loop or sleep"); },
       stdin: input === undefined ? undefined : Readable.from([input]), isStdinTty: () => input === undefined,
       stdout: new Writable({ write(chunk, _encoding, done) { stdout += chunk; done(); } }),

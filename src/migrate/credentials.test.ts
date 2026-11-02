@@ -19,9 +19,9 @@ const adapter: Pick<VendorAdapter, "id" | "name" | "credentials"> = {
   id: "demo",
   name: "Demo CMS",
   credentials: [
-    { env: "DEMO_ID", secret: false, required: true, help: "The client id." },
-    { env: "DEMO_SECRET", secret: true, required: true, help: "The client secret." },
-    { env: "DEMO_REGION", secret: false, required: false, help: "Optional." },
+    { name: "DEMO_ID", secret: false, required: true, help: "The client id." },
+    { name: "DEMO_SECRET", secret: true, required: true, help: "The client secret." },
+    { name: "DEMO_REGION", secret: false, required: false, help: "Optional." },
   ],
 };
 
@@ -31,23 +31,20 @@ test("a credential file is NAME=VALUE lines with comments, quotes and an export 
   });
 });
 
-test("with a file the values come from it alone; without one, from the environment; undeclared names are ignored", async () => {
-  const file = await loadCredentials(adapter, { file: "keys.env", env: { DEMO_ID: "from-env", DEMO_SECRET: "from-env" }, read: async () => "DEMO_ID=from-file\nDEMO_SECRET=file-secret\nOTHER=x\n" });
+test("the values come from the --credentials file alone; undeclared names are ignored", async () => {
+  const file = await loadCredentials(adapter, { file: "keys.txt", read: async () => "DEMO_ID=from-file\nDEMO_SECRET=file-secret\nOTHER=x\n" });
   assert.deepEqual(file, { DEMO_ID: "from-file", DEMO_SECRET: "file-secret" });
-  const env = await loadCredentials(adapter, { env: { DEMO_ID: "e1", DEMO_SECRET: "e2", DEMO_REGION: "eu", PATH: "/bin" } });
-  assert.deepEqual(env, { DEMO_ID: "e1", DEMO_SECRET: "e2", DEMO_REGION: "eu" });
-  // A file does not fall back to the environment for a name it lacks.
-  await assert.rejects(loadCredentials(adapter, { file: "keys.env", env: { DEMO_SECRET: "from-env", DEMO_ID: "from-env" }, read: async () => "DEMO_ID=only\n" }), /DEMO_SECRET in the --credentials file/);
+  await assert.rejects(loadCredentials(adapter, { file: "keys.txt", read: async () => "DEMO_ID=only\n" }), /a DEMO_SECRET line in the --credentials file/);
 });
 
-test("a missing required variable is named and its help given, never a value", async () => {
-  const error = await loadCredentials(adapter, { env: { DEMO_ID: "visible-id" } }).catch((caught: unknown) => caught as { problem: { detail: string; code: string; next?: { command: string } } });
+test("a missing required credential is named and its help given, never a value", async () => {
+  const error = await loadCredentials(adapter, { file: "keys.txt", read: async () => "DEMO_ID=visible-id\n" }).catch((caught: unknown) => caught as { problem: { detail: string; code: string; next?: { command: string } } });
   const problem = (error as { problem: { detail: string; code: string; next?: { command: string } } }).problem;
   assert.equal(problem.code, "usage_error");
-  assert.match(problem.detail, /Demo CMS needs DEMO_SECRET in the environment, or in a file passed with --credentials FILE\. The client secret\./);
+  assert.match(problem.detail, /Demo CMS needs a DEMO_SECRET line in the --credentials file\. The client secret\./);
   assert.ok(!problem.detail.includes("visible-id"));
   assert.equal(problem.next?.command, "screenrig migrate vendors demo");
-  await assert.rejects(loadCredentials(adapter, { file: "x", env: {}, read: async () => { throw new Error("EACCES: /private/path/keys.env"); } }), (caught: unknown) => {
+  await assert.rejects(loadCredentials(adapter, { file: "x", read: async () => { throw new Error("EACCES: /private/path/keys.env"); } }), (caught: unknown) => {
     const detail = (caught as { problem: { detail: string } }).problem.detail;
     assert.equal(detail, "Cannot read the --credentials file. It holds NAME=VALUE lines.");
     return true;
@@ -106,7 +103,7 @@ test("an adapter that throws with the key in its message is scrubbed before the 
   const cwd = await testTemp("cred-throw-");
   try {
     const leaky: VendorAdapter = {
-      id: "leaky", name: "Leaky CMS", inputs: {}, credentials: [{ env: "LEAKY_KEY", secret: true, required: true, help: "A key." }],
+      id: "leaky", name: "Leaky CMS", inputs: {}, credentials: [{ name: "LEAKY_KEY", secret: true, required: true, help: "A key." }],
       connect: [], maps: [], skips: [], docs: [], example: "",
       async open(input) {
         return { scan: async () => { throw new Error(`request failed with Authorization: Bearer ${input.credentials.LEAKY_KEY}`); }, fetchMedia: async () => ({ bytes: 0 }) };
@@ -114,8 +111,10 @@ test("an adapter that throws with the key in its message is scrubbed before the 
     };
     const http = createVendorHttp({ vendor: "leaky", name: "Leaky CMS", credentialNames: [], fetch, sleep: async () => undefined, now: () => 0 });
     const dir = new MigrationDir(path.join(cwd, "mig"));
+    const keys = path.join(cwd, "leaky-key.txt");
+    await writeFile(keys, "LEAKY_KEY=super-secret-key-value\n", { mode: 0o600 });
     await assert.rejects(
-      runScan({ adapter: leaky, flags: {}, dir, env: { LEAKY_KEY: "super-secret-key-value" }, now: () => new Date(0), http }),
+      runScan({ adapter: leaky, flags: {}, credentialsFile: keys, dir, now: () => new Date(0), http }),
       (error: unknown) => {
         const detail = (error as { problem: { detail: string; code: string } }).problem.detail;
         assert.match(detail, /Authorization: Bearer \[redacted\]/);

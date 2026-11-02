@@ -37,7 +37,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function enrolled(): Promise<Env> {
   const configDir = await testTemp("schedule-import-cfg-");
   const cwd = await testTemp("schedule-import-cwd-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   return { fs, cwd, configPath };
@@ -49,7 +49,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, stdin?: s
   const outP = collect(stdout);
   const errP = collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr,
+    argv, settings: env.fs.settings, stdout, stderr,
     now: () => new Date("2026-10-29T17:00:00.000Z"),
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
@@ -357,7 +357,7 @@ test("unreadable input and bad options are usage errors that send nothing", asyn
     [["schedule", "import", "missing.csv"], /missing\.csv does not exist/],
     [["schedule", "import", "notes.txt"], /not a \.csv, \.xlsx or \.json file/],
     [["schedule", "import", "empty.csv"], /empty\.csv is empty/],
-    [["schedule", "import", `${"n".repeat(81)}.csv`], /Pass --name NAME/],
+    [["schedule", "import", `${"n".repeat(81)}.csv`], /Add --name NAME/],
     [["schedule", "import", "empty.csv", "--name", " "], /--name must contain 1 to 80 characters/],
     [["schedule", "import", "empty.csv", "--timezone", "Mars/Base"], /IANA time zone/],
     [["schedule", "import"], /requires <file>|missing required argument/i],

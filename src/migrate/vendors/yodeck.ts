@@ -386,13 +386,13 @@ export const yodeck: VendorAdapter = {
   name: NAME,
   inputs: { timezone: true, files: "optional" },
   credentials: [
-    { env: "YODECK_API_TOKEN", secret: true, required: true, help: "A Yodeck API token as label:token, the label being the name you gave the token." },
+    { name: "YODECK_API_TOKEN", secret: true, required: true, help: "A Yodeck API token as label:token, the label being the name you gave the token." },
   ],
   connect: [
     "Yodeck's API is available on the Premium and Enterprise plans.",
     "Open Account, then Account Settings, then Advanced Settings, then API Tokens, and choose Generate Token. Name it, and give it a role that can view media, playlists, layouts, schedules and screens: the token acts as a user with that role.",
-    "Copy the token when it is shown; it cannot be shown again. It reads label:token. Write YODECK_API_TOKEN=label:token as a line in a file only you can read, and pass it with --credentials FILE.",
-    "Yodeck's API does not hand out files you uploaded. Download those originals from Yodeck into one folder (or a .zip) and pass it with --files; the playlists, layouts, schedules and screens still come from the API.",
+    "Copy the token when it is shown; it cannot be shown again. It reads label:token. Write YODECK_API_TOKEN=label:token as a line in a file only you can read, and name it with --credentials FILE.",
+    "Yodeck's API does not hand out files you uploaded. Download those originals from Yodeck into one folder (or a .zip) and name it with --files; the playlists, layouts, schedules and screens still come from the API.",
     "--timezone is used for screens that have no time zone in Yodeck.",
   ],
   maps: [
@@ -413,7 +413,7 @@ export const yodeck: VendorAdapter = {
     "https://app.yodeck.com/api-docs/bundle.yaml",
     "https://www.yodeck.com/academy/api-token/",
   ],
-  example: "screenrig migrate scan --from yodeck --files ./yodeck-downloads --timezone America/Toronto --credentials ./yodeck.env",
+  example: "screenrig migrate scan --from yodeck --files ./yodeck-downloads --timezone America/Toronto --credentials ./yodeck-key.txt",
   async open(input) {
     const token = tokenOf(input.credentials.YODECK_API_TOKEN);
     const client = input.http.client({ base: BASE, auth: { Authorization: `Token ${token}` }, rate: RATE });

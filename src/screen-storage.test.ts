@@ -40,7 +40,7 @@ async function invoke(args: string[], transport: FakeTransport, files: Record<st
   for (const [name, body] of Object.entries(files)) await writeFile(path.join(dir, name), JSON.stringify(body));
   let stdout = "", stderr = "";
   const code = await run({ ...processRuntime(), argv: ["--config", config, ...args], cwd: () => dir,
-    transport, env: { XDG_CONFIG_HOME: dir }, now: () => new Date(clock.ms), sleep: async (ms) => { clock.ms += ms; },
+    transport, settings: { XDG_CONFIG_HOME: dir }, now: () => new Date(clock.ms), sleep: async (ms) => { clock.ms += ms; },
     stdout: new Writable({ write(chunk, _encoding, done) { stdout += chunk; done(); } }),
     stderr: new Writable({ write(chunk, _encoding, done) { stderr += chunk; done(); } }),
   });

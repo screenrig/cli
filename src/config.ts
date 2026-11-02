@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import type { AgentCapability } from "./adapters/protocol.js";
-import { accessClaims } from "./oauth.js";
+import { accessClaims, type StoredServiceClient } from "./oauth.js";
 import { isResourceID } from "./generated/resource-ids.js";
     import path from "node:path";
     import type { OperationLogger } from "./log/types.js";
     import { configError } from "./problems.js";
+    import type { HostSettings } from "./host-settings.js";
 
     export interface ScreenRigConfig {
       api_url: string;
@@ -94,6 +95,8 @@ import { isResourceID } from "./generated/resource-ids.js";
       login?: PendingLogin;
       /** Set by logout, so the next command names screenrig login. */
       signed_out_at?: string;
+      /** A service client this config signs in as; set by screenrig login --client-id. */
+      service_client?: StoredServiceClient;
       updated_at?: string;
     }
 
@@ -141,20 +144,20 @@ import { isResourceID } from "./generated/resource-ids.js";
       chmod: typeof chmod;
       stat: typeof stat;
       homedir: () => string;
-      env: NodeJS.Dict<string>;
+      settings: HostSettings;
       logger?: OperationLogger;
     }
 
     const DEFAULT_CONFIG_NAME = "config.json";
     const LOCAL_DEV_CONFIG_NAME = "config.local-dev.json";
 
-    function defaultConfigDir(fsLike: Pick<ConfigFs, "homedir" | "env">): string {
-      const xdg = fsLike.env.XDG_CONFIG_HOME;
+    function defaultConfigDir(fsLike: Pick<ConfigFs, "homedir" | "settings">): string {
+      const xdg = fsLike.settings.XDG_CONFIG_HOME;
       if (xdg && xdg.length > 0) {
         return path.join(xdg, "screenrig");
       }
       if (process.platform === "win32") {
-        const appdata = fsLike.env.APPDATA;
+        const appdata = fsLike.settings.APPDATA;
         if (appdata && appdata.length > 0) {
           return path.join(appdata, "screenrig");
         }
@@ -163,9 +166,9 @@ import { isResourceID } from "./generated/resource-ids.js";
     }
 
     export async function defaultConfigPath(
-      fsLike: Pick<ConfigFs, "homedir" | "env" | "stat">,
+      fsLike: Pick<ConfigFs, "homedir" | "settings" | "stat">,
     ): Promise<string> {
-      const fromEnv = fsLike.env.SCREENRIG_CONFIG;
+      const fromEnv = fsLike.settings.SCREENRIG_CONFIG;
       if (fromEnv && fromEnv.length > 0) {
         return fromEnv;
       }
@@ -479,7 +482,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       configPath: string;
       logSocket?: string;
       source: {
-        apiUrl: "flag" | "env" | "config" | "local-dev" | "default";
+        apiUrl: "flag" | "setting" | "config" | "local-dev" | "default";
         token: "config" | "none";
       };
     }
@@ -581,12 +584,7 @@ import { isResourceID } from "./generated/resource-ids.js";
         (await defaultConfigPath(options.fs));
       const file = await readConfigFile(configPath, options.fs, { repair: options.repair });
       const flagApi = typeof options.flags["api-url"] === "string" ? options.flags["api-url"] : undefined;
-      const envApi = options.fs.env.SCREENRIG_API_URL;
-      if (options.fs.env.SCREENRIG_TOKEN) {
-        throw configError(
-          "SCREENRIG_TOKEN is not supported. screenrig login and agent enroll store this installation's sign-in in the user config.",
-        );
-      }
+      const envApi = options.fs.settings.SCREENRIG_API_URL;
 
       const localDevProfile = path.basename(configPath) === LOCAL_DEV_CONFIG_NAME;
       let apiUrl = localDevProfile ? LOCAL_DEV_API_URL : DEFAULT_API_URL;
@@ -598,7 +596,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       }
       if (envApi) {
         apiUrl = envApi;
-        apiSource = "env";
+        apiSource = "setting";
       }
       if (flagApi) {
         apiUrl = flagApi;

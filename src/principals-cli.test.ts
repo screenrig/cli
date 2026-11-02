@@ -28,7 +28,7 @@ function context(id: string, name: string, organizationName = "Acme"): ProjectCo
 async function fixture(t: TestContext, config?: ScreenRigConfig) {
   const home = await testTemp("principals-cli-");
   t.after(() => rm(home, { recursive: true, force: true }));
-  const fs = { chmod, mkdir, open, rename, rm, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+  const fs = { chmod, mkdir, open, rename, rm, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
   const configPath = path.join(home, "screenrig", "config.json");
   if (config) await writeConfigAtomic(configPath, config, fs);
   const transport = new FakeTransport();
@@ -37,7 +37,7 @@ async function fixture(t: TestContext, config?: ScreenRigConfig) {
     let out = "", err = "";
     stdout.on("data", chunk => { out += String(chunk); });
     stderr.on("data", chunk => { err += String(chunk); });
-    const code = await run({ argv, env: fs.env, fs, homedir: fs.homedir, cwd: () => process.cwd(), stdout, stderr, transport, now: () => new Date("2026-10-04T12:00:00Z"), sleep: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 10))) });
+    const code = await run({ argv, settings: fs.settings, fs, homedir: fs.homedir, cwd: () => process.cwd(), stdout, stderr, transport, now: () => new Date("2026-10-04T12:00:00Z"), sleep: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 10))) });
     return { code, out, err, result: JSON.parse(out) };
   };
   /** The authorization server renews a project's access token the first time a command targets it. */

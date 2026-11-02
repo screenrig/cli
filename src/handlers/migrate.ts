@@ -49,7 +49,6 @@ export const handleMigrateScan = commandHandler(async (args, runtime) => {
     },
     ...(resolvePath("credentials") !== undefined ? { credentialsFile: resolvePath("credentials")! } : {}),
     dir,
-    env: runtime.env,
     now: runtime.now,
     http: vendorHttpFor(runtime, adapter),
   });
@@ -105,7 +104,7 @@ export const handleMigrateApply = commandHandler(async (args, runtime, resolved)
     apiUrl: resolved.apiUrl.replace(/\/+$/, ""),
     projectId: await migrateProjectId(client, resolved.projectId),
     openSession: async () => {
-      const credentials = await loadCredentials(adapter, { ...(credentialsFile !== undefined ? { file: credentialsFile } : {}), env: runtime.env });
+      const credentials = await loadCredentials(adapter, credentialsFile !== undefined ? { file: credentialsFile } : {});
       secrets.push(...Object.values(credentials));
       const files = scan.inputs.files !== undefined ? await openLocalFiles(scan.inputs.files) : undefined;
       return adapter.open({

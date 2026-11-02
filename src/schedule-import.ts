@@ -417,7 +417,7 @@ export const handleScheduleImport = commandHandler(async (args: ParsedArgs, runt
     try {
       name = scheduleImportName(sheet.defaultName);
     } catch {
-      throw usageError(`The file name ${sheet.defaultName} cannot be the import's name (1 to ${SCHEDULE_IMPORT_NAME_MAX} characters). Pass --name NAME.`);
+      throw usageError(`The file name ${sheet.defaultName} cannot be the import's name (1 to ${SCHEDULE_IMPORT_NAME_MAX} characters). Add --name NAME.`);
     }
   }
   const stdin = file === "-";

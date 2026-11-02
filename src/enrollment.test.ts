@@ -20,7 +20,7 @@ function fixture(home: string): { fs: ConfigFs; resolved: ResolvedConfig } {
     chmod,
     stat,
     homedir: () => home,
-    env: { XDG_CONFIG_HOME: home },
+    settings: { XDG_CONFIG_HOME: home },
   };
   return {
     fs,

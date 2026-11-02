@@ -20,7 +20,7 @@ async function revisionsCli(t: TestContext, transport: FakeTransport) {
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
   return async (argv: string[]) => {
     let output = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, env: {}, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, settings: {}, transport,
       stdin: Readable.from([""]), isStdinTty: () => false,
       stdout: new Writable({ write(chunk, _encoding, done) { output += chunk; done(); } }),
       stderr: new Writable({ write(_chunk, _encoding, done) { done(); } }),

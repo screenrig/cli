@@ -55,7 +55,7 @@ async function enrolled(): Promise<Env> {
   const configDir = path.join(dir, "config");
   const cwd = path.join(dir, "cwd");
   await mkdir(cwd, { recursive: true });
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   const document = initializePlaylist({ name: "Lobby", media: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
@@ -69,7 +69,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env): Promise<
   const outP = collect(stdout);
   const errP = collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined,
+    argv, settings: env.fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
   };
   const code = await run(runtime);

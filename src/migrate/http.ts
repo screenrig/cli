@@ -23,7 +23,7 @@ export interface VendorHttpOptions {
   vendor: string;
   /** Adapter name, for messages. */
   name: string;
-  /** Environment variable names the adapter reads, named when the vendor refuses the credential. */
+  /** Names of the --credentials lines the adapter reads, named when the vendor refuses the credential. */
   credentialNames: readonly string[];
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;

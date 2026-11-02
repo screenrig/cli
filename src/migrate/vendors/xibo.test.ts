@@ -224,7 +224,7 @@ test("on the default setting a 09:00 to 17:00 event plays 09:00 to 17:00 on ever
   const t = await setup();
   try {
     const result = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--timezone", "America/Toronto"], {
-      env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: only,
+      credentials: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: only,
     });
     assert.equal(result.code, 0, result.stdout);
     assert.deepEqual(result.json.data.lossy.filter((entry: { kind: string; source_id: string }) => entry.kind === "schedule" && entry.source_id === "40"), []);
@@ -339,12 +339,12 @@ test("an answer this adapter cannot use is vendor_bad_response, naming the path 
   assert.match(missing.problem.detail, /GET \/library has a row without mediaId/);
 });
 
-test("migrate scan --from xibo: keys from the environment, a report of what cannot come over, and no key in anything written or printed", async () => {
+test("migrate scan --from xibo: keys from --credentials, a report of what cannot come over, and no key in anything written or printed", async () => {
   const t = await setup();
   try {
     const router = cms();
     const result = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--timezone", "America/Toronto"], {
-      env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: router.fetch,
+      credentials: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: router.fetch,
     });
     assert.equal(result.code, 0, result.stdout);
     const report = result.json.data;
@@ -369,7 +369,7 @@ test("migrate scan --from xibo: keys from the environment, a report of what cann
     assert.deepEqual(await readdir(dir), ["scan.json"]);
 
     const refused = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--dir", "refused"], {
-      env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: "a-wrong-secret" }, vendorFetch: cms().fetch,
+      credentials: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: "a-wrong-secret" }, vendorFetch: cms().fetch,
     });
     assert.equal(refused.code, 3);
     assert.equal(refused.json.error.code, "vendor_refused");
@@ -377,12 +377,12 @@ test("migrate scan --from xibo: keys from the environment, a report of what cann
     assert.ok(!refused.stdout.includes("a-wrong-secret"), "a secret the CMS quotes back is not echoed");
     await assert.rejects(stat(path.join(t.cwd, "refused")), { code: "ENOENT" });
 
-    const noSecret = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--dir", "nosecret"], { env: { XIBO_CLIENT_ID: CLIENT_ID }, vendorFetch: cms().fetch });
+    const noSecret = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--dir", "nosecret"], { credentials: { XIBO_CLIENT_ID: CLIENT_ID }, vendorFetch: cms().fetch });
     assert.equal(noSecret.code, 2);
-    assert.match(noSecret.json.error.detail, /Xibo needs XIBO_CLIENT_SECRET/);
-    const noUrl = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--dir", "nourl"], { env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: cms().fetch });
+    assert.match(noSecret.json.error.detail, /Xibo needs a XIBO_CLIENT_SECRET line/);
+    const noUrl = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--dir", "nourl"], { credentials: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: cms().fetch });
     assert.match(noUrl.json.error.detail, /Xibo needs --url/);
-    const files = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--files", t.cwd, "--dir", "files"], { env: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: cms().fetch });
+    const files = await t.h.invoke(["migrate", "scan", "--from", "xibo", "--url", ORIGIN, "--files", t.cwd, "--dir", "files"], { credentials: { XIBO_CLIENT_ID: CLIENT_ID, XIBO_CLIENT_SECRET: CLIENT_SECRET }, vendorFetch: cms().fetch });
     assert.match(files.json.error.detail, /Xibo does not take --files/);
   } finally {
     await t.cleanup();
@@ -396,7 +396,7 @@ test("migrate vendors xibo says what it takes and how to make the key", async ()
     assert.equal(result.code, 0);
     const [vendor] = result.json.data.vendors;
     assert.deepEqual(vendor.inputs.flags, [{ flag: "--url", required: true }, { flag: "--timezone", required: false }]);
-    assert.deepEqual(vendor.inputs.env.map((entry: { name: string; secret: boolean; required: boolean }) => [entry.name, entry.secret, entry.required]), [["XIBO_CLIENT_ID", false, true], ["XIBO_CLIENT_SECRET", true, true]]);
+    assert.deepEqual(vendor.inputs.credentials.map((entry: { name: string; secret: boolean; required: boolean }) => [entry.name, entry.secret, entry.required]), [["XIBO_CLIENT_ID", false, true], ["XIBO_CLIENT_SECRET", true, true]]);
     assert.ok(vendor.connect.length >= 3 && vendor.maps.length > 0 && vendor.skips.length > 0 && vendor.docs.every((doc: string) => doc.startsWith("https://")));
     assert.match(vendor.example, /^screenrig migrate scan --from xibo --url https:\/\/cms\.example\.com/);
   } finally {
@@ -407,7 +407,7 @@ test("migrate vendors xibo says what it takes and how to make the key", async ()
 test("the example on migrate vendors runs as written", async () => {
   const t = await setup();
   try {
-    await writeFile(path.join(t.cwd, "xibo.env"), `XIBO_CLIENT_ID=${CLIENT_ID}\nXIBO_CLIENT_SECRET=${CLIENT_SECRET}\n`);
+    await writeFile(path.join(t.cwd, "xibo-key.txt"), `XIBO_CLIENT_ID=${CLIENT_ID}\nXIBO_CLIENT_SECRET=${CLIENT_SECRET}\n`);
     const result = await t.h.invoke(xibo.example.split(" ").slice(1), { vendorFetch: cms().fetch });
     assert.equal(result.code, 0, result.stdout);
     assert.equal(result.json.data.vendor, "xibo");

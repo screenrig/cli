@@ -27,7 +27,7 @@ async function fixture(t: TestContext, config: Partial<ScreenRigConfig>, target 
     .on("PATCH", "/api/screens/scr_TEST", () => { assigned = true; return { status: 200, headers: {}, body: { id: "scr_TEST", revision: 2, playlist_id: "pl_TEST" } }; });
   async function invoke(...argv: string[]) {
     let stdout = "", stderr = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", configPath, ...argv], env: {}, cwd: () => directory, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", configPath, ...argv], settings: {}, cwd: () => directory, transport,
       stdout: new Writable({ write(chunk, _encoding, done) { stdout += chunk; done(); } }),
       stderr: new Writable({ write(chunk, _encoding, done) { stderr += chunk; done(); } }),
     });

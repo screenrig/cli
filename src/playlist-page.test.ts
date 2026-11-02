@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { HostSettings } from "./host-settings.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -119,7 +120,7 @@ test("replacing media keeps everything else, dates included, and rebuilds across
     (error: { problem?: { code?: string } }) => error.problem?.code === "usage_error");
 });
 
-async function cli(t: TestContext, transport: FakeTransport, env: Record<string, string> = {}) {
+async function cli(t: TestContext, transport: FakeTransport, settings: HostSettings = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "playlist-page-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const config = path.join(directory, "config.json");
@@ -127,7 +128,7 @@ async function cli(t: TestContext, transport: FakeTransport, env: Record<string,
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
   return Object.assign(async (argv: string[], input = "") => {
     let output = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, env, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, settings, transport,
       stdin: Readable.from([input]), isStdinTty: () => false,
       stdout: new Writable({ write(chunk, _encoding, done) { output += chunk; done(); } }),
       stderr: new Writable({ write(_chunk, _encoding, done) { done(); } }),

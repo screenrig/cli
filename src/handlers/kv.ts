@@ -89,7 +89,7 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
 export function kvWebhookTarget(args: ParsedArgs, command: string): KvWebhookTarget {
   const applicationId = flagString(args.flags, "app-id");
   const card = flagString(args.flags, "card");
-  if (applicationId && card) throw usageError("Pass --app-id or --card, not both.");
+  if (applicationId && card) throw usageError("Add --app-id or --card, not both.");
   if (card) return { kind: "card", id: cardUid(card) };
   if (!applicationId) throw usageError(`kv webhook ${command} requires --app-id (a key of an application) or --card (a card's data document).`);
   return { kind: "app", id: applicationId };
@@ -189,9 +189,9 @@ export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolv
   let body: KVWebhookCreate | CardKVWebhookCreate;
   if (target.kind === "app") {
     if (flagString(args.flags, "map") !== undefined || flagString(args.flags, "key-template") !== undefined || flagBool(args.flags, "signing")) {
-      throw usageError("--map, --key-template and --signing apply to a card webhook: pass --card CARD_ID instead of --app-id.");
+      throw usageError("--map, --key-template and --signing apply to a card webhook: add --card CARD_ID instead of --app-id.");
     }
-    if (verifyFlagsGiven(args).length) throw usageError(`${verifyFlagsGiven(args).join(", ")} apply to a card webhook: pass --card CARD_ID instead of --app-id.`);
+    if (verifyFlagsGiven(args).length) throw usageError(`${verifyFlagsGiven(args).join(", ")} apply to a card webhook: add --card CARD_ID instead of --app-id.`);
     body = { key: kvWebhookKey(key), ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
   } else {
     if (key !== undefined) throw usageError("A card webhook writes the card's data document, not a key: omit <key>.");
@@ -232,7 +232,7 @@ export const handleKvWebhookRotateSecret = commandHandler(async (args, runtime, 
   const target = kvWebhookTarget(args, "rotate-secret");
   const id = kvWebhookId(args.positionals[3], "rotate-secret", target);
   const signing = flagBool(args.flags, "signing");
-  if (signing && target.kind === "app") throw usageError("--signing rotates a card webhook's signing secret: pass --card CARD_ID.");
+  if (signing && target.kind === "app") throw usageError("--signing rotates a card webhook's signing secret: add --card CARD_ID.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await kvWebhookCall(client, {
     method: "POST", path: `${kvWebhooksPath(target)}/${id}/rotate-secret`, idempotent: true,
@@ -243,7 +243,7 @@ export const handleKvWebhookRotateSecret = commandHandler(async (args, runtime, 
 
 export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolved) => {
   const target = kvWebhookTarget(args, "update");
-  if (target.kind !== "card") throw usageError("kv webhook update changes a card webhook: pass --card CARD_ID.");
+  if (target.kind !== "card") throw usageError("kv webhook update changes a card webhook: add --card CARD_ID.");
   const id = kvWebhookId(args.positionals[3], "update", target);
   const description = flagString(args.flags, "description");
   const keyTemplate = flagString(args.flags, "key-template");
@@ -271,7 +271,7 @@ export const handleKvWebhookUpdate = commandHandler(async (args, runtime, resolv
 
 export const handleKvWebhookDeliveries = commandHandler(async (args, runtime, resolved) => {
   const target = kvWebhookTarget(args, "deliveries");
-  if (target.kind !== "card") throw usageError("kv webhook deliveries reads a card webhook's log: pass --card CARD_ID.");
+  if (target.kind !== "card") throw usageError("kv webhook deliveries reads a card webhook's log: add --card CARD_ID.");
   const id = kvWebhookId(args.positionals[3], "deliveries", target);
   const limit = flagString(args.flags, "limit");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));

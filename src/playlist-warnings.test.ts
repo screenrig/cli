@@ -38,7 +38,7 @@ async function enrolled() {
   const configDir = path.join(dir, "config");
   const cwd = path.join(dir, "cwd");
   await mkdir(cwd, { recursive: true });
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   await writeFile(path.join(cwd, "lobby.json"), JSON.stringify(document()));
@@ -50,7 +50,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Awaited<Return
   const stderr = new PassThrough();
   const outP = collect(stdout);
   collect(stderr);
-  const runtime: CliRuntime = { argv, env: env.fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport };
+  const runtime: CliRuntime = { argv, settings: env.fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport };
   const code = await run(runtime);
   stdout.end();
   stderr.end();
@@ -140,7 +140,7 @@ async function publishFixture(t: { after(fn: () => unknown): void }) {
     .on("PATCH", `/api/screens/${SCREEN}`, () => { assigned = true; return json(200, { id: SCREEN, revision: 8, playlist_id: "pl_TEST" }); });
   async function invoke(...extra: string[]) {
     let out = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", config, "screen", "publish", SCREEN, "lobby.json", "--no-progress", ...extra], env: { XDG_CONFIG_HOME: dir }, cwd: () => dir, transport, sleep: async () => {},
+    const code = await run({ ...processRuntime(), argv: ["--config", config, "screen", "publish", SCREEN, "lobby.json", "--no-progress", ...extra], settings: { XDG_CONFIG_HOME: dir }, cwd: () => dir, transport, sleep: async () => {},
       stdout: new Writable({ write(chunk, _e, done) { out += chunk; done(); } }), stderr: new Writable({ write(_c, _e, done) { done(); } }) });
     return { code, out, body: (() => { try { return JSON.parse(out); } catch { return undefined; } })() };
   }

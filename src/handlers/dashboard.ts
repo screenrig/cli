@@ -62,7 +62,7 @@ export async function signInReset(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const email = signInResetEmail(flagString(args.flags, "email"));
-  const configFs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const configFs = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   // The durable retry ledger lives in the user config, which an unenrolled
   // installation does not have yet. Seed a credential-free config; recovery
   // never writes a token, project, agent, or enrollment state into it.

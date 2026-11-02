@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { Readable, type Writable } from "node:stream";
-import { childEnv } from "./child-env.js";
+import { processSettings, type HostSettings } from "./host-settings.js";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
 import type { OperationLogger } from "./log/types.js";
@@ -14,7 +14,7 @@ export interface CliRuntime {
   stdin?: AsyncIterable<Uint8Array | string>;
   isStdinTty?: () => boolean;
   argv: string[];
-  env: NodeJS.Dict<string>;
+  settings: HostSettings;
   stdout: Writable;
   stderr: Writable;
   now: () => Date;
@@ -92,7 +92,7 @@ export type RunProcess = (request: RunProcessRequest) => Promise<RunProcessResul
 
 const STDERR_TAIL_LIMIT = 8192;
 
-export function spawnRunProcess(env: NodeJS.ProcessEnv = process.env): RunProcess {
+export function spawnRunProcess(): RunProcess {
   return (request) =>
     new Promise<RunProcessResult>((resolve) => {
       let child;
@@ -100,7 +100,6 @@ export function spawnRunProcess(env: NodeJS.ProcessEnv = process.env): RunProces
         child = spawn(request.command, request.args, {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
-          env: childEnv(env),
         });
       } catch (error) {
         resolve({
@@ -350,11 +349,12 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
 }
 
 export function processRuntime(): CliRuntime {
+  const settings = processSettings();
   return {
     argv: process.argv.slice(2),
     stdin: process.stdin,
     isStdinTty: () => process.stdin.isTTY === true,
-    env: process.env,
+    settings,
     stdout: process.stdout,
     stderr: process.stderr,
     now: () => new Date(),
@@ -373,7 +373,7 @@ export function processRuntime(): CliRuntime {
       chmod,
       stat,
       homedir,
-      env: process.env,
+      settings,
     },
   };
 }

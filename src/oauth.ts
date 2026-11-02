@@ -439,29 +439,36 @@ export function readKeyFile(text: string): { publicKey: Jwk; privateKey?: KeyObj
   return { publicKey: { ...publicKey, kid }, ...(privateKey ? { privateKey } : {}), kid, alg };
 }
 
+/** A service client saved by `screenrig login --client-id`: its id and the file holding its key or secret. */
+export interface StoredServiceClient {
+  client_id: string;
+  /** Absolute path of the private key (a JWK or PEM), for private_key_jwt. */
+  key_file?: string;
+  /** Absolute path of a file holding the client secret, for HTTP Basic. */
+  secret_file?: string;
+}
+
 /**
- * Service-client mode from the environment: SCREENRIG_CLIENT_ID with
- * SCREENRIG_CLIENT_SECRET (HTTP Basic) or SCREENRIG_CLIENT_KEY_FILE
- * (private_key_jwt). Undefined when SCREENRIG_CLIENT_ID is unset.
+ * The credentials of a saved service client, read from the file it names on
+ * every run, so rotating the file needs no new login.
  */
-export async function serviceCredentialsFromEnv(env: NodeJS.Dict<string>, readText: (file: string) => Promise<string>): Promise<ServiceClientCredentials | undefined> {
-  const clientId = env.SCREENRIG_CLIENT_ID;
-  const secret = env.SCREENRIG_CLIENT_SECRET;
-  const keyFile = env.SCREENRIG_CLIENT_KEY_FILE;
-  if (!clientId) {
-    if (secret || keyFile) throw credentialsError("SCREENRIG_CLIENT_SECRET and SCREENRIG_CLIENT_KEY_FILE need SCREENRIG_CLIENT_ID.");
-    return undefined;
-  }
-  if (!isServiceClientId(clientId)) throw credentialsError("SCREENRIG_CLIENT_ID must be a service client id (scl_...).");
-  if (Boolean(secret) === Boolean(keyFile)) throw credentialsError("Set exactly one of SCREENRIG_CLIENT_SECRET or SCREENRIG_CLIENT_KEY_FILE with SCREENRIG_CLIENT_ID.");
-  if (secret) return { clientId, method: "client_secret_basic", secret };
+export async function serviceCredentialsFromConfig(stored: StoredServiceClient, readText: (file: string) => Promise<string>): Promise<ServiceClientCredentials> {
+  const clientId = stored.client_id;
+  if (!isServiceClientId(clientId)) throw credentialsError("The saved service client id is not a service client id (scl_...); run screenrig login --client-id again.");
+  if (Boolean(stored.key_file) === Boolean(stored.secret_file)) throw credentialsError("The saved service client needs exactly one of a key file or a secret file; run screenrig login --client-id again.");
+  const file = (stored.key_file ?? stored.secret_file)!;
   let text: string;
   try {
-    text = await readText(keyFile!);
+    text = await readText(file);
   } catch {
-    throw credentialsError("SCREENRIG_CLIENT_KEY_FILE cannot be read.");
+    throw credentialsError(`The service client's ${stored.key_file ? "key" : "secret"} file ${file} cannot be read.`);
+  }
+  if (stored.secret_file) {
+    const secret = text.trim();
+    if (!secret) throw credentialsError(`The service client's secret file ${file} is empty.`);
+    return { clientId, method: "client_secret_basic", secret };
   }
   const key = readKeyFile(text);
-  if (!key.privateKey) throw credentialsError("SCREENRIG_CLIENT_KEY_FILE must hold the private key; the server keeps only the public one.");
+  if (!key.privateKey) throw credentialsError(`The service client's key file ${file} must hold the private key; the server keeps only the public one.`);
   return { clientId, method: "private_key_jwt", key: key.privateKey, kid: key.kid, alg: key.alg };
 }

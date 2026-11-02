@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { processSettings, type HostSettings } from "./host-settings.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,14 +47,13 @@ function readPackageVersion(): string | undefined {
 }
 
 export function resolveCliVersion(input: {
-  env?: Record<string, string | undefined>;
+  settings?: HostSettings;
   packageVersion?: string;
   now?: Date;
 } = {}): string {
-  const envSource = input.env ?? process.env;
-  const env = envSource.SCREENRIG_VERSION;
-  if (typeof env === "string" && isProductVersion(env)) {
-    return env;
+  const stamped = (input.settings ?? processSettings()).SCREENRIG_VERSION;
+  if (typeof stamped === "string" && isProductVersion(stamped)) {
+    return stamped;
   }
   const pkg = input.packageVersion ?? readPackageVersion();
   if (typeof pkg === "string" && pkg !== PLACEHOLDER_VERSION && isProductVersion(pkg)) {

@@ -595,11 +595,11 @@ export const screenly: VendorAdapter = {
   id: "screenly",
   name: NAME,
   inputs: {},
-  credentials: [{ env: "SCREENLY_API_TOKEN", secret: true, required: true, help: "An API token from your Screenly workspace settings." }],
+  credentials: [{ name: "SCREENLY_API_TOKEN", secret: true, required: true, help: "An API token from your Screenly workspace settings." }],
   connect: [
     "In Screenly open Settings (the workspace settings, not your account), then Security, then Tokens, and add a token. It is shown once.",
     "A token can do what its creator can do, and Screenly has no read-only token: make it from a User-role account made for this, and delete the token when the import is done.",
-    "Put SCREENLY_API_TOKEN=... in a file and pass it with --credentials.",
+    "Put SCREENLY_API_TOKEN=... in a file and name it with --credentials.",
   ],
   maps: [
     "Image, video and audio assets become media, and web assets become web page items; playlists keep their item order and durations.",
@@ -616,7 +616,7 @@ export const screenly: VendorAdapter = {
     "https://www.screenly.io/docs/scheduling/advanced/predicates/",
     "https://www.screenly.io/docs/developers/overview/api-tokens/",
   ],
-  example: "screenrig migrate scan --from screenly",
+  example: "screenrig migrate scan --from screenly --credentials ./screenly-key.txt",
   async open(input) {
     const token = input.credentials.SCREENLY_API_TOKEN;
     const client = input.http.client({ base: BASE, auth: { Authorization: `Token ${token}` } });

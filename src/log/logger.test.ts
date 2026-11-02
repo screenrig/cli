@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { HostSettings } from "../host-settings.js";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -29,8 +30,8 @@ function collect(stream: PassThrough): Promise<string> {
   });
 }
 
-function realFs(home: string, env: NodeJS.Dict<string> = { XDG_CONFIG_HOME: home }): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env };
+function realFs(home: string, settings: HostSettings = { XDG_CONFIG_HOME: home }): ConfigFs {
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings };
 }
 
 async function withRuntime(
@@ -51,11 +52,11 @@ async function withRuntime(
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   };
   const runtime: CliRuntime = {
     argv,
-    env: fsLike.env,
+    settings: fsLike.settings,
     stdout,
     stderr,
     now: () => new Date("2026-08-14T17:00:00.000Z"),

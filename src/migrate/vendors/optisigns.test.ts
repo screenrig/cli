@@ -115,7 +115,7 @@ test("through the command: with --files the originals are matched by the asset's
     const project = fakeProject();
     const h = await harness(project, configDir, cwd);
     const api = gateway();
-    const result = await h.invoke(["migrate", "scan", "--from", "optisigns", "--files", downloads, "--timezone", "America/Toronto"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const result = await h.invoke(["migrate", "scan", "--from", "optisigns", "--files", downloads, "--timezone", "America/Toronto"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.equal(result.code, 0, result.stdout);
     const report = result.json.data;
     assert.deepEqual(report.found, { media: 4, playlists: 3, layouts: 0, schedules: 5, groups: 3, screens: 4 });
@@ -133,12 +133,12 @@ test("through the command: with --files the originals are matched by the asset's
     assert.ok(!JSON.stringify(scanFile).includes(KEY));
     assert.ok(!result.stdout.includes(KEY));
     assert.equal(project.transport.calls.length, 0);
-    const refused = await h.invoke(["migrate", "scan", "--from", "optisigns", "--dir", "refused"], { env: { OPTISIGNS_API_KEY: "wrong-token" }, vendorFetch: api.fetch });
+    const refused = await h.invoke(["migrate", "scan", "--from", "optisigns", "--dir", "refused"], { credentials: { OPTISIGNS_API_KEY: "wrong-token" }, vendorFetch: api.fetch });
     assert.equal(refused.code, 3);
     assert.equal(refused.json.error.code, "vendor_refused");
     assert.match(refused.json.error.detail, /Check OPTISIGNS_API_KEY/);
     assert.ok(!refused.stdout.includes("wrong-token"));
-    assert.equal((await h.invoke(["migrate", "scan", "--from", "optisigns", "--dir", "u", "--url", "https://x.example.com"], { env: CREDENTIALS, vendorFetch: api.fetch })).code, 2);
+    assert.equal((await h.invoke(["migrate", "scan", "--from", "optisigns", "--dir", "u", "--url", "https://x.example.com"], { credentials: CREDENTIALS, vendorFetch: api.fetch })).code, 2);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwd, { recursive: true, force: true });

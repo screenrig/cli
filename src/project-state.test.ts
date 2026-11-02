@@ -71,13 +71,13 @@ test("stored project records cannot overwrite global authority or API origin", (
 test("generation, provisioning, browser claims and ordinary writes stay in their captured project", async t => {
   const home = await testTemp("project-retry-isolation-");
   t.after(() => rm(home, { recursive: true, force: true }));
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: {} };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: {} };
   const configPath = path.join(home, "config.json");
   const stored = twoProjects();
   await writeConfigAtomic(configPath, stored, fs);
   const resolvedA = target(A, "private-current", configPath);
   const resolvedB = target(B, "private-current", configPath);
-  const runtime = { ...processRuntime(), fs, env: fs.env, homedir: fs.homedir, now: () => new Date(), sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) };
+  const runtime = { ...processRuntime(), fs, settings: fs.settings, homedir: fs.homedir, now: () => new Date(), sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) };
   const options = { resolved: resolvedA, runtime };
   const generation = await generateRetryState({ ...options, requestHash: "hash-a", generateIdempotencyKey: () => "generation-key-a" });
   assert.equal(generation.reused, false);

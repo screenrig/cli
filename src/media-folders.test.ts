@@ -28,7 +28,7 @@ function collect(stream: PassThrough): Promise<string> {
 }
 
 function realFs(home: string): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
 }
 
 async function withRuntime(argv: string[], transport: FakeTransport, configDir: string): Promise<{ code: number; stdout: string }> {
@@ -38,7 +38,7 @@ async function withRuntime(argv: string[], transport: FakeTransport, configDir: 
   const errP = collect(stderr);
   const fsLike = realFs(configDir);
   const runtime: CliRuntime = {
-    argv, env: fsLike.env, stdout, stderr,
+    argv, settings: fsLike.settings, stdout, stderr,
     now: () => new Date("2026-10-21T17:00:00.000Z"), sleep: async () => undefined,
     homedir: fsLike.homedir, cwd: () => configDir, fs: fsLike, transport, signedRawPut: async () => ({ status: 200 }),
   };

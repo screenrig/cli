@@ -44,7 +44,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
     }
     assets.set(new URL(link.src, origin).pathname, { bytes, type: link.src.endsWith(".js") ? "text/javascript" : link.src.endsWith(".css") ? "text/css" : "font/ttf" });
   }
-  return await withPreviewBrowser(options.runtime.env, async (browser: PreviewBrowser) => work({
+  return await withPreviewBrowser(options.runtime.settings, async (browser: PreviewBrowser) => work({
       async render(input) {
         if (![input.width, input.height].every((size) => Number.isSafeInteger(size) && size > 0 && size <= 8192)) throw usageError("Preview dimensions must be integers from 1 to 8192.");
         if (input.now && !Number.isFinite(Date.parse(input.now))) throw usageError("--now must be an ISO timestamp.");

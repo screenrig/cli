@@ -677,9 +677,9 @@ function runtimeForImport(
   },
 ): CliRuntime {
   return {
-    argv: [], env: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: clock.now,
+    argv: [], settings: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: clock.now,
     sleep: clock.sleep, homedir: () => "/tmp", cwd: () => "/tmp",
-    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", env: {} },
+    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", settings: {} },
     signedRawPut: async (request) => {
       const chunks: Uint8Array[] = [];
       if (request.body instanceof Uint8Array) chunks.push(request.body);
@@ -1259,9 +1259,9 @@ test("command parser and JSON help expose playlist export/import including updat
   const output = collect(stdout);
   const errors = collect(stderr);
   const runtime: CliRuntime = {
-    argv: ["--json", "playlist", "export", "--help"], env: {}, stdout, stderr, now: () => new Date(), sleep: async () => undefined,
+    argv: ["--json", "playlist", "export", "--help"], settings: {}, stdout, stderr, now: () => new Date(), sleep: async () => undefined,
     homedir: () => "/tmp", cwd: () => "/tmp", transport: new FakeTransport(),
-    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", env: {} },
+    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", settings: {} },
   };
   assert.equal(await run(runtime), 0);
   stdout.end(); stderr.end();

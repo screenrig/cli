@@ -200,7 +200,7 @@ export function buildReport(input: {
     addLossy("schedule", schedule.id, schedule.name, changes);
   }
   const notes = [...input.notes];
-  if (noZone > 0) notes.push(`No time zone was known for ${noZone} screen${noZone === 1 ? "" : "s"}; pass --timezone or set ${noZone === 1 ? "it" : "them"} after pairing (screen set-timezone). Campaigns with dates or hours wait for one (no_timezone).`);
+  if (noZone > 0) notes.push(`No time zone was known for ${noZone} screen${noZone === 1 ? "" : "s"}; add --timezone or set ${noZone === 1 ? "it" : "them"} after pairing (screen set-timezone). Campaigns with dates or hours wait for one (no_timezone).`);
   if (noDefault > 0) notes.push(`${noDefault} screen${noDefault === 1 ? " has" : "s have"} no default playlist; campaigns need one (no_default_playlist), so set it after pairing (screen assign).`);
   return {
     schema: REPORT_SCHEMA,

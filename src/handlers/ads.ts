@@ -161,7 +161,7 @@ export function adsMembershipWriteBody(current: Record<string, unknown> | undefi
   const policy = flagString(args.flags, "policy")
     ?? (typeof current?.policy === "string" && current.policy.length > 0 ? current.policy : undefined);
   if (policy === undefined) {
-    throw usageError(`The membership row was not found, so its current review policy cannot be carried over. Run ads memberships list, or pass --policy trusted|review_required explicitly.`);
+    throw usageError(`The membership row was not found, so its current review policy cannot be carried over. Run ads memberships list, or add --policy trusted|review_required explicitly.`);
   }
   const scope = current?.scope;
   if ((screenIds === undefined || slotIds === undefined)

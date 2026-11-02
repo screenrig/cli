@@ -65,7 +65,7 @@ export async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolve
 }
 
 export const handleProjectToken = commandHandler(async (args, runtime, resolved) => {
-  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir });
   if (!stored?.oauth) throw missingCredentialError(resolved);
   const raw = flagString(args.flags, "projects") ?? "";
   const projects = raw.split(/[\s,]+/).filter(Boolean);

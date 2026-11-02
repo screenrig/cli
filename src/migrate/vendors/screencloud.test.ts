@@ -161,7 +161,7 @@ test("migrate scan --from screencloud needs --region and a token, and prints the
     const project = fakeProject();
     const h = await harness(project, configDir, cwd);
     const api = studio();
-    const result = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "eu"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const result = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "eu"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.equal(result.code, 0, result.stdout);
     const report = result.json.data;
     assert.deepEqual(report.found, { media: 4, playlists: 3, layouts: 4, schedules: 0, groups: 4, screens: 5 });
@@ -171,14 +171,14 @@ test("migrate scan --from screencloud needs --region and a token, and prints the
     assert.ok(report.notes.some((note: string) => /No time zone was known for 2 screens/.test(note)));
     assert.ok(!result.stdout.includes(TOKEN));
     assert.equal(project.transport.calls.length, 0);
-    const noRegion = await h.invoke(["migrate", "scan", "--from", "screencloud", "--dir", "none"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const noRegion = await h.invoke(["migrate", "scan", "--from", "screencloud", "--dir", "none"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.equal(noRegion.code, 2);
     assert.match(noRegion.json.error.detail, /ScreenCloud needs --region/);
-    const badRegion = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "asia", "--dir", "none"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const badRegion = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "asia", "--dir", "none"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.match(badRegion.json.error.detail, /--region asia is not one of eu, us/);
     const noToken = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "eu", "--dir", "none"], { vendorFetch: api.fetch });
-    assert.match(noToken.json.error.detail, /ScreenCloud needs SCREENCLOUD_API_TOKEN/);
-    const wrong = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "eu", "--dir", "wrong"], { env: { SCREENCLOUD_API_TOKEN: "wrong-token" }, vendorFetch: api.fetch });
+    assert.match(noToken.json.error.detail, /ScreenCloud needs a SCREENCLOUD_API_TOKEN line/);
+    const wrong = await h.invoke(["migrate", "scan", "--from", "screencloud", "--region", "eu", "--dir", "wrong"], { credentials: { SCREENCLOUD_API_TOKEN: "wrong-token" }, vendorFetch: api.fetch });
     assert.equal(wrong.code, 3);
     assert.ok(!wrong.stdout.includes("wrong-token"));
   } finally {

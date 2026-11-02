@@ -25,7 +25,7 @@ function collect(stream: PassThrough): Promise<string> {
 }
 
 function realFs(home: string): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
 }
 
 async function withRuntime(argv: string[], transport: FakeTransport, configDir: string): Promise<{ code: number; stdout: string }> {
@@ -35,7 +35,7 @@ async function withRuntime(argv: string[], transport: FakeTransport, configDir: 
   const errP = collect(stderr);
   const fsLike = realFs(configDir);
   const runtime: CliRuntime = {
-    argv, env: fsLike.env, stdout, stderr,
+    argv, settings: fsLike.settings, stdout, stderr,
     now: () => new Date("2026-10-29T17:00:00.000Z"), sleep: async () => undefined,
     homedir: fsLike.homedir, cwd: () => configDir, fs: fsLike, transport, signedRawPut: async () => ({ status: 200 }),
   };
@@ -118,7 +118,7 @@ test("media availability reads the rule from stdin", async () => {
     stdin.end(JSON.stringify({ windows: [{ days: ["mon", "tue"], start: "17:00", end: "22:00" }] }));
     const fsLike = realFs(configDir);
     const code = await run({
-      argv: ["--json", "media", "availability", FILE, "--file", "-"], env: fsLike.env, stdout, stderr, stdin, isStdinTty: () => false,
+      argv: ["--json", "media", "availability", FILE, "--file", "-"], settings: fsLike.settings, stdout, stderr, stdin, isStdinTty: () => false,
       now: () => new Date("2026-10-29T17:00:00.000Z"), sleep: async () => undefined,
       homedir: fsLike.homedir, cwd: () => configDir, fs: fsLike, transport, signedRawPut: async () => ({ status: 200 }),
     } as CliRuntime);

@@ -258,14 +258,14 @@ test("offline playlist validate rejects unknown entry fields without HTTP", asyn
     stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     stderr.resume();
     const base = processRuntime();
-    const env = { XDG_CONFIG_HOME: cwdDir };
+    const settings = { XDG_CONFIG_HOME: cwdDir };
     const code = await run({
       ...base,
       argv: ["--json", "playlist", "validate", input],
-      env,
+      settings,
       homedir: () => cwdDir,
       cwd: () => cwdDir,
-      fs: { ...base.fs, homedir: () => cwdDir, env },
+      fs: { ...base.fs, homedir: () => cwdDir, settings },
       stdout,
       stderr,
       transport,

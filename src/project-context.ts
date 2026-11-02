@@ -58,7 +58,7 @@ export async function cacheProjectContexts(
   options: { select?: string; credential?: string; identityToken?: string } = {},
 ): Promise<ResolvedConfig> {
   const verified = values.map(validateProjectContext);
-  const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fs = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fs, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     let current = await readConfigFile(resolved.configPath, fs);
     if (!current || current.api_url.replace(/\/+$/, "") !== resolved.apiUrl) throw configError("Stored API configuration changed before project context persistence.");

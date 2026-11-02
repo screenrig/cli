@@ -236,12 +236,12 @@ test("an answer this adapter cannot use is vendor_bad_response, naming the path 
   assert.match(noId.problem.detail, /GET \/layouts\/ has a row without id/);
 });
 
-test("migrate scan --from yodeck: the token from the environment, originals from --files, and nothing secret written or printed", async () => {
+test("migrate scan --from yodeck: the token from --credentials, originals from --files, and nothing secret written or printed", async () => {
   const t = await setup();
   try {
     const router = yodeck_();
     const env = { YODECK_API_TOKEN: TOKEN };
-    const lone = await t.h.invoke(["migrate", "scan", "--from", "yodeck"], { env, vendorFetch: router.fetch });
+    const lone = await t.h.invoke(["migrate", "scan", "--from", "yodeck"], { credentials: env, vendorFetch: router.fetch });
     assert.equal(lone.code, 0, lone.stdout);
     const report = lone.json.data;
     assert.deepEqual(report.found, { media: 5, playlists: 5, layouts: 2, schedules: 7, groups: 2, screens: 6 });
@@ -265,7 +265,7 @@ test("migrate scan --from yodeck: the token from the environment, originals from
     const downloads = path.join(t.cwd, "downloads");
     await mkdir(downloads);
     for (const name of ["welcome.png", "THEME.MP3", "Promo.mp4"]) await writeFile(path.join(downloads, name), `bytes of ${name}`);
-    const withFiles = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--files", downloads, "--timezone", "America/Toronto", "--dir", "with-files"], { env, vendorFetch: router.fetch });
+    const withFiles = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--files", downloads, "--timezone", "America/Toronto", "--dir", "with-files"], { credentials: env, vendorFetch: router.fetch });
     assert.equal(withFiles.code, 0, withFiles.stdout);
     assert.deepEqual(withFiles.json.data.not_imported.filter((entry: { kind: string }) => entry.kind === "media").map((entry: { source_id: string }) => entry.source_id), ["16", "17", "18", "19", "21"]);
     assert.ok(!withFiles.json.data.lossy.some((entry: { source_id: string }) => entry.source_id === "12"), "the original replaced the copy");
@@ -273,15 +273,15 @@ test("migrate scan --from yodeck: the token from the environment, originals from
     const scan = JSON.parse(await readFile(path.join(t.cwd, "with-files", "scan.json"), "utf8"));
     assert.deepEqual(scan.catalog.media.map((media: { id: string; local?: string }) => [media.id, media.local]), [["11", "welcome.png"], ["12", "Promo.mp4"], ["13", undefined], ["14", "THEME.MP3"], ["20", undefined]]);
 
-    const refused = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--dir", "refused"], { env: { YODECK_API_TOKEN: "fixture-label:wrong-token" }, vendorFetch: yodeck_().fetch });
+    const refused = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--dir", "refused"], { credentials: { YODECK_API_TOKEN: "fixture-label:wrong-token" }, vendorFetch: yodeck_().fetch });
     assert.equal(refused.code, 3);
     assert.equal(refused.json.error.code, "vendor_refused");
     assert.match(refused.json.error.detail, /Check YODECK_API_TOKEN/);
     assert.ok(!refused.stdout.includes("wrong-token"));
     const missing = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--dir", "missing"], { vendorFetch: yodeck_().fetch });
     assert.equal(missing.code, 2);
-    assert.match(missing.json.error.detail, /Yodeck needs YODECK_API_TOKEN in the environment, or in a file passed with --credentials FILE/);
-    const url = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--url", "https://example.com", "--dir", "url"], { env, vendorFetch: yodeck_().fetch });
+    assert.match(missing.json.error.detail, /Yodeck needs a YODECK_API_TOKEN line in a file given with --credentials FILE/);
+    const url = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--url", "https://example.com", "--dir", "url"], { credentials: env, vendorFetch: yodeck_().fetch });
     assert.match(url.json.error.detail, /Yodeck does not take --url/);
   } finally {
     await t.cleanup();
@@ -291,7 +291,7 @@ test("migrate scan --from yodeck: the token from the environment, originals from
 test("the token can come from a --credentials file", async () => {
   const t = await setup();
   try {
-    const file = path.join(t.cwd, "yodeck.env");
+    const file = path.join(t.cwd, "yodeck-key.txt");
     await writeFile(file, `# read-only token\nYODECK_API_TOKEN="${TOKEN}"\nOTHER=ignored\n`);
     const result = await t.h.invoke(["migrate", "scan", "--from", "yodeck", "--credentials", file], { vendorFetch: yodeck_().fetch });
     assert.equal(result.code, 0, result.stdout);
@@ -308,7 +308,7 @@ test("migrate vendors yodeck says what it takes and how to make the token", asyn
     assert.equal(result.code, 0);
     const [vendor] = result.json.data.vendors;
     assert.deepEqual(vendor.inputs.flags, [{ flag: "--timezone", required: false }, { flag: "--files", required: false }]);
-    assert.deepEqual(vendor.inputs.env.map((entry: { name: string; secret: boolean; required: boolean }) => [entry.name, entry.secret, entry.required]), [["YODECK_API_TOKEN", true, true]]);
+    assert.deepEqual(vendor.inputs.credentials.map((entry: { name: string; secret: boolean; required: boolean }) => [entry.name, entry.secret, entry.required]), [["YODECK_API_TOKEN", true, true]]);
     assert.ok(vendor.connect.length >= 3 && vendor.maps.length > 0 && vendor.skips.length > 0 && vendor.docs.every((doc: string) => doc.startsWith("https://")));
     assert.match(vendor.example, /^screenrig migrate scan --from yodeck /);
   } finally {
@@ -319,7 +319,7 @@ test("migrate vendors yodeck says what it takes and how to make the token", asyn
 test("the example on migrate vendors runs as written", async () => {
   const t = await setup();
   try {
-    await writeFile(path.join(t.cwd, "yodeck.env"), `YODECK_API_TOKEN=${TOKEN}\n`);
+    await writeFile(path.join(t.cwd, "yodeck-key.txt"), `YODECK_API_TOKEN=${TOKEN}\n`);
     await mkdir(path.join(t.cwd, "yodeck-downloads"));
     const result = await t.h.invoke(yodeck.example.split(" ").slice(1), { vendorFetch: yodeck_().fetch });
     assert.equal(result.code, 0, result.stdout);

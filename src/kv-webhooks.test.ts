@@ -38,7 +38,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function enrolled(): Promise<Env> {
   const configDir = await testTemp("kv-webhooks-cfg-");
   const cwd = await testTemp("kv-webhooks-cwd-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   return { fs, cwd, configPath };
@@ -50,7 +50,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: 
   const outP = collect(stdout);
   const errP = collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr,
+    argv, settings: env.fs.settings, stdout, stderr,
     now: () => new Date("2026-08-14T17:00:00.000Z"),
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
@@ -245,7 +245,7 @@ test("kv webhook create --card sends the mapping and signing, prints both secret
   assert.match(human.stdout, /^signing: true$/m);
   assert.match(human.stdout, /^secret: srkw_\S{43}$/m);
   assert.match(human.stdout, /^signing_secret: whsec_\S{43}$/m);
-  assert.match(human.stdout, /^example: body='\{"message":"Hello"\}'; t=\$\(date \+%s\); sig=.*"\$SIGNING_SECRET".*ScreenRig-Signature: t=\$t,v1=\$sig/m);
+  assert.match(human.stdout, /^example: curl -X POST "[^"]+" -H "Authorization: Bearer srkw_\w+" -H "ScreenRig-Signature: t=<unix seconds>,v1=<hmac>" -H "Content-Type: application\/json" --data '\{"message":"Hello"\}'$/m);
 
   const plain = await cli(["--human", "kv", "webhook", "create", "--card", CARD], transport, env);
   assert.deepEqual(webhookCalls(transport).at(-1)!.body, {});
@@ -264,7 +264,7 @@ test("kv webhook create reads --map from stdin and refuses a template that is no
   const stdout = new PassThrough(); const stderr = new PassThrough();
   const outP = collect(stdout); void collect(stderr);
   const code = await run({
-    argv: ["--json", "kv", "webhook", "create", "--card", CARD, "--map", "-"], env: env.fs.env, stdout, stderr, stdin: piped,
+    argv: ["--json", "kv", "webhook", "create", "--card", CARD, "--map", "-"], settings: env.fs.settings, stdout, stderr, stdin: piped,
     now: () => new Date("2026-08-14T17:00:00.000Z"), sleep: async () => undefined, homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
   });
   stdout.end(); stderr.end();

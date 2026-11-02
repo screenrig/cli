@@ -173,7 +173,8 @@ export interface VendorSession {
 }
 
 export interface VendorCredential {
-  env: string;
+  /** The NAME of its NAME=VALUE line in the --credentials file. */
+  name: string;
   secret: boolean;
   required: boolean;
   help: string;

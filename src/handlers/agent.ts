@@ -16,6 +16,7 @@ import { ExitCode } from "../exit-codes.js";
 import { CliError, configError, screenScopeText, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { installSource } from "../install-source.js";
+import { serviceLogin, serviceLogout } from "../service-login.js";
 import { redactText } from "../redact.js";
 import { agentPlatform, validateAgent, validateAgentSelfStatus } from "../agent-identity.js";
 import { AGENT_SELF_PATH, notesHint, notesHintWarning, selfNoteCounts, selfNotesField, type NoteCounts } from "../agent-notes.js";
@@ -95,6 +96,9 @@ export function enrollmentSetupCode(value: string | undefined): string | undefin
 export const handleAgentStatus = commandHandler(agentStatus, false);
 
 export const handleLogin = commandHandler(async (args, runtime, resolved) => {
+  if (flagString(args.flags, "client-id") !== undefined || flagString(args.flags, "client-key-file") !== undefined || flagString(args.flags, "client-secret-file") !== undefined) {
+    return loggerOf(runtime).withLocal({ op: "login", message: "login service client" }, () => serviceLogin(args, runtime, resolved));
+  }
   return loggerOf(runtime).withLocal({ op: "login", message: "login" }, () => {
     const access = (flagString(args.flags, "access") ?? "manage") as AccessLevel;
     if (!ACCESS_LEVELS.includes(access)) throw usageError("login --access must be read, propose or manage.");
@@ -117,7 +121,7 @@ export async function login(args: ParsedArgs, runtime: CliRuntime, resolved: Res
   if (name && name.length > 80) throw usageError("login --name is at most 80 characters.");
   const session = oauthSessionFor(runtime, resolved);
   const device = new DeviceLogin(session, resolved.configPath, sessionRuntime(runtime));
-  const source = installSource(runtime.env);
+  const source = installSource(runtime.settings);
   const outcome: LoginOutcome = await device.run({
     access: request.access,
     ...(request.project ? { project: request.project } : {}),
@@ -155,7 +159,7 @@ export async function login(args: ParsedArgs, runtime: CliRuntime, resolved: Res
     };
   }
   const signedIn = await resolveConfig({ flags: { ...(typeof args.flags.config === "string" ? { config: args.flags.config } : {}), ...(typeof args.flags["api-url"] === "string" ? { "api-url": args.flags["api-url"] } : {}) },
-    fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir } });
+    fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir } });
   const token = requireToken(signedIn.token);
   const client = clientFor(runtime, args, signedIn.apiUrl, token);
   const response = await client.call({ method: "GET", path: "/api/project" });
@@ -183,6 +187,8 @@ export async function login(args: ParsedArgs, runtime: CliRuntime, resolved: Res
 }
 
 export async function logout(_args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const service = await serviceLogout(runtime, resolved);
+  if (service) return service;
   const { revoked } = await oauthSessionFor(runtime, resolved).logout();
   return {
     envelope: successEnvelope({ status: "signed_out", revoked }),
@@ -362,7 +368,7 @@ export async function agentEnroll(
     await clearPendingEnrollment(runtime, resolved);
     enrollmentConfig = await resolveConfig({
       flags: args.flags,
-      fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
+      fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir },
     });
   }
   const enrollOnce = async (config: Awaited<ReturnType<typeof resolveConfig>>) => {
@@ -461,7 +467,7 @@ export async function dropDeadCredential(
   const organization = flagString(args.flags, "organization");
   if (organization === undefined) throw usageError("agent enroll requires --organization NAME.");
   validateDisplayName(organization, "Organization name");
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fsLike = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fsLike);
     if (!current) return;
@@ -485,7 +491,7 @@ export async function clearPendingEnrollment(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<void> {
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fsLike = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fsLike);
     if (!current?.enrollment) return;
@@ -500,7 +506,7 @@ export async function removeLocalAgentCredential(
   token: string,
   agent: Agent | undefined,
 ): Promise<void> {
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fsLike = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fsLike);
     if (!current) {
@@ -641,7 +647,7 @@ export async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime,
     if (!(error instanceof CliError) || error.problem.code !== "unauthorized") throw error;
     alreadyRejected = true;
   }
-  const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fs = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fs, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fs);
     if (!current || !sameCredential(current.identity_token, identity.identityToken, "identity")) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
@@ -700,13 +706,13 @@ export async function enrollForCommand(
       ...(options.intent ? { enrollmentIntent: options.intent } : {}),
       ...(options.setupCode !== undefined ? { enrollmentSetupCode: options.setupCode } : {}),
       runtime: {
-        fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
+        fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir },
         now: runtime.now,
         sleep: runtime.sleep,
       },
       enroll: async (state) => {
         const client = clientFor(runtime, args, resolved.apiUrl);
-        const source = installSource(runtime.env);
+        const source = installSource(runtime.settings);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
           credential_format: state.credentialFormat,

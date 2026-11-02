@@ -53,24 +53,59 @@ function server(onToken: (req: TransportRequest) => TransportResponse): FakeTran
     .on("GET", "/api/project", () => json(200, { id: PROJECT, name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", revision: 1, status: "active" }));
 }
 
-async function cli(dir: string, argv: string[], transport: FakeTransport, env: Record<string, string> = {}) {
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir, ...env } };
+async function cli(dir: string, argv: string[], transport: FakeTransport) {
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const out: Buffer[] = [];
   const err: Buffer[] = [];
   stdout.on("data", (chunk) => out.push(Buffer.from(chunk)));
   stderr.on("data", (chunk) => err.push(Buffer.from(chunk)));
-  const code = await run({ argv, env: fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir, cwd: () => dir, fs, transport });
+  const code = await run({ argv, settings: fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir, cwd: () => dir, fs, transport });
   return { code, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), fs };
 }
 
-test("a SCREENRIG_CLIENT_SECRET run uses HTTP Basic, keeps its token in memory and never touches the stored config", async () => {
+/** Save the service client in dir's default config with login --client-id; nothing is sent. */
+async function saveClient(dir: string, credential: { secretFile: string } | { keyFile: string }): Promise<void> {
+  const transport = new FakeTransport();
+  const flag = "secretFile" in credential ? ["--client-secret-file", credential.secretFile] : ["--client-key-file", credential.keyFile];
+  const result = await cli(dir, ["--json", "login", "--client-id", CLIENT, ...flag], transport);
+  assert.equal(result.code, 0, result.stdout);
+  assert.ok(!result.stdout.includes(SECRET) && !result.stderr.includes(SECRET));
+  assert.equal(transport.calls.length + transport.oauthCalls.length, 0, "saving a service client sends nothing");
+}
+
+async function writeSecret(dir: string): Promise<string> {
+  const file = path.join(dir, "client-secret.txt");
+  await writeFile(file, `${SECRET}\n`, { mode: 0o600 });
+  return file;
+}
+
+test("login --client-id saves the client and its secret file in the config; the secret itself is never stored", async () => {
+  const dir = await testTemp("service-save-");
+  try {
+    const secretFile = await writeSecret(dir);
+    await saveClient(dir, { secretFile });
+    const config = JSON.parse(await readFile(path.join(dir, "screenrig", "config.json"), "utf8")) as Record<string, unknown>;
+    assert.deepEqual(config.service_client, { client_id: CLIENT, secret_file: secretFile });
+    assert.ok(!JSON.stringify(config).includes(SECRET));
+    assert.equal((await stat(path.join(dir, "screenrig", "config.json"))).mode & 0o777, 0o600);
+    const logout = await cli(dir, ["--json", "logout"], new FakeTransport());
+    assert.equal(logout.code, 0, logout.stdout);
+    assert.equal(JSON.parse(logout.stdout).data.service_client_id, CLIENT);
+    const after = JSON.parse(await readFile(path.join(dir, "screenrig", "config.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(after.service_client, undefined);
+    assert.equal(await readFile(secretFile, "utf8"), `${SECRET}\n`, "logout leaves the secret file");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a saved client secret signs in with HTTP Basic, keeps its token in memory and never writes the config", async () => {
   const dir = await testTemp("service-secret-");
   const configPath = path.join(dir, "screenrig", "config.json");
   try {
-    await writeConfigAtomic(configPath, { api_url: API, project_id: "prj_OTHERAAAAAAAAAAAAAAAAAAA", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_stored_other_secret" },
-      { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} });
+    await saveClient(dir, { secretFile: await writeSecret(dir) });
     const before = await readFile(configPath, "utf8");
     const beforeStat = await stat(configPath);
     let minted = 0;
@@ -85,7 +120,7 @@ test("a SCREENRIG_CLIENT_SECRET run uses HTTP Basic, keeps its token in memory a
       assert.deepEqual([decodeURIComponent(id!), decodeURIComponent(secret!)], [CLIENT, SECRET]);
       return json(200, { access_token: token, token_type: "Bearer", expires_in: 900, scope: "access:manage screens content" });
     });
-    const result = await cli(dir, ["--json", "project", "show"], transport, { SCREENRIG_CLIENT_ID: CLIENT, SCREENRIG_CLIENT_SECRET: SECRET });
+    const result = await cli(dir, ["--json", "project", "show"], transport);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(minted, 1);
     assert.equal(transport.calls[0]?.headers?.authorization, `Bearer ${token}`);
@@ -103,7 +138,7 @@ async function readdirSafe(dir: string): Promise<string[]> {
   return readdir(dir).catch(() => []);
 }
 
-test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's rules", async () => {
+test("a saved key file signs an assertion that meets the server's rules", async () => {
   for (const [type, options, alg] of [
     ["ed25519", {}, "EdDSA"],
     ["ec", { namedCurve: "P-256" }, "ES256"],
@@ -116,6 +151,7 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
       const publicJwk = publicKey.export({ format: "jwk" }) as JWK;
       const keyFile = path.join(dir, "client.jwk");
       await writeFile(keyFile, JSON.stringify(privateJwk), { mode: 0o600 });
+      await saveClient(dir, { keyFile });
       const kid = thumbprint(publicJwk);
       let checked = false;
       const transport = server((req) => {
@@ -132,7 +168,7 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
         checked = true;
         return json(200, { access_token: serviceToken(), token_type: "Bearer", expires_in: 900 });
       });
-      const result = await cli(dir, ["--json", "project", "show"], transport, { SCREENRIG_CLIENT_ID: CLIENT, SCREENRIG_CLIENT_KEY_FILE: keyFile });
+      const result = await cli(dir, ["--json", "project", "show"], transport);
       assert.equal(result.code, 0, result.stdout);
       assert.ok(checked);
       const assertion = form(transport.oauthCalls.find((call) => call.path === "/oauth/token")!).get("client_assertion")!;
@@ -147,7 +183,6 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
       assert.deepEqual([payload.iss, payload.sub, payload.aud], [CLIENT, CLIENT, API], "iss = sub = client_id; aud is the issuer as one string");
       assert.ok(payload.jti && payload.iat <= Math.floor(Date.now() / 1000) + 1);
       assert.ok(payload.exp - payload.iat <= 300 && payload.exp > payload.iat);
-      await assert.rejects(stat(path.join(dir, "screenrig", "config.json")), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -157,6 +192,7 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
 test("a refused service token is minted again once; there is no refresh token", async () => {
   const dir = await testTemp("service-renew-");
   try {
+    await saveClient(dir, { secretFile: await writeSecret(dir) });
     let minted = 0;
     let refuse = true;
     const transport = server(() => { minted += 1; return json(200, { access_token: serviceToken(), token_type: "Bearer", expires_in: 900 }); });
@@ -167,7 +203,7 @@ test("a refused service token is minted again once; there is no refresh token", 
       }
       return json(200, { items: [], next_cursor: null });
     });
-    const result = await cli(dir, ["--json", "screen", "list"], transport, { SCREENRIG_CLIENT_ID: CLIENT, SCREENRIG_CLIENT_SECRET: SECRET });
+    const result = await cli(dir, ["--json", "screen", "list"], transport);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(minted, 2);
     assert.ok(transport.oauthCalls.every((call) => form(call).get("grant_type") !== "refresh_token"));
@@ -176,21 +212,45 @@ test("a refused service token is minted again once; there is no refresh token", 
   }
 });
 
-test("service-client env mode refuses agent commands and incomplete variables before any request", async () => {
+test("a service client's config refuses agent commands, and login --client-id refuses bad input, before any request", async () => {
   const dir = await testTemp("service-refuse-");
   try {
     const transport = new FakeTransport();
-    for (const argv of [["login"], ["logout"], ["agent", "enroll", "--email", "a@example.com", "--organization", "X"]]) {
-      const result = await cli(dir, ["--json", ...argv], transport, { SCREENRIG_CLIENT_ID: CLIENT, SCREENRIG_CLIENT_SECRET: SECRET });
+    const secretFile = await writeSecret(dir);
+    for (const argv of [["login", "--client-id", "not-a-client", "--client-secret-file", secretFile], ["login", "--client-id", CLIENT],
+      ["login", "--client-id", CLIENT, "--client-secret-file", secretFile, "--client-key-file", secretFile],
+      ["login", "--client-id", CLIENT, "--client-secret-file", secretFile, "--access", "read"]]) {
+      const result = await cli(dir, ["--json", ...argv], transport);
       assert.equal(result.code, ExitCode.Usage, argv.join(" "));
     }
-    for (const env of [{ SCREENRIG_CLIENT_ID: CLIENT }, { SCREENRIG_CLIENT_SECRET: SECRET }, { SCREENRIG_CLIENT_ID: "not-a-client", SCREENRIG_CLIENT_SECRET: SECRET },
-      { SCREENRIG_CLIENT_ID: CLIENT, SCREENRIG_CLIENT_SECRET: SECRET, SCREENRIG_CLIENT_KEY_FILE: "/nonexistent" }] as Array<Record<string, string>>) {
-      const result = await cli(dir, ["--json", "project", "show"], transport, env);
-      assert.equal(result.code, ExitCode.Config, JSON.stringify(Object.keys(env)));
-      assert.ok(!result.stdout.includes(SECRET));
+    for (const argv of [["login", "--client-id", CLIENT, "--client-key-file", path.join(dir, "missing.pem")], ["login", "--client-id", CLIENT, "--client-key-file", secretFile]]) {
+      const result = await cli(dir, ["--json", ...argv], transport);
+      assert.equal(result.code, ExitCode.Config, argv.join(" "));
     }
+    await saveClient(dir, { secretFile });
+    for (const argv of [["agent", "enroll", "--email", "a@example.com", "--organization", "X"], ["project", "token"]]) {
+      const result = await cli(dir, ["--json", ...argv], transport);
+      assert.equal(result.code, ExitCode.Usage, argv.join(" "));
+    }
+    await rm(secretFile);
+    const missing = await cli(dir, ["--json", "project", "show"], transport);
+    assert.equal(missing.code, ExitCode.Config, missing.stdout);
     assert.equal(transport.calls.length + transport.oauthCalls.length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("login --client-id refuses a config that holds an agent sign-in", async () => {
+  const dir = await testTemp("service-mixed-");
+  const configPath = path.join(dir, "screenrig", "config.json");
+  try {
+    await writeConfigAtomic(configPath, { api_url: API, project_id: "prj_OTHERAAAAAAAAAAAAAAAAAAA", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_stored_other_secret" },
+      { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: {} });
+    const before = await readFile(configPath, "utf8");
+    const result = await cli(dir, ["--json", "login", "--client-id", CLIENT, "--client-secret-file", await writeSecret(dir)], new FakeTransport());
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.equal(await readFile(configPath, "utf8"), before);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -198,7 +258,7 @@ test("service-client env mode refuses agent commands and incomplete variables be
 
 test("service-client create sends only a public key and writes a generated secret to a new 0600 file, never stdout", async () => {
   const dir = await testTemp("service-manage-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: {} };
   try {
     const agentToken = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agent_manage_secret";
     await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), { api_url: API, project_id: PROJECT, project_name: "Screens",
@@ -243,7 +303,7 @@ test("service-client create sends only a public key and writes a generated secre
 
 test("service-client writes the secret through the file it created, not through the path it reopens", async () => {
   const dir = await testTemp("service-secret-swap-");
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: {} };
   try {
     const agentToken = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agent_manage_secret";
     await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), { api_url: API, project_id: PROJECT, project_name: "Screens",

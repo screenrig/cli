@@ -467,7 +467,7 @@ export function normalizePlaylistForBundle(
       }
       if (category === "application") {
         if (!options.skipApplications) {
-          throw usageError("Playlist export does not support application primitives; pass --skip-applications to export the remaining supported content, or use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
+          throw usageError("Playlist export does not support application primitives; add --skip-applications to export the remaining supported content, or use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
         }
         skipped.primitives.push(stringField(primitive, "id", "Playlist primitive"));
         skippedApplications = true;

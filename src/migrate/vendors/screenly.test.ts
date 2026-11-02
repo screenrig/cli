@@ -222,7 +222,7 @@ test("migrate scan --from screenly prints what comes over and what does not, and
     const project = fakeProject();
     const h = await harness(project, configDir, cwd);
     const api = workspace();
-    const result = await h.invoke(["migrate", "scan", "--from", "screenly"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const result = await h.invoke(["migrate", "scan", "--from", "screenly"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.equal(result.code, 0, result.stdout);
     const report = result.json.data;
     assert.equal(report.vendor, "screenly");
@@ -247,13 +247,13 @@ test("migrate scan --from screenly prints what comes over and what does not, and
     assert.equal(scan.account, "01J9FX0000000000000000T001");
     assert.ok(!JSON.stringify(scan).includes(TOKEN));
     assert.equal(NOW.toISOString().slice(0, 10), "2026-10-28");
-    const refused = await h.invoke(["migrate", "scan", "--from", "screenly", "--dir", "refused"], { env: { SCREENLY_API_TOKEN: "wrong-token" }, vendorFetch: api.fetch });
+    const refused = await h.invoke(["migrate", "scan", "--from", "screenly", "--dir", "refused"], { credentials: { SCREENLY_API_TOKEN: "wrong-token" }, vendorFetch: api.fetch });
     assert.equal(refused.code, 3);
     assert.equal(refused.json.error.code, "vendor_refused");
     assert.ok(!refused.stdout.includes("wrong-token"));
-    const flag = await h.invoke(["migrate", "scan", "--from", "screenly", "--url", "https://x.example.com", "--dir", "flag"], { env: CREDENTIALS, vendorFetch: api.fetch });
+    const flag = await h.invoke(["migrate", "scan", "--from", "screenly", "--url", "https://x.example.com", "--dir", "flag"], { credentials: CREDENTIALS, vendorFetch: api.fetch });
     assert.equal(flag.code, 2);
-    assert.match(flag.json.error.detail, /Screenly does not take --url\. Screenly takes no vendor flags; it reads SCREENLY_API_TOKEN \(required, secret\)/);
+    assert.match(flag.json.error.detail, /Screenly does not take --url\. Screenly takes no vendor flags; its --credentials file holds SCREENLY_API_TOKEN \(required, secret\)/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwd, { recursive: true, force: true });

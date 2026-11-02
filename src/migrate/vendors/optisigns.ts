@@ -409,13 +409,13 @@ export const optisigns: VendorAdapter = {
   id: "optisigns",
   name: NAME,
   inputs: { timezone: true, files: "optional" },
-  credentials: [{ env: "OPTISIGNS_API_KEY", secret: true, required: true, help: "An API key from OptiSigns, API Key settings." }],
+  credentials: [{ name: "OPTISIGNS_API_KEY", secret: true, required: true, help: "An API key from OptiSigns, API Key settings." }],
   connect: [
     "In OptiSigns open API Keys (app.optisigns.com/app/s/apikeys), click New API Key, name it, and turn on the Screens, Files/Assets, Playlists and Schedules scopes with read access. The key is shown once.",
     "Making a key needs the Pro Plus plan or above, an Account Owner or Super Admin sign-in, and a portal that is not white-labeled.",
-    "Put OPTISIGNS_API_KEY=... in a file and pass it with --credentials.",
-    "OptiSigns has no way to download files through its API: download your files from OptiSigns into one folder and pass it with --files. Playlists, schedules and screens come from the API either way.",
-    "Pass --timezone with the zone your OptiSigns schedules use: the API gives event times as exact instants without one.",
+    "Put OPTISIGNS_API_KEY=... in a file and name it with --credentials.",
+    "OptiSigns has no way to download files through its API: download your files from OptiSigns into one folder and name it with --files. Playlists, schedules and screens come from the API either way.",
+    "Add --timezone with the zone your OptiSigns schedules use: the API gives event times as exact instants without one.",
   ],
   maps: [
     "Image, video and audio assets become media once their files are in --files, matched on the asset's file name; web assets become web page items.",
@@ -436,7 +436,7 @@ export const optisigns: VendorAdapter = {
     "https://docs.optisigns.com/quickstart",
     "https://api-doc.optisigns.com/",
   ],
-  example: "screenrig migrate scan --from optisigns --files ./optisigns-downloads --timezone America/Toronto",
+  example: "screenrig migrate scan --from optisigns --files ./optisigns-downloads --timezone America/Toronto --credentials ./optisigns-key.txt",
   async open(input) {
     const key = input.credentials.OPTISIGNS_API_KEY;
     const zone = input.timezone;

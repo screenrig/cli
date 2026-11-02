@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { processSettings } from "../host-settings.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { readAsset } from "../assets.js";
@@ -101,7 +102,7 @@ export class ArchiveSdkInjector implements SdkInjector {
 
 class ReleaseLocalSdkInjector implements SdkInjector {
   async inject(entries: ArchiveEntry[], request?: SdkInjectionRequest): Promise<SdkInjectionResult> {
-    const configured = process.env.SCREENRIG_SDK_RUNTIME;
+    const configured = processSettings().SCREENRIG_SDK_RUNTIME;
     let runtime: Buffer;
     try {
       runtime = configured ? await readFile(path.resolve(configured)) : readAsset("screenrig.runtime.js");

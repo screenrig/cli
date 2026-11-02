@@ -30,7 +30,7 @@ async function author(t: TestContext) {
     }));
     let output = "";
     const code = await run({ ...processRuntime(), argv: ["--config", config, "--json", "playlist", command, input],
-      cwd: () => directory, env: {}, transport, stdin: Readable.from([text]), isStdinTty: () => false,
+      cwd: () => directory, settings: {}, transport, stdin: Readable.from([text]), isStdinTty: () => false,
       stdout: new Writable({ write(chunk, _encoding, done) { output += chunk; done(); } }),
       stderr: new Writable({ write(_chunk, _encoding, done) { done(); } }),
     });

@@ -110,7 +110,7 @@ export async function triggerPull(file: string, runtime: CliRuntime): Promise<Tr
 export function triggerTargetBody(args: ParsedArgs): TriggerTarget | undefined {
   const tag = flagString(args.flags, "tag");
   const screenIds = flagString(args.flags, "screen-id");
-  if (tag !== undefined && screenIds !== undefined) throw usageError("Pass --tag TAG or --screen-id ID, not both.");
+  if (tag !== undefined && screenIds !== undefined) throw usageError("Add --tag TAG or --screen-id ID, not both.");
   if (tag !== undefined) return { tag: triggerTag(tag) };
   if (screenIds !== undefined) return { screen_ids: triggerScreenIds(screenIds).split(",") };
   return undefined;

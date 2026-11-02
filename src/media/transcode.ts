@@ -115,7 +115,7 @@ export function classifySource(filePath: string, explicitContentType?: string): 
   if (AUDIO_EXTENSIONS.has(extension)) return "audio";
   throw usageError(
     `Cannot tell whether ${path.basename(filePath)} is video, image, or audio from its extension. ` +
-      "Pass --content-type with the source type, or pass --no-transcode to upload the bytes unchanged.",
+      "Add --content-type with the source type, or add --no-transcode to upload the bytes unchanged.",
   );
 }
 
@@ -206,7 +206,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
         throw usageError(
           `${path.basename(filePath)} is an animated WebP of ${sourceWebp.width}x${sourceWebp.height}, ` +
             `which exceeds the ${options.maxEdge}px bound, and ffmpeg cannot decode animated WebP to resize it. ` +
-            "Supply the original source, or pass --no-transcode to upload it unchanged.",
+            "Supply the original source, or add --no-transcode to upload it unchanged.",
         );
       }
       transcodeSpan.finish({
@@ -238,7 +238,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     }
     throw usageError(
       `ffprobe found no decodable ${kind} stream in ${path.basename(filePath)}. ` +
-        "Pass --no-transcode to upload the bytes unchanged.",
+        "Add --no-transcode to upload the bytes unchanged.",
     );
   }
 
@@ -455,7 +455,7 @@ async function transcodeAudio(
 ): Promise<TranscodeResult> {
   const name = path.basename(filePath);
   if (!probe.hasAudio) {
-    throw usageError(`ffprobe found no decodable audio stream in ${name}. Pass --no-transcode to upload MP3 bytes unchanged.`);
+    throw usageError(`ffprobe found no decodable audio stream in ${name}. Add --no-transcode to upload MP3 bytes unchanged.`);
   }
   if (probe.durationSeconds > 0 && (probe.durationSeconds < MIN_AUDIO_SECONDS || probe.durationSeconds > MAX_AUDIO_SECONDS)) {
     throw usageError(`${name} runs ${probe.durationSeconds.toFixed(1)} s; soundtrack audio must be 1 second to 3 hours long.`);
@@ -780,7 +780,7 @@ function planVideo(
     throw usageError(
       `This ffmpeg build has no ${encoder} encoder, so it cannot produce ${
         options.codec === "hevc" ? "H.265" : "H.264"
-      }. Install an ffmpeg built with ${encoder}, or pass ${alternate}.`,
+      }. Install an ffmpeg built with ${encoder}, or add ${alternate}.`,
       {
         command: "screenrig doctor",
         reason: "Report which encoders the resolved ffmpeg build provides.",
@@ -893,7 +893,7 @@ async function planImage(
   if (animated) {
     throw usageError(
       "This ffmpeg build has no libwebp encoder, so it cannot produce animated WebP. " +
-        "cwebp encodes stills only. Install an ffmpeg built with libwebp, or pass --no-transcode " +
+        "cwebp encodes stills only. Install an ffmpeg built with libwebp, or add --no-transcode " +
         "to upload the source unchanged.",
       {
         command: "screenrig doctor",
@@ -907,7 +907,7 @@ async function planImage(
     throw usageError(
       "This ffmpeg build has no libwebp encoder, and cwebp is not available, so the CLI cannot produce WebP. " +
         "Install an ffmpeg built with libwebp, or install cwebp on PATH (or set SCREENRIG_CWEBP). " +
-        "Pass --no-transcode only when the source is already delivery WebP.",
+        "Add --no-transcode only when the source is already delivery WebP.",
       {
         command: "screenrig doctor",
         reason: "Report which image encoders the resolved toolchain provides.",

@@ -11,7 +11,7 @@ import { FakeTransport } from "./transport/fake.js";
 
 test("project export pages K/V, reports unread state and application files, and refreshes its manifest", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "screenrig-export-command-"));
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => directory, env: { XDG_CONFIG_HOME: directory } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => directory, settings: { XDG_CONFIG_HOME: directory } };
   try {
     await writeConfigAtomic(path.join(directory, "screenrig", "config.json"), {
       api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret",
@@ -47,7 +47,7 @@ test("project export pages K/V, reports unread state and application files, and 
       const stderr = new Writable({ write(_chunk, _encoding, done) { done(); } });
       const code = await run({
         argv: [human ? "--human" : "--json", "project", "export", "export", "--no-media"],
-        env: fs.env, stdout, stderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
+        settings: fs.settings, stdout, stderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
         now: () => new Date("2026-10-29T12:00:00Z"), sleep: async () => undefined,
       });
       stdout.end();
@@ -75,7 +75,7 @@ test("project export pages K/V, reports unread state and application files, and 
     const deniedStderr = new Writable({ write(_chunk, _encoding, done) { done(); } });
     assert.equal(await run({
       argv: ["--json", "project", "export", "export", "--no-media"],
-      env: fs.env, stdout: deniedStdout, stderr: deniedStderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
+      settings: fs.settings, stdout: deniedStdout, stderr: deniedStderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
       now: () => new Date("2026-10-29T12:00:00Z"), sleep: async () => undefined,
     }), 0);
     deniedStdout.end();
@@ -93,7 +93,7 @@ test("project export pages K/V, reports unread state and application files, and 
     const stderr = new Writable({ write(_chunk, _encoding, done) { done(); } });
     assert.equal(await run({
       argv: ["--json", "project", "export", "export", "--no-media"],
-      env: fs.env, stdout, stderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
+      settings: fs.settings, stdout, stderr, fs, transport, homedir: fs.homedir, cwd: () => directory,
       now: () => new Date("2026-10-29T12:00:00Z"), sleep: async () => undefined,
     }), 0);
     stdout.end();

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { HostSettings } from "./host-settings.js";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
@@ -14,8 +15,8 @@ import {
 } from "./config.js";
 import { testTemp } from "./test-temp.js";
 
-function realFs(home: string, env: NodeJS.Dict<string> = { XDG_CONFIG_HOME: home }): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env };
+function realFs(home: string, settings: HostSettings = { XDG_CONFIG_HOME: home }): ConfigFs {
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings };
 }
 
 test("project identity resolves only from project config fields", async () => {
@@ -152,16 +153,6 @@ test("log_socket is resolved from the user config and rejected when it is a dire
   await rm(home, { recursive: true, force: true });
 });
 
-test("a pasted SCREENRIG_TOKEN is rejected instead of overriding durable credentials", async () => {
-  const home = await testTemp("config-token-branch-");
-  const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_TOKEN: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_pasted_secret" });
-  await assert.rejects(
-    resolveConfig({ flags: {}, fs: fsLike }),
-    /SCREENRIG_TOKEN is not supported/,
-  );
-  await rm(home, { recursive: true, force: true });
-});
-
 test("default config path is config.json when SCREENRIG_CONFIG is unset and local-dev is absent", async () => {
   const home = await testTemp("config-default-json-");
   const fsLike = realFs(home);
@@ -201,7 +192,7 @@ test("default resolution reuses production while alternative profiles remain unt
     const explicit = await resolveConfig({ flags: { config: alternate }, fs: fsLike });
     assert.equal(explicit.apiUrl, "https://api.example.com");
     assert.equal(explicit.token, "alternate-test-token");
-    const localEnv = await resolveConfig({ flags: {}, fs: { ...fsLike, env: { ...fsLike.env, SCREENRIG_CONFIG: local } } });
+    const localEnv = await resolveConfig({ flags: {}, fs: { ...fsLike, settings: { ...fsLike.settings, SCREENRIG_CONFIG: local } } });
     assert.equal(localEnv.apiUrl, LOCAL_DEV_API_URL);
     assert.equal(localEnv.token, "local-test-token");
     for (const [file, config] of files) assert.equal(await readFile(file, "utf8"), JSON.stringify(config));
@@ -247,17 +238,17 @@ test("local-dev profile replaces a stored production default but preserves expli
 
   resolved = await resolveConfig({
     flags: { config: localDev, "api-url": "http://127.0.0.1:18088" },
-    fs: { ...fsLike, env: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
+    fs: { ...fsLike, settings: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
   });
   assert.equal(resolved.apiUrl, "http://127.0.0.1:18088");
   assert.equal(resolved.source.apiUrl, "flag");
 
   resolved = await resolveConfig({
     flags: { config: localDev },
-    fs: { ...fsLike, env: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
+    fs: { ...fsLike, settings: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
   });
   assert.equal(resolved.apiUrl, "http://127.0.0.1:28088");
-  assert.equal(resolved.source.apiUrl, "env");
+  assert.equal(resolved.source.apiUrl, "setting");
 
   await rm(home, { recursive: true, force: true });
 });

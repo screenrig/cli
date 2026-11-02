@@ -567,7 +567,7 @@ const DEFAULT_HINTS: Record<string, string> = {
   usage_error: "Fix the argument or input named in detail and run the command again. Add --help to the command to see its arguments, accepted values, and an example.",
   not_enrolled: "This installation has no active agent credential. Run the next command, then run the original command again.",
   unauthenticated: "This installation has no active agent credential. Run the next command, then run the original command again.",
-  config_error: "Fix the configuration named in detail, or pass --config with a different private config file. screenrig doctor checks the configuration without sending requests.",
+  config_error: "Fix the configuration named in detail, or add --config with a different private config file. screenrig doctor checks the configuration without sending requests.",
   file_error: "Check that the target directory exists, is writable, and has free space, or choose a different output path, then run the command again.",
   unexpected_response: "The API answered with something the CLI cannot use, often a proxy or gateway page. Check --api-url with screenrig doctor and retry; if it keeps happening, report the request_id with screenrig feedback bug.",
   transport_error: "The CLI could not reach the API. Check network connectivity and the configured API with screenrig doctor, then run the command again.",

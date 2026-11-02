@@ -17,7 +17,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const read = async () => JSON.parse(await readFile(config, "utf8"));
   async function invoke(transport: FakeTransport, args = command, now = "2026-09-10T12:00:00Z") {
     let stdout = "", stderr = "";
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...args], env: {}, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...args], settings: {}, transport,
       now: () => new Date(now),
       stdout: new Writable({ write(chunk, _encoding, done) { stdout += chunk; done(); } }),
       stderr: new Writable({ write(chunk, _encoding, done) { stderr += chunk; done(); } }),

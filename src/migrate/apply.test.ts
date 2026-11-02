@@ -36,13 +36,13 @@ async function scanFiles(w: World): Promise<void> {
 }
 
 async function scanFixture(w: World, extra: string[] = []): Promise<void> {
-  const scan = await w.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL, "--dir", "mig", ...extra], { env: { FIXTURE_TOKEN }, vendorFetch: fixtureRouter().fetch });
+  const scan = await w.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL, "--dir", "mig", ...extra], { credentials: { FIXTURE_TOKEN }, vendorFetch: fixtureRouter().fetch });
   assert.equal(scan.code, 0, scan.stdout);
 }
 
 const readMap = async (w: World): Promise<any> => JSON.parse(await readFile(path.join(w.dir, "map.json"), "utf8"));
 const applyFiles = (w: World, extra: string[] = []) => w.h.invoke([...APPLY, ...extra]);
-const applyFixture = (w: World, extra: string[] = [], router = fixtureRouter()) => w.h.invoke([...APPLY, ...extra], { env: { FIXTURE_TOKEN }, vendorFetch: router.fetch });
+const applyFixture = (w: World, extra: string[] = [], router = fixtureRouter()) => w.h.invoke([...APPLY, ...extra], { credentials: { FIXTURE_TOKEN }, vendorFetch: router.fetch });
 const sorted = <T>(rows: Iterable<T>, by: (row: T) => string): T[] => [...rows].sort((a, b) => by(a).localeCompare(by(b)));
 const writesTo = (project: FakeProject, route: string): number => project.writes().filter((write) => write === route).length;
 
@@ -647,7 +647,7 @@ test("apply needs the vendor key only when a download is due", async () => {
     assert.equal(dry.code, 0, dry.stdout);
     const missing = await w.h.invoke(APPLY);
     assert.equal(missing.code, 2);
-    assert.match(missing.json.error.detail, /Fixture CMS needs FIXTURE_TOKEN/);
+    assert.match(missing.json.error.detail, /Fixture CMS needs a FIXTURE_TOKEN line/);
     const fromFile = path.join(w.cwd, "fixture.env");
     await writeFile(fromFile, `# fixture\nFIXTURE_TOKEN="${FIXTURE_TOKEN}"\n`);
     const ok = await w.h.invoke([...APPLY, "--credentials", fromFile], { vendorFetch: fixtureRouter().fetch });

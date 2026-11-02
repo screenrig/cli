@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { HostSettings } from "../host-settings.js";
 import { loggingRunProcess, loggerOf } from "../log/logger.js";
 import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
@@ -41,9 +42,9 @@ const INSTALL_HINT =
 const VERSION_TIMEOUT_MS = 15_000;
 
 /** Where the CLI will look for the toolchain, without running anything. */
-export function ffmpegLookup(env: NodeJS.Dict<string>): FfmpegLookup {
-  const ffmpegEnv = trimmed(env.SCREENRIG_FFMPEG);
-  const ffprobeEnv = trimmed(env.SCREENRIG_FFPROBE);
+export function ffmpegLookup(settings: HostSettings): FfmpegLookup {
+  const ffmpegEnv = trimmed(settings.SCREENRIG_FFMPEG);
+  const ffprobeEnv = trimmed(settings.SCREENRIG_FFPROBE);
   return {
     ffmpeg: ffmpegEnv ?? "ffmpeg",
     ffprobe: ffprobeEnv ?? "ffprobe",
@@ -53,8 +54,8 @@ export function ffmpegLookup(env: NodeJS.Dict<string>): FfmpegLookup {
 }
 
 /** Where the CLI will look for `cwebp`, without running anything. */
-export function cwebpLookup(env: NodeJS.Dict<string>): CwebpLookup {
-  const cwebpEnv = trimmed(env.SCREENRIG_CWEBP);
+export function cwebpLookup(settings: HostSettings): CwebpLookup {
+  const cwebpEnv = trimmed(settings.SCREENRIG_CWEBP);
   return {
     cwebp: cwebpEnv ?? "cwebp",
     cwebpFromEnv: cwebpEnv !== undefined,
@@ -148,7 +149,7 @@ export async function resolveFfmpegToolchain(runtime: CliRuntime): Promise<Ffmpe
 
 async function probeToolchain(runtime: CliRuntime): Promise<FfmpegToolchain> {
   const run = runProcessFor(runtime);
-  const lookup = ffmpegLookup(runtime.env);
+  const lookup = ffmpegLookup(runtime.settings);
 
   const ffmpegVersionResult = await run({
     command: lookup.ffmpeg,
@@ -214,7 +215,7 @@ export async function resolveCwebpToolchain(runtime: CliRuntime): Promise<CwebpT
 
 async function probeCwebp(runtime: CliRuntime): Promise<CwebpToolchain | undefined> {
   const run = runProcessFor(runtime);
-  const lookup = cwebpLookup(runtime.env);
+  const lookup = cwebpLookup(runtime.settings);
   const result = await run({
     command: lookup.cwebp,
     args: ["-version"],

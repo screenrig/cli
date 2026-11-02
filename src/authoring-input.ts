@@ -41,7 +41,7 @@ export async function readAuthoringJson(file: string, runtime: CliRuntime): Prom
   try { return JSON.parse(text); } catch { throw usageError("Input is not valid JSON."); }
 }
 const outputExists = (output: string) =>
-  `Output file already exists: ${output}. Nothing was written and it still holds its earlier content. Choose a new --output path, or pass --overwrite to replace it.`;
+  `Output file already exists: ${output}. Nothing was written and it still holds its earlier content. Choose a new --output path, or add --overwrite to replace it.`;
 
 /** An empty file is what an interrupted earlier run leaves behind, never a prepared document. */
 async function holdsContent(output: string): Promise<boolean> {

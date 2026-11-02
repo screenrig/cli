@@ -26,7 +26,7 @@ export function describeVendor(adapter: VendorAdapter): Record<string, unknown> 
         ...(adapter.inputs.timezone ? [{ flag: "--timezone", required: false }] : []),
         ...(adapter.inputs.files ? [{ flag: "--files", required: adapter.inputs.files === "required" }] : []),
       ],
-      env: adapter.credentials.map((credential) => ({ name: credential.env, secret: credential.secret, required: credential.required, help: credential.help })),
+      credentials: adapter.credentials.map((credential) => ({ name: credential.name, secret: credential.secret, required: credential.required, help: credential.help })),
     },
     connect: [...adapter.connect],
     maps: [...adapter.maps],
@@ -46,7 +46,7 @@ export function vendorLines(adapter: VendorAdapter): string[] {
   return [
     `${adapter.id}: ${adapter.name}`,
     `  takes: ${flags.join(", ") || "no vendor flags"}`,
-    ...adapter.credentials.map((credential) => `  ${credential.env}${credential.secret ? " (secret)" : ""}${credential.required ? " (required)" : ""}: ${credential.help}`),
+    ...adapter.credentials.map((credential) => `  ${credential.name}${credential.secret ? " (secret)" : ""}${credential.required ? " (required)" : ""}: ${credential.help}`),
     ...adapter.connect.map((step, index) => `  connect ${index + 1}. ${step}`),
     ...adapter.maps.map((line) => `  maps: ${line}`),
     ...adapter.skips.map((line) => `  skips: ${line}`),
@@ -78,8 +78,8 @@ export async function chooseDir(runtime: CliRuntime, flag: string | undefined, v
   }
   if (found.length === 1) return new MigrationDir(path.resolve(runtime.cwd(), found[0]!));
   throw usageError(found.length === 0
-    ? "There is no migration directory here. Pass --dir DIR, the directory migrate scan wrote."
-    : `More than one migration directory is here (${found.join(", ")}). Pass --dir DIR for the one you mean.`, {
+    ? "There is no migration directory here. Add --dir DIR, the directory migrate scan wrote."
+    : `More than one migration directory is here (${found.join(", ")}). Add --dir DIR for the one you mean.`, {
     command: "screenrig migrate scan --from VENDOR",
     reason: "Reads the vendor account and writes a migration directory.",
   });
@@ -91,7 +91,7 @@ export function vendorHttpFor(runtime: CliRuntime, adapter: VendorAdapter): Vend
   return createVendorHttp({
     vendor: adapter.id,
     name: adapter.name,
-    credentialNames: adapter.credentials.map((credential) => credential.env),
+    credentialNames: adapter.credentials.map((credential) => credential.name),
     fetch: runtime.vendorFetch ?? globalThis.fetch,
     sleep: runtime.sleep,
     now: () => runtime.now().getTime(),

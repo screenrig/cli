@@ -46,7 +46,7 @@ export function httpFor(adapter: Pick<VendorAdapter, "id" | "name" | "credential
   return createVendorHttp({
     vendor: adapter.id,
     name: adapter.name,
-    credentialNames: adapter.credentials.map((credential) => credential.env),
+    credentialNames: adapter.credentials.map((credential) => credential.name),
     fetch: fetchImpl,
     sleep: async (ms) => {
       sleeps.push(ms);

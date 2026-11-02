@@ -21,16 +21,15 @@ export function parseCredentialFile(text: string): Record<string, string> {
 }
 
 /**
- * The vendor credentials an adapter declares. With `--credentials FILE` they are
- * read from that file and only from it; otherwise from the environment. Names the
- * adapter does not declare are ignored. Every message names a variable, never a
- * value.
+ * The vendor credentials an adapter declares, read from the `--credentials FILE`
+ * and only from it. Names the adapter does not declare are ignored. Every
+ * message names a credential, never a value.
  */
 export async function loadCredentials(
   adapter: Pick<VendorAdapter, "id" | "name" | "credentials">,
-  options: { file?: string; env: NodeJS.Dict<string>; read?: (file: string) => Promise<string> },
+  options: { file?: string; read?: (file: string) => Promise<string> },
 ): Promise<Record<string, string>> {
-  let source: Record<string, string | undefined> = options.env;
+  let source: Record<string, string> = {};
   if (options.file !== undefined) {
     let text: string;
     try {
@@ -42,13 +41,13 @@ export async function loadCredentials(
   }
   const values: Record<string, string> = {};
   for (const declared of adapter.credentials) {
-    const value = source[declared.env];
+    const value = source[declared.name];
     if (value !== undefined && value !== "") {
-      values[declared.env] = value;
+      values[declared.name] = value;
     } else if (declared.required) {
       throw usageError(
-        `${adapter.name} needs ${declared.env}${options.file !== undefined ? " in the --credentials file" : " in the environment, or in a file passed with --credentials FILE"}. ${declared.help}`,
-        { command: `screenrig migrate vendors ${adapter.id}`, reason: `Shows how to make a read-only key for ${adapter.name} and where to put it.` },
+        `${adapter.name} needs a ${declared.name} line in ${options.file !== undefined ? "the --credentials file" : "a file given with --credentials FILE"}. ${declared.help}`,
+        { command: `screenrig migrate vendors ${adapter.id}`, reason: `Shows how to make a read-only key for ${adapter.name} and what the file holds.` },
       );
     }
   }

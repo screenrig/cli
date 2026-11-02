@@ -479,13 +479,13 @@ export const xibo: VendorAdapter = {
   name: NAME,
   inputs: { url: "required", timezone: true },
   credentials: [
-    { env: "XIBO_CLIENT_ID", secret: false, required: true, help: "The Client ID of a Xibo Application that uses the Client Credentials grant (Administration, Applications)." },
-    { env: "XIBO_CLIENT_SECRET", secret: true, required: true, help: "The Client Secret of that Application." },
+    { name: "XIBO_CLIENT_ID", secret: false, required: true, help: "The Client ID of a Xibo Application that uses the Client Credentials grant (Administration, Applications)." },
+    { name: "XIBO_CLIENT_SECRET", secret: true, required: true, help: "The Client Secret of that Application." },
   ],
   connect: [
     "Make a dedicated CMS user that can view the library, layouts, campaigns, displays and schedule. A Client Credentials token acts as the user that owns the Application, so give that user nothing more.",
     "Signed in as that user, open Administration, then Applications, and add an Application. Enable the Client Credentials grant, save, then edit it to read the Client ID and Client Secret. The secret is shown once; reset it if it is lost.",
-    "Write XIBO_CLIENT_ID=... and XIBO_CLIENT_SECRET=... as two lines in a file only you can read, and pass it with --credentials FILE.",
+    "Write XIBO_CLIENT_ID=... and XIBO_CLIENT_SECRET=... as two lines in a file only you can read, and name it with --credentials FILE.",
     "--url is the address you sign in at, including the folder when the CMS is installed in one (https://example.org/xibo). --timezone is the CMS's own time zone, used to read the hours of events that play at the same clock time on every display.",
   ],
   maps: [
@@ -509,7 +509,7 @@ export const xibo: VendorAdapter = {
     "https://raw.githubusercontent.com/xibosignage/xibo-cms/develop/web/swagger.json",
     "https://github.com/xibosignage/xibo-cms/blob/develop/lib/Entity/Schedule.php",
   ],
-  example: "screenrig migrate scan --from xibo --url https://cms.example.com --timezone America/Toronto --credentials ./xibo.env",
+  example: "screenrig migrate scan --from xibo --url https://cms.example.com --timezone America/Toronto --credentials ./xibo-key.txt",
   async open(input) {
     const address = cmsAddress(input.url);
     const id = input.credentials.XIBO_CLIENT_ID;

@@ -12,9 +12,9 @@ import { TEMPORARY_PROTOCOL_VERSION, type Project, type ProjectContextList, type
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import { ApiClient, RequestIds, requireToken, type ListAllOptions } from "./client.js";
 import { UPTIME_MAX_DAYS } from "./series.js";
-import { resolveConfig, readConfigFile, type ScreenRigConfig } from "./config.js";
+import { defaultConfigPath, resolveConfig, readConfigFile, type ScreenRigConfig } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
-import { accessClaims, serviceCredentialsFromEnv, type ServiceClientCredentials } from "./oauth.js";
+import { accessClaims, serviceCredentialsFromConfig, type ServiceClientCredentials } from "./oauth.js";
 import { pendingReviewLines, pendingReviewWarning, reviewNext, reviewNoteHeaders } from "./reviews.js";
 import { OAuthSession, refreshExpiryDays, type SessionRuntime } from "./oauth-session.js";
 import { successEnvelope, type Warning } from "./envelope.js";
@@ -72,7 +72,7 @@ export function transportFor(runtime: CliRuntime, apiUrl: string, token?: string
 export const oauthSessions = new WeakMap<CliRuntime, OAuthSession>();
 
 export function sessionRuntime(runtime: CliRuntime): SessionRuntime {
-  return { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep, logger: loggerOf(runtime) };
+  return { fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep, logger: loggerOf(runtime) };
 }
 
 export function oauthSessionFor(runtime: CliRuntime, resolved: { configPath: string; apiUrl: string }): OAuthSession {
@@ -210,33 +210,40 @@ export function streamEnvelope(runtime: CliRuntime, data: unknown, requestId: st
 export type CommandHandler = (args: ParsedArgs, runtime: CliRuntime) => Promise<CommandResult>;
 export type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 
-/** A service client's credentials for this invocation (SCREENRIG_CLIENT_ID mode). */
+/** A service client's credentials for this invocation (a config saved by login --client-id). */
 const serviceCredentials = new WeakMap<CliRuntime, ServiceClientCredentials>();
 
 /** Commands that act as an agent installation; a service-client run has none. */
-const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "project token", "agent enroll", "agent disconnect", "agent revoke-identity"]);
+const AGENT_ONLY_COMMANDS = new Set(["project token", "agent enroll", "agent disconnect", "agent revoke-identity"]);
 
 /**
- * SCREENRIG_CLIENT_ID mode: the run authenticates as a service client. Its
- * config, lock and token live in memory for this invocation only, so the
- * stored config is neither read nor written.
+ * A config saved by `screenrig login --client-id` makes every run a service
+ * client: the key or secret is read from the file the config names, and the
+ * run keeps its token, lock and project state in memory, so the stored config
+ * is neither read again nor written. login and logout manage the saved client.
  */
 function withServiceClient(run: CommandHandler): CommandHandler {
   return async (args, runtime) => {
-    const service = await serviceCredentialsFromEnv(runtime.env, (file) => readFile(file, "utf8"));
-    if (!service) return run(args, runtime);
+    const top = args.command[0] ?? "";
+    if (top === "login" || top === "logout") return run(args, runtime);
+    const configPath = flagString(args.flags, "config") ?? await defaultConfigPath(runtime.fs);
+    const stored = await readConfigFile(configPath, runtime.fs).catch(() => undefined);
+    const saved = stored?.service_client;
+    if (!saved) return run(args, runtime);
     const command = args.command.slice(0, 2).join(" ");
-    if (AGENT_ONLY_COMMANDS.has(command) || AGENT_ONLY_COMMANDS.has(args.command[0] ?? "")) {
-      throw usageError(`${command} acts as an agent installation; this run is a service client because SCREENRIG_CLIENT_ID is set. Nothing was sent.`);
+    if (AGENT_ONLY_COMMANDS.has(command) || AGENT_ONLY_COMMANDS.has(top)) {
+      throw usageError(`${command} acts as an agent installation; ${configPath} signs in as service client ${saved.client_id}. Use another --config, or screenrig logout to remove the service client. Nothing was sent.`);
     }
+    const service = await serviceCredentialsFromConfig(saved, (file) => readFile(file, "utf8"));
     const root = path.join(tmpdir(), `screenrig-service-${process.pid}-${randomBytes(8).toString("hex")}`);
-    const stored = runtime.fs;
-    runtime.fs = memoryConfigFs(stored, root);
+    const storedFs = runtime.fs;
+    runtime.fs = memoryConfigFs(storedFs, root);
     serviceCredentials.set(runtime, service);
+    const origin: Record<string, string> = flagString(args.flags, "api-url") === undefined && !runtime.settings.SCREENRIG_API_URL && stored?.api_url ? { "api-url": stored.api_url } : {};
     try {
-      return await run({ ...args, flags: { ...args.flags, config: path.join(root, "config.json") } }, runtime);
+      return await run({ ...args, flags: { ...args.flags, ...origin, config: path.join(root, "config.json") } }, runtime);
     } finally {
-      runtime.fs = stored;
+      runtime.fs = storedFs;
       serviceCredentials.delete(runtime);
     }
   };
@@ -294,9 +301,9 @@ export function commandHandler(
 ): CommandHandler {
   const run: CommandHandler = async (args, runtime) => {
     const repair = flagBool(args.flags, "repair-config");
-    let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
+    let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir }, repair });
     if (args.command[0] === "project" && args.command[1] === "create" && resolved.identityToken && !flagString(args.flags, "project-id")) {
-      const current = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+      const current = await readConfigFile(resolved.configPath, { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir });
       if (!resolved.projectId || Object.keys(current?.identity_writes ?? {}).length) {
         resolved = { ...resolved, token: resolved.identityToken, projectId: undefined, projectName: undefined,
           organizationId: undefined, organizationName: undefined, identityWriteScope: true };
@@ -348,7 +355,7 @@ export function commandHandler(
       recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
       if (recovery) writeRecoveries.set(runtime, recovery);
       let result = await handler(args, runtime, resolved);
-      const expiring = signInExpiryWarning((await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }).catch(() => undefined))?.oauth, runtime.now());
+      const expiring = signInExpiryWarning((await readConfigFile(resolved.configPath, { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir }).catch(() => undefined))?.oauth, runtime.now());
       if (expiring && result.output !== "stream") {
         result = { ...result, envelope: { ...result.envelope, warnings: [...(result.envelope.warnings ?? []), expiring] } };
       }
@@ -420,7 +427,7 @@ export function requirePrivateNoStore(headers: Record<string, string>, context: 
 /** Identity is a scope of the sign-in's access token, renewed like any other. */
 export async function identityForCommand(runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
   const session = oauthSessionFor(runtime, resolved);
-  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir });
   if (!stored?.oauth && !session.serviceMode) throw missingCredentialError(resolved);
   const identityToken = await session.identityToken();
   if (!identityToken) {

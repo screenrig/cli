@@ -13,7 +13,7 @@ async function invoke(argv: string[], transport = new FakeTransport(), authentic
   if (authenticated) await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-only-token" }), { mode: 0o600 });
   let stdout = "", stderr = "";
   try {
-    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], env: {}, transport,
+    const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], settings: {}, transport,
       isStderrTty: () => tty,
       stdout: new Writable({ write(chunk, _encoding, done) { stdout += chunk; done(); } }),
       stderr: new Writable({ write(chunk, _encoding, done) { stderr += chunk; done(); } }),

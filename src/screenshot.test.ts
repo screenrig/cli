@@ -48,11 +48,11 @@ async function withRuntime(
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   };
   const runtime: CliRuntime = {
     argv,
-    env: extra?.env ?? fsLike.env,
+    settings: extra?.settings ?? fsLike.settings,
     stdout,
     stderr,
     now: extra?.now ?? (() => new Date("2026-08-14T17:00:00.000Z")),
@@ -77,7 +77,7 @@ async function enrolledFs(configDir: string): Promise<ConfigFs> {
     chmod,
     stat,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
   };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),

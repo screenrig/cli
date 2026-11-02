@@ -69,9 +69,10 @@ against the origin it was issued for, so keep one profile per environment.
 - `screenrig login` signs in with a person's approval (a dashboard URL and code);
   `screenrig logout` revokes the session. `agent status` shows the granted
   access and capabilities.
-- CI uses a service client: `SCREENRIG_CLIENT_ID` with
-  `SCREENRIG_CLIENT_KEY_FILE` (or `SCREENRIG_CLIENT_SECRET`) runs with no login.
-  See `screenrig service-client --help`.
+- CI uses a service client: `screenrig --config PATH login --client-id scl_...
+  --client-key-file KEY.pem` (or `--client-secret-file FILE`) saves it in that
+  config, and every command with that config signs in as the client, reading
+  the key or secret file each time. See `screenrig service-client --help`.
 
 Writes persist an idempotency key before sending. After an ambiguous failure,
 rerun the same command with unchanged input and it reuses the key.

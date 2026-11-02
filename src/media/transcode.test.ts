@@ -254,7 +254,7 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
 
   const runtime = {
     argv: [],
-    env: {},
+    settings: {},
     stdout: new PassThrough(),
     stderr,
     now: () => new Date((clock += 100)),
@@ -675,8 +675,8 @@ test("real video transcodes keep faststart, constant 30 fps and zero-based track
     assert.equal(result.code, 0, result.spawnError ?? result.stderrTail);
     return result.stdout;
   };
-  const ffmpeg = runtime.env.SCREENRIG_FFMPEG || "ffmpeg";
-  const ffprobe = runtime.env.SCREENRIG_FFPROBE || "ffprobe";
+  const ffmpeg = runtime.settings.SCREENRIG_FFMPEG || "ffmpeg";
+  const ffprobe = runtime.settings.SCREENRIG_FFPROBE || "ffprobe";
   await run(ffmpeg, [
     "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24",
     "-frames:v", "240", "-c:v", "libx264", "-profile:v", "baseline",
@@ -933,7 +933,7 @@ test("without libwebp, SCREENRIG_CWEBP selects the cwebp binary", async () => {
     encoders: ENCODER_LISTING_NO_WEBP,
     cwebp: true,
   });
-  runtime.env = { ...runtime.env, SCREENRIG_CWEBP: "/opt/libwebp/bin/cwebp" };
+  runtime.settings = { ...runtime.settings, SCREENRIG_CWEBP: "/opt/libwebp/bin/cwebp" };
 
   const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
   try {
@@ -1015,7 +1015,7 @@ test("without libwebp or cwebp, image transcode names both missing pieces", asyn
         assert.match(error.problem.detail, /no libwebp encoder/);
         assert.match(error.problem.detail, /cwebp is not available/);
         assert.match(error.problem.detail, /SCREENRIG_CWEBP/);
-        assert.doesNotMatch(error.problem.detail, /or pass --no-transcode to upload the source unchanged/);
+        assert.doesNotMatch(error.problem.detail, /or add --no-transcode to upload the source unchanged/);
         return true;
       },
     );

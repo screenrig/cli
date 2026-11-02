@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { childEnv } from "./child-env.js";
+import { processSettings, type HostSettings } from "./host-settings.js";
 
 export type OpenUrl = (url: string) => Promise<boolean>;
 
@@ -12,11 +12,11 @@ const OPENER_SETTLE_MS = 2000;
  * opener that cannot start or exits non-zero, as xdg-open does with no
  * desktop, did not open anything, so the caller prints the URL instead.
  */
-export function spawnDetached(command: string, argv: string[], settleMs = OPENER_SETTLE_MS, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+export function spawnDetached(command: string, argv: string[], settleMs = OPENER_SETTLE_MS): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const finish = (opened: boolean) => { if (!settled) { settled = true; resolve(opened); } };
-    const child = spawn(command, argv, { detached: true, stdio: "ignore", shell: false, env: childEnv(env) });
+    const child = spawn(command, argv, { detached: true, stdio: "ignore", shell: false });
     child.once("error", () => finish(false));
     child.once("exit", (code) => finish(code === 0));
     child.once("spawn", () => {
@@ -28,9 +28,9 @@ export function spawnDetached(command: string, argv: string[], settleMs = OPENER
 }
 
 /** A Linux or BSD session with neither X11 nor Wayland has no browser to open. */
-export function hasDesktop(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): boolean {
+export function hasDesktop(platform: NodeJS.Platform = process.platform, settings: HostSettings = processSettings()): boolean {
   if (platform === "darwin" || platform === "win32") return true;
-  return Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+  return Boolean(settings.DISPLAY || settings.WAYLAND_DISPLAY);
 }
 
 export const openExternalUrl: OpenUrl = async (url) => {

@@ -248,7 +248,9 @@ export function screenTableLines(items: Screen[], now: Date): string[] {
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withFolder ? ["FOLDER"] : []), ...(withFields ? ["FIELDS"] : []), ...(withLocation ? ["LOCATION"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
+  const optional: Array<[boolean, string]> = [[withPlatform, "PLATFORM"], [withReason, "REASON"], [withTags, "TAGS"], [withFolder, "FOLDER"], [withFields, "FIELDS"],
+    [withLocation, "LOCATION"], [withAssignment, "ASSIGNED"], [withHealth, "HEALTH"], [withUpgrade, "UPGRADE"]];
+  const header = ["ID", "LABEL", "STATE", ...optional.filter(([shown]) => shown).map(([, name]) => name)];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -413,7 +415,7 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
   const folder = flagString(args.flags, "folder");
   const folderId = folder === undefined ? undefined : screenFolderId(folder, "--folder");
   const enrollmentRuntime = {
-    fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
+    fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir },
     now: runtime.now,
     sleep: runtime.sleep,
   };
@@ -893,7 +895,7 @@ export const handleScreenRecover = commandHandler(async (args, runtime, resolved
   let response;
   try {
     // A fresh Idempotency-Key per invocation: the client mints one when the
-    // operator did not pass --idempotency-key, and write recovery keeps it.
+    // operator did not add --idempotency-key, and write recovery keeps it.
     response = await client.call({
       method: "POST",
       path: `/api/screens/${id}/recovery/confirm`,

@@ -26,7 +26,7 @@ export async function browserSetupCommand(
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const retryRuntime = {
-    fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
+    fs: { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir },
     now: runtime.now,
     sleep: runtime.sleep,
   };

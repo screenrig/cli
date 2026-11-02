@@ -35,7 +35,7 @@ async function enrolled(t: TestContext): Promise<Env> {
   const configDir = await testTemp("paging-cfg-");
   const cwd = await testTemp("paging-cwd-");
   t.after(() => Promise.all([rm(configDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]));
-  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   return { fs, cwd };
 }
@@ -46,7 +46,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env) {
   const outP = collect(stdout);
   const errP = collect(stderr);
   const runtime: CliRuntime = {
-    argv, env: env.fs.env, stdout, stderr, now: () => new Date("2026-08-14T17:00:00.000Z"), sleep: async () => undefined,
+    argv, settings: env.fs.settings, stdout, stderr, now: () => new Date("2026-08-14T17:00:00.000Z"), sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
   };
   const code = await run(runtime);

@@ -48,7 +48,7 @@ function collect(stream: PassThrough): Promise<string> {
 }
 
 function realFs(home: string): ConfigFs {
-  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env: { XDG_CONFIG_HOME: home } };
+  return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, settings: { XDG_CONFIG_HOME: home } };
 }
 
 async function withRuntime(
@@ -63,7 +63,7 @@ async function withRuntime(
   const fsLike = extra.fs ?? realFs(extra.configDir);
   const runtime: CliRuntime = {
     argv,
-    env: fsLike.env,
+    settings: fsLike.settings,
     stdout,
     stderr,
     now: extra.now ?? (() => new Date("2026-08-14T17:00:00.000Z")),
@@ -487,7 +487,7 @@ test("attempts, wait_ms, and transfer_ms track retries separately", async () => 
     const result = await runMediaUploadBatch({
       runtime: {
         argv: [],
-        env: fsLike.env,
+        settings: fsLike.settings,
         stdout,
         stderr,
         now: () => {
@@ -543,7 +543,7 @@ test("state file is 0600 and replaced atomically", async () => {
     stat,
     rm,
     homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir },
+    settings: { XDG_CONFIG_HOME: configDir },
     rename: async (from, to) => {
       if (path.resolve(String(to)) === path.resolve(statePath)) {
         assert.match(String(from), /\.tmp$/);
@@ -596,7 +596,7 @@ test("state file refuses an api_url or project mismatch", async () => {
         runMediaUploadBatch({
           runtime: {
             argv: [],
-            env: fsLike.env,
+            settings: fsLike.settings,
             stdout,
             stderr,
             now: () => new Date("2026-08-14T17:00:00.000Z"),
@@ -642,7 +642,7 @@ test("operation log emits batch and per-item local pairs without signed material
     const result = await runMediaUploadBatch({
       runtime: {
         argv: [],
-        env: fsLike.env,
+        settings: fsLike.settings,
         stdout,
         stderr,
         now: () => new Date("2026-08-14T17:00:00.000Z"),

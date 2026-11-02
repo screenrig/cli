@@ -36,7 +36,7 @@ export class WriteRecovery {
   constructor(private readonly resolved: ResolvedConfig, private readonly runtime: CliRuntime, private readonly command?: string) {}
 
   private async update<T>(work: (config: ScreenRigConfig, pending: Ledger) => T): Promise<T> {
-    const fs = { ...this.runtime.fs, env: this.runtime.env, homedir: this.runtime.homedir };
+    const fs = { ...this.runtime.fs, settings: this.runtime.settings, homedir: this.runtime.homedir };
     return withConfigLock(this.resolved.configPath, fs,
       { sleep: this.runtime.sleep, now: () => this.runtime.now().getTime() }, async () => {
         const stored = await readConfigFile(this.resolved.configPath, fs);
@@ -161,7 +161,7 @@ export async function manageWriteRecovery(
   if (action !== "list" && (!id || !/^wr_[a-f0-9]{64}$/.test(id))) {
     throw usageError("Use a recovery ID returned by screenrig recovery list.");
   }
-  const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const fs = { ...runtime.fs, settings: runtime.settings, homedir: runtime.homedir };
   return withConfigLock(resolved.configPath, fs,
     { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
       const stored = await readConfigFile(resolved.configPath, fs);

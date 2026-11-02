@@ -30,7 +30,7 @@ test("migrate vendors works offline, lists the systems sorted with files last, a
     const files = all.json.data.vendors.find((vendor: { id: string }) => vendor.id === "files");
     assert.equal(files.name, "Files");
     assert.deepEqual(files.inputs.flags.map((flag: { flag: string }) => flag.flag), ["--timezone", "--files"]);
-    assert.deepEqual(files.inputs.env, []);
+    assert.deepEqual(files.inputs.credentials, []);
     for (const field of ["connect", "maps", "skips", "docs"]) assert.ok(Array.isArray(files[field]) && files[field].length > 0, field);
     assert.match(files.example, /^screenrig migrate scan --from files --files /);
     const one = await t.h.invoke(["migrate", "vendors", "files"]);
@@ -175,11 +175,11 @@ test("a new scan replaces scan.json and leaves the map; a map bound to another v
   }
 });
 
-test("scan against a vendor API: the key comes from the environment, files fill in originals, and a refused key is vendor_refused", async () => {
+test("scan against a vendor API: the key comes from --credentials, files fill in originals, and a refused key is vendor_refused", async () => {
   const t = await setup();
   try {
     const router = fixtureRouter();
-    const result = await t.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL], { env: { FIXTURE_TOKEN }, vendorFetch: router.fetch });
+    const result = await t.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL], { credentials: { FIXTURE_TOKEN }, vendorFetch: router.fetch });
     assert.equal(result.code, 0, result.stdout);
     const report = result.json.data;
     assert.deepEqual(report.found, { media: 3, playlists: 2, layouts: 1, schedules: 4, groups: 2, screens: 3 });
@@ -187,7 +187,7 @@ test("scan against a vendor API: the key comes from the environment, files fill 
     assert.deepEqual(report.not_imported.map((entry: { kind: string; source_id: string; reason: string }) => [entry.kind, entry.source_id]), [["media", "3"], ["schedule", "sc3"]]);
     assert.match(report.not_imported[1].reason, /by the month/);
     assert.ok(router.requests.every((request) => request.authorization === `Bearer ${FIXTURE_TOKEN}`));
-    const refused = await t.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL, "--dir", "refused"], { env: { FIXTURE_TOKEN }, vendorFetch: fixtureRouter({ refuse: true }).fetch });
+    const refused = await t.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL, "--dir", "refused"], { credentials: { FIXTURE_TOKEN }, vendorFetch: fixtureRouter({ refuse: true }).fetch });
     assert.equal(refused.code, 3);
     assert.equal(refused.json.error.code, "vendor_refused");
     assert.match(refused.json.error.detail, /Check FIXTURE_TOKEN/);
@@ -195,7 +195,7 @@ test("scan against a vendor API: the key comes from the environment, files fill 
     await assert.rejects(stat(path.join(t.cwd, "refused")), { code: "ENOENT" });
     const missing = await t.h.invoke(["migrate", "scan", "--from", "fixture", "--url", FIXTURE_URL, "--dir", "missing"], { vendorFetch: router.fetch });
     assert.equal(missing.code, 2);
-    assert.match(missing.json.error.detail, /Fixture CMS needs FIXTURE_TOKEN in the environment, or in a file passed with --credentials FILE/);
+    assert.match(missing.json.error.detail, /Fixture CMS needs a FIXTURE_TOKEN line in a file given with --credentials FILE/);
   } finally {
     await t.cleanup();
   }

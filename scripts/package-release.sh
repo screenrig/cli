@@ -11,7 +11,7 @@ esac
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/screenrig-cli-release.XXXXXX")"
 trap 'rm -rf -- "${temporary}"' EXIT
 
-# Minified dist/bin.js and the dist/*.js chunks it loads per command group, with
+# Readable (unminified) dist/bin.js and the dist/*.js chunks it loads per command group, with
 # every runtime dependency inside them, and assets/, built from `npm run build`
 # output.
 install -d "${temporary}/normalized/package"

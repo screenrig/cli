@@ -53,19 +53,19 @@ test("untagged local trees use YY.MM.0-dev in UTC", () => {
 test("placeholder package.json is not a product version", () => {
   assert.equal(PLACEHOLDER_VERSION, "0.1.0");
   assert.equal(
-    resolveCliVersion({ env: {}, packageVersion: PLACEHOLDER_VERSION, now: new Date("2026-09-07T00:00:00.000Z") }),
+    resolveCliVersion({ settings: {}, packageVersion: PLACEHOLDER_VERSION, now: new Date("2026-09-07T00:00:00.000Z") }),
     "26.09.0-dev",
   );
 });
 
 test("stamped package.json and SCREENRIG_VERSION win in that order", () => {
-  assert.equal(resolveCliVersion({ env: {}, packageVersion: "26.09.2" }), "26.09.2");
+  assert.equal(resolveCliVersion({ settings: {}, packageVersion: "26.09.2" }), "26.09.2");
   assert.equal(
-    resolveCliVersion({ env: { SCREENRIG_VERSION: "26.09.3" }, packageVersion: "26.09.2" }),
+    resolveCliVersion({ settings: { SCREENRIG_VERSION: "26.09.3" }, packageVersion: "26.09.2" }),
     "26.09.3",
   );
   assert.equal(
-    resolveCliVersion({ env: { SCREENRIG_VERSION: "not-a-version" }, packageVersion: "26.09.2" }),
+    resolveCliVersion({ settings: { SCREENRIG_VERSION: "not-a-version" }, packageVersion: "26.09.2" }),
     "26.09.2",
   );
 });

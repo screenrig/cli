@@ -33,7 +33,7 @@ interface Harness {
 async function harness(t: TestContext): Promise<Harness> {
   const dir = await testTemp("media-replace-");
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
@@ -52,7 +52,7 @@ async function harness(t: TestContext): Promise<Harness> {
       let output = "";
       let errors = "";
       const code = await run({
-        argv: ["--json", ...argv], env: fs.env, fs, homedir: fs.homedir, cwd: () => dir, transport,
+        argv: ["--json", ...argv], settings: fs.settings, fs, homedir: fs.homedir, cwd: () => dir, transport,
         stdout: new Writable({ write(chunk, _encoding, done) { output += chunk; done(); } }),
         stderr: new Writable({ write(chunk, _encoding, done) { errors += chunk; done(); } }),
         now: () => new Date(AT), sleep: async () => undefined, signedRawPut,
@@ -238,8 +238,8 @@ test("media versions follows next_cursor to the end, or reads one page with --li
   const human = await (async () => {
     let output = "";
     const code = await run({
-      argv: ["--human", "media", "versions", MEDIA, "--limit", "1"], env: { XDG_CONFIG_HOME: cli.dir }, homedir: () => cli.dir, cwd: () => cli.dir, transport,
-      fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => cli.dir, env: { XDG_CONFIG_HOME: cli.dir } },
+      argv: ["--human", "media", "versions", MEDIA, "--limit", "1"], settings: { XDG_CONFIG_HOME: cli.dir }, homedir: () => cli.dir, cwd: () => cli.dir, transport,
+      fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => cli.dir, settings: { XDG_CONFIG_HOME: cli.dir } },
       stdout: new Writable({ write(chunk, _encoding, done) { output += chunk; done(); } }),
       stderr: new Writable({ write(_chunk, _encoding, done) { done(); } }),
       now: () => new Date(AT), sleep: async () => undefined,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Bundle the built CLI (dist/ after `npm run build`) and every runtime
-// dependency into minified ESM files: dist/bin.js and the flat dist/*.js chunks
+// dependency into readable (unminified) ESM files: dist/bin.js and the flat dist/*.js chunks
 // it loads per command group. Write the files that travel with them: assets/,
 // the runtime dependency lock, the license notices of every bundled package,
 // and a package.json for the bundle.
@@ -17,8 +17,6 @@ const MANIFEST_FIELDS = ["name", "version", "private", "description", "homepage"
 // The Claude plugin directory reads at most 256 KiB of a script and holds a
 // larger one for review, so no bundled file may be bigger.
 const MAX_OUTPUT_BYTES = 256 * 1024;
-// Short lines keep the minified code reviewable as text.
-const LINE_LIMIT = 500;
 
 function packageOf(input) {
   const parts = input.split(/[\\/]/);
@@ -35,6 +33,94 @@ async function licenseText(name) {
   return (await readFile(path.join(directory, license), "utf8")).trim();
 }
 
+// Readable code is several times larger than minified code, and a shared chunk
+// (every input that the same set of entry points reaches) can outgrow the file
+// limit however the command bundles are cut: ajv alone is 280 KB. A chunk over
+// TARGET_OUTPUT_BYTES is therefore cut into pieces of about equal size, leaving
+// headroom for growth. esbuild has no manual chunks, but it gives every distinct
+// set of entry points its own chunk. So each piece gets a hint entry that imports
+// just its modules. Only the hint's own code and its output file are dropped; the
+// real entry points load the pieces as ordinary chunks.
+const TARGET_OUTPUT_BYTES = 235_000;
+const HINT_PREFIX = "split-hint-";
+const MAX_SPLIT_ROUNDS = 8;
+
+function splitHintPlugin(groups) {
+  return {
+    name: "split-hint",
+    setup(esbuild) {
+      esbuild.onResolve({ filter: new RegExp(`^${HINT_PREFIX}`) }, (args) => ({ path: args.path, namespace: "split-hint" }));
+      esbuild.onLoad({ filter: /.*/, namespace: "split-hint" }, (args) => {
+        const group = groups[Number(args.path.slice(HINT_PREFIX.length))];
+        const names = group.map((_, index) => `module${index}`);
+        const imports = group.map((input, index) => `import * as ${names[index]} from ${JSON.stringify(`./${input}`)};`);
+        return { contents: `${imports.join("\n")}\nexport { ${names.join(", ")} };\n`, resolveDir: root, loader: "js" };
+      });
+    },
+  };
+}
+
+function isHint(file) {
+  return path.basename(file).startsWith(HINT_PREFIX);
+}
+
+/** Cut each oversized output's modules, in path order, into pieces of about equal size. */
+function cutOversized(metafile) {
+  const groups = [];
+  for (const [file, output] of Object.entries(metafile.outputs)) {
+    if (isHint(file) || output.bytes <= TARGET_OUTPUT_BYTES) continue;
+    const inputs = Object.entries(output.inputs).filter(([, input]) => input.bytesInOutput > 0).sort(([left], [right]) => (left < right ? -1 : 1));
+    if (inputs.length < 2) continue;
+    const total = inputs.reduce((sum, [, input]) => sum + input.bytesInOutput, 0);
+    const share = total / Math.ceil(output.bytes / TARGET_OUTPUT_BYTES);
+    let group = [];
+    let size = 0;
+    for (const [name, input] of inputs) {
+      group.push(name);
+      size += input.bytesInOutput;
+      if (size >= share) { groups.push(group); group = []; size = 0; }
+    }
+    if (group.length) groups.push(group);
+  }
+  return groups;
+}
+
+/** Bundle dist/bin.js into outdir (not written), cutting oversized chunks until the files fit. */
+async function bundleSplit(outdir) {
+  const groups = [];
+  for (let round = 0; ; round += 1) {
+    const result = await build({
+      // Chunk names hash input paths relative to the working directory: pin it
+      // to this checkout so every machine and CI produce the same files.
+      absWorkingDir: root,
+      entryPoints: { bin: path.join(root, "dist", "bin.js"), ...Object.fromEntries(groups.map((_, index) => [`${HINT_PREFIX}${index}`, `${HINT_PREFIX}${index}`])) },
+      outdir,
+      // Chunks sit beside bin.js, so ../assets/ resolves from every one of them.
+      entryNames: "[name]",
+      chunkNames: "[name]-[hash]",
+      splitting: true,
+      bundle: true,
+      // Readable output: the plugin directory's security scan cannot review minified code.
+      minify: false,
+      format: "esm",
+      platform: "node",
+      target: "node22",
+      legalComments: "none",
+      metafile: true,
+      write: false,
+      plugins: [splitHintPlugin(groups)],
+      logLevel: "warning",
+      // Bundled CommonJS dependencies require Node built-ins.
+      banner: { js: 'import { createRequire as screenrigCreateRequire } from "node:module";\nconst require = screenrigCreateRequire(import.meta.url);' },
+    });
+    const more = cutOversized(result.metafile);
+    if (!more.length || round >= MAX_SPLIT_ROUNDS) {
+      return { files: result.outputFiles.filter((file) => !isHint(file.path)), metafile: result.metafile };
+    }
+    groups.push(...more);
+  }
+}
+
 async function main() {
   const flag = process.argv.indexOf("--destination");
   if (flag < 0 || !process.argv[flag + 1] || process.argv.length !== 4) {
@@ -43,33 +129,15 @@ async function main() {
   const destination = path.resolve(process.argv[flag + 1]);
   const runtimeLock = await loadRuntimeDependencyLock(root);
   await rm(path.join(destination, "dist"), { recursive: true, force: true });
-  const result = await build({
-    // Chunk names hash input paths relative to the working directory: pin it
-    // to this checkout so every machine and CI produce the same files.
-    absWorkingDir: root,
-    entryPoints: [path.join(root, "dist", "bin.js")],
-    outdir: path.join(destination, "dist"),
-    // Chunks sit beside bin.js, so ../assets/ resolves from every one of them.
-    entryNames: "[name]",
-    chunkNames: "[name]-[hash]",
-    splitting: true,
-    bundle: true,
-    minify: true,
-    lineLimit: LINE_LIMIT,
-    format: "esm",
-    platform: "node",
-    target: "node22",
-    legalComments: "none",
-    metafile: true,
-    logLevel: "warning",
-    // Bundled CommonJS dependencies require Node built-ins.
-    banner: { js: 'import { createRequire as screenrigCreateRequire } from "node:module";\nconst require = screenrigCreateRequire(import.meta.url);' },
-  });
-
-  const outputs = Object.entries(result.metafile.outputs).map(([file, output]) => ({ file: path.relative(destination, file), bytes: output.bytes }));
+  const { files, metafile } = await bundleSplit(path.join(destination, "dist"));
+  const outputs = files.map((file) => ({ file: path.relative(destination, file.path), bytes: file.contents.length }));
   const oversized = outputs.filter((output) => output.bytes > MAX_OUTPUT_BYTES);
   if (oversized.length) {
-    throw new Error(`${oversized.map((output) => `${output.file} is ${output.bytes} bytes`).join(", ")}; every bundled file must stay within ${MAX_OUTPUT_BYTES} bytes. Move code behind a command bundle (src/cli-commands/index.ts) or split a bundle.`);
+    throw new Error(`${oversized.map((output) => `${output.file} is ${output.bytes} bytes`).join(", ")}; every bundled file must stay within ${MAX_OUTPUT_BYTES} bytes. A single module over the limit has to be split in source; otherwise move code behind a command bundle (src/cli-commands/index.ts).`);
+  }
+  for (const file of files) {
+    await mkdir(path.dirname(file.path), { recursive: true });
+    await writeFile(file.path, file.contents);
   }
 
   // src/assets.ts reads these at run time from ../assets/ beside dist/.
@@ -78,7 +146,7 @@ async function main() {
     await copyFile(path.join(root, "assets", name), path.join(destination, "assets", name));
   }
 
-  const bundled = [...new Set(Object.keys(result.metafile.inputs).map(packageOf).filter(Boolean))].sort();
+  const bundled = [...new Set(Object.keys(metafile.inputs).map(packageOf).filter(Boolean))].sort();
   const sections = [];
   for (const name of bundled) {
     const locked = runtimeLock.packages.find((entry) => entry.name === name);

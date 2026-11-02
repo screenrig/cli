@@ -111,7 +111,7 @@ export const fixtureAdapter: VendorAdapter = {
   id: "fixture",
   name: "Fixture CMS",
   inputs: { url: "required", timezone: true, files: "optional" },
-  credentials: [{ env: "FIXTURE_TOKEN", secret: true, required: true, help: "A read-only key from the Fixture CMS settings." }],
+  credentials: [{ name: "FIXTURE_TOKEN", secret: true, required: true, help: "A read-only key from the Fixture CMS settings." }],
   connect: ["Open Settings, then API keys, and make a key that can read."],
   maps: ["Media, playlists, layouts, groups, screens and schedules."],
   skips: ["Fonts."],

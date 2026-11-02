@@ -578,7 +578,7 @@ export const handleMediaAvailability = commandHandler(async (args, runtime, reso
   if (revision === undefined) {
     const current = await client.call({ method: "GET", path: `/api/media/${id}` });
     const value = (current.body as { revision?: unknown } | undefined)?.revision;
-    if (typeof value !== "number") throw usageError(`Media ${id} returned no revision; pass --expect-rev REVISION.`);
+    if (typeof value !== "number") throw usageError(`Media ${id} returned no revision; add --expect-rev REVISION.`);
     revision = String(value);
   }
   const response = await client.call({

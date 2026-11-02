@@ -122,7 +122,7 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  const dir=await mkdtemp(path.join(tmpdir(), 'playlist-workflows-')); t.after(()=>rm(dir,{recursive:true,force:true}));
  const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  async function invoke(argv:string[], transport=new FakeTransport(), input=JSON.stringify(document())) {
-  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],env:{},cwd:()=>dir,transport,stdin:Readable.from([input]),isStdinTty:()=>false,stdout:new Writable({write(c,e,done){out+=c;done();}}),stderr:new Writable({write(c,e,done){done();}})});
+  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input]),isStdinTty:()=>false,stdout:new Writable({write(c,e,done){out+=c;done();}}),stderr:new Writable({write(c,e,done){done();}})});
   return {code,body:JSON.parse(out)};
  }
  assert.equal((await invoke(['playlist','validate','-'])).code,0);
@@ -217,7 +217,7 @@ test("publish --no-wait returns after assignment and a wait warning explains the
   .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
   .on('PATCH','/api/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
  async function invoke(...extra:string[]) {
-  let out='',err='';const code=await run({...processRuntime(),argv:['--config',config,'screen','publish','scr_TEST','lobby.json',...extra],env:{XDG_CONFIG_HOME:dir},cwd:()=>dir,transport,sleep:async()=>{},
+  let out='',err='';const code=await run({...processRuntime(),argv:['--config',config,'screen','publish','scr_TEST','lobby.json',...extra],settings:{XDG_CONFIG_HOME:dir},cwd:()=>dir,transport,sleep:async()=>{},
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){err+=c;d();}})});
   return {code,body:JSON.parse(out),err};
  }
@@ -279,7 +279,7 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
  const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  const transport=new FakeTransport().on('GET','/api/media/med_IMAGE',()=>response(media[0])).on('GET','/api/media/med_VIDEO',()=>response(media[1]));
  async function invoke(argv:string[], input?:string) {
-  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],env:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,data:JSON.parse(out)};
  }
  const initialized=await invoke(['playlist','init','med_IMAGE','med_VIDEO','--name','Lobby','--output','lobby.json','--target-width','1080','--target-height','1920']);
@@ -354,7 +354,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
   .on('GET',`/api/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
   .on('GET','/api/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
  async function invoke(inputs:string[], output='prepared.json', extra:string[]=[]) {
-  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen-id',`${prefix}scr_TEST`,'--output',output,...extra],env:{},cwd:()=>dir,transport,
+  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen-id',`${prefix}scr_TEST`,'--output',output,...extra],settings:{},cwd:()=>dir,transport,
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
@@ -412,7 +412,7 @@ test("file preparation uses upload readiness and protects existing output before
  const transport=memoryBackend();
  let puts=0;
  async function invoke() {
-  let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress'],env:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
+  let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress'],settings:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
@@ -441,7 +441,7 @@ test("file preparation recovers from an interrupted run: empty output is replace
  const transport=memoryBackend();
  let puts=0;
  async function invoke(...extra:string[]) {
-  let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress',...extra],env:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
+  let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress',...extra],settings:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
@@ -504,7 +504,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
     ...(explicitKey ? ['--idempotency-key', 'prepare-retry-test'] : []),
     'playlist', 'init', './first.mp4', sameFile ? './first.mp4' : './second.mp4',
     '--name', 'Lobby', '--output', 'prepared.json', '--target-width', '1920', '--target-height', '1080', '--no-transcode', '--no-progress'],
-    env: {}, cwd: () => dir, transport, sleep: async () => {}, signedRawPut: async () => ({ status: 200 }),
+    settings: {}, cwd: () => dir, transport, sleep: async () => {}, signedRawPut: async () => ({ status: 200 }),
     stdout: new Writable({ write(c, e, done) { out += c; done(); } }), stderr: new Writable({ write(c, e, done) { done(); } }),
    });
    return { code, body: JSON.parse(out) };
@@ -541,7 +541,7 @@ test("an existing output pinning release A is never left pinned when init resolv
  const releaseA='rel_AAAAAAAAAAAAAAAAAAAAAAAA', releaseB='rel_BBBBBBBBBBBBBBBBBBBBBBBB';
  async function invoke(release:string, extra:string[]=[]) {
   let out=''; const transport=new FakeTransport();
-  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init',release,'--name','Build','--target-width','1920','--target-height','1080','--output',output,...extra],env:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init',release,'--name','Build','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
  const pinned=async()=>JSON.stringify(JSON.parse(await readFile(output,'utf8')).pages);
@@ -564,7 +564,7 @@ test("local URL authoring works offline, creates parents, and supports explicit 
  const output=dir+'/nested/playlist.json';
  async function invoke(extra:string[]=[]) {
   let out=''; const transport=new FakeTransport();
-  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init','https://example.com','--name','Offline','--target-width','1920','--target-height','1080','--output',output,...extra],env:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init','https://example.com','--name','Offline','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   assert.equal(transport.calls.length,0);return {code,out};
  }
  assert.equal((await invoke()).code,0);

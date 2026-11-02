@@ -431,11 +431,11 @@ export const screencloud: VendorAdapter = {
   id: "screencloud",
   name: NAME,
   inputs: { regions: ["eu", "us"], files: "optional" },
-  credentials: [{ env: "SCREENCLOUD_API_TOKEN", secret: true, required: true, help: "An API token from ScreenCloud Studio, Account Settings, Developer." }],
+  credentials: [{ name: "SCREENCLOUD_API_TOKEN", secret: true, required: true, help: "An API token from ScreenCloud Studio, Account Settings, Developer." }],
   connect: [
     "In Studio open Account Settings, then the Developer tab, and click New Token. Choose read permissions for files, playlists, channels, layouts, screens, screen groups and links (full access also works), and copy the key once.",
     "The Developer tab names your GraphQL endpoint; its region is eu or us, and goes to --region.",
-    "Put SCREENCLOUD_API_TOKEN=... in a file and pass it with --credentials.",
+    "Put SCREENCLOUD_API_TOKEN=... in a file and name it with --credentials.",
   ],
   maps: [
     "Files become media (images, video and audio), and web links become web page items.",
@@ -453,7 +453,7 @@ export const screencloud: VendorAdapter = {
     "https://screencloud.github.io/signage-next-graphql-docs/graphql-reference/content-json-reference/custom-layout-config",
     "https://screencloud.github.io/signage-next-graphql-docs/graphql-reference",
   ],
-  example: "screenrig migrate scan --from screencloud --region eu",
+  example: "screenrig migrate scan --from screencloud --region eu --credentials ./screencloud-key.txt",
   async open(input) {
     const host = HOSTS[input.region ?? ""];
     if (!host) throw vendorBadResponse(NAME, "the region is not eu or us");

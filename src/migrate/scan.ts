@@ -13,8 +13,8 @@ export function inputsText(adapter: VendorAdapter): string {
   if (adapter.inputs.regions) flags.push(`--region ${adapter.inputs.regions.join("|")} (required)`);
   if (adapter.inputs.timezone) flags.push("--timezone ZONE (optional)");
   if (adapter.inputs.files) flags.push(`--files PATH (${adapter.inputs.files})`);
-  const variables = adapter.credentials.map((credential) => `${credential.env} (${credential.required ? "required" : "optional"}${credential.secret ? ", secret" : ""})`);
-  return `${adapter.name} takes ${flags.length ? flags.join(", ") : "no vendor flags"}${variables.length ? `; it reads ${variables.join(", ")}` : ""}. --credentials FILE and --dir DIR work with every vendor.`;
+  const variables = adapter.credentials.map((credential) => `${credential.name} (${credential.required ? "required" : "optional"}${credential.secret ? ", secret" : ""})`);
+  return `${adapter.name} takes ${flags.length ? flags.join(", ") : "no vendor flags"}${variables.length ? `; its --credentials file holds ${variables.join(", ")}` : ""}. --credentials FILE and --dir DIR work with every vendor.`;
 }
 
 function badInput(adapter: VendorAdapter, detail: string): CliError {
@@ -111,7 +111,6 @@ export interface ScanRequest {
   flags: ScanFlags;
   credentialsFile?: string;
   dir: MigrationDir;
-  env: NodeJS.Dict<string>;
   now: () => Date;
   http: VendorHttp;
 }
@@ -120,7 +119,7 @@ export interface ScanRequest {
 export async function runScan(request: ScanRequest): Promise<{ scan: ScanFile; report: Report }> {
   const { adapter, flags } = request;
   checkFlags(adapter, flags);
-  const credentials = await loadCredentials(adapter, { ...(request.credentialsFile !== undefined ? { file: request.credentialsFile } : {}), env: request.env });
+  const credentials = await loadCredentials(adapter, request.credentialsFile !== undefined ? { file: request.credentialsFile } : {});
   const files = flags.files !== undefined ? await openLocalFiles(flags.files) : undefined;
   let catalog: SourceCatalog;
   try {
