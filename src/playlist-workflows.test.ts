@@ -4,15 +4,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { Writable, Readable } from "node:stream";
-import { run, processRuntime } from "./main.js";
-import { initializePlaylist, preparePlaylist, editablePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
+import { preparePlaylist, editablePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { parseArgv } from "./argv.js";
 import { publishScreen } from "./screen-publish.js";
 import { ApiClient } from "./client.js";
 import { networkError } from "./problems.js";
 const media = [{ id: "med_IMAGE", primitive: "image", state: "ready" }, { id: "med_VIDEO", primitive: "video", state: "ready" }];
-const document = () => initializePlaylist({ name: "Lobby", media, width: 1080, height: 1920, durationMs: 8000, fit: "contain" });
+const document = () => preparePlaylist({ name: "Lobby", content: media, width: 1080, height: 1920, durationMs: 8000, fit: "contain" });
 const response = (body: unknown) => ({ status: 200, headers: {}, body });
 
 test("publish accepts data-only visibility without a zone and refuses mixed civil bounds before writes", async t => {
@@ -76,10 +77,10 @@ test("editable projection preserves dynamic selectors, schedules, motion and app
 });
 
 test("init turns ready audio into the soundtrack and edits keep it", () => {
- const withAudio = initializePlaylist({ name: "Lobby", media: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }, media[1]!, { id: "med_BED", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+ const withAudio = preparePlaylist({ name: "Lobby", content: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }, media[1]!, { id: "med_BED", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
  assert.equal(withAudio.pages.length, 2);
  assert.deepEqual(withAudio.audio, { tracks: [{ id: "track_1", media_id: "med_SONG" }, { id: "track_2", media_id: "med_BED" }] });
- assert.throws(() => initializePlaylist({ name: "Only audio", media: [{ id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" }), /at least one page/);
+ assert.throws(() => preparePlaylist({ name: "Only audio", content: [{ id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" }), /at least one page/);
  const read: Record<string, any> = { ...structuredClone(withAudio), id: "pl_TEST", revision: 2, audio: { ...withAudio.audio, loop: true, volume: 1 } };
  read.pages[0].audio_cue = { track: "track_2", restart: false };
  const editable = editablePlaylist(read);
@@ -88,7 +89,7 @@ test("init turns ready audio into the soundtrack and edits keep it", () => {
 });
 
 test("edits keep a cued soundtrack and drop the server's max_ms from an audio_end page", () => {
- const authored = initializePlaylist({ name: "Album", media: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+ const authored = preparePlaylist({ name: "Album", content: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
  const read: Record<string, any> = { ...structuredClone(authored), id: "pl_TEST", revision: 4, audio: { ...authored.audio, loop: true, volume: 1, cued: true } };
  read.pages[0].audio_cue = { track: "track_1", restart: true };
  read.pages[0].advance = { mode: "audio_end", max_ms: 214000 };
@@ -122,7 +123,7 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  const dir=await mkdtemp(path.join(tmpdir(), 'playlist-workflows-')); t.after(()=>rm(dir,{recursive:true,force:true}));
  const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  async function invoke(argv:string[], transport=new FakeTransport(), input=JSON.stringify(document())) {
-  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input]),isStdinTty:()=>false,stdout:new Writable({write(c,e,done){out+=c;done();}}),stderr:new Writable({write(c,e,done){done();}})});
+  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input]),isStdinTty:()=>false,stdout:new Writable({write(c,_e,done){out+=c;done();}}),stderr:new Writable({write(_c,_e,done){done();}})});
   return {code,body:JSON.parse(out)};
  }
  assert.equal((await invoke(['playlist','validate','-'])).code,0);
@@ -218,7 +219,7 @@ test("publish --no-wait returns after assignment and a wait warning explains the
   .on('PATCH','/api/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
  async function invoke(...extra:string[]) {
   let out='',err='';const code=await run({...processRuntime(),argv:['--config',config,'screen','publish','scr_TEST','lobby.json',...extra],settings:{XDG_CONFIG_HOME:dir},cwd:()=>dir,transport,sleep:async()=>{},
-   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){err+=c;d();}})});
+   stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(c,_e,d){err+=c;d();}})});
   return {code,body:JSON.parse(out),err};
  }
  const offline=await invoke();
@@ -279,7 +280,7 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
  const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  const transport=new FakeTransport().on('GET','/api/media/med_IMAGE',()=>response(media[0])).on('GET','/api/media/med_VIDEO',()=>response(media[1]));
  async function invoke(argv:string[], input?:string) {
-  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],settings:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   return {code,data:JSON.parse(out)};
  }
  const initialized=await invoke(['playlist','init','med_IMAGE','med_VIDEO','--name','Lobby','--output','lobby.json','--target-width','1080','--target-height','1920']);
@@ -355,7 +356,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
   .on('GET','/api/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
  async function invoke(inputs:string[], output='prepared.json', extra:string[]=[]) {
   let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen-id',`${prefix}scr_TEST`,'--output',output,...extra],settings:{},cwd:()=>dir,transport,
-   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+   stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
  const result = await invoke(['med_IMAGE',`${prefix}rel_TEST`,'https://example.com/board']);
@@ -413,7 +414,7 @@ test("file preparation uses upload readiness and protects existing output before
  let puts=0;
  async function invoke() {
   let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress'],settings:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
-   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+   stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
  const result=await invoke();assert.equal(result.code,0,JSON.stringify(result.body));
@@ -442,7 +443,7 @@ test("file preparation recovers from an interrupted run: empty output is replace
  let puts=0;
  async function invoke(...extra:string[]) {
   let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress',...extra],settings:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
-   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+   stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
  const first=await invoke(); assert.equal(first.code,0,JSON.stringify(first.body));
@@ -505,7 +506,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
     'playlist', 'init', './first.mp4', sameFile ? './first.mp4' : './second.mp4',
     '--name', 'Lobby', '--output', 'prepared.json', '--target-width', '1920', '--target-height', '1080', '--no-transcode', '--no-progress'],
     settings: {}, cwd: () => dir, transport, sleep: async () => {}, signedRawPut: async () => ({ status: 200 }),
-    stdout: new Writable({ write(c, e, done) { out += c; done(); } }), stderr: new Writable({ write(c, e, done) { done(); } }),
+    stdout: new Writable({ write(c, _e, done) { out += c; done(); } }), stderr: new Writable({ write(_c, _e, done) { done(); } }),
    });
    return { code, body: JSON.parse(out) };
   }
@@ -541,7 +542,7 @@ test("an existing output pinning release A is never left pinned when init resolv
  const releaseA='rel_AAAAAAAAAAAAAAAAAAAAAAAA', releaseB='rel_BBBBBBBBBBBBBBBBBBBBBBBB';
  async function invoke(release:string, extra:string[]=[]) {
   let out=''; const transport=new FakeTransport();
-  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init',release,'--name','Build','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init',release,'--name','Build','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
  const pinned=async()=>JSON.stringify(JSON.parse(await readFile(output,'utf8')).pages);
@@ -564,7 +565,7 @@ test("local URL authoring works offline, creates parents, and supports explicit 
  const output=dir+'/nested/playlist.json';
  async function invoke(extra:string[]=[]) {
   let out=''; const transport=new FakeTransport();
-  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init','https://example.com','--name','Offline','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init','https://example.com','--name','Offline','--target-width','1920','--target-height','1080','--output',output,...extra],settings:{},cwd:()=>dir,transport,stdout:new Writable({write(c,_e,d){out+=c;d();}}),stderr:new Writable({write(_c,_e,d){d();}})});
   assert.equal(transport.calls.length,0);return {code,out};
  }
  assert.equal((await invoke()).code,0);

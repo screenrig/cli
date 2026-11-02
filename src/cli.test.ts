@@ -1,16 +1,16 @@
-import { CREDIT_HELP } from "./help.js";
+import { CREDIT_HELP } from "./help-text.js";
 import { commandHelp } from "./help-tree.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS } from "./commands.js";
+import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS } from "./commands.js";
 import { formatEventLine } from "./handlers/events.js";
-import { run, type CliRuntime } from "./main.js";
+import { CLI_VERSION } from "./version.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportResponse } from "./transport/types.js";
 import { ExitCode } from "./exit-codes.js";
@@ -1912,7 +1912,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 1,
       type: "application.event",
       severity: "info",
-      message: "Application emitted an event",
+      message: "cta.pressed",
       details: { extra: { nested: true }, count: 2, primitive_id: "weather", code: "cta.pressed" },
       at: "2026-08-14T17:00:00.000Z",
     }),
@@ -1924,7 +1924,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 2,
       type: "runtime.reported",
       severity: "warning",
-      message: "Runtime reported a bounded condition",
+      message: "decoder.stalled",
       details: { code: "decoder.stalled" },
       at: "2026-08-14T17:00:01.000Z",
     }),
@@ -1947,7 +1947,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 4,
       type: "",
       severity: "info",
-      message: "Application emitted an event",
+      message: "",
       at: "",
     }),
     undefined,
@@ -1958,7 +1958,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 5,
       type: "application.event",
       severity: "info",
-      message: "Application emitted an event",
+      message: "",
       at: "2026-08-14T17:00:03.000Z",
     }),
     undefined,
@@ -1969,7 +1969,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 6,
       type: "runtime.reported",
       severity: "warning",
-      message: "Runtime reported a bounded condition",
+      message: "",
       at: "2026-08-14T17:00:04.000Z",
     }),
     undefined,
@@ -2004,7 +2004,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 9,
       type: "screen.screenshot_ready",
       severity: "info",
-      message: "Screen screenshot ready",
+      message: "",
       resource: { type: "screen", id: "scr_1" },
       details: {
         capture_id: "shot_1",
@@ -2069,7 +2069,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 14,
       type: "runtime.reported",
       severity: "warning",
-      message: "Player reported runtime status",
+      message: "decoder.stalled",
       details: { code: "decoder.stalled" },
       at: "2026-08-14T17:00:11.000Z",
     }),
@@ -2081,7 +2081,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       sequence: 15,
       type: "screen.screenshot_requested",
       severity: "info",
-      message: "Screenshot requested",
+      message: "",
       details: { capture_id: "shot_1" },
       at: "2026-08-14T17:00:12.000Z",
     }),
@@ -2127,7 +2127,7 @@ test("events list prints data or silence", async () => {
           sequence: 1,
           type: "application.event",
           severity: "info",
-          message: "Application emitted an event",
+          message: "cta.pressed",
           details: { code: "cta.pressed", primitive_id: "weather" },
           at: "2026-08-14T17:00:00.000Z",
         },
@@ -2136,7 +2136,7 @@ test("events list prints data or silence", async () => {
           sequence: 2,
           type: "runtime.reported",
           severity: "warning",
-          message: "Runtime reported a bounded condition",
+          message: "decoder.stalled",
           details: { code: "decoder.stalled" },
           at: "2026-08-14T17:00:01.000Z",
         },
@@ -2145,7 +2145,7 @@ test("events list prints data or silence", async () => {
           sequence: 3,
           type: "",
           severity: "info",
-          message: "Application emitted an event",
+          message: "",
           at: "",
         },
       ],
@@ -2165,8 +2165,6 @@ test("events list prints data or silence", async () => {
     printed.stdout,
     "organization: Example organization\nproject: Screens (prj_AAAAAAAAAAAAAAAAAAAAAAAA)\nat=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
-  assert.ok(!printed.stdout.includes("Application emitted an event"));
-  assert.ok(!printed.stdout.includes("Runtime reported a bounded condition"));
 
   const emptyTransport = new FakeTransport();
   emptyTransport.on("GET", "/api/events", () => ({
@@ -2357,14 +2355,14 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
 test("events follow prints scalar details and skips empty frames", async () => {
   const transport = memoryBackend();
   transport.pushStream(
-    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"application.event\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"details\":{\"code\":\"cta.pressed\",\"primitive_id\":\"weather\"},\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"application.event\",\"severity\":\"info\",\"message\":\"cta.pressed\",\"details\":{\"code\":\"cta.pressed\",\"primitive_id\":\"weather\"},\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
   );
   transport.pushStream(
-    "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"runtime.reported\",\"severity\":\"warning\",\"message\":\"Runtime reported a bounded condition\",\"details\":{\"code\":\"decoder.stalled\"},\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
+    "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"runtime.reported\",\"severity\":\"warning\",\"message\":\"decoder.stalled\",\"details\":{\"code\":\"decoder.stalled\"},\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
   );
   transport.pushStream("id: ev1_3\nevent: message\ndata: not-json\n\n");
   transport.pushStream(
-    "id: ev1_4\nevent: message\ndata: {\"cursor\":\"ev1_4\",\"type\":\"\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"at\":\"\"}\n\n",
+    "id: ev1_4\nevent: message\ndata: {\"cursor\":\"ev1_4\",\"type\":\"\",\"severity\":\"info\",\"message\":\"\",\"at\":\"\"}\n\n",
   );
   const configDir = await testTemp("ev-details-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
@@ -2379,8 +2377,6 @@ test("events follow prints scalar details and skips empty frames", async () => {
     stdout,
     "organization: Example organization\nproject: Screens (prj_AAAAAAAAAAAAAAAAAAAAAAAA)\nat=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
-  assert.ok(!stdout.includes("Application emitted an event"));
-  assert.ok(!stdout.includes("Runtime reported a bounded condition"));
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2702,7 +2698,7 @@ test("doctor passes a check an uploader's credential is answered outside_upload_
   }
 });
 
-test("doctor warns about degraded application workers without failing HTTP readiness", async () => {
+test("doctor warns about a degraded dependency that has no degraded_detail sentence without failing HTTP readiness", async () => {
   const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-degraded-", {
     encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
   }, { status: 200, body: { status: "ready", degraded: ["application_processing", "valkey", "private-probe-value"] } });
@@ -2711,10 +2707,8 @@ test("doctor warns about degraded application workers without failing HTTP readi
     assert.equal(status, "warn");
     assert.equal(byName.ready?.status, "warn");
     assert.match(byName.ready?.detail ?? "", /service ready with degraded dependencies/);
-    assert.match(byName.ready?.detail ?? "", /application_processing:.*restore application workers.*rerun doctor/);
-    assert.match(byName.ready?.detail ?? "", /valkey:.*restore Valkey connectivity/);
-    assert.match(byName.ready?.detail ?? "", /another optional dependency/);
-    assert.doesNotMatch(byName.ready?.detail ?? "", /private-probe-value/);
+    assert.match(byName.ready?.detail ?? "", /another optional dependency is unavailable.*rerun doctor/);
+    assert.doesNotMatch(byName.ready?.detail ?? "", /application_processing|valkey|private-probe-value/);
     assert.equal(byName.health?.status, "pass");
   } finally {
     await cleanup();
@@ -2999,9 +2993,10 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
   assert.equal(uploadCall.headers?.["screenrig-sdk-version"], SDK_PROTOCOL_VERSION);
   assert.ok(Number(uploadCall.headers?.["screenrig-expanded-bytes"]) > 0);
   assert.ok(Number(uploadCall.headers?.["screenrig-file-count"]) > 0);
-  const uploadEnvelope = JSON.parse(result.stdout) as { ok: true; data: { id: string; operation_id: string } };
-  assert.equal(uploadEnvelope.data.id, "app_AAAAAAAAAAAAAAAAAAAAAAAA");
-  assert.equal(uploadEnvelope.data.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
+  const uploadEnvelope = JSON.parse(result.stdout) as { ok: true; operation_id: string; data: { application: { id: string; operation_id: string } } };
+  assert.equal(uploadEnvelope.data.application.id, "app_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(uploadEnvelope.data.application.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(uploadEnvelope.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
 
   result = await withRuntime(["--json", "screen", "pair", "ABC234", "--name", "Lobby"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
@@ -3483,6 +3478,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
       status: 429,
       detail: "This project reached the feedback submission limit.",
       code: "rate_limited",
+      hint: "Too many requests. Wait before retrying.",
     },
   }));
   const configDir = await testTemp("feedback-429-");
@@ -3505,7 +3501,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
     assert.equal(envelope.error.code, "rate_limited");
     assert.equal(envelope.error.retry_after_seconds, 180);
     assert.match(envelope.error.detail, /Retry-After is 180 seconds/);
-    assert.match(String(envelope.error.hint), /Wait 3 minutes/);
+    assert.equal(envelope.error.hint, "Too many requests. Wait before retrying.");
 
     const human = await withRuntime(["--human", "feedback", "bug", "Title", "--body", "Body"], transport, { fs: fsLike });
     assert.match(human.stderr, /retry_after_seconds: 180/);
@@ -3571,6 +3567,7 @@ function projectShowTransport(opts?: { header?: string; remaining?: number; low?
 
 test("project show reports integer credit_remaining and warns when remaining is zero", async () => {
   const transport = memoryBackend();
+  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "true" };
   // Random request IDs can contain a forbidden billing abbreviation by chance.
   const json = await withTokenConfig(transport, ["--json", "--request-id", "req_credit_remaining_fixture0001", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
@@ -3599,7 +3596,7 @@ test("project show reports integer credit_remaining and warns when remaining is 
   assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 });
 
-test("ScreenRig-Credits-Low decides credits_low; remaining alone decides only without it", async () => {
+test("ScreenRig-Credits-Low decides credits_low, whatever the remaining balance", async () => {
   const warns = async (opts: { header: string; low?: string }) => {
     const json = await withTokenConfig(projectShowTransport({ ...opts, remaining: Number(opts.header) }), ["--json", "project", "show"]);
     assert.equal(json.code, 0, json.stdout);
@@ -3608,12 +3605,11 @@ test("ScreenRig-Credits-Low decides credits_low; remaining alone decides only wi
   assert.equal(await warns({ header: "0", low: "false" }), false, "a fresh free account at 0 is not low under launch terms");
   assert.equal(await warns({ header: "500", low: "true" }), true);
   assert.equal(await warns({ header: "5000", low: "true" }), true, "the server's verdict wins");
-  assert.equal(await warns({ header: "0" }), true, "an older server without the header falls back to remaining < 1000");
-  assert.equal(await warns({ header: "1000" }), false);
+  assert.equal(await warns({ header: "1000", low: "false" }), false);
 });
 
 test("remaining header 1000 does not add credits_low", async () => {
-  const transport = projectShowTransport({ header: "1000", remaining: 0 });
+  const transport = projectShowTransport({ header: "1000", low: "false", remaining: 0 });
   const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
@@ -3622,7 +3618,7 @@ test("remaining header 1000 does not add credits_low", async () => {
 });
 
 test("remaining header 999 adds credits_low on JSON and human output", async () => {
-  const transport = projectShowTransport({ header: "999", remaining: 5000 });
+  const transport = projectShowTransport({ header: "999", low: "true", remaining: 5000 });
   const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
@@ -3638,7 +3634,7 @@ test("remaining header 999 adds credits_low on JSON and human output", async () 
 });
 
 test("remaining header 0 on a successful command adds credits_low", async () => {
-  const transport = projectShowTransport({ header: "0", remaining: 5000 });
+  const transport = projectShowTransport({ header: "0", low: "true", remaining: 5000 });
   const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
@@ -3647,8 +3643,8 @@ test("remaining header 0 on a successful command adds credits_low", async () => 
   assert.match(warning.message, /\b0\b/);
 });
 
-test("no remaining header and remaining at or above 1000 does not add credits_low", async () => {
-  const transport = projectShowTransport({ remaining: 1000 });
+test("a project body without the credit headers does not add credits_low", async () => {
+  const transport = projectShowTransport({ remaining: 0 });
   const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
@@ -4200,6 +4196,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
     headers: {
       "content-type": "application/problem+json",
       "ScreenRig-Credits-Remaining": "0",
+      "ScreenRig-Credits-Low": "true",
     },
     body: {
       type: "https://screenrig.ai/problems/payment-required",
@@ -4384,7 +4381,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
 
 test("credits_low appends beside generic_filename instead of replacing it", async () => {
   const transport = memoryBackend();
-  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "999" };
+  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "999", "ScreenRig-Credits-Low": "true" };
   const configDir = await testTemp("media-filename-credits-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
@@ -5303,7 +5300,7 @@ function aspectMismatchTransport(): FakeTransport {
 
 test("screen assign emits aspect_mismatch beside credits_low from resolved playlist media", async () => {
   const transport = aspectMismatchTransport();
-  transport.extraResponseHeaders = { "screenrig-credits-remaining": "999" };
+  transport.extraResponseHeaders = { "screenrig-credits-remaining": "999", "screenrig-credits-low": "true" };
   const result = await withAuthenticatedRuntime(
     ["--json", "screen", "assign", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--expect-rev", "1"],
     transport,
@@ -6516,8 +6513,8 @@ test("app update publishes to the existing application with revision and release
   await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>updated</body></html>");
   const result = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, "--expect-rev", "7", "--no-wait"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Success, result.stdout);
-  assert.equal(JSON.parse(result.stdout).data.id, "app_EXISTING");
-  assert.equal(JSON.parse(result.stdout).data.release_id, "rel_NEW");
+  assert.equal(JSON.parse(result.stdout).data.application.id, "app_EXISTING");
+  assert.equal(JSON.parse(result.stdout).data.application.release_id, "rel_NEW");
   const count = transport.calls.length;
   for (const flags of [["--expect-rev", "0"], ["--expect-rev", "7", "--name", "changed"]]) {
     const invalid = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, ...flags], transport, { fs: fsLike });

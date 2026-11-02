@@ -1,8 +1,6 @@
 import { usageError } from "./problems.js";
 import { decodeAttributeEntities } from "./generated/playlist-write-semantics.js";
 
-export { decodeAttributeEntities };
-
 /**
  * The src of the first iframe of a pasted embed code (Google's Publish to web
  * and Microsoft's Embed dialog give one), with its entities decoded. Input that

@@ -1,4 +1,4 @@
-import type { ParsedArgs } from "../argv.js";
+import type { ParsedArgs } from "../command-input.js";
 import type { ResolvedConfig } from "../config.js";
 import { fetchSignedRawPut, type CliRuntime } from "../runtime.js";
 import { commandWords, createSinkLogger, loggingSignedRawPut, noopLogger } from "./logger.js";

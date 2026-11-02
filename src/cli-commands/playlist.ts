@@ -192,7 +192,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .action(bind(handlePlaylistPageReplace));
   requireOptionGroup(pageReplace, "atMostOne", ["--file", "--media"]);
   requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always"]);
-  const pageRemove = page.command("remove").description("Remove one page")
+  page.command("remove").description("Remove one page")
     .argument("<playlist-id>", "Playlist identifier")
     .argument("<page-id>", "The page to remove")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)

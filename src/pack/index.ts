@@ -95,8 +95,3 @@ export async function packDirectory(root: string, options: PackOptions = {}): Pr
     return result;
   });
 }
-
-export { writeTar, gzipDeterministic, sha256Hex, parseTar } from "./archive.js";
-export { walkDirectory } from "./walk.js";
-export { hoistInlineAssets } from "./inline.js";
-export { DEFAULT_ARCHIVE_LIMITS, mergeLimits } from "./limits.js";

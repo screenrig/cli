@@ -162,9 +162,9 @@ function asNext(value: unknown): ProblemNext | undefined {
  * `errors[0]` (status, code, type, title, detail, hint, and current_revision,
  * next, or retryable where they apply) and keeps only document members
  * (action, instance, request_id, server_time, trace_id) at the top level. The
- * runtime routes, operation errors, and older servers carry every member at
- * the top level. Either way the result reads the same; errors[] entries that
- * name a request field stay in `errors` as `{field, detail}`.
+ * runtime routes and operation errors carry every member at the top level.
+ * Either way the result reads the same; errors[] entries that name a request
+ * field stay in `errors` as `{field, detail}`.
  */
 export function flattenProblemDocument(rec: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!rec || !Array.isArray(rec.errors) || asString(rec.code) !== undefined) {
@@ -307,21 +307,18 @@ export function normalizeProblem(
  * by `normalizeProblem`.
  */
 function renderProblemError(entry: unknown): string | undefined {
-  if (typeof entry === "string") {
-    return entry.length > 0 ? entry : undefined;
-  }
   const rec = asRecord(entry);
   if (!rec) {
     return undefined;
   }
-  const field = asString(rec.field) ?? asString(rec.pointer) ?? asString(rec.name);
-  const message = asString(rec.detail) ?? asString(rec.message) ?? asString(rec.reason);
+  const field = asString(rec.field);
+  const message = asString(rec.detail);
   const code = asString(rec.code);
   const suffix = code && message ? ` (${code})` : "";
   if (field && message) {
     return `${field}: ${message}${suffix}`;
   }
-  return message ? `${message}${suffix}` : field ?? JSON.stringify(rec);
+  return message ? `${message}${suffix}` : field;
 }
 
 export function renderProblem(problem: NormalizedProblem): string {
@@ -404,18 +401,11 @@ export function parseRetryAfter(value: string | undefined, nowMs: number): numbe
   return Math.max(0, Math.ceil((at - nowMs) / 1000));
 }
 
-export function describeRetryInterval(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds} second${seconds === 1 ? "" : "s"}`;
-  }
-  const minutes = Math.ceil(seconds / 60);
-  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-}
-
 /**
- * Local guidance for an older server that sends no `hint` or `next`. Each
- * member is filled only when the server left it empty; server guidance always
- * wins.
+ * Local guidance for a problem the server sends without a `hint` or `next`: a
+ * failed operation's error carries no hint, and no server route names a next
+ * action for these codes. Each member is filled only when the server left it
+ * empty; server guidance always wins.
  */
 function withGuidance(problem: NormalizedProblem, guidance: { hint?: string; next?: ProblemNext }): NormalizedProblem {
   const hint = problem.hint ?? guidance.hint;
@@ -429,8 +419,8 @@ function withGuidance(problem: NormalizedProblem, guidance: { hint?: string; nex
 
 /**
  * A bare 429 tells an agent nothing actionable. The server declares
- * `Retry-After` on every rate-limited response, so fold it into the detail and
- * the hint instead of discarding the header.
+ * `Retry-After` on every rate-limited response, so fold it into the detail
+ * instead of discarding the header.
  */
 export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: number | undefined): NormalizedProblem {
   if (retryAfterSeconds === undefined) return problem;
@@ -439,15 +429,11 @@ export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: nu
   if (problem.status !== 429) {
     return problem;
   }
-  const interval = describeRetryInterval(retryAfterSeconds);
   const detail = problem.detail.includes("Retry-After")
     ? problem.detail
     : `${problem.detail} Retry-After is ${retryAfterSeconds} seconds.`;
-  // detail is the server's and names the limit that tripped; add the wait, but no
-  // command: the action is to wait, then run the same command again.
-  return withGuidance({ ...problem, detail, retry_after_seconds: retryAfterSeconds }, {
-    hint: `Wait ${interval}, then run the same command again. Do not retry sooner; each early retry is refused too.`,
-  });
+  // detail is the server's and names the limit that tripped; add the wait.
+  return { ...problem, detail, retry_after_seconds: retryAfterSeconds };
 }
 
 /**
@@ -479,7 +465,6 @@ export function withOverbookingGuidance(problem: NormalizedProblem): NormalizedP
     return problem;
   }
   return withGuidance(problem, {
-    hint: "The goal is larger than the plays the selected screens are estimated to have left in the flight. Lower goal_plays or widen the targeting, or set \"overbook\": true in the draft to book it anyway.",
     next: {
       command: "screenrig ads direct availability --help",
       reason: "Shows how to estimate the plays still available: the query document takes the draft's targeting, dayparts, flight_start and flight_end.",
@@ -539,9 +524,7 @@ export function withPlanGuidance(problem: NormalizedProblem): NormalizedProblem 
   const plan = problem.required_plan ? planTitle(problem.required_plan) : undefined;
   let guided = problem;
   if (problem.code === "feature_not_in_plan") {
-    const includes = plan ? `the ${plan} plan` : "a higher plan";
     guided = withGuidance(problem, {
-      hint: `This feature is part of ${includes}, which this project is not on. Credit does not unlock it and retrying is refused the same way. Stop retrying, tell the user ${includes} includes it, and continue the task without it.`,
       next: {
         command: "screenrig project capabilities",
         reason: "Lists the features this project's plan has and which plan includes each one, so you can tell the user what the refused feature needs.",
@@ -560,8 +543,9 @@ export function withPlanGuidance(problem: NormalizedProblem): NormalizedProblem 
 
 /**
  * The fallback hint for a problem that reached the output boundary without
- * one: CLI-originated errors, and answers from a server that sends no hint.
- * Server hints are never replaced.
+ * one: CLI-originated errors, the codes a failed operation reports (its error
+ * has no hint member), and the 401 and 5xx bodies of a foreign proxy. The
+ * server hints every other code. Server hints are never replaced.
  */
 const DEFAULT_HINTS: Record<string, string> = {
   usage_error: "Fix the argument or input named in detail and run the command again. Add --help to the command to see its arguments, accepted values, and an example.",
@@ -576,41 +560,14 @@ const DEFAULT_HINTS: Record<string, string> = {
   operation_failed: "The server finished the operation with an error. Read detail, fix the input it names, and start the command again; screenrig operations show OPERATION_ID shows the stored result.",
   invalid_request: "The server rejected the request as invalid. Read detail and errors[] for the field to change, fix it, and send the request again; the unchanged request is refused the same way.",
   unauthorized: "The stored credential was not accepted, so this installation's project is gone. Clear it with screenrig agent disconnect --yes, then create a new project with screenrig agent enroll --email ADDRESS --organization NAME. Use screenrig login only when the user asked to join an existing project.",
-  credential_revoked: "A project member revoked this agent credential. Tell the user; with their approval, screenrig login asks to rejoin that project, or screenrig agent enroll --email ADDRESS --organization NAME creates a new one.",
-  credential_retired: "This installation's stored credential is no longer accepted. Run screenrig login; a person approves the sign-in in the dashboard.",
-  forbidden: "This credential is not allowed to do this. Do not retry it unchanged; screenrig agent status lists the granted capabilities.",
-  insufficient_access: "Read only access changes nothing; Propose access uploads media, writes notes and proposes playlist and screen changes for review, but cannot delete, control screens or spend credit. Ask a person to approve Manage access, or leave the change to a credential that has it.",
-  approver_required: "Only the project owner or a member who can approve may do this. Ask the project owner to turn on Can approve for that person.",
-  outside_upload_scope: "This uploader works only in the playlists and media folders upload_scope lists (screenrig playlist list, screenrig media folder list). Ask the project owner to add the playlist or folder, or leave this to a full member.",
-  review_not_pending: "Someone already decided, withdrew or replaced this review. Read it again with screenrig reviews show ID for its current state.",
-  review_stale: "What the change was proposed against moved on (the playlist, campaign, screen folder or screens), so it can no longer be applied as reviewed. Read it again and propose the change again on top of what is there now.",
-  outside_screen_scope: "This agent, or the person responsible for it, works only on the screen folders and screens screen_scope lists, and everything inside those folders (screenrig agent status, screenrig screen list, screenrig screen folder list). Ask the project owner to widen the scope in the dashboard, or leave this to a member of the whole project.",
-  protected_target: "This change reaches a screen in a protected screen folder and has no review form. Propose clearing protection on the protected folder (screenrig screen folder update ID --unprotect): a second approver decides that review. Then make the change and have an approver protect the folder again.",
-  second_approver_required: "Changes that reach a protected screen folder are decided by an approver other than the person who proposed them or who is responsible for the agent that did. Ask another approver to decide the review, or ask the project owner to let another member approve reviews.",
-  reserved_item: "A reserved campaign is changed, paused, deleted or un-reserved only by a person who can approve reviews on the screens it reaches; an agent never is. Ask an approver to make the change or to clear the reserved flag in the dashboard.",
-  review_blocked: "This screen change uses a playlist that has no approved version yet. The playlist's review is decided first.",
-  playlist_not_approved: "This playlist is waiting for review and cannot reach a screen until a person approves it. Check it with screenrig reviews list, or choose an approved playlist.",
   capability_required: "This project does not have the capability this command needs. Do not retry; tell the user, who can change the project's purpose in the dashboard.",
   capability_unavailable: "The project's capabilities could not be read, so the write was not attempted. Retry shortly; screenrig project capabilities checks them directly.",
   not_found: "Nothing with that id exists in this project. Check the id with the matching list command (for example screenrig screen list) and use an id from its output.",
-  method_not_allowed: "This CLI sent a request the API does not accept. Update the CLI to the current release, then retry.",
-  idempotency_mismatch: "This idempotency key was already used for a different request. Rerun without --idempotency-key, or with a new key; screenrig recovery list shows saved keys from interrupted writes.",
   resource_conflict: "The resource is not in a state that allows this change. Inspect it with its show command, then retry only once its state allows the change.",
-  revision_conflict: "The resource changed since you read it. Show it again, reconcile your change with the current state, and retry with --expect-rev set to the new revision.",
-  wall_unsupported: "This screen's Player cannot lay out a video wall. Only the Linux Player's kiosk install (cage and wlr-randr) and the Windows Player declare display.wall; screenrig screen show ID lists the Player's host capabilities.",
-  playlist_format_mismatch: "The playlist's format (displays, arrangement, columns for a grid, orientation) is not the shape of the screen's video wall, or the screen has no wall. Author a playlist for the wall with screenrig playlist init --screen-id ID, or change the wall with screenrig screen wall set.",
-  screen_archived: "This screen is archived. Run screenrig screen unarchive ID first if it should be used again.",
-  application_in_use: "A screen is showing one of this application's releases. Assign those screens other content, then retry.",
-  rate_limited: "Too many requests. Wait before retrying; retry_after_seconds says how long when the server sent it.",
   quota_exceeded: "The project is at a limit. Free space or use a smaller input, then retry.",
-  free_organization_limit: "This person already holds their free Standard organization. Create the project there: screenrig organization list shows it, then screenrig project create NAME --organization-id ID. A second organization needs Premium or Enterprise; the user asks sales@screenrig.ai.",
-  organization_plan_required: "This organization admits no new screens until a Premium or Enterprise plan pays for it. Move the project into the person's free organization with screenrig project moves and screenrig project move --organization-id ID, or the user asks sales@screenrig.ai for a plan.",
-  feature_unavailable: "This project cannot use this feature. Do not retry; tell the user.",
   not_ready: "The resource is still being prepared. Wait a few seconds and retry, or follow its operation with screenrig operations wait OPERATION_ID.",
   internal_error: "The server failed while handling the request. If retryable is true, wait a moment and retry; otherwise report the request_id with screenrig feedback bug.",
   dependency_unavailable: "A service the API depends on is unavailable. Wait a minute and retry the same command.",
-  dependency_timeout: "A service the API depends on timed out. Wait a minute and retry the same command.",
-  server_draining: "The server is restarting. Retry the same command in a few seconds.",
 };
 
 function statusHint(problem: NormalizedProblem): string {

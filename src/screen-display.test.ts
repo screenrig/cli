@@ -7,7 +7,8 @@ import type { Screen } from "./adapters/protocol.js";
 import { formatEventLine } from "./handlers/events.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { commandLines } from "./screen-commands.js";
 import { displayLines, displayScheduleWrite, displayUntil, rebootScheduleLines, rebootScheduleWrite, rebootWindowList, rebootWindowOption } from "./screen-display.js";
 import { testTemp } from "./test-temp.js";
@@ -347,7 +348,6 @@ test("screen reboot-schedule set refuses what needs a timezone or a reboot-capab
     ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-04:03"],
     ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-05:00", "--file", "reboots.json"],
     ["screen", "reboot-schedule", "set", LOBBY, "--file", "reboots.json", "--disabled"],
-    ["screen", "reboot-schedule", "set", LOBBY, "--window", "Mon 04:00-05:00", "--enabled", "--disabled"],
     ["screen", "reboot-schedule", "set", LOBBY, PLAIN, "--window", "Mon 04:00-05:00", "--expect-rev", "3"],
     ["screen", "reboot-schedule", "set", "--window", "Mon 04:00-05:00"],
   ]) {

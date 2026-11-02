@@ -8,11 +8,14 @@ import { CliError, makeProblem, usageError } from "./problems.js";
 export function validateProjectCapabilities(value: unknown): ProjectCapabilities {
   const body = value as Partial<ProjectCapabilities> | undefined;
   const features = body?.features as { advertiser?: unknown; screens?: unknown } | undefined;
+  const planFeatures = body?.plan_features as { features?: unknown; featuresets?: unknown } | undefined;
   if (!body || typeof body.project_id !== "string" || body.project_id.length === 0
     || typeof body.plan_id !== "string" || body.plan_id.length === 0
     || !features || typeof features.advertiser !== "boolean" || typeof features.screens !== "boolean"
     || !Number.isSafeInteger(body.feature_revision) || (body.feature_revision ?? -1) < 0
-    || !Array.isArray(body.capabilities) || body.capabilities.some((item) => typeof item !== "string")) {
+    || !Array.isArray(body.capabilities) || body.capabilities.some((item) => typeof item !== "string")
+    || !planFeatures || !Array.isArray(planFeatures.features) || !Array.isArray(planFeatures.featuresets)
+    || !body.limits || typeof body.limits !== "object") {
     throw usageError("Capabilities response does not match the generated project capabilities contract.");
   }
   return body as ProjectCapabilities;
@@ -23,27 +26,23 @@ const LIMIT_KEYS = ["screens", "members", "video_bytes", "event_retention_days"]
 /**
  * The plan's featuresets, which plan features are on or off, and its limits,
  * as four human lines. Each off feature names the plan that includes it, and a
- * limit of 0 reads as none (no plan cap). A server that sends no plan_features,
- * or an entry that is not one, adds nothing.
+ * limit of 0 reads as none (no plan cap).
  */
 export function planFeatureFields(capabilities: ProjectCapabilities): Array<[string, string | undefined]> {
-  const planFeatures = capabilities.plan_features;
-  if (!planFeatures || !Array.isArray(planFeatures.features)) return [];
-  const limits: Partial<ProjectPlanLimits> = capabilities.limits && typeof capabilities.limits === "object" ? capabilities.limits : {};
+  const { features, featuresets } = capabilities.plan_features;
+  const limits: Partial<ProjectPlanLimits> = capabilities.limits;
   const stated = LIMIT_KEYS.flatMap((key) => {
     const value = limits[key];
-    return typeof value === "number" && Number.isFinite(value) ? [`${key}=${value === 0 ? "none" : value}`] : [];
+    return typeof value === "number" ? [`${key}=${value === 0 ? "none" : value}`] : [];
   });
   const on: string[] = [];
   const off: string[] = [];
-  for (const feature of planFeatures.features) {
-    if (!feature || typeof feature.id !== "string" || typeof feature.enabled !== "boolean") continue;
+  for (const feature of features) {
     if (feature.enabled) on.push(feature.id);
-    else off.push(typeof feature.required_plan === "string" ? `${feature.id} (${feature.required_plan})` : feature.id);
+    else off.push(`${feature.id} (${feature.required_plan})`);
   }
-  const sets = Array.isArray(planFeatures.featuresets) ? planFeatures.featuresets.filter((id) => typeof id === "string") : [];
   return [
-    ["featuresets", sets.join(", ") || "(none)"],
+    ["featuresets", featuresets.join(", ") || "(none)"],
     ["plan_features_on", on.join(", ") || "(none)"],
     ["plan_features_off", off.join(", ") || "(none)"],
     ["limits", stated.join(" ") || undefined],

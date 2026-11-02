@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { writeConfigAtomic, type ConfigFs } from "../config.js";
-import { run, type CliRuntime } from "../main.js";
+import { run } from "../main.js";
+import { type CliRuntime } from "../runtime.js";
 import { FakeTransport, listPage } from "../transport/fake.js";
 import type { TransportRequest, TransportResponse } from "../transport/types.js";
 

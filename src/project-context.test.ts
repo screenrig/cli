@@ -5,8 +5,9 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import type { ScreenRigConfig } from "./config.js";
-import { processRuntime, run } from "./main.js";
-import { initializePlaylist } from "./playlist-authoring.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
+import { preparePlaylist } from "./playlist-authoring.js";
 import { fakeSessionJwt, FakeTransport } from "./transport/fake.js";
 
 const A = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", B = "prj_BBBBBBBBBBBBBBBBBBBBBBBB";
@@ -19,7 +20,7 @@ async function fixture(t: TestContext, config: Partial<ScreenRigConfig>, target 
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configPath = path.join(directory, "config.json");
   await writeFile(configPath, JSON.stringify({ api_url: "https://api.screenrig.ai", ...config }), { mode: 0o600 });
-  await writeFile(path.join(directory, "playlist.json"), JSON.stringify(initializePlaylist({ name: "Lobby", media: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" })));
+  await writeFile(path.join(directory, "playlist.json"), JSON.stringify(preparePlaylist({ name: "Lobby", content: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" })));
   let assigned = false;
   const transport = new FakeTransport()
     .on("GET", "/api/screens/scr_TEST", () => ({ status: 200, headers: {}, body: { id: "scr_TEST", revision: assigned ? 2 : 1, ...(assigned ? { playlist_id: "pl_TEST" } : {}) } }))

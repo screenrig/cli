@@ -7,7 +7,8 @@ import { readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs, type P
 import { ExitCode } from "./exit-codes.js";
 import { DeviceLogin } from "./login.js";
 import { credentialCheck } from "./handlers/doctor.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { OAuthClient } from "./oauth.js";
 import { OAuthSession } from "./oauth-session.js";
 import { CliError, networkError } from "./problems.js";

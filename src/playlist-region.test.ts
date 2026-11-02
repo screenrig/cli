@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { commandHelp } from "./help-tree.js";
-import { processRuntime, run } from "./main.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
 import { FakeTransport } from "./transport/fake.js";
 
 async function regionCli(t: TestContext, transport: FakeTransport) {

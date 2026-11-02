@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help-tree.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import {
   appliedLine, importIdempotencyKey, importRowsFromJson, type ImportCommitted, type ImportPreview, previewLines, rowProblemLine,
   SCHEDULE_IMPORT_NEEDS_CORRECTIONS,

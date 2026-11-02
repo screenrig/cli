@@ -6,11 +6,11 @@ import { open } from "node:fs/promises";
 import path from "node:path";
 import { type Project, type ProjectCreate, type CreatedProject } from "../adapters/protocol.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "../command-input.js";
+import { headerValue } from "../credits.js";
 import { requireToken } from "../client.js";
 import { HEALTH_DEFAULT_WINDOW_MS, HEALTH_HOURLY_MAX_DAYS, SERIES_PAGE_SIZE, seriesWindow } from "../series.js";
 import { resolveConfig, describeTokenPresence, hasToken, readConfigFile } from "../config.js";
 import { accessClaims } from "../oauth.js";
-import { headerValue, CREDITS_REMAINING_HEADER, observeCreditsRemaining, parseCreditsInteger } from "../credits.js";
 import { successEnvelope, type Warning } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { CliError, configError, makeProblem, usageError } from "../problems.js";
@@ -47,9 +47,6 @@ export async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolve
   const context = contextFromProject(project);
   if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project response changed the command's target.");
   await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
-  if (headerValue(response.headers, CREDITS_REMAINING_HEADER) === undefined) {
-    observeCreditsRemaining(runtime, parseCreditsInteger(project.credit_remaining));
-  }
   return {
     envelope,
     exitCode: ExitCode.Success,

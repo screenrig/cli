@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { test } from "node:test";
-import { run, processRuntime } from "./main.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
 import { FakeTransport } from "./transport/fake.js";
 import { networkError } from "./problems.js";
 

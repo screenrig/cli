@@ -87,23 +87,6 @@ export interface InvitationIssued extends Invitation {
   url?: string;
 }
 
-export interface InvitationCreated {
-  invitations: InvitationIssued[];
-}
-
-export interface InvitationList {
-  items: Invitation[];
-  next_cursor: string;
-}
-
-export interface SignInResetRequest {
-  email: string;
-}
-
-export interface SignInResetAccepted {
-  status: "accepted";
-}
-
 /** Independent project product features. Neither flag is a billing plan. */
 export interface ProjectFeatures {
   advertiser: boolean;
@@ -142,9 +125,8 @@ export interface ProjectCapabilities {
   capabilities: string[];
   /** The most bytes one video upload may declare on the project's plan. */
   media_video_bytes?: number;
-  /** The contract requires both; they stay optional here because the command reads, and never checks, them. */
-  plan_features?: ProjectPlanFeatures;
-  limits?: ProjectPlanLimits;
+  plan_features: ProjectPlanFeatures;
+  limits: ProjectPlanLimits;
 }
 
 /** Enrollment delivers the grant's first token pair. */
@@ -902,9 +884,8 @@ export interface Screen {
   manifest_revision: number;
   observation?: ScreenObservation;
   /**
-   * Manifest upgrade read model. Always present on screen responses once the
-   * backend ships the feature; older backends omit it and readers render
-   * defensively. `desired_revision` is the manifest the screen is moving to
+   * Manifest upgrade read model. The backend always sends it on screen
+   * responses; readers render a missing object as nothing. `desired_revision` is the manifest the screen is moving to
    * and `active_revision` the last server-acknowledged activation. Read-only.
    */
   manifest_upgrade?: ScreenManifestUpgrade;
@@ -1122,11 +1103,6 @@ export interface ScreenActionResult {
 /** PUT /api/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */
 export interface CommentsWrite {
   comments: Record<string, unknown>;
-}
-
-/** GET/PUT /api/comment/... body. Null when the target exists and comments are unset. */
-export interface Comments {
-  comments: Record<string, unknown> | null;
 }
 
 export interface PairScreen {
@@ -1630,9 +1606,6 @@ export interface WebhookDeliveryList {
   next_cursor: string | null;
 }
 
-/** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "loop_stalled" | "glass_blank" | "glass_frozen" | "crashing" | "source_failed" | "source_stale" | "reach_dropped" | "group_empty" | "card_data_stale";
-
 /**
  * GET/PATCH /api/notifications/{id}: an email, webhook, Slack, Teams, PagerDuty
  * or Telegram notification. The signing secret and a chat or pager destination
@@ -2061,12 +2034,6 @@ export interface Trigger {
   revision: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface TriggerWithPassword extends Trigger {
-  password: string;
-  /** An overlay trigger that signs: shown once. */
-  signing_secret?: string;
 }
 
 /** The answer of an update or a rotation: whichever secret it issued. */

@@ -12,9 +12,9 @@ import { pendingReviewOf } from "../reviews.js";
 import type { CliRuntime } from "../runtime.js";
 import { scrubSecrets } from "./credentials.js";
 import type { LocalFiles } from "./local-files.js";
-import { allocateTags, cleanName, DEFAULT_CANVAS, tagAudience, truncate, uploadName, type BuildContext, type Built, type MediaRef, buildLayout, buildPlaylist } from "./map.js";
+import { allocateTags, cleanName, tagAudience, truncate, uploadName, type BuildContext, type Built, type MediaRef, buildLayout, buildPlaylist } from "./map.js";
 import { classify, placeholderFor, screenContent, type ContentKey } from "./report.js";
-import { emptyMap, fingerprintOf, migrationKey, Serial, type MapItem, type MigrationDir, type MigrationMap, type ScanFile, type ScannedMedia } from "./state.js";
+import { emptyMap, fingerprintOf, migrationKey, Serial, type MigrationDir, type MigrationMap, type ScanFile, type ScannedMedia } from "./state.js";
 import type { SourceItem, SourceLayout, SourcePlaylist, SourceScreen, VendorSession } from "./types.js";
 
 export const FLEET_LINK_CAP = 50;

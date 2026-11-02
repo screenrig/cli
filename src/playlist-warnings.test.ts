@@ -5,8 +5,9 @@ import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
-import { run, processRuntime, type CliRuntime } from "./main.js";
-import { initializePlaylist } from "./playlist-authoring.js";
+import { run } from "./main.js";
+import { processRuntime, type CliRuntime } from "./runtime.js";
+import { preparePlaylist } from "./playlist-authoring.js";
 import { playlistAnswerWarnings, playlistWarningItems, withoutAnswerWarnings } from "./playlist-warnings.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -22,7 +23,7 @@ const FRAMING = {
 
 const json = (status: number, body: unknown): TransportResponse => ({ status, headers: { "content-type": "application/json" }, body });
 const media = [{ id: "med_IMAGE", primitive: "image", state: "ready" }];
-const document = () => initializePlaylist({ name: "Lobby", media, width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+const document = () => preparePlaylist({ name: "Lobby", content: media, width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
 
 function collect(stream: PassThrough): Promise<string> {
   return new Promise((resolve) => {

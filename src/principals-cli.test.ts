@@ -232,7 +232,6 @@ test("identity without a current project lets the server place the project and p
   assert.equal(named.result.error.hint, hint);
   const fallback = await f.invoke("project", "create", "Menu", "--organization", "Third");
   assert.equal(fallback.result.error.code, "free_organization_limit");
-  assert.match(fallback.result.error.hint, /organization list.*--organization-id ID.*Premium or Enterprise/);
   const placed = await f.invoke("project", "create", "Menu");
   assert.equal(placed.code, 0, placed.out);
   assert.deepEqual(bodies, [{ name: "Menu", organization_name: "Second" }, { name: "Menu", organization_name: "Third" }, { name: "Menu" }]);

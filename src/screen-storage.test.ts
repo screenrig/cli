@@ -3,8 +3,9 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { test } from "node:test";
-import { run, processRuntime } from "./main.js";
-import { initializePlaylist } from "./playlist-authoring.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
+import { preparePlaylist } from "./playlist-authoring.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -146,7 +147,7 @@ test("publish distinguishes full storage from a playlist that is still loading",
       } : { id: SCREEN, revision: 3 }))
       .on("POST", "/api/playlists", () => response({ id: PLAYLIST, revision: 1 }))
       .on("PATCH", `/api/screens/${SCREEN}`, () => { assigned = true; return response({ id: SCREEN, revision: 4, playlist_id: PLAYLIST }); });
-    const document = initializePlaylist({ name: "Lobby", media: [{ id: "med_AAAAAAAAAAAAAAAAAAAAAAAA", primitive: "image", state: "ready" }],
+    const document = preparePlaylist({ name: "Lobby", content: [{ id: "med_AAAAAAAAAAAAAAAAAAAAAAAA", primitive: "image", state: "ready" }],
       width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
     const result = await invoke([mode, "screen", "publish", SCREEN, "playlist.json", "--timeout", "10000", "--poll-ms", "2000"], transport, { "playlist.json": document });
     assert.equal(result.code, 0, result.stdout);

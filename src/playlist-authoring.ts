@@ -112,12 +112,6 @@ export function shortApplicationPageWarning(document: unknown): Warning | undefi
   };
 }
 
-export function initializePlaylist(options: {
-  name: string; media: RecordValue[]; width: number; height: number; format?: PlaylistFormat; durationMs?: number; fit: string;
-}): RecordValue {
-  return preparePlaylist({ ...options, content: options.media });
-}
-
 /** Build the backend-owned write document; target metadata stays outside it. */
 export function preparePlaylist(options: {
   name: string; content: RecordValue[]; width: number; height: number; format?: PlaylistFormat; durationMs?: number; fit: string;

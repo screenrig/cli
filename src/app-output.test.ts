@@ -51,11 +51,8 @@ for (const action of ["upload", "update"] as const) {
       const expectedRelease = action === "update" ? "rel_NEW" : "rel_AAAAAAAAAAAAAAAAAAAAAAAA";
       assert.equal(data.application.id, expectedId);
       assert.equal(data.application.release_id, expectedRelease);
-      assert.equal(data.id, data.application.id);
-      assert.equal(data.release_id, data.application.release_id);
-      assert.equal(data.operation_id, data.application.operation_id);
+      assert.deepEqual(Object.keys(data).sort(), ["application", "operation", "pack"]);
       assert.equal(envelope.operation_id, data.application.operation_id);
-      assert.equal(data.sha256, data.pack.sha256);
       assert.match(data.pack.sha256, /^[a-f0-9]{64}$/);
       assert.ok(data.pack.file_count > 0);
       const polls = transport.calls.filter((call) => call.path.startsWith("/api/operations/"));

@@ -294,15 +294,8 @@ export async function doctor(
         if (typeof sentence === "string" && sentence.trim().length > 0) {
           return `${dependency}: ${redactedReadinessSentence(sentence)}`;
         }
-        switch (dependency) {
-          case "application_processing":
-            return "application_processing: new applications cannot become ready; ask the service operator to restore application workers, then rerun doctor";
-          case "valkey":
-            return "valkey: ask the service operator to restore Valkey connectivity, then rerun doctor";
-          default:
-            // Probe names are server input; do not echo arbitrary values into diagnostics.
-            return "another optional dependency is unavailable; ask the service operator to inspect readiness diagnostics, then rerun doctor";
-        }
+        // Probe names are server input; do not echo arbitrary values into diagnostics.
+        return "another optional dependency is unavailable; ask the service operator to inspect readiness diagnostics, then rerun doctor";
       }))];
       checks.push({
         name,

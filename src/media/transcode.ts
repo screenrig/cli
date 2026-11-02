@@ -82,15 +82,6 @@ export interface TranscodeOptions {
  */
 export const DEFAULT_CODEC: TranscodeCodec = "h264";
 
-export function defaultTranscodeOptions(): TranscodeOptions {
-  return {
-    codec: DEFAULT_CODEC,
-    maxFps: DEFAULT_MAX_FPS,
-    webpQuality: DEFAULT_WEBP_QUALITY,
-    maxEdge: MAX_EDGE,
-  };
-}
-
 /** Source families the CLI recognizes before it decides what to run. */
 const VIDEO_EXTENSIONS = new Set([
   ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".mpg", ".mpeg", ".ts", ".m2ts", ".wmv", ".flv", ".ogv", ".3gp",

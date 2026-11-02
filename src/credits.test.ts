@@ -28,15 +28,15 @@ test("parses integer remaining from numbers, digit strings, and credit headers",
   assert.equal(parseCreditsRemainingHeader({}), undefined);
 });
 
-test("credits_low fires below 1000 remaining and is silent at the threshold", () => {
-  assert.equal(creditsLowWarning(1000), undefined);
+test("credits_low fires when the server calls the balance low", () => {
+  assert.equal(creditsLowWarning({ remaining: 1000, low: false }), undefined);
   assert.equal(creditsLowWarning(undefined), undefined);
-  const low = creditsLowWarning(999);
+  const low = creditsLowWarning({ remaining: 999, low: true });
   assert.equal(low?.code, CREDITS_LOW_CODE);
   assert.match(low?.message ?? "", /999/);
   assert.match(low?.message ?? "", /below 1000 credits/);
   assert.doesNotMatch(low?.message ?? "", /mcr|millicredit|kCr|stripe|x402|\$/i);
-  const zero = creditsLowWarning(0);
+  const zero = creditsLowWarning({ remaining: 0, low: true });
   assert.equal(zero?.code, CREDITS_LOW_CODE);
   assert.match(zero?.message ?? "", /\b0\b/);
 });
@@ -47,7 +47,7 @@ test("success envelopes append credits_low without replacing other warnings", ()
       envelope: successEnvelope({ ok: true }, { warnings: [{ code: "generic_filename", message: "rename me" }] }),
       human: "Uploaded\nwarning: rename me",
     },
-    999,
+    { remaining: 999, low: true },
   );
   assert.deepEqual(
     result.envelope.warnings.map((item) => item.code),
@@ -55,7 +55,7 @@ test("success envelopes append credits_low without replacing other warnings", ()
   );
   assert.match(result.human, /warning: rename me/);
   assert.match(result.human, /warning: Remaining prepaid credit is 999, below 1000 credits\./);
-  const emptyHuman = applyCreditsLowToSuccess({ envelope: successEnvelope({}), human: "" }, 0);
+  const emptyHuman = applyCreditsLowToSuccess({ envelope: successEnvelope({}), human: "" }, { remaining: 0, low: true });
   assert.equal(emptyHuman.human, "");
   assert.equal(emptyHuman.envelope.warnings[0]?.code, CREDITS_LOW_CODE);
 });
@@ -63,9 +63,9 @@ test("success envelopes append credits_low without replacing other warnings", ()
 test("the ScreenRig-Credits-Low header carries the server's verdict", () => {
   assert.deepEqual(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "false" }), { remaining: 0, low: false });
   assert.deepEqual(parseCreditsHeaders({ "screenrig-credits-remaining": "10", "screenrig-credits-low": "true" }), { remaining: 10, low: true });
-  assert.deepEqual(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "10", "ScreenRig-Credits-Low": "maybe" }), { remaining: 10 });
+  assert.equal(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "10", "ScreenRig-Credits-Low": "maybe" }), undefined);
+  assert.equal(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "10" }), undefined);
   assert.equal(parseCreditsHeaders({ "ScreenRig-Credits-Low": "true" }), undefined);
   assert.equal(creditsLowWarning({ remaining: 0, low: false }), undefined);
   assert.ok(creditsLowWarning({ remaining: 10, low: true }));
-  assert.ok(creditsLowWarning({ remaining: 10 }));
 });

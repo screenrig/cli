@@ -1,4 +1,4 @@
-import type { Screen, ScreenDisplay, ScreenRebootSchedule, ScreenScheduleWindow } from "./adapters/protocol.js";
+import type { ScreenDisplay, ScreenRebootSchedule, ScreenScheduleWindow } from "./adapters/protocol.js";
 import { CliError, usageError } from "./problems.js";
 import { campaignWindow, campaignWindowSpec, CAMPAIGN_WINDOWS_MAX } from "./campaigns.js";
 import { durationMs, instantInZone, normalizeInstant, scheduleWindow } from "./screen-control.js";
@@ -196,10 +196,6 @@ export function rebootScheduleProblem(error: unknown, id: string): unknown {
     }, error.exitCode, error.warnings);
   }
   return rebootProblem(error, id);
-}
-
-export function hostDeclaresReboot(screen: Screen | undefined): boolean {
-  return Array.isArray(screen?.host?.capabilities) && screen.host.capabilities.includes("reboot");
 }
 
 /** 409 reboot_unsupported, explained: the Player must declare the reboot capability. */

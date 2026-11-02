@@ -24,17 +24,28 @@ import {
   boundedScaleFilter,
   boundedSize,
   classifySource,
-  defaultTranscodeOptions,
+  DEFAULT_CODEC,
+  DEFAULT_MAX_FPS,
+  DEFAULT_WEBP_QUALITY,
   encodeTiming,
   isAnimated,
   isHdr,
   MAX_AUDIO_BYTES,
+  MAX_EDGE,
   summarizeFfmpegError,
   transcodeForUpload,
+  type TranscodeOptions,
   videoFilterChain,
 } from "./transcode.js";
 import { readWebpContainer } from "./webp.js";
-import { createMemoryLogger } from "../log/index.js";
+import { createMemoryLogger } from "../log/logger.js";
+
+const DEFAULT_OPTIONS: TranscodeOptions = {
+  codec: DEFAULT_CODEC,
+  maxFps: DEFAULT_MAX_FPS,
+  webpQuality: DEFAULT_WEBP_QUALITY,
+  maxEdge: MAX_EDGE,
+};
 
 /** The Standard plan's video limit, which every video source here is held to. */
 const STANDARD_VIDEO_BYTES = 500_000_000;
@@ -491,7 +502,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
   const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES,
     runtime,
     filePath: source,
-    options: defaultTranscodeOptions(),
+    options: DEFAULT_OPTIONS,
     reporter,
   });
 
@@ -508,7 +519,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.ok(encode);
     const args = encode.args;
     const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
-    assert.equal(defaultTranscodeOptions().codec, "h264", "the default stays H.264");
+    assert.equal(DEFAULT_CODEC, "h264", "the default stays H.264");
     assert.equal(valueAfter("-c:v"), "libx264");
     assert.equal(valueAfter("-profile:v"), "high");
     assert.equal(valueAfter("-level:v"), "5.1");
@@ -555,7 +566,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES,
     runtime,
     filePath: source,
-    options: { ...defaultTranscodeOptions(), codec: "hevc" },
+    options: { ...DEFAULT_OPTIONS, codec: "hevc" },
   });
 
   try {
@@ -636,7 +647,7 @@ test("real video transcodes convert SMPTE 170M pixels and retain SDR/HDR deliver
     const reference = compare ? await linearSamples(source, `${fixture.name}-source`) : undefined;
     for (const codec of ["h264", "hevc"] as const) await t.test(`${fixture.name}, ${codec}`, async () => {
       const result = await transcodeForUpload({ runtime, filePath: source,
-        options: { ...defaultTranscodeOptions(), codec }, videoBytes: STANDARD_VIDEO_BYTES });
+        options: { ...DEFAULT_OPTIONS, codec }, videoBytes: STANDARD_VIDEO_BYTES });
       try {
         assert.equal(result.passthrough, false);
         const output = await probeMedia(runtime, toolchain, result.filePath);
@@ -727,7 +738,7 @@ test("real video transcodes keep faststart, constant 30 fps and zero-based track
   ]);
   for (const codec of ["h264", "hevc"] as const) {
     for (const audio of [false, true]) await t.test(`${codec}, ${audio ? "AAC audio" : "silent"}`, async (t) => {
-      const result = await transcodeForUpload({ runtime, filePath: audio ? audioSource : source, options: { ...defaultTranscodeOptions(), codec }, videoBytes: STANDARD_VIDEO_BYTES });
+      const result = await transcodeForUpload({ runtime, filePath: audio ? audioSource : source, options: { ...DEFAULT_OPTIONS, codec }, videoBytes: STANDARD_VIDEO_BYTES });
       t.after(() => rm(result.cleanupDir!, { recursive: true, force: true }));
       assert.equal(result.passthrough, false, "exercise the encoder rather than source passthrough");
       await assertMp4Timeline(result.filePath);
@@ -780,7 +791,7 @@ test("image transcode targets WebP and honours alpha, animation, and the 4K boun
     }, { duration: "0", format_name: "webp_pipe" }),
   });
 
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.contentType, "image/webp");
     assert.equal(result.filename, "poster.webp");
@@ -809,7 +820,7 @@ test("animated sources use the inter-frame WebP encoder and loop forever", async
     probe: probeJson({ codec_name: "gif", width: 800, height: 600, nb_frames: "10", pix_fmt: "bgra" },
       { duration: "1.0", format_name: "gif" }),
   });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     const args = encodeCall(calls)?.args ?? [];
     assert.equal(args[args.indexOf("-c:v") + 1], "libwebp_anim");
@@ -857,7 +868,7 @@ test("without libwebp, stills fall back to cwebp with quality 90, alpha, and the
     cwebp: true,
   });
 
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.contentType, "image/webp");
     assert.equal(result.filename, "poster.webp");
@@ -905,7 +916,7 @@ test("libwebp_anim alone does not make the missing still encoder runnable", asyn
     cwebp: true,
   });
 
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(calls.filter(isCwebpEncode).length, 1);
     assert.equal(calls.filter((call) => call.args.includes("-c:v") && call.args.includes("libwebp")).length, 0);
@@ -935,7 +946,7 @@ test("without libwebp, SCREENRIG_CWEBP selects the cwebp binary", async () => {
   });
   runtime.settings = { ...runtime.settings, SCREENRIG_CWEBP: "/opt/libwebp/bin/cwebp" };
 
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     const encode = calls.filter(isCwebpEncode).at(-1);
     assert.equal(encode?.command, "/opt/libwebp/bin/cwebp");
@@ -973,7 +984,7 @@ test("cwebp output that is lossless or not WebP is rejected before upload", asyn
       writeOutput,
     });
     await assert.rejects(
-      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError, label);
         assert.match(error.problem.detail, detail, label);
@@ -1009,7 +1020,7 @@ test("without libwebp or cwebp, image transcode names both missing pieces", asyn
   process.env.TMPDIR = scratch;
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.match(error.problem.detail, /no libwebp encoder/);
@@ -1044,7 +1055,7 @@ test("cwebp cannot encode animation when libwebp is missing", async () => {
   });
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.match(error.problem.detail, /animated WebP/);
@@ -1066,7 +1077,7 @@ test("a conforming WebP source is passed through instead of re-encoded", async (
   const { runtime, calls } = fakeRuntime({
     probe: probeJson({ codec_name: "webp", width: 640, height: 480, nb_frames: "1" }, { duration: "0" }),
   });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.passthrough, true);
     assert.equal(result.filePath, source);
@@ -1114,7 +1125,7 @@ test("a lossless WebP source is re-encoded under the lossy delivery profile", as
     }, { duration: "0", format_name: "webp_pipe" }),
   });
 
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.passthrough, false);
     assert.equal(encodeCall(calls)?.args.includes("libwebp"), true);
@@ -1137,7 +1148,7 @@ test("a failed encode removes the temporary directory and leaks no ffmpeg intern
   });
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.match(error.problem.detail, /ffmpeg exited with status 1/);
@@ -1167,7 +1178,7 @@ test("a build without the profile encoder fails without leaving a temporary dire
   process.env.TMPDIR = scratch;
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.match(error.problem.detail, /no libx264 encoder/);
@@ -1204,7 +1215,7 @@ test("a capability listing that fails is reported as an unusable ffmpeg build", 
   } as CliRuntime;
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime: broken, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime: broken, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.match(error.problem.detail, /Cannot run ffmpeg/);
@@ -1228,7 +1239,7 @@ test("reported dimensions are measured from the output, not predicted from the p
     outputProbe: encodedVideoProbe({ width: 3840, height: 2158, level: 51 }),
     progressSeconds: [6],
   });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.notDeepEqual(boundedSize(3841, 2160, 3840), { width: 3840, height: 2158 });
     assert.equal(result.width, 3840);
@@ -1249,7 +1260,7 @@ test("a source ffprobe cannot read names ffprobe's first error line and says the
   const stderr = `[mov,mp4,m4a,3gp,3g2,mj2 @ 0x55b0ebd41bc0] moov atom not found\n${source}: Invalid data found when processing input\n`;
   const { runtime, calls } = fakeRuntime({ probe: probeJson(), failSourceProbe: { code: 1, stderr } });
   try {
-    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }), (error: unknown) => {
+    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }), (error: unknown) => {
       assert.ok(error instanceof CliError);
       assert.equal(error.problem.code, "usage_error");
       assert.equal(error.problem.detail, "ffprobe could not read the media file: [mov,mp4,m4a,3gp,3g2,mj2] moov atom not found (exit status 1).");
@@ -1276,7 +1287,7 @@ test("only the file's name reaches ffprobe's error line, and a silent failure st
     ] as const) {
       resetFfmpegToolchainCache();
       const { runtime } = fakeRuntime({ probe: probeJson(), failSourceProbe: { code: 1, stderr } });
-      await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }), (error: unknown) => {
+      await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }), (error: unknown) => {
         assert.ok(error instanceof CliError);
         assert.equal(error.problem.detail, detail);
         assert.ok(!error.problem.detail.includes(dir), "the directory stays out of the error");
@@ -1295,7 +1306,7 @@ test("an unmeasurable video fails closed and deletes its output", async () => {
   await writeFile(source, Buffer.alloc(256, 7));
   const { runtime, calls } = fakeRuntime({ probe: probeJson(), failOutputProbe: true });
   try {
-    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }));
+    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }));
     const output = encodeCall(calls)?.args.at(-1);
     assert.ok(output);
     await assert.rejects(() => stat(output));
@@ -1312,7 +1323,7 @@ test("a noncompliant video never reports completion and deletes its output", asy
   const { runtime, calls } = fakeRuntime({ probe: probeJson(), outputProbe: encodedVideoProbe({ level: 31 }) });
   let finished = false;
   try {
-    await assert.rejects(() => transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source, options: defaultTranscodeOptions(),
+    await assert.rejects(() => transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source, options: DEFAULT_OPTIONS,
       reporter: { start() {}, update() {}, finish() { finished = true; }, failed() {} },
     }), /delivery validation/);
     assert.equal(finished, false);
@@ -1334,7 +1345,7 @@ test("signage preset bounds portrait video and strips audio when requested", asy
     outputProbe: encodedVideoProbe({ width: 1080, height: 1920 }, false),
   });
   const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source,
-    options: { ...defaultTranscodeOptions(), preset: "signage-1080p30", noAudio: true, maxFps: 60 },
+    options: { ...DEFAULT_OPTIONS, preset: "signage-1080p30", noAudio: true, maxFps: 60 },
   });
   try {
     const args = encodeCall(calls)?.args ?? [];
@@ -1403,7 +1414,7 @@ test("temporary output lives outside the source directory and is removed by the 
   const source = path.join(dir, "clip.mp4");
   await writeFile(source, Buffer.alloc(128, 4));
   const { runtime } = fakeRuntime({ probe: probeJson(), progressSeconds: [6] });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   assert.ok(result.cleanupDir);
   assert.ok(!result.filePath.startsWith(dir));
   assert.equal(path.dirname(result.filePath), result.cleanupDir);
@@ -1422,7 +1433,7 @@ test("transcode emits paired local start and finish events without pixels", asyn
   const { runtime } = fakeRuntime({ probe: probeJson(), progressSeconds: [6] });
   const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
   runtime.logger = logger;
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     const starts = events.filter((event) => event.kind === "local" && event.phase === "start" && event.op === "media.transcode");
     const finishes = events.filter((event) => event.kind === "local" && event.phase === "finish" && event.op === "media.transcode");
@@ -1462,7 +1473,7 @@ test("an MP3 source is a soundtrack passthrough with no encode", async () => {
   await writeFile(source, Buffer.alloc(512, 1));
   const { runtime, calls } = fakeRuntime({ probe: audioProbe("mp3", "mp3") });
   try {
-    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+    const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
     assert.equal(result.passthrough, true);
     assert.equal(result.contentType, "audio/mpeg");
     assert.equal(result.stage, "audio");
@@ -1481,7 +1492,7 @@ test("an MP3 over the 170 MiB audio limit is re-encoded, not uploaded as is", as
   // Sparse: the size counts, the disk stays empty.
   await truncate(source, MAX_AUDIO_BYTES + 1);
   const { runtime, calls } = fakeRuntime({ probe: audioProbe("mp3", "mp3"), encoders: LAME_ENCODERS, outputProbe: audioProbe("mp3", "mp3") });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.passthrough, false);
     const args = encodeCall(calls)?.args ?? [];
@@ -1498,7 +1509,7 @@ test("other audio is re-encoded to a 128 kb/s stereo MP3 without cover art", asy
   const source = path.join(dir, "theme.flac");
   await writeFile(source, Buffer.alloc(512, 1));
   const { runtime, calls } = fakeRuntime({ probe: audioProbe("flac", "flac"), encoders: LAME_ENCODERS, outputProbe: audioProbe("mp3", "mp3") });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.equal(result.passthrough, false);
     assert.equal(result.contentType, "audio/mpeg");
@@ -1521,12 +1532,12 @@ test("audio transcode names a missing LAME encoder and out-of-range lengths", as
   await writeFile(source, Buffer.alloc(512, 1));
   try {
     await assert.rejects(
-      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav") }).runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav") }).runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       /libmp3lame/,
     );
     resetFfmpegToolchainCache();
     await assert.rejects(
-      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav", {}, "0.4"), encoders: LAME_ENCODERS }).runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES }),
+      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav", {}, "0.4"), encoders: LAME_ENCODERS }).runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES }),
       /1 second to 3 hours/,
     );
   } finally {
@@ -1561,7 +1572,7 @@ test("ffprobe and ffmpeg open a source with only the file protocol, forcing the 
     const { runtime, calls } = fakeRuntime({ probe: item.probe, encoders: LAME_ENCODERS, outputProbe: item.name.endsWith(".flac") ? audioProbe("mp3", "mp3") : undefined });
     let result;
     try {
-      result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: STANDARD_VIDEO_BYTES });
+      result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
     } catch {
       // A fake encode of a fake file may be refused after the runs under test.
     }

@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { commandHelp } from "./help-tree.js";
-import { processRuntime, run } from "./main.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
 import { networkError } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -33,9 +34,9 @@ const revision = (number: number, extra: Record<string, unknown> = {}) => ({
   revision: number, created_at: `2026-10-${String(number).padStart(2, "0")}T10:00:00Z`, change: "edited", name: "Lobby", page_count: 3, current: false, ...extra,
 });
 
-const problem = (status: number, code: string, detail: string) => ({
+const problem = (status: number, code: string, detail: string, hint?: string) => ({
   status, headers: { "content-type": "application/problem+json" },
-  body: { type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, status, detail, code },
+  body: { type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, status, detail, code, ...(hint ? { hint } : {}) },
 });
 
 test("playlist revisions reads one page, passes --after, and names the next page", async t => {
@@ -155,7 +156,7 @@ test("playlist promote requires --revision and --expect-rev before any request",
 test("playlist promote surfaces a stale guard as revision_conflict and a Propose credential as forbidden", async t => {
   const transport = new FakeTransport()
     .on("POST", `/api/playlists/${PLAYLIST}/revisions/3/promote`, request => request.headers?.["if-match"] === '"9"'
-      ? problem(412, "revision_conflict", "The playlist changed since you read it.")
+      ? problem(412, "revision_conflict", "The playlist changed since you read it.", "Show it again and retry with --expect-rev set to the new revision.")
       : problem(403, "forbidden", "This credential's writes are proposed for review."));
   const invoke = await revisionsCli(t, transport);
   const stale = await invoke(["--json", "playlist", "promote", PLAYLIST, "--revision", "3", "--expect-rev", "9"]);

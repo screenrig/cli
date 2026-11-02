@@ -3,13 +3,10 @@ import type { ParsedArgs } from "./command-input.js";
 import { usageError } from "./problems.js";
 import { table } from "./webhooks.js";
 
-/** The report kinds GET /api/reports lists. */
-export const REPORT_KINDS = ["fleet_health", "uptime", "publishing", "alerts", "alert_log", "proof_of_play"] as const;
 export const REPORT_GROUPINGS = ["folder", "screen", "tag"] as const;
 export const REPORT_CADENCES = ["daily", "weekly", "monthly"] as const;
 export const REPORT_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 export const REPORT_SUBSCRIPTION_FORMATS = ["pdf", "xlsx", "csv"] as const;
-export const REPORT_SUBSCRIPTIONS_MAX = 50;
 export const REPORT_RECIPIENTS_MAX = 25;
 
 const KIND_PATTERN = /^[a-z][a-z_]{1,40}$/;

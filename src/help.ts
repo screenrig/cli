@@ -1,7 +1,6 @@
 import type { Command, Option } from "commander";
 import { commandPath } from "./command-tree.js";
 import { commandNotes, commandExamples, commandRelationships, type OptionRelationship } from "./cli-commands/notes.js";
-export { CREDIT_HELP } from "./help-text.js";
 
 export interface HelpOption {
   name: string;

@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { auditAnchor, auditEntryLines, auditHeadLines, auditId, auditListLines, auditVerifyLines } from "./audit.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 

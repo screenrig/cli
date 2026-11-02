@@ -121,28 +121,24 @@ const PLAN_BASE = {
   errors: [],
 };
 
-test("feature_not_in_plan says credit does not unlock it and points at the plan's features", () => {
-  const problem = withPaymentGuidance(withPlanGuidance(PLAN_BASE));
+test("feature_not_in_plan points at the plan's features and names the plan the server's hint leaves out", () => {
+  const problem = withPaymentGuidance(withPlanGuidance({ ...PLAN_BASE, hint: "Credit does not unlock it. Stop retrying, tell the user, and continue without it." }));
   assert.equal(problem.next?.command, "screenrig project capabilities");
   assert.match(problem.next?.reason ?? "", /features/);
   const hint = problem.hint ?? "";
-  assert.match(hint, /part of the Premium plan/);
   assert.match(hint, /Credit does not unlock it/);
-  assert.match(hint, /Stop retrying/);
-  assert.match(hint, /tell the user the Premium plan includes it/);
-  assert.match(hint, /continue the task without it/);
+  assert.match(hint, /The Premium plan includes it\.$/);
   assert.doesNotMatch(`${hint} ${problem.next?.reason}`, /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$|\d/i);
   // The credit guidance leaves it alone, and it names no credit command.
   assert.equal(withPaymentGuidance(PLAN_BASE).hint, undefined);
   assert.notEqual(problem.next?.command, "screenrig billing balance");
 });
 
-test("feature_not_in_plan without a required_plan still stops, tells the user and continues", () => {
+test("feature_not_in_plan without a required_plan still points at the plan's features", () => {
   const { required_plan: _omitted, ...bare } = PLAN_BASE;
-  const hint = withPlanGuidance(bare).hint ?? "";
-  assert.match(hint, /part of a higher plan/);
-  assert.match(hint, /Credit does not unlock it/);
-  assert.match(hint, /Stop retrying/);
+  const guided = withPlanGuidance({ ...bare, hint: "Server hint." });
+  assert.equal(guided.hint, "Server hint.");
+  assert.equal(guided.next?.command, "screenrig project capabilities");
 });
 
 test("a server hint on feature_not_in_plan is kept and gains the plan that includes the feature", () => {
@@ -219,13 +215,14 @@ test("local guidance never replaces a server hint or next", () => {
   assert.equal(limited.next?.command, "screenrig server next");
   assert.equal(limited.retry_after_seconds, 30);
   assert.equal(withDefaultHint({ ...PAYMENT_BASE, ...server }).hint, "Server hint.");
-  // An older server with a next but no hint keeps its next and gains only a hint.
-  const older = withQuotaGuidance({ ...PAYMENT_BASE, status: 413, code: "quota_exceeded", next: server.next });
-  assert.equal(older.next?.command, "screenrig server next");
-  assert.match(older.hint ?? "", /storage limit/);
-  const olderLimited = withRetryAfter({ ...PAYMENT_BASE, status: 429, code: "rate_limited" }, 90);
-  assert.match(olderLimited.hint ?? "", /Wait 2 minutes/);
-  assert.equal(olderLimited.next, undefined, "no invented command");
+  // A failed operation's error has a next but no hint: it keeps its next and gains only a hint.
+  const operation = withQuotaGuidance({ ...PAYMENT_BASE, status: 413, code: "quota_exceeded", next: server.next });
+  assert.equal(operation.next?.command, "screenrig server next");
+  assert.match(operation.hint ?? "", /storage limit/);
+  const bareLimited = withRetryAfter({ ...PAYMENT_BASE, status: 429, code: "rate_limited" }, 90);
+  assert.equal(bareLimited.retry_after_seconds, 90);
+  assert.equal(bareLimited.hint, undefined, "the server's hint is the only one");
+  assert.equal(bareLimited.next, undefined, "no invented command");
 });
 
 test("normalizeProblem carries hint, next.argv, retryable, trace_id, and errors from the server", () => {
@@ -362,7 +359,7 @@ test("human rendering shows the hint, field errors, argv, and retryable", () => 
 });
 
 test("every problem that reaches the output boundary has a hint", () => {
-  for (const code of ["usage_error", "not_enrolled", "config_error", "file_error", "unexpected_response", "transport_error", "timeout", "unexpected_error", "not_found", "revision_conflict", "forbidden", "free_organization_limit", "organization_plan_required", "some_future_code"]) {
+  for (const code of ["usage_error", "not_enrolled", "config_error", "file_error", "unexpected_response", "transport_error", "timeout", "unexpected_error", "not_found", "some_future_code"]) {
     const hint = withDefaultHint({ ...PAYMENT_BASE, status: 400, code }).hint;
     assert.ok(hint && hint.length > 20, code);
   }

@@ -14,7 +14,6 @@ import {
   isReleaseVersion,
   resolveCliVersion,
   untaggedDevVersion,
-  versionFromTag,
 } from "./version.js";
 
 test("distribution distinguishes a standalone install from an enclosing screenRIG bundle", async () => {
@@ -68,13 +67,6 @@ test("stamped package.json and SCREENRIG_VERSION win in that order", () => {
     resolveCliVersion({ settings: { SCREENRIG_VERSION: "not-a-version" }, packageVersion: "26.09.2" }),
     "26.09.2",
   );
-});
-
-test("release tags map to YY.MM.N and reject serial 0", () => {
-  assert.equal(versionFromTag("v26.09.1"), "26.09.1");
-  assert.equal(versionFromTag("v26.09.0"), undefined);
-  assert.equal(versionFromTag("v26.09.0-dev"), undefined);
-  assert.equal(versionFromTag("v0.1.0"), undefined);
 });
 
 test("running CLI_VERSION is the stamped or untagged product version", () => {

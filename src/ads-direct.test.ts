@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { commandHelp } from "./help-tree.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { csvRecord } from "./playback-export.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -297,7 +298,7 @@ test("ads direct and fill refuse bad input before any request", async () => {
   });
 });
 
-test("goal_overbooked is rendered with a hint and a next command, and a server hint wins", async () => {
+test("goal_overbooked is rendered with the server hint and a next command", async () => {
   await withDir("ads-direct-overbooked-", async (configDir) => {
     const problem = (extra: Record<string, unknown>) => ({
       status: 409, headers: { "content-type": "application/problem+json" },
@@ -305,16 +306,13 @@ test("goal_overbooked is rendered with a hint and a next command, and a server h
     });
     const file = path.join(configDir, "direct.json");
     await writeFile(file, JSON.stringify(DRAFT));
-    const local = new FakeTransport().on("POST", DIRECT, () => problem({}));
+    const local = new FakeTransport().on("POST", DIRECT, () => problem({ hint: "Server hint." }));
     const result = await withRuntime(["--json", "ads", "direct", "create", file], local, configDir);
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
     const error = JSON.parse(result.stdout).error;
     assert.equal(error.code, "goal_overbooked");
     assert.equal(error.next.command, "screenrig ads direct availability --help");
-    assert.match(error.hint, /overbook/);
-    const server = new FakeTransport().on("POST", DIRECT, () => problem({ hint: "Server hint." }));
-    const served = await withRuntime(["--json", "ads", "direct", "create", file], server, configDir);
-    assert.equal(JSON.parse(served.stdout).error.hint, "Server hint.");
+    assert.equal(error.hint, "Server hint.");
   });
 });
 

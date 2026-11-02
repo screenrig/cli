@@ -466,9 +466,8 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
     .addOption(new Option("--window <SPEC>", "Reboot at the start of this weekly window, DAYS HH:MM-HH:MM such as \"Mon-Sun 04:00-04:30\" (repeatable, at most 16); each window lasts 5 minutes to 24 hours").argParser(rebootWindowOption).conflicts(["file"]))
-    .addOption(new Option("--file <FILE>", "Reboot schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin, instead of --window").conflicts(["window", "disabled", "enabled"]))
-    .addOption(new Option("--enabled", "Reboot at each window (the default)").conflicts(["disabled", "file"]))
-    .addOption(new Option("--disabled", "Keep the windows and reboot nothing").conflicts(["enabled", "file"]))
+    .addOption(new Option("--file <FILE>", "Reboot schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin, instead of --window").conflicts(["window", "disabled"]))
+    .addOption(new Option("--disabled", "Keep the windows and reboot nothing").conflicts(["file"]))
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenRebootScheduleSet));
   requireOptionGroup(rebootScheduleSet, "exactlyOne", ["--window", "--file"]);

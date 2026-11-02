@@ -121,6 +121,3 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
     }
   }
 }
-
-export { processRuntime };
-export type { CliRuntime } from "./runtime.js";

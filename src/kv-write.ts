@@ -1,7 +1,7 @@
 import { readInputBytes } from "./authoring-input.js";
 import type { CliRuntime } from "./runtime.js";
 import type { KVWrite } from "./adapters/protocol.js";
-import type { ParsedArgs } from "./argv.js";
+import type { ParsedArgs } from "./command-input.js";
 import { usageError } from "./problems.js";
 
 export const KV_VALUE_BASE64_MAX_LENGTH = 1_398_104;

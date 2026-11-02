@@ -1,7 +1,5 @@
 import type { LocalFiles } from "./local-files.js";
 
-export type { LocalEntry, LocalFiles } from "./local-files.js";
-
 export type MediaKind = "image" | "video" | "audio";
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 

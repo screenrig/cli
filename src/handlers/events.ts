@@ -26,15 +26,6 @@ export const handleEventsFollow = commandHandler(async (args, runtime, resolved)
 }, true);
 
 export const CANNED_EVENT_MESSAGES = new Set([
-  "Application emitted an event",
-  "Runtime reported a bounded condition",
-  "Player reported runtime status",
-  "Screen screenshot requested",
-  "Screen screenshot ready",
-  "Screen screenshot failed",
-  "Screenshot requested",
-  "Screenshot ready",
-  "Screenshot failed",
   "Stream cursor advanced",
   "Stream replay state is no longer retained",
   "Screen came online",

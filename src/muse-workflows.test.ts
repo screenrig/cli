@@ -4,7 +4,8 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {Writable,Readable} from 'node:stream';
-import {run,processRuntime} from './main.js';
+import {run} from './main.js';
+import {processRuntime} from './runtime.js';
 import {FakeTransport} from './transport/fake.js';
 
 test('CLI sends card data with an expiry', async t => {

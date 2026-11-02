@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { ApiClient } from "./client.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
@@ -84,7 +85,7 @@ const CAPABILITIES = {
 
 test("feature_not_in_plan reaches the agent with its fields, the plan and the capabilities command", async () => {
   const transport = new FakeTransport().on("GET", "/api/screens", () => ({
-    status: 402, headers: { "content-type": "application/problem+json" }, body: planProblem({}),
+    status: 402, headers: { "content-type": "application/problem+json" }, body: planProblem({ hint: SERVER_HINT }),
   }));
   const result = await invoke(["--json", "screen", "list"], transport);
   assert.equal(result.code, ExitCode.Client, result.stdout);
@@ -135,7 +136,7 @@ test("a plan-limit refusal that carries required_plan names the plan; one that d
 
 test("a refused download gets the same plan guidance", async () => {
   const transport = new FakeTransport().onDownload("GET", "/api/audit", () => ({
-    status: 402, headers: { "content-type": "application/problem+json" }, problem: planProblem({ feature: "audit_log", required_plan: "enterprise" }),
+    status: 402, headers: { "content-type": "application/problem+json" }, problem: planProblem({ feature: "audit_log", required_plan: "enterprise", hint: SERVER_HINT }),
   }));
   await assert.rejects(new ApiClient({ transport, token: TOKEN }).download({ method: "GET", path: "/api/audit" }), (error: unknown) => {
     assert.ok(error instanceof CliError, String(error));
@@ -173,24 +174,4 @@ test("a limit of 0 reads as none, because the plan has no cap on it", async () =
   const transport = new FakeTransport().on("GET", "/api/project/capabilities", () => ({ status: 200, headers: NO_STORE, body }));
   const result = await invoke(["--human", "project", "capabilities"], transport);
   assert.match(result.stdout, /^limits: screens=250 members=none$/m);
-});
-
-test("project capabilities from a server without plan fields prints what it always did", async () => {
-  const { plan_features: _features, limits: _limits, ...older } = CAPABILITIES;
-  const transport = new FakeTransport().on("GET", "/api/project/capabilities", () => ({ status: 200, headers: NO_STORE, body: older }));
-  const result = await invoke(["--human", "project", "capabilities"], transport);
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  assert.doesNotMatch(result.stdout, /featuresets|plan_features|limits/);
-  assert.match(result.stdout, /^features: advertiser=true screens=true$/m);
-});
-
-test("a malformed plan_features entry never fails project capabilities", async () => {
-  const body = { ...CAPABILITIES, plan_features: { featuresets: "founding", features: [null, { id: 7 }, { id: "sso", enabled: false }, { id: "reports", enabled: true, required_plan: "premium" }] }, limits: "none" };
-  const transport = new FakeTransport().on("GET", "/api/project/capabilities", () => ({ status: 200, headers: NO_STORE, body }));
-  const result = await invoke(["--human", "project", "capabilities"], transport);
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  assert.match(result.stdout, /^featuresets: \(none\)$/m);
-  assert.match(result.stdout, /^plan_features_on: reports$/m);
-  assert.match(result.stdout, /^plan_features_off: sso$/m);
-  assert.doesNotMatch(result.stdout, /^limits:/m);
 });

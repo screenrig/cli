@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { Readable } from "node:stream";
 import { fetchSignedRawPut, SIGNED_PUT_ANSWER_MS, SIGNED_PUT_IDLE_MS, signedPutDispatcher, spawnRunProcess } from "./runtime.js";
-import { readFile, rm } from "node:fs/promises";
-import path from "node:path";
+import { Readable } from "node:stream";
 
 for (const stream of ["stdout", "stderr"] as const) {
   test(`process streaming bounds unterminated ${stream} lines`, async () => {

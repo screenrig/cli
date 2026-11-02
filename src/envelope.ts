@@ -64,8 +64,6 @@ export interface ErrorEnvelope {
   context?: import("./project-context.js").ResultContext;
 }
 
-export type Envelope<T> = SuccessEnvelope<T> | ErrorEnvelope;
-
 export function successEnvelope<T>(
   data: T,
   extras?: { request_id?: string; operation_id?: string; warnings?: Warning[] },

@@ -146,7 +146,8 @@ export async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved:
   });
   // Where the server takes them, the archive goes straight to the object
   // store (declare, signed PUT, commit), so a slow uplink is not cut off by
-  // the API's proxy. Older servers take the streamed POST.
+  // the API's proxy. A server without direct uploads (no upload store) takes the
+  // streamed POST.
   const { accepted: body, response } = directApplicationUploads(capabilities)
     ? await uploadApplicationDirect({
       runtime, client, packed, sdkVersion: SDK_PROTOCOL_VERSION,
@@ -176,17 +177,20 @@ export async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved:
       sleep: runtime.sleep,
     })
     : null;
+  // The accepted body, whichever way the archive traveled: a direct upload's
+  // commit answers the operation, not the accepted application. Its request and
+  // operation ids stay on the envelope; data holds the same three members
+  // regardless of waiting mode.
+  const accepted = jsonBody({ body, headers: response.headers }, client.requestId);
   return {
-    // The accepted body, whichever way the archive traveled: a direct upload's
-    // commit answers the operation, not the accepted application.
-    envelope: jsonBody({ body, headers: response.headers }, client.requestId, {
-      // Keep the historical flat accepted fields and sha256 as aliases while
-      // exposing the same canonical paths regardless of waiting mode.
-      application: body,
-      operation,
-      pack: { sha256: packed.sha256, file_count: packed.file_count },
-      sha256: packed.sha256,
-    }),
+    envelope: {
+      ...accepted,
+      data: {
+        application: body,
+        operation,
+        pack: { sha256: packed.sha256, file_count: packed.file_count },
+      },
+    },
     exitCode: ExitCode.Success,
     human: humanLines(
       operation

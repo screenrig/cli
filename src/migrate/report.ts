@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  allocateTags, buildLayout, buildPlaylist, campaignTiming, DEFAULT_CANVAS, placeholderBody, tagAudience,
+  allocateTags, buildLayout, buildPlaylist, campaignTiming, DEFAULT_CANVAS, placeholderBody,
   type Built, type BuildContext, type CampaignTiming, type MediaRef, type PlaceholderBody, type TagWant,
 } from "./map.js";
 import type { ScannedCatalog } from "./state.js";

@@ -1,4 +1,4 @@
-import { RESOURCE_ID_PATTERNS, isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
+import { isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
 import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";

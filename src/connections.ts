@@ -108,8 +108,6 @@ function checkLines(checks: ConnectionCheck[] | undefined): string[] {
   return (checks ?? []).map((check) => `  ${!check.ok ? "failed" : check.warn ? "warning" : "ok"} ${check.name}${check.detail ? `: ${check.detail}` : ""}`);
 }
 
-const PROVIDER_NAMES: Record<ConnectionProvider, string> = { microsoft: "Microsoft 365", google: "Google" };
-
 export function connectionLines(connection: Connection | undefined): string[] {
   if (!connection) return [];
   const test = connection.last_test;

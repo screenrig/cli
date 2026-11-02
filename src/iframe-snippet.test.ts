@@ -3,8 +3,10 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { decodeAttributeEntities, iframeSnippetSource } from "./iframe-snippet.js";
-import { processRuntime, run } from "./main.js";
+import { decodeAttributeEntities } from "./generated/playlist-write-semantics.js";
+import { iframeSnippetSource } from "./iframe-snippet.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 

@@ -7,8 +7,15 @@ import { testTemp } from "../test-temp.js";
 import { prepareMediaUpload } from "../media-upload.js";
 import type { CliRuntime, RunProcessRequest } from "../runtime.js";
 import { parseProbePayload, resetFfmpegToolchainCache } from "./ffmpeg.js";
-import { defaultTranscodeOptions, transcodeForUpload } from "./transcode.js";
+import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, MAX_EDGE, transcodeForUpload, type TranscodeOptions } from "./transcode.js";
 import { H264HeaderInspection, VideoPacketInspection } from "./video-inspection.js";
+
+const DEFAULT_OPTIONS: TranscodeOptions = {
+  codec: DEFAULT_CODEC,
+  maxFps: DEFAULT_MAX_FPS,
+  webpQuality: DEFAULT_WEBP_QUALITY,
+  maxEdge: MAX_EDGE,
+};
 
 function probeJson(video: Record<string, unknown> = {}, audio = false): string {
   return JSON.stringify({ streams: [{ index: 0, codec_type: "video", codec_name: "h264", codec_tag_string: "avc1",
@@ -155,7 +162,7 @@ test("valid input skips the encoder, snapshots original bytes, and binds the upl
   const source = path.join(dir, "external.mp4"), original = Buffer.from("original compressed video bytes");
   await writeFile(source, original);
   const { runtime, calls } = fakeRuntime(dir);
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: 500_000_000 });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: 500_000_000 });
   try {
     assert.equal(result.passthrough, true);
     assert.equal(result.video?.level, "4.1");
@@ -185,7 +192,7 @@ for (const [name, size, limit, passthrough] of [
     await writeFile(source, "");
     await truncate(source, size);
     const { runtime, calls, snapshots } = fakeRuntime(dir);
-    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: limit });
+    const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: limit });
     try {
       if (passthrough) {
         assert.equal(snapshots.length > 0, true, "the source was inspected");
@@ -214,7 +221,7 @@ for (const failure of ["bad-packets", "delayed-track", "probe-errors", "no-heade
     const dir = await testTemp("video-fallback-");
     const source = path.join(dir, "clip.mp4"); await writeFile(source, Buffer.from("source"));
     const { runtime, calls, snapshots } = fakeRuntime(dir, failure);
-    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: 500_000_000 });
+    const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: 500_000_000 });
     try {
       assert.equal(result.passthrough, false);
       assert.equal(calls.filter((call) => call.args.includes("-progress")).length, 1);
@@ -236,7 +243,7 @@ test("the inspection runs open the snapshot with only the file protocol and the 
     const source = path.join(dir, name);
     await writeFile(source, bytes);
     const { runtime, calls } = fakeRuntime(dir);
-    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(), videoBytes: 500_000_000 });
+    const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: 500_000_000 });
     try {
       assert.equal(result.passthrough, true);
       const reads = calls.filter((call) => call.args.some((arg) => arg.includes("screenrig-inspect-") || arg === "trace_headers"));

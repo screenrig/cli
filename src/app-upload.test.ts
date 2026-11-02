@@ -94,12 +94,9 @@ for (const action of ["upload", "update"] as const) {
     // The envelope is the streamed upload's, field for field.
     assert.deepEqual(Object.keys(data).sort(), Object.keys(legacy.envelope.data).sort());
     assert.deepEqual(data.application, legacy.envelope.data.application);
-    assert.equal(data.id, data.application.id);
-    assert.equal(data.release_id, data.application.release_id);
-    assert.equal(data.operation_id, data.application.operation_id);
     assert.equal(direct.envelope.operation_id, data.application.operation_id);
     assert.equal(data.operation.state, "succeeded");
-    assert.equal(data.sha256, legacy.envelope.data.sha256);
+    assert.deepEqual(data.pack, legacy.envelope.data.pack);
   });
 }
 

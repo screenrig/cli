@@ -93,14 +93,7 @@ async function failedOperation(kind: string, error: Record<string, unknown>) {
 }
 
 test("a failed upload whose bytes were refused is a client error with a re-upload hint, never wait and retry", async () => {
-  // Today's server: media_upload_failed carries no status.
-  const unverified = await failedOperation("media.upload", { code: "media_upload_failed", detail: "The staged media object could not be verified." });
-  assert.equal(unverified.status, 400);
-  assert.equal(unverified.code, "media_upload_failed");
-  assert.equal(unverified.detail, "The staged media object could not be verified.");
-  assert.equal(unverified.operation_id, "op_test");
-  assert.equal(unverified.hint, "This upload is over and nothing was stored, so waiting cannot help. Fix the file if detail says what is wrong with it, then run the upload again.");
-  // A server moving these failures to invalid_request, with or without a status.
+  // The operation reports the refusal with or without a status.
   for (const error of [
     { code: "invalid_request", detail: "The uploaded bytes are not the declared content_type." },
     { code: "invalid_request", status: 400, detail: "The uploaded bytes are not the declared content_type." },
@@ -109,6 +102,8 @@ test("a failed upload whose bytes were refused is a client error with a re-uploa
     assert.equal(refused.status, 400);
     assert.equal(refused.code, "invalid_request");
     assert.match(refused.hint ?? "", /nothing was stored/);
+    assert.equal(refused.operation_id, "op_test");
+    assert.equal(refused.hint, "This upload is over and nothing was stored, so waiting cannot help. Fix the file if detail says what is wrong with it, then run the upload again.");
     assert.doesNotMatch(refused.hint ?? "", /Wait a minute|retry the same command/);
   }
 });

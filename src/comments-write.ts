@@ -1,7 +1,7 @@
 import { readInputBytes } from "./authoring-input.js";
 import type { CliRuntime } from "./runtime.js";
 import type { CommentsWrite } from "./adapters/protocol.js";
-import type { ParsedArgs } from "./argv.js";
+import type { ParsedArgs } from "./command-input.js";
 import { usageError } from "./problems.js";
 
 export const COMMENTS_MAX_BYTES = 1024;

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { memoryConfigFs } from "./memory-config.js";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { TEMPORARY_PROTOCOL_VERSION, type Project, type ProjectContextList, type Operation, type ReviewPending } from "./adapters/protocol.js";
+import { TEMPORARY_PROTOCOL_VERSION, type Project, type ProjectContextList, type ReviewPending } from "./adapters/protocol.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import { ApiClient, RequestIds, requireToken, type ListAllOptions } from "./client.js";
 import { UPTIME_MAX_DAYS } from "./series.js";
@@ -30,8 +30,6 @@ import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, MAX_EDGE, type Tr
 import { NotesApi, resourceNoteLines, resourceNotesWarning, type NoteAboutType, type NoteList } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
 
-
-export { CLI_VERSION };
 
 export interface CommandResult {
   envelope: ReturnType<typeof successEnvelope<unknown>>;
@@ -808,7 +806,6 @@ function signInExpiryWarning(grant: ScreenRigConfig["oauth"], now: Date): Warnin
   };
 }
 
-export type { Operation };
 
 export function webhookRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
   const revision = flagString(args.flags, "expect-rev");

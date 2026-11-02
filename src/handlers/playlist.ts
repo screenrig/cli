@@ -31,7 +31,7 @@ import { validatePlaylistCards } from "../cards.js";
 import { clientFor, commandHandler, humanLines, jsonBody, pendingReviewResult, playlistWriteResult, progressReporterFor, requireFlagValue, resolveProjectContext, resourceNotes, reviewNoteFrom, scheduleZoneError, simpleList, transcodeOptionsFromArgs, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
-export const handlePlaylistValidate = commandHandler(async (args, runtime, resolved) => {
+export const handlePlaylistValidate = commandHandler(async (args, runtime) => {
   const file = args.positionals[2];
   if (!file) throw usageError("playlist validate requires one JSON file.");
   let parsed: Record<string, unknown>;

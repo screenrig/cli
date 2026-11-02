@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -244,14 +244,6 @@ export async function performSignedMediaPut(
   options: SignedPutOptions = {},
 ): Promise<void> {
   return performSignedBodyPut(prepared.bytes, session, signedRawPut, options);
-}
-
-export async function performSignedMediaFilePut(
-  filePath: string,
-  session: ValidatedMediaUploadSession,
-  signedRawPut: SignedRawPut,
-): Promise<void> {
-  return performSignedBodyPut(createReadStream(filePath), session, signedRawPut);
 }
 
 export async function performSignedMediaStreamPut(

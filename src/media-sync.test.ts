@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { commandHelp } from "./help-tree.js";
 import { createMemoryLogger } from "./log/logger.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import {
   MEDIA_SYNC_ACCOUNT_ID_PATTERN, MEDIA_SYNC_ID_PATTERN, accountLines, mediaSyncAppKey, mediaSyncClientId, mediaSyncDriveUrl, mediaSyncDropboxUrl,
   mediaSyncEvery, mediaSyncTenant, mediaSyncUrl, syncLines, syncTableLines,

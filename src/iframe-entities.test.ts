@@ -3,7 +3,8 @@ import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
-import { processRuntime, run } from "./main.js";
+import { run } from "./main.js";
+import { processRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 

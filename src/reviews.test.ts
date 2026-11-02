@@ -5,8 +5,9 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
-import { initializePlaylist } from "./playlist-authoring.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
+import { preparePlaylist } from "./playlist-authoring.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
@@ -58,7 +59,7 @@ async function enrolled(): Promise<Env> {
   const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
-  const document = initializePlaylist({ name: "Lobby", media: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+  const document = preparePlaylist({ name: "Lobby", content: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
   await writeFile(path.join(cwd, "lobby.json"), JSON.stringify(document));
   return { fs, cwd, configPath, dir };
 }

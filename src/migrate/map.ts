@@ -14,7 +14,6 @@ import type { MediaKind, SourceItem, SourceLayout, SourcePlaylist, SourceSchedul
 export const DEFAULT_CANVAS = { width: 1920, height: 1080 } as const;
 export const DEFAULT_PAGE_MS = 8000;
 export const PLAYLIST_NAME_MAX = 120;
-export const CAMPAIGN_NAME_MAX = 120;
 export const PLACEHOLDER_LABEL_MAX = 80;
 export const PLACEHOLDER_TAGS_MAX = 16;
 export const TAG_MAX = 32;

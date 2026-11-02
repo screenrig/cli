@@ -4,7 +4,8 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 

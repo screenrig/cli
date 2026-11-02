@@ -3,9 +3,9 @@ import type { Screen, ScreenManifestUpgrade, ScreenManifestUpgradePlaylist } fro
 /**
  * Consumer helpers for the screen manifest upgrade read model
  * (`Screen.manifest_upgrade`). The backend always computes it; these helpers
- * only render it. A missing or malformed object (an older backend, or a test
- * fixture without the feature) simply renders nothing, exactly like a screen
- * that never reported storage.
+ * only render it. A missing or malformed object (a test fixture without the
+ * field) simply renders nothing, exactly like a screen that never reported
+ * storage.
  *
  * User-facing presentation is playlist versions — `Target v42` / `Playing
  * v41` — scoped by playlist identity across switches; `Playing` is the last

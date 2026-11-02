@@ -559,10 +559,9 @@ export class ApiClient {
  * refused (they did not match the declaration, are not the declared type, or
  * expired before they could be checked). Such an operation is over: it never
  * finishes later, so waiting and retrying it cannot help. It is a client
- * error (400) whether or not the server sends a status; older servers send
- * media_upload_failed without one.
+ * error (400) whether or not the server sends a status.
  */
-const REFUSED_UPLOAD_CODES = new Set(["media_upload_failed", "invalid_request"]);
+const REFUSED_UPLOAD_CODES = new Set(["invalid_request"]);
 
 const REFUSED_UPLOAD_HINT = "This upload is over and nothing was stored, so waiting cannot help. Fix the file if detail says what is wrong with it, then run the upload again.";
 

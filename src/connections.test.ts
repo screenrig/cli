@@ -9,7 +9,8 @@ import { connectionId, connectionLines, connectionTableLines, type Connection } 
 import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help-tree.js";
 import { createMemoryLogger } from "./log/logger.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";

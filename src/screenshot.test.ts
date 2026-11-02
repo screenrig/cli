@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, open, rename, chmod, stat, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdir, open, rename, chmod, stat, rm, readFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";

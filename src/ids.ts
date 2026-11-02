@@ -32,14 +32,3 @@ export function isValidRequestId(value: string): boolean {
 export function isValidIdempotencyKey(value: string): boolean {
   return /^[A-Za-z0-9._~-]{8,200}$/.test(value);
 }
-
-export function requestIdEntropyBytes(value: string): number {
-  if (!isValidRequestId(value)) {
-    return 0;
-  }
-  try {
-    return Buffer.from(value.slice(4), "base64url").length;
-  } catch {
-    return 0;
-  }
-}

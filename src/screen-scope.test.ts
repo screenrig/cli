@@ -6,8 +6,9 @@ import { test } from "node:test";
 import { commandHelp } from "./help-tree.js";
 import { readConfigFile, writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { run, type CliRuntime } from "./main.js";
-import { normalizeProblem, renderProblem, withDefaultHint, withScreenScopeGuidance } from "./problems.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
+import { normalizeProblem, renderProblem, withScreenScopeGuidance } from "./problems.js";
 import { protectedChangeLines, reviewDetailLines, reviewListLines } from "./reviews.js";
 import { campaignLines, campaignTableLines } from "./campaigns.js";
 import { folderLines, folderListLines, screenScopeFromArgs } from "./screen-folders.js";
@@ -137,13 +138,6 @@ test("outside_screen_scope names the scope and the way back; the other new refus
   assert.equal(withScreenScopeGuidance(own).next?.command, "screenrig screen list");
   assert.equal(normalizeProblem({ status: 403, code: "outside_screen_scope", screen_scope: { folder_ids: "x" } }).screen_scope, undefined);
   assert.equal(withScreenScopeGuidance(normalizeProblem({ status: 409, code: "protected_target" })).next, undefined);
-  // The CLI's own hints name the way back for a server that sends none.
-  for (const code of ["outside_screen_scope", "protected_target", "second_approver_required", "reserved_item"]) {
-    const hint = withDefaultHint(normalizeProblem({ status: 403, code })).hint ?? "";
-    assert.match(hint, /Ask |Propose |owner|approver/, code);
-    assert.notEqual(hint, withDefaultHint(normalizeProblem({ status: 403, code: "no_such_code" })).hint, code);
-  }
-  assert.match(withDefaultHint(normalizeProblem({ status: 409, code: "protected_target" })).hint ?? "", /screen folder update ID --unprotect/);
   assert.match(renderProblem(withScreenScopeGuidance(normalizeProblem({ status: 403, code: "outside_screen_scope", title: "Outside", detail: "d", screen_scope: { folder_ids: [], screen_ids: [A] } }))), new RegExp(`screen_scope: folders none; screens ${A}`));
 });
 
@@ -330,7 +324,7 @@ test("campaign update answers a protected change with its review and a reserved 
     const held = await cli(["--json", "campaign", "update", CAMPAIGN, "--playlist-id", PLAYLIST], transport, configDir);
     assert.equal(held.code, ExitCode.Success, held.stdout);
     assert.equal(held.envelope.data.status, "pending_review");
-    answer = problem(403, "reserved_item", "Campaign cmp_SPRING is reserved.");
+    answer = problem(403, "reserved_item", "Campaign cmp_SPRING is reserved.", { hint: "Ask an approver to make the change." });
     const refused = await cli(["--json", "campaign", "update", CAMPAIGN, "--name", "x"], transport, configDir);
     assert.equal(refused.code, ExitCode.Auth);
     assert.equal(refused.envelope.error?.code, "reserved_item");

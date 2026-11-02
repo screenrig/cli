@@ -9,7 +9,8 @@ import {
 } from "./bi.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { commandHelp } from "./help-tree.js";
-import { run, type CliRuntime } from "./main.js";
+import { run } from "./main.js";
+import { type CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";

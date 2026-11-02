@@ -18,8 +18,6 @@ import { clientFor, commandHandler, humanLines, jsonBody, simpleGet, simpleList,
 export const handleKvList = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "app-id");
   if (!applicationId) throw usageError("kv commands require --app-id.");
-  const key = args.positionals[2];
-
   return simpleList(args, runtime, resolved, `/api/applications/${applicationId}/kv`, "K/V");
 }, true);
 
