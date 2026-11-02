@@ -14301,7 +14301,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccount
-      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. Instead of those three, config.connection_id names a Microsoft connection of the project (createConnection), in either mode, which signs in and holds the secret. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. Instead of those three, config.connection_id names a Microsoft connection of the project (createConnection), in either mode, which signs in and holds the secret. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. kind dropbox works like canva: the account is pending_consent and authorize_url is a one-time link that the person who owns the Dropbox account opens, signed in to Dropbox, to allow read-only access (files.metadata.read, files.content.read, account_info.read). It goes through screenRIG''s Dropbox app, or through the customer''s own Dropbox app when config.app_key names it (PKCE, so no app secret; the app must list https://API_ORIGIN/api/dropbox/callback as a redirect URI). A server without screenRIG''s Dropbox app answers 409 dropbox_not_configured to a dropbox account with no app_key. kind google_drive is ready at once and reads the folders shared with config.service_account_email: screenRIG''s service account, or the customer''s own when secret is that service account''s JSON key. A folder shared with screenRIG''s service account syncs only when a member of the project with a verified email shared it or owns it. A server without screenRIG''s service account answers 409 google_drive_not_configured to a google_drive account with no key. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva or Dropbox retry gets a new link).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14315,7 +14315,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked; a Canva account also carries authorize_url.
+          description: Created, with its secret masked; a Canva or Dropbox account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -14342,7 +14342,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), dropbox_not_configured (no screenRIG Dropbox app and no config.app_key; kind dropbox only), google_drive_not_configured (no screenRIG service account and no key; kind google_drive only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -14492,7 +14492,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: connectMediaSyncAccount
-      description: 'Makes a new one-time consent link (authorize_url, valid until authorize_expires_at) for a Canva account, to send to the person who owns the Canva account; they open it signed in to Canva and allow access. It replaces any earlier link. A connected account stays connected until the new consent completes, so this also renews a connection (state reconnect_required) or moves it to another Canva account. The link is a credential of the consent: send it to that person only. A server without the Canva integration answers 409 canva_not_configured.'
+      description: 'Makes a new one-time consent link (authorize_url, valid until authorize_expires_at) for a Canva or Dropbox account, to send to the person who owns that account; they open it signed in to Canva or Dropbox and allow access. It replaces any earlier link. A connected account stays connected until the new consent completes, so this also renews a connection (state reconnect_required) or moves it to another Canva or Dropbox account. The link is a credential of the consent: send it to that person only. A server without the Canva integration answers 409 canva_not_configured; a Dropbox account with no app_key on a server without screenRIG''s Dropbox app answers 409 dropbox_not_configured.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14515,13 +14515,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
-          description: invalid_request — the account is not a Canva account.
+          description: invalid_request — the account is not a Canva or Dropbox account.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: canva_not_configured — this server has no Canva integration.
+          description: canva_not_configured (this server has no Canva integration) or dropbox_not_configured (no screenRIG Dropbox app and the account has no app_key).
           content:
             application/problem+json:
               schema:
@@ -14700,6 +14700,51 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       security: []
+  /api/dropbox/callback:
+    get:
+      operationId: completeDropboxConsent
+      description: 'Where Dropbox sends the person after they allow (or refuse) access in a consent link. It carries no credential: the one-time state in the query finds the Dropbox account, must be unexpired and is used once, in the same write that stores the connection. screenRIG exchanges the code (PKCE, with screenRIG''s Dropbox app or the account''s own app_key), reads whose Dropbox account it is, seals the tokens and appends media_sync_account.connected. The answer is a short page naming the account and the project it was connected to; an error, an unknown, expired or used state, or a refused code renders the same page with the reason and changes nothing. Answers only on the API host.'
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The page that says the account is connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          description: The page that says why nothing was connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '502':
+          description: Dropbox could not be reached; the same link works again.
+          content:
+            text/html:
+              schema:
+                type: string
+        '409':
+          description: The account has no app_key and screenRIG's Dropbox app is not configured on this server.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      security: []
   /api/media-syncs:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -14732,7 +14777,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSync
-      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider dropbox: url is the folder''s address in Dropbox (https://www.dropbox.com/home/...), a shared folder link the connected account has added to its Dropbox, or a path starting with /; it is read once through a connected Dropbox account and the sync is stored, due now. Folders in a team space are read from the team''s root. Each run continues from Dropbox''s saved position in the folder, so only changes are read. A folder the account cannot open is 409 media_sync_source_refused; an account whose connection Dropbox no longer honors is 409 dropbox_reconnect_required. provider google_drive: url is the folder''s Google Drive address (https://drive.google.com/drive/folders/ID) or its id, shared (Viewer is enough) with the account''s service_account_email. Each run lists the folder and compares each file''s checksum. Google Docs, Sheets and Slides files are skipped as unsupported_type. A folder the address cannot open is 409 media_sync_source_refused. Through screenRIG''s service account the folder must be shared or owned by a member of the project with a verified email (403 media_sync_sharer_not_member), and every run checks it again (run error sharer_not_member stops the sync in state error). provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -14772,8 +14817,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '403':
+          description: media_sync_sharer_not_member — a Google Drive folder read through screenRIG's service account was not shared or owned by a member of the project with a verified email.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
-          description: media_sync_source_refused (the provider refused the app, its permission or the folder), resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
+          description: media_sync_source_refused (the provider refused the app, its permission or the folder), dropbox_reconnect_required (the Dropbox account must be connected again), dropbox_not_configured, google_drive_not_configured, resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -25428,7 +25479,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccountInProject
-      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. Instead of those three, config.connection_id names a Microsoft connection of the project (createConnection), in either mode, which signs in and holds the secret. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. Instead of those three, config.connection_id names a Microsoft connection of the project (createConnection), in either mode, which signs in and holds the secret. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. kind dropbox works like canva: the account is pending_consent and authorize_url is a one-time link that the person who owns the Dropbox account opens, signed in to Dropbox, to allow read-only access (files.metadata.read, files.content.read, account_info.read). It goes through screenRIG''s Dropbox app, or through the customer''s own Dropbox app when config.app_key names it (PKCE, so no app secret; the app must list https://API_ORIGIN/api/dropbox/callback as a redirect URI). A server without screenRIG''s Dropbox app answers 409 dropbox_not_configured to a dropbox account with no app_key. kind google_drive is ready at once and reads the folders shared with config.service_account_email: screenRIG''s service account, or the customer''s own when secret is that service account''s JSON key. A folder shared with screenRIG''s service account syncs only when a member of the project with a verified email shared it or owns it. A server without screenRIG''s service account answers 409 google_drive_not_configured to a google_drive account with no key. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva or Dropbox retry gets a new link).'
       security:
         - projectBearer: []
       parameters:
@@ -25441,7 +25492,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked; a Canva account also carries authorize_url.
+          description: Created, with its secret masked; a Canva or Dropbox account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -25468,7 +25519,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), dropbox_not_configured (no screenRIG Dropbox app and no config.app_key; kind dropbox only), google_drive_not_configured (no screenRIG service account and no key; kind google_drive only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -25510,7 +25561,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncInProject
-      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider dropbox: url is the folder''s address in Dropbox (https://www.dropbox.com/home/...), a shared folder link the connected account has added to its Dropbox, or a path starting with /; it is read once through a connected Dropbox account and the sync is stored, due now. Folders in a team space are read from the team''s root. Each run continues from Dropbox''s saved position in the folder, so only changes are read. A folder the account cannot open is 409 media_sync_source_refused; an account whose connection Dropbox no longer honors is 409 dropbox_reconnect_required. provider google_drive: url is the folder''s Google Drive address (https://drive.google.com/drive/folders/ID) or its id, shared (Viewer is enough) with the account''s service_account_email. Each run lists the folder and compares each file''s checksum. Google Docs, Sheets and Slides files are skipped as unsupported_type. A folder the address cannot open is 409 media_sync_source_refused. Through screenRIG''s service account the folder must be shared or owned by a member of the project with a verified email (403 media_sync_sharer_not_member), and every run checks it again (run error sharer_not_member stops the sync in state error). provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
       parameters:
@@ -25549,8 +25600,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '403':
+          description: media_sync_sharer_not_member — a Google Drive folder read through screenRIG's service account was not shared or owned by a member of the project with a verified email.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
-          description: media_sync_source_refused (the provider refused the app, its permission or the folder), resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
+          description: media_sync_source_refused (the provider refused the app, its permission or the folder), dropbox_reconnect_required (the Dropbox account must be connected again), dropbox_not_configured, google_drive_not_configured, resource_conflict (the same source is already synced into that media folder) or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -34704,12 +34761,16 @@ components:
         connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?pcn_[A-Za-z0-9_-]{4,64}$", description: "A Microsoft 365 account: the id of a Microsoft connection of this project, in either mode, to sign in with instead of tenant_id, client_id and a secret of the account's own."}
         canva_user_id: {type: string, description: "A Canva account: the Canva user who connected it."}
         team_id: {type: string, description: "A Canva account: the Canva team of that user."}
-        display_name: {type: string, description: "A Canva account: the name Canva shows for that user."}
+        display_name: {type: string, description: "A Canva or Dropbox account: the name Canva or Dropbox shows for the person who connected it."}
+        app_key: {type: string, maxLength: 64, description: "A Dropbox account: the app key of the customer's own Dropbox app; absent when the account goes through screenRIG's Dropbox app."}
+        dropbox_account_id: {type: string, description: "A Dropbox account: the Dropbox account that connected it (dbid:...)."}
+        email: {type: string, description: "A Dropbox account: the email address of that Dropbox account."}
+        service_account_email: {type: string, description: "A Google Drive account: the address folders are shared with, screenRIG's service account or the client_email of the account's own key."}
     MediaSyncSecret:
       type: object
       additionalProperties: false
       required: [set, hint]
-      description: How an answer shows an account's client secret, or a Canva account's tokens (set once connected, with no hint). The value is never returned.
+      description: "How an answer shows an account's client secret, a Canva or Dropbox account's tokens (set once connected, with no hint), or a Google Drive account's own service-account key (set when the account has one; hint is the last four characters of its private_key_id). The value is never returned."
       properties:
         set: {type: boolean}
         hint: {type: string, maxLength: 4, description: "The secret's last four characters; empty when it is too short to show any."}
@@ -34734,37 +34795,37 @@ components:
       type: object
       additionalProperties: false
       required: [id, project_id, kind, name, config, secret, state, revision, created_at, updated_at]
-      description: "What syncs read through: the credentials of the project's own Microsoft Entra app (microsoft365), or one person's connection to Canva (canva). The client secret and the tokens are sealed and never returned."
+      description: "What syncs read through: the credentials of the project's own Microsoft Entra app (microsoft365), one person's connection to Canva (canva) or Dropbox (dropbox), or a Google service account that folders are shared with (google_drive). The client secret, the tokens and the key are sealed and never returned."
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msa_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
-        kind: {type: string, enum: [microsoft365, canva]}
+        kind: {type: string, enum: [microsoft365, canva, dropbox, google_drive]}
         name: {type: string, minLength: 1, maxLength: 80}
         config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
         secret: {$ref: "#/components/schemas/MediaSyncSecret"}
-        state: {type: string, enum: [ready, pending_consent, reconnect_required], description: "pending_consent: a Canva account no person has connected yet. reconnect_required: Canva no longer honors the connection; run media sync account connect."}
+        state: {type: string, enum: [ready, pending_consent, reconnect_required], description: "pending_consent: a Canva or Dropbox account no person has connected yet. reconnect_required: Canva or Dropbox no longer honors the connection; run media sync account connect."}
         last_test: {$ref: "#/components/schemas/MediaSyncTest"}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     MediaSyncAccountConnect:
-      description: "An account answered with its one-time consent link: what creating a Canva account and media sync account connect answer. The person who owns the Canva account opens authorize_url, signed in to Canva, before authorize_expires_at. It is the link of one consent: send it to that person only. Reads of the account never carry it."
+      description: "An account answered with its one-time consent link: what creating a Canva or Dropbox account and media sync account connect answer. The person who owns the Canva or Dropbox account opens authorize_url, signed in to Canva or Dropbox, before authorize_expires_at. It is the link of one consent: send it to that person only. Reads of the account never carry it."
       allOf:
         - $ref: "#/components/schemas/MediaSyncAccount"
         - type: object
           properties:
-            authorize_url: {type: string, description: "Present for a Canva account."}
-            authorize_expires_at: {type: string, format: date-time, description: "Present for a Canva account."}
+            authorize_url: {type: string, description: "Present for a Canva or Dropbox account."}
+            authorize_expires_at: {type: string, format: date-time, description: "Present for a Canva or Dropbox account."}
     MediaSyncAccountList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSyncAccount"}}, next_cursor: {type: string, nullable: true}}}
     MediaSyncAccountWrite:
       type: object
       additionalProperties: false
       required: [kind, name]
       properties:
-        kind: {type: string, enum: [microsoft365, canva]}
+        kind: {type: string, enum: [microsoft365, canva, dropbox, google_drive]}
         name: {type: string, minLength: 1, maxLength: 80}
-        config: {type: object, additionalProperties: false, properties: {tenant_id: {type: string}, client_id: {type: string}, connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?pcn_[A-Za-z0-9_-]{4,64}$"}}, description: "For microsoft365, either tenant_id and client_id (both) with secret, or connection_id alone: the id of a Microsoft connection of this project. Not accepted for canva."}
-        secret: {type: string, minLength: 1, maxLength: 1024, description: "Required for microsoft365 with tenant_id and client_id: the value of one of the app's client secrets (not its id). Not accepted with connection_id, nor for canva."}
+        config: {type: object, additionalProperties: false, properties: {tenant_id: {type: string}, client_id: {type: string}, connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?pcn_[A-Za-z0-9_-]{4,64}$"}, app_key: {type: string, minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9]+$"}}, description: "For microsoft365, either tenant_id and client_id (both) with secret, or connection_id alone: the id of a Microsoft connection of this project. For dropbox, app_key optionally names the customer's own Dropbox app. Not accepted for canva or google_drive."}
+        secret: {type: string, minLength: 1, maxLength: 8192, description: "Required for microsoft365 with tenant_id and client_id: the value of one of the app's client secrets (not its id), at most 1024 characters. For google_drive, optional: the JSON key of the customer's own Google Cloud service account (type service_account), whose client_email becomes the account's service_account_email; without it the account reads through screenRIG's service account. Not accepted with connection_id, nor for canva or dropbox."}
     MediaSyncAccountPatch:
       type: object
       additionalProperties: false
@@ -34772,16 +34833,18 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
         config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
-        secret: {type: string, minLength: 1, maxLength: 1024, description: "Replaces the stored secret; omit it to keep the stored one."}
+        secret: {type: string, minLength: 1, maxLength: 8192, description: "Replaces the stored secret (a microsoft365 client secret, or a google_drive account's own service-account key, which must belong to the same client_email); omit it to keep the stored one."}
     MediaSyncSource:
       type: object
       additionalProperties: false
       required: [web_url]
-      description: The source a sync reads, resolved when the sync was created. A SharePoint folder has drive_id and item_id; a Canva design has design_id and the members after it.
+      description: The source a sync reads, resolved when the sync was created. A SharePoint folder has drive_id and item_id; a Dropbox folder item_id and path; a Google Drive folder item_id, drive_id when it is in a shared drive, and shared_by; a Canva design has design_id and the members after it.
       properties:
-        web_url: {type: string, description: "The source's address as the provider names it: the SharePoint folder, or the Canva design's view address."}
-        drive_id: {type: string}
-        item_id: {type: string}
+        web_url: {type: string, description: "The source's address as the provider names it: the SharePoint, Dropbox or Google Drive folder, or the Canva design's view address."}
+        drive_id: {type: string, description: "SharePoint: the folder's drive. Google Drive: the shared drive that holds the folder, when one does."}
+        item_id: {type: string, description: "The folder's id at the provider: a SharePoint item, a Dropbox folder (id:...) or a Google Drive folder."}
+        path: {type: string, description: "Dropbox: the folder's path in the connected account (in the team's root for a team space)."}
+        shared_by: {type: string, description: "Google Drive through screenRIG's service account: the email of the project member who shared or owns the folder, checked on every run."}
         design_id: {type: string, description: The Canva design's id.}
         title: {type: string, description: The Canva design's title when the sync was created or last exported.}
         pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "The pages synced; absent is every page."}
@@ -34801,7 +34864,7 @@ components:
       additionalProperties: false
       required: [code, detail]
       properties:
-        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error; for Canva also design_unavailable (Canva no longer shows the design; the sync is in state error and keeps its media), reconnect_required (run media sync account connect), canva_not_configured, export_failed, export_timeout or export_incomplete."}
+        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error; for Canva also design_unavailable (Canva no longer shows the design; the sync is in state error and keeps its media), reconnect_required (run media sync account connect), canva_not_configured, export_failed, export_timeout or export_incomplete; for Dropbox also reconnect_required and dropbox_not_configured; for Google Drive also google_drive_not_configured and sharer_not_member (through screenRIG's service account the folder is no longer shared or owned by a verified member of the project; the sync is in state error and keeps its media)."}
         detail: {type: string}
     MediaSyncRun:
       type: object
@@ -34827,11 +34890,11 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msy_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
         account_id: {type: string}
-        provider: {type: string, enum: [sharepoint, canva]}
+        provider: {type: string, enum: [sharepoint, canva, dropbox, google_drive]}
         name: {type: string, minLength: 1, maxLength: 80}
         folder_id: {type: string, description: The media folder the files land in; a folder selector on it plays them.}
         every_s: {type: integer, minimum: 300, maximum: 86400}
-        state: {type: string, enum: [active, paused, error], description: "error: the media folder or the source folder was deleted; repair it (update with a folder_id, or delete the sync)."}
+        state: {type: string, enum: [active, paused, error], description: "error: the media folder or the source folder was deleted, or a Google Drive folder lost its verified sharer; repair it (update with a folder_id, share the folder again, or delete the sync)."}
         source: {$ref: "#/components/schemas/MediaSyncSource"}
         next_run_at: {type: string, format: date-time}
         last_run: {$ref: "#/components/schemas/MediaSyncRun"}
@@ -34863,9 +34926,9 @@ components:
       additionalProperties: false
       required: [provider, account_id]
       properties:
-        provider: {type: string, enum: [sharepoint, canva]}
-        account_id: {type: string}
-        url: {type: string, maxLength: 4096, description: "sharepoint (required): the folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        provider: {type: string, enum: [sharepoint, canva, dropbox, google_drive]}
+        account_id: {type: string, description: "An account of the provider's kind: microsoft365 for sharepoint, canva, dropbox or google_drive."}
+        url: {type: string, maxLength: 4096, description: "sharepoint (required): the folder's SharePoint address or sharing link, read once to find the folder and not stored. dropbox (required): the folder's Dropbox address, a shared folder link the account has added, or a path starting with /. google_drive (required): the folder's Google Drive address or its id."}
         design: {type: string, maxLength: 2048, description: "canva (required): the design's id, or its canva.com/design/ID/... address."}
         pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "canva: the pages to sync; omit for every page. A design that later has fewer pages takes the missing ones out of play."}
         format: {type: string, enum: [png, mp4], default: png, description: "canva: png gives one image per page; mp4 one video of the pages."}
@@ -38102,6 +38165,10 @@ x-problem-codes:
   - media_sync_source_unavailable
   - canva_not_configured
   - canva_reconnect_required
+  - dropbox_not_configured
+  - dropbox_reconnect_required
+  - google_drive_not_configured
+  - media_sync_sharer_not_member
   - not_found
   - method_not_allowed
   - idempotency_mismatch
