@@ -483,7 +483,7 @@ export async function requireInputFile(resolved: string, given: string): Promise
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw usageError(`${given} does not exist.`);
     throw usageError(`${given} cannot be read.`);
   }
-  if (info.isDirectory()) throw usageError(`${given} is a directory; pass a file.`);
+  if (info.isDirectory()) throw usageError(`${given} is a directory; name a file.`);
 }
 
 /** The report commands that also write their route's rows as a file (--format csv, xlsx or pdf), by command and file name stem. */

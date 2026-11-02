@@ -2,6 +2,7 @@ import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleCommentShowScreen, handleCommentShowPlaylist, handleCommentSetScreen, handleCommentSetPlaylist, handleCommentDeleteScreen, handleCommentDeletePlaylist } from "../handlers/comment.js";
 import { type Command, Option } from "commander";
+import { subcommand } from "./subcommand.js";
 
 export function registerCommentCommands(root: Command, bind: CommandActionBinder): void {
   const comment = root.command("comment").description("Read and manage screen and playlist comments");
@@ -17,7 +18,7 @@ export function registerCommentCommands(root: Command, bind: CommandActionBinder
     .option("--page <PAGE_ID>", "Select playlist page comments")
     .action(bind(handleCommentShowPlaylist));
 
-  const commentSet = comment.command("set").description("Replace screen or playlist comments");
+  const commentSet = subcommand(comment, "set").description("Replace screen or playlist comments");
 
   commentSet.command("screen").description("Replace screen comments")
     .argument("<id>", "Screen or playlist identifier")

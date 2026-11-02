@@ -5,6 +5,7 @@ import { addCommandNotes } from "./notes.js";
 import { positiveInteger, projectSubset, reportFormatOption, reportOutputOption } from "./options.js";
 import { CREDIT_HELP } from "../help-text.js";
 import { playsInstantOption } from "../playback-export.js";
+import { subcommand } from "./subcommand.js";
 
 export function registerProjectCommands(root: Command, bind: CommandActionBinder): void {
   const project = root.command("project").description("Create, select, and manage projects");
@@ -45,7 +46,7 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     .addOption(reportFormatOption())
     .addOption(reportOutputOption("health-trend.FORMAT"))
     .action(bind(handleProjectHealthTrend));
-  const exportCommand = project.command("export").description("Write this project's data to a directory in open formats with each section's outcome")
+  const exportCommand = subcommand(project, "export").description("Write this project's data to a directory in open formats with each section's outcome")
     .argument("<DIR>", "Directory to write (created if needed; a rerun continues and refreshes it)")
     .option("--no-media", "Skip the original media files (the manifest still lists them with their hashes)")
     .option("--since <YYYY-MM-DD>", "First UTC day of the plays, uptime and playback CSV and of the event log (default: as far back as the plan keeps the CSV data, and the whole log)");

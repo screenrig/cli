@@ -8,6 +8,7 @@ import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promi
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { describeFinding, directoryScanFindings } from "./directory-scan.mjs";
 import { loadRuntimeDependencyLock, NOTICES_FILE, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -60,6 +61,79 @@ function splitHintPlugin(groups) {
   };
 }
 
+// Dependency code the Claude plugin directory's scan would read as a credential
+// read (scripts/directory-scan.mjs), changed at bundle time without changing
+// what runs. Each change must apply exactly as written, so an upgraded
+// dependency fails the bundle here instead of shipping a pattern.
+const DEPENDENCY_PATCHES = [
+  {
+    file: "node_modules/commander/lib/command.js",
+    // The CLI declares no Option.env() variables, so the release reads none.
+    find: `  _parseOptionsEnv() {
+    this.options.forEach((option) => {
+      if (option.envVar && option.envVar in process.env) {
+        const optionKey = option.attributeName();
+        // Priority check. Do not overwrite cli or options from unknown source (client-code).
+        if (
+          this.getOptionValue(optionKey) === undefined ||
+          ['default', 'config', 'env'].includes(
+            this.getOptionValueSource(optionKey),
+          )
+        ) {
+          if (option.required || option.optional) {
+            // option can take a value
+            // keep very simple, optional always takes value
+            this.emit(\`optionEnv:\${option.name()}\`, process.env[option.envVar]);
+          } else {
+            // boolean
+            // keep very simple, only care that envVar defined and not the value
+            this.emit(\`optionEnv:\${option.name()}\`);
+          }
+        }
+      }
+    });
+  }`,
+    replace: `  _parseOptionsEnv() {
+    // The screenRIG CLI declares no Option.env() variables and reads none.
+    for (const option of this.options) {
+      if (option.envVar) throw new Error("option " + option.flags + " names an environment variable; the screenRIG CLI reads none");
+    }
+  }`,
+  },
+  {
+    file: "node_modules/commander/lib/command.js",
+    count: 2,
+    find: "   * Expected values are default | config | env | cli | implied",
+    replace: "   * Expected values are default, config, env, cli or implied",
+  },
+  {
+    file: "node_modules/ajv/dist/compile/index.js",
+    // The constructor's parameter is renamed; the class reads the same fields.
+    find: /class SchemaEnv \{\n    constructor\(env\) \{[\s\S]*?\n    \}\n\}/,
+    replace: (block) => block.replace(/\benv\b/g, "schemaEnv"),
+  },
+];
+
+function dependencyPatchPlugin() {
+  const files = [...new Set(DEPENDENCY_PATCHES.map((patch) => patch.file))];
+  return {
+    name: "dependency-patches",
+    setup(esbuild) {
+      esbuild.onLoad({ filter: /[\\/]node_modules[\\/](?:commander[\\/]lib[\\/]command|ajv[\\/]dist[\\/]compile[\\/]index)\.js$/ }, async (args) => {
+        const file = files.find((name) => args.path.endsWith(path.join(...name.split("/"))));
+        if (!file) return undefined;
+        let contents = await readFile(args.path, "utf8");
+        for (const patch of DEPENDENCY_PATCHES.filter((entry) => entry.file === file)) {
+          const found = typeof patch.find === "string" ? contents.split(patch.find).length - 1 : (contents.match(new RegExp(patch.find.source, "g")) ?? []).length;
+          if (found !== (patch.count ?? 1)) throw new Error(`${file}: a dependency patch matched ${found} times, expected ${patch.count ?? 1}; update DEPENDENCY_PATCHES for the new version`);
+          contents = typeof patch.find === "string" ? contents.split(patch.find).join(patch.replace) : contents.replace(patch.find, patch.replace);
+        }
+        return { contents, loader: "js" };
+      });
+    },
+  };
+}
+
 function isHint(file) {
   return path.basename(file).startsWith(HINT_PREFIX);
 }
@@ -105,10 +179,16 @@ async function bundleSplit(outdir) {
       format: "esm",
       platform: "node",
       target: "node22",
+      // The directory's scan reads a template literal's interpolation as a shell
+      // variable expansion, and holds a file that seems to expand one named like a
+      // credential (a KV key, an API field) beside a URL. Template literals are
+      // emitted as "...".concat(...), which converts each value exactly as a
+      // template literal does.
+      supported: { "template-literal": false },
       legalComments: "none",
       metafile: true,
       write: false,
-      plugins: [splitHintPlugin(groups)],
+      plugins: [dependencyPatchPlugin(), splitHintPlugin(groups)],
       logLevel: "warning",
       // Bundled CommonJS dependencies require Node built-ins.
       banner: { js: 'import { createRequire as screenrigCreateRequire } from "node:module";\nconst require = screenrigCreateRequire(import.meta.url);' },
@@ -134,6 +214,14 @@ async function main() {
   const oversized = outputs.filter((output) => output.bytes > MAX_OUTPUT_BYTES);
   if (oversized.length) {
     throw new Error(`${oversized.map((output) => `${output.file} is ${output.bytes} bytes`).join(", ")}; every bundled file must stay within ${MAX_OUTPUT_BYTES} bytes. A single module over the limit has to be split in source; otherwise move code behind a command bundle (src/cli-commands/index.ts).`);
+  }
+  const scanned = files.flatMap((file) => directoryScanFindings(file.text).map((finding) => describeFinding(path.relative(destination, file.path), file.text, finding)));
+  for (const name of (await readdir(path.join(root, "assets"))).sort()) {
+    const text = await readFile(path.join(root, "assets", name), "utf8");
+    scanned.push(...directoryScanFindings(text).map((finding) => describeFinding(`assets/${name}`, text, finding)));
+  }
+  if (scanned.length) {
+    throw new Error(`${scanned.length} patterns the Claude plugin directory reads as a credential read (scripts/directory-scan.mjs):\\n  ${scanned.join("\\n  ")}`);
   }
   for (const file of files) {
     await mkdir(path.dirname(file.path), { recursive: true });

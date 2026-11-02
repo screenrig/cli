@@ -16,6 +16,7 @@ import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } 
 import { handleScreenFolderCreate, handleScreenFolderDelete, handleScreenFolderList, handleScreenFolderShow, handleScreenFolderUpdate, handleScreenMove, screenFolderIdOption, screenFolderName, screenFolderPlaylistOption, screenListFolderOption } from "../screen-folders.js";
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
 import { type Command, Option } from "commander";
+import { subcommand } from "./subcommand.js";
 
 /** --folder on a fleet command: the same fleet as --tag, chosen by screen folder (with every folder inside it). */
 function folderSelector(verb: "Target" | "Capture" = "Target"): Option {
@@ -121,7 +122,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, takeovers and\n  display schedules read their civil times in this zone. Page visibility\n  needs it for from, until or windows; data-only visibility needs no zone.");
 
   const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two to twelve displays as one canvas");
-  wall.command("set").description("Set a screen's video wall")
+  subcommand(wall, "set").description("Set a screen's video wall")
     .argument("<id>", "Screen identifier")
     .requiredOption("--outputs <NAMES>", "Two to twelve comma-separated output names in physical order (left to right, then top to bottom), as screen show lists them under observation.surfaces (required)", wallOutputsOption)
     .addOption(new Option("--arrangement <ARRANGEMENT>", "row (one row, left to right), column (one column, top to bottom) or grid (rows of --columns outputs, top to bottom) (required)").choices([...WALL_ARRANGEMENTS]).makeOptionMandatory())
@@ -304,7 +305,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   schedule.command("show").description("Show a screen's playlist schedule and the playlist it currently selects")
     .argument("<id>", "Screen identifier")
     .action(bind(handleScreenScheduleShow));
-  schedule.command("set").description("Replace the playlist schedule on a screen or a fleet of screens")
+  subcommand(schedule, "set").description("Replace the playlist schedule on a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
@@ -437,7 +438,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   displaySchedule.command("show").description("Show a screen's display schedule and its display state")
     .argument("<id>", "Screen identifier")
     .action(bind(handleScreenDisplayScheduleShow));
-  displaySchedule.command("set").description("Replace the display schedule on a screen or a fleet of screens")
+  subcommand(displaySchedule, "set").description("Replace the display schedule on a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
@@ -460,7 +461,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   rebootSchedule.command("show").description("Show a screen's reboot schedule and its next reboot")
     .argument("<id>", "Screen identifier")
     .action(bind(handleScreenRebootScheduleShow));
-  const rebootScheduleSet = rebootSchedule.command("set").description("Replace the reboot schedule on a screen or a fleet of screens")
+  const rebootScheduleSet = subcommand(rebootSchedule, "set").description("Replace the reboot schedule on a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())

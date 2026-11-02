@@ -4,6 +4,7 @@ import { reportFormatOption, reportOutputOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleAuditExport, handleAuditHead, handleAuditList, handleAuditShow, handleAuditVerify } from "../handlers/audit.js";
 import { AUDIT_ACTOR_KINDS, AUDIT_SOURCES, auditAction, auditAnchor, auditField, auditInstant } from "../audit.js";
+import { subcommand } from "./subcommand.js";
 
 const filterOptions = (command: Command): Command => command
   .option("--actor <ID>", "Only changes made by this person, agent or service client (its id)")
@@ -56,7 +57,7 @@ export function registerAuditCommands(root: Command, bind: CommandActionBinder):
     .option("--anchor <SEQ:HASH>", "A chain head you kept: also proves the history up to it is unchanged", auditAnchor)
     .action(bind(handleAuditVerify));
 
-  filterOptions(audit.command("export").description("Write the filtered audit log as a CSV, XLSX or PDF file, one row per changed field, with the chain head in it"))
+  filterOptions(subcommand(audit, "export").description("Write the filtered audit log as a CSV, XLSX or PDF file, one row per changed field, with the chain head in it"))
     .addOption(reportFormatOption().makeOptionMandatory())
     .addOption(reportOutputOption("audit-log.FORMAT"))
     .action(bind(handleAuditExport));

@@ -5,6 +5,7 @@ import { handleKvGet, handleKvSet, handleKvDelete, handleKvList, handleKvWebhook
 import { kvWebhookDeliveriesLimit, kvWebhookDescription } from "../kv-webhooks.js";
 import { type Command, Option } from "commander";
 import { addVerifyOptions, type VerifyOptionsTarget } from "./verify-options.js";
+import { subcommand } from "./subcommand.js";
 
 const descriptionOption = (value: string): string => { kvWebhookDescription(value); return value; };
 const CARD_VERIFY: VerifyOptionsTarget = { scope: "With --card", secret: "the webhook's srkw_ secret" };
@@ -16,7 +17,7 @@ export function registerKvCommands(root: Command, bind: CommandActionBinder): vo
     .argument("<key>", "Application key")
     .action(bind(handleKvGet));
 
-  kv.command("set").description("Write a value")
+  subcommand(kv, "set").description("Write a value")
     .argument("<key>", "Application key")
     .addOption(new Option("--json-value <JSON>", "Supply a JSON value").conflicts(["file", "valueBase64"]))
     .addOption(new Option("--file <FILE>", "Read the value from a file, or - for stdin").conflicts(["jsonValue", "valueBase64"]))

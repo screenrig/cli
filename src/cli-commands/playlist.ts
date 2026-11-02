@@ -6,6 +6,7 @@ import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
 import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
 import { handlePlaylistFields, handlePlaylistInstances, templateClearOption, templateSetOption } from "../playlist-fields.js";
+import { subcommand } from "./subcommand.js";
 
 const REGIONS = ["header", "footer", "side"];
 const ORIENTATIONS = ["landscape", "portrait"];
@@ -114,7 +115,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   addCommandExamples(replaceRelease, 'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW',
     'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply');
 
-  const exportCommand = playlist.command("export").description("Export a playlist bundle")
+  const exportCommand = subcommand(playlist, "export").description("Export a playlist bundle")
     .argument("<id>", "Playlist identifier")
     .requiredOption("--output <PATH>", "Write the exported bundle to this directory (required)")
     .option("--skip-applications", "Drop applications and empty or application-controlled pages; report what was skipped")

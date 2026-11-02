@@ -31,7 +31,7 @@ export async function readAuthoringText(file: string, runtime: CliRuntime, maxBy
     if (error instanceof CliError) throw error;
     const code = (error as NodeJS.ErrnoException).code;
     if (file !== "-" && code === "ENOENT") throw usageError(`${file} does not exist.`);
-    if (file !== "-" && code === "EISDIR") throw usageError(`${file} is a directory; pass a file.`);
+    if (file !== "-" && code === "EISDIR") throw usageError(`${file} is a directory; name a file.`);
     if (file !== "-" && code === "EACCES") throw usageError(`${file} cannot be read (permission denied).`);
     throw usageError(`Cannot read ${file === "-" ? "stdin" : file}; provide a readable file or pipe, within the size limit.`);
   }

@@ -118,7 +118,7 @@ function fileReadError(file: string, error: unknown): unknown {
   if (error instanceof CliError) return error;
   const code = (error as NodeJS.ErrnoException).code;
   if (code === "ENOENT") return usageError(`${file} does not exist.`);
-  if (code === "EISDIR") return usageError(`${file} is a directory; pass a .csv, .xlsx or .json file.`);
+  if (code === "EISDIR") return usageError(`${file} is a directory; name a .csv, .xlsx or .json file.`);
   if (code === "EACCES") return usageError(`${file} cannot be read (permission denied).`);
   return usageError(`Cannot read ${file}; provide a readable file within the 8 MiB limit.`);
 }

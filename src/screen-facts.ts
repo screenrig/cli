@@ -162,14 +162,14 @@ export function screenAddressOption(input: string): string {
  * --clear-location is a null location. Members the flags do not name are absent.
  */
 export function screenFactsPatch(flags: Flags): Pick<ScreenPatch, "fields" | "location"> {
-  const set = flagString(flags, "field");
+  const assigned = flagString(flags, "field");
   const unset = flagString(flags, "unset-field");
   const location = flagString(flags, "location");
   const placeName = flagString(flags, "location-name");
   const address = flagString(flags, "address");
   const clearFields = flagBool(flags, "clear-fields");
   const clearLocation = flagBool(flags, "clear-location");
-  if (clearFields && (set !== undefined || unset !== undefined)) throw usageError("--clear-fields cannot be used with --field or --unset-field.");
+  if (clearFields && (assigned !== undefined || unset !== undefined)) throw usageError("--clear-fields cannot be used with --field or --unset-field.");
   if (clearLocation && location !== undefined) throw usageError("--clear-location cannot be used with --location.");
   if (location === undefined && (placeName !== undefined || address !== undefined)) {
     throw usageError(`${placeName !== undefined ? "--location-name" : "--address"} requires --location.`);
@@ -177,8 +177,8 @@ export function screenFactsPatch(flags: Flags): Pick<ScreenPatch, "fields" | "lo
   const patch: Pick<ScreenPatch, "fields" | "location"> = {};
   if (clearFields) {
     patch.fields = null;
-  } else if (set !== undefined || unset !== undefined) {
-    const sets = fieldEntries(set);
+  } else if (assigned !== undefined || unset !== undefined) {
+    const sets = fieldEntries(assigned);
     const removed = unset === undefined ? [] : unset.split("\n");
     const clash = removed.find((name) => sets.some((entry) => entry.name === name));
     if (clash !== undefined) throw usageError(`--field and --unset-field both name ${clash}.`);

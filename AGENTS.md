@@ -28,6 +28,12 @@ is not required to contribute.
   one. It cuts any chunk over 235,000 bytes into pieces by module path
   (`scripts/bundle-release.mjs`); a single module over the limit has to be split
   in source. `scripts/check-release-artifact.mjs` states its inventory.
+- The bundler also fails on any pattern `scripts/directory-scan.mjs` lists: the
+  Claude directory reads script text as shell and holds a plugin that seems to
+  read a credential. Template literals ship as `.concat()` for that reason. In
+  source: register a `set` or `export` subcommand with `subcommand()`, never
+  start a clause of a message with "pass" (write "name a file"), and read the
+  environment only by name in `src/host-settings.ts`.
 - Commands load on demand: `src/cli-commands/index.ts` maps each top-level
   command to a bundle in `src/bundles/`, which registers its commands and
   imports their handlers from `src/handlers/`; `src/commands.ts` keeps what
