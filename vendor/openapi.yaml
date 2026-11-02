@@ -12244,6 +12244,59 @@ paths:
           description: Deleted
         default:
           $ref: '#/components/responses/Problem'
+  /api/source-presets:
+    get:
+      x-screenrig-access: read
+      operationId: listSourcePresets
+      description: >-
+        Lists the source presets: ready-made, tested configurations of the json data source (docs/sources.md, Presets). Each says which cards it fills, the fields a person fills in (with help, a pattern and an example), the secrets it needs and how to get each, how often it refreshes and how long a card keeps its last data, and whose data it reads under which terms. Create a source from one with POST /api/sources and preset, settings and secrets, and preview it with POST /api/sources/test.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The source presets, by category and title.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourcePresetList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/source-presets/{name}:
+    parameters:
+      - $ref: '#/components/parameters/SourcePresetName'
+    get:
+      x-screenrig-access: read
+      operationId: getSourcePreset
+      description: One source preset, as the list shows it.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: One source preset.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourcePreset'
+        '404':
+          description: not_found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/sources:
     get:
       x-screenrig-access: read
@@ -12277,7 +12330,7 @@ paths:
       x-screenrig-access: write
       operationId: createSource
       description: >-
-        Creates a data source that writes one card's dynamic properties from an outside address. kind selects the adapter (ics reads an iCalendar or webcal:// address); config holds the kind's settings and secrets its credentials, which are stored sealed and shown only as a masked hint. The source runs within seconds and then every refresh_seconds. A failed run never writes: the card keeps its last good document and the source's status shows the error. One source writes one card (source_target_taken), the card must be one the kind can fill (source_target_unsupported), and an organization has at most 200 sources (source_limit_reached). Use POST /api/sources/test first to see the document the source would write. Appends source.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.
+        Creates a data source that writes one card's dynamic properties from an outside address. kind selects the adapter (ics reads an iCalendar or webcal:// address); config holds the kind's settings and secrets its credentials, which are stored sealed and shown only as a masked hint. Or name a preset (GET /api/source-presets) and give its settings and secrets instead of kind and config: the source is a json source whose config the preset builds, shown back with its preset and settings, and the refresh interval and stale period default to the preset's. A preset fills only the cards it lists (source_target_unsupported). The source runs within seconds and then every refresh_seconds. A failed run never writes: the card keeps its last good document and the source's status shows the error. One source writes one card (source_target_taken), the card must be one the kind can fill (source_target_unsupported), and an organization has at most 200 sources (source_limit_reached). Use POST /api/sources/test first to see the document the source would write. Appends source.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.
       security:
         - projectBearer: []
       parameters:
@@ -12308,7 +12361,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Source'
         '400':
-          description: invalid_request with field errors (config.calendars[0].key, secrets.calendar_url.lobby), or source_secret_required when a secret the kind needs is missing.
+          description: invalid_request with field errors (config.calendars[0].key, secrets.calendar_url.lobby, settings.channel for a preset), or source_secret_required when a secret the kind or preset needs is missing.
           content:
             application/problem+json:
               schema:
@@ -12338,7 +12391,7 @@ paths:
       x-screenrig-access: write
       operationId: testSource
       description: >-
-        Previews a data source without saving or writing anything: fetches the address, shapes the answer for the target card and validates the document against the card, then returns the document, whether the card accepts it (valid, with validation_error naming the path when it does not), the run's warnings and counts. Pass source_id to test a saved source with the other members as overrides; otherwise kind, target and config are required. A secret a saved source keeps is used as stored, unless the override changes where it points (source_secret_required). A fetch or shaping failure is source_test_failed with the fixed source_error. At most 30 previews a minute per organization.
+        Previews a data source without saving or writing anything: fetches the address, shapes the answer for the target card and validates the document against the card, then returns the document, whether the card accepts it (valid, with validation_error naming the path when it does not), the run's warnings and counts. Pass source_id to test a saved source with the other members as overrides (settings override a preset source's own); otherwise target and either kind and config, or preset, settings and secrets, are required. A secret a saved source keeps is used as stored, unless the override changes where it points (source_secret_required). A fetch or shaping failure is source_test_failed with the fixed source_error. At most 30 previews a minute per organization.
       security:
         - projectBearer: []
       requestBody:
@@ -12425,7 +12478,7 @@ paths:
       x-screenrig-access: write
       operationId: updateSource
       description: >-
-        Changes a data source. config replaces the whole config; secrets merges (a string sets or replaces one, null removes it). A secret not sent keeps its value unless the change points the source somewhere its stored scope does not cover (source_secret_required at secrets.<name>: enter it again). A change to the target, config, secrets, refresh_seconds or enabled resets the failure count and runs the source within seconds; a rename does not. enabled false stops the schedule and keeps the card's last document. If-Match guards the revision. Appends source.updated.
+        Changes a data source. config replaces the whole config; secrets merges (a string sets or replaces one, null removes it). A source made from a preset takes settings instead of config: each setting named replaces its value, null removes an optional one, the others keep theirs, and the config is built again from the preset (config on such a source is invalid_request at config, and settings on another is invalid_request at settings). Its secrets are named as the preset names them. A secret not sent keeps its value unless the change points the source somewhere its stored scope does not cover (source_secret_required at secrets.<name>: enter it again). A change to the target, config, secrets, refresh_seconds or enabled resets the failure count and runs the source within seconds; a rename does not. enabled false stops the schedule and keeps the card's last document. If-Match guards the revision. Appends source.updated.
       security:
         - projectBearer: []
       parameters:
@@ -26797,6 +26850,7 @@ components:
     CommandID: {name: command_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$"}, description: "The id of one of the screen's commands: the id in Screen.commands, the reboot_id or reload_id of the 202 answer."}
     PlaylistPageID: {name: page_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, description: Playlist page id string.}
     ApplicationID: {name: application_id, in: path, required: true, schema: {type: string}}
+    SourcePresetName: {name: name, in: path, required: true, schema: {type: string, pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"}, description: "The name of a source preset, as GET /api/source-presets lists it."}
     SourceID: {name: source_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}, description: The id of one of the project's data sources.}
     KVWebhookID: {name: webhook_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$"}, description: The id of one of the application's key/value webhooks.}
     FeedbackID: {name: id, in: path, required: true, schema: {type: string, pattern: '^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$'}}
@@ -34067,18 +34121,73 @@ components:
         error: {anyOf: [{$ref: "#/components/schemas/SourceError"}, {type: "null"}]}
         warnings: {type: array, items: {type: string}, description: "What the last successful run noticed and worked around: a time zone it could not place, events cut at a limit."}
         stats: {type: object, additionalProperties: {type: integer}, description: "Counts from the last successful run, such as calendars and events."}
+    SourcePresetAttribution: {type: object, additionalProperties: false, required: [text], properties: {text: {type: string, description: "Whose data it is and what the vendor's terms ask of its use."}, terms: {type: string, description: "The address of the vendor's terms, when it publishes them."}}}
+    SourcePresetOption: {type: object, additionalProperties: false, required: [value, label], properties: {value: {type: string}, label: {type: string}}}
+    SourcePresetField:
+      type: object
+      additionalProperties: false
+      required: [name, label, type, required, help]
+      description: One thing a person tells a preset. A text is checked against pattern and max_length, a choice is one of options, and a list holds min_items to max_items objects filled in with fields.
+      properties:
+        name: {type: string, description: "The member of settings that carries it."}
+        label: {type: string}
+        type: {type: string, enum: [text, choice, list]}
+        required: {type: boolean}
+        help: {type: string}
+        example: {type: string, description: "A value that works."}
+        default: {type: string, description: "The value used when the field is left out."}
+        pattern: {type: string, description: "An anchored regular expression a text value must match."}
+        max_length: {type: integer, minimum: 1}
+        options: {type: array, items: {$ref: "#/components/schemas/SourcePresetOption"}}
+        min_items: {type: integer, minimum: 0}
+        max_items: {type: integer, minimum: 1}
+        fields: {type: array, items: {$ref: "#/components/schemas/SourcePresetField"}, description: "The fields of each item of a list."}
+    SourcePresetSecret:
+      type: object
+      additionalProperties: false
+      required: [name, label, help, how_to_get, required]
+      description: A credential a preset needs, entered under name in secrets.
+      properties:
+        name: {type: string}
+        label: {type: string}
+        help: {type: string, description: What the credential is for.}
+        how_to_get: {type: string, description: "Where the vendor issues it, step by step."}
+        required: {type: boolean}
+    SourcePresetCard: {type: object, additionalProperties: false, required: [type, default], properties: {type: {type: string, description: "A card type the preset fills."}, default: {type: boolean, description: "True for the card the preset is made for, the first."}}}
+    SourcePreset:
+      type: object
+      additionalProperties: false
+      required: [name, title, category, description, kind, cards, fields, secrets, refresh_seconds, min_refresh_seconds, stale_after_seconds, attribution, docs]
+      description: A ready-made, tested configuration of the json data source.
+      properties:
+        name: {type: string, pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", description: "What a source's preset member names."}
+        title: {type: string}
+        category: {type: string}
+        description: {type: string}
+        kind: {type: string, enum: [json, csv], description: The kind of source it makes.}
+        cards: {type: array, minItems: 1, items: {$ref: "#/components/schemas/SourcePresetCard"}}
+        fields: {type: array, items: {$ref: "#/components/schemas/SourcePresetField"}}
+        secrets: {type: array, items: {$ref: "#/components/schemas/SourcePresetSecret"}}
+        refresh_seconds: {type: integer, description: The interval a source syncs at unless it asks for another.}
+        min_refresh_seconds: {type: integer, description: The shortest interval a source may ask for.}
+        stale_after_seconds: {type: integer, description: "How long a card keeps the last good data when the source cannot refresh, unless the source says otherwise."}
+        attribution: {$ref: "#/components/schemas/SourcePresetAttribution"}
+        docs: {type: string, description: "The page and anchor of the docs that describe it."}
+    SourcePresetList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/SourcePreset"}}}}
     Source:
       type: object
       additionalProperties: false
-      required: [id, name, kind, target, enabled, config, secrets, refresh_seconds, stale_after_seconds, revision, status, created_at, updated_at]
+      required: [id, name, kind, target, enabled, config, preset, settings, secrets, refresh_seconds, stale_after_seconds, revision, status, created_at, updated_at]
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}
         name: {type: string, minLength: 1, maxLength: 80}
         kind: {$ref: "#/components/schemas/SourceKind"}
         target: {$ref: "#/components/schemas/SourceTarget"}
         enabled: {type: boolean}
-        config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources."}
-        secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked."}
+        config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources. For a source made from a preset, what its settings expand to."}
+        preset: {anyOf: [{type: string}, {type: "null"}], description: "The source preset the source was made from (GET /api/source-presets); null for a source that is not made from one."}
+        settings: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "The values of the preset's fields, by field name, with the defaults of the fields left out; null without a preset."}
+        secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked. A source made from a preset names them as the preset does."}
         refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
         stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         revision: {type: integer, minimum: 1}
@@ -34090,13 +34199,15 @@ components:
       description: "JSON, CSV and Sheets config may set key_template, a card data key with {screen.field.NAME} tokens. Its mapping then produces {documents:[{fields:{NAME:VALUE},document:{...}}]} instead of one document. Each output is validated against the target card. Keys are unique and outside card-instance and feed namespaces; source test previews the envelope and validates every output. Each key uses the source stale period. Missing keys are retained with their existing expiry; storage failures can leave partial writes and the next run retries."
       type: object
       additionalProperties: false
-      required: [name, kind, target, config]
+      required: [name, target]
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
         kind: {$ref: "#/components/schemas/SourceKind"}
         target: {$ref: "#/components/schemas/SourceTarget"}
+        preset: {type: string, pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", description: "A source preset (GET /api/source-presets) to make the source from, instead of kind and config: the kind is the preset's, and the config is built from settings. kind and config are required without it, and refused with it unless kind is the preset's own."}
+        settings: {type: object, additionalProperties: true, description: "The values of the preset's fields, by field name (a text, an option of a choice, or a list of objects). Required fields are enforced against the preset, with a field path such as settings.channel."}
         config: {type: object, additionalProperties: true, description: "The kind's settings (/docs/sources). For ics: calendars (1 to 60, each with a key), days, time_zone, private_title, include, exclude. include and exclude (each 1 to 20 keywords of 1 to 100 characters, matched against event titles) are also settings of microsoft365, google_calendar and momentus. For csv and json: url, method (GET or POST), body or graphql, headers, auth (none, bearer, header, basic, oauth2, token_request), time_zone, pagination, and for json format (auto, json, csv, xml)."}
-        secrets: {type: object, additionalProperties: {type: string, writeOnly: true}, description: "Credentials by name, stored sealed. For ics: calendar_url.<key>, the calendar's address (webcal://, https:// or http://), one per calendar. For csv and json: token, password, client_secret, header.<Name> (a request header) and query.<name> (a query parameter), and the secrets a token_request body reads as {{secrets.<name>}}."}
+        secrets: {type: object, additionalProperties: {type: string, writeOnly: true}, description: "Credentials by name, stored sealed. For ics: calendar_url.<key>, the calendar's address (webcal://, https:// or http://), one per calendar. For csv and json: token, password, client_secret, header.<Name> (a request header) and query.<name> (a query parameter), and the secrets a token_request body reads as {{secrets.<name>}}. For a preset: the names its secrets list gives."}
         refresh_seconds: {type: integer, minimum: 30, maximum: 86400, description: "Seconds between syncs; the kind's default and floor apply when omitted or lower (ics: 300, at least 60; momentus: 60, at least 30)."}
         stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean, default: true}
@@ -34106,8 +34217,9 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
         target: {$ref: "#/components/schemas/SourceTarget"}
-        config: {type: object, additionalProperties: true, description: Replaces the whole config.}
-        secrets: {type: object, additionalProperties: {anyOf: [{type: string, writeOnly: true}, {type: "null"}]}, description: "Merged into the stored secrets: a string sets or replaces one, null removes it."}
+        config: {type: object, additionalProperties: true, description: "Replaces the whole config. A source made from a preset takes settings instead."}
+        settings: {type: object, additionalProperties: true, description: "For a source made from a preset: merged into its settings (a value replaces one, null removes an optional one) and the config is built again."}
+        secrets: {type: object, additionalProperties: {anyOf: [{type: string, writeOnly: true}, {type: "null"}]}, description: "Merged into the stored secrets: a string sets or replaces one, null removes it. A source made from a preset names them as the preset does."}
         refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
         stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
         enabled: {type: boolean}
@@ -34190,6 +34302,8 @@ components:
         kind: {$ref: "#/components/schemas/SourceKind"}
         target: {$ref: "#/components/schemas/SourceTarget"}
         config: {type: object, additionalProperties: true}
+        preset: {type: string, pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", description: "A source preset to test a source that is not saved yet; its settings and secrets replace kind and config."}
+        settings: {type: object, additionalProperties: true, description: "A preset's settings; with source_id they override the saved source's."}
         secrets: {type: object, additionalProperties: {type: string, writeOnly: true}}
     SourceTestResult:
       type: object
@@ -34295,7 +34409,7 @@ components:
         header: {type: string, description: generic_hmac only.}
         encoding: {type: string, enum: [hex, base64], description: generic_hmac only.}
         timestamp_header: {type: string, description: generic_hmac only.}
-        tolerance_seconds: {type: integer, description: generic_hmac only, with timestamp_header.: ''}
+        tolerance_seconds: {type: integer, description: "generic_hmac only, with timestamp_header."}
         secret:
           type: object
           additionalProperties: false
