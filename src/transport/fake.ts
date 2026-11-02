@@ -336,8 +336,6 @@ export function memoryBackend(options: {
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
-      project_content_bytes: 0,
-      api_version: "0.2.0",
       application_compressed_bytes: 104857600,
       application_expanded_bytes: 262144000,
       application_file_bytes: 33554432,
@@ -345,13 +343,6 @@ export function memoryBackend(options: {
       application_path_bytes: 255,
       application_path_depth: 16,
       features: { feedback: true, ...options.features },
-      media_image_bytes: 20971520,
-      playlist_max_items_per_page: 24,
-      playlist_max_media_per_selector: 32,
-      playlist_max_pages: 100,
-      protocol_version: "1",
-      screens_per_project: 100,
-      transition_max_duration_ms: 60000,
     } satisfies Capabilities,
   }));
 

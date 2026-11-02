@@ -300,9 +300,6 @@ export interface EventPage {
 }
 
 export interface Capabilities {
-  /** Default-plan storage cap. Zero means no product storage cap. */
-  project_content_bytes: 0;
-  api_version: string;
   application_compressed_bytes: 104857600;
   application_expanded_bytes: 262144000;
   application_file_bytes: 33554432;
@@ -310,14 +307,6 @@ export interface Capabilities {
   application_path_bytes: 255;
   application_path_depth: 16;
   features: Record<string, unknown>;
-  /** Maximum declared byte size of one image upload, 20 MiB. */
-  media_image_bytes: 20971520;
-  playlist_max_items_per_page: 24;
-  playlist_max_media_per_selector: 32;
-  playlist_max_pages: 100;
-  protocol_version: string;
-  screens_per_project: 100;
-  transition_max_duration_ms: 60000;
 }
 
 export interface ArchiveLimits {
@@ -1265,10 +1254,9 @@ export interface MediaGenerationUsage {
   credits: number;
   usd: string;
   quality?: MediaGenerationQuality;
-  aspect_ratio?: MediaGenerationAspectRatio;
 }
 
-/** 201 body. media.id is med_…. Never image bytes. */
+/** Built from the media generation operation's result. media.id is med_…. Never image bytes. */
 export interface MediaGeneration {
   media: { id: string; [key: string]: unknown };
   usage: MediaGenerationUsage;
