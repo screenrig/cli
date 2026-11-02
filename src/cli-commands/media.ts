@@ -7,14 +7,24 @@ import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes
 import { CREDIT_HELP } from "../help-text.js";
 import { connectionIdOption } from "../connection-ids.js";
 import {
-  handleMediaSyncAccountAdd, handleMediaSyncAccountDelete,
+  handleMediaSyncAccountAdd, handleMediaSyncAccountAddDropbox, handleMediaSyncAccountAddGoogleDrive, handleMediaSyncAccountConnect, handleMediaSyncAccountDelete,
   handleMediaSyncAccountList, handleMediaSyncAccountShow, handleMediaSyncAccountTest, handleMediaSyncAccountUpdate, handleMediaSyncCreate,
+  handleMediaSyncCreateDropbox, handleMediaSyncCreateGoogleDrive,
   handleMediaSyncDelete, handleMediaSyncList, handleMediaSyncRun, handleMediaSyncShow, handleMediaSyncUpdate,
-  mediaSyncAccountOption, mediaSyncClientId, mediaSyncEvery, mediaSyncFolderOption, mediaSyncName, mediaSyncTenant, mediaSyncUrl,
+  mediaSyncAccountOption, mediaSyncAppKey, mediaSyncClientId, mediaSyncDriveUrl, mediaSyncDropboxUrl, mediaSyncEvery, mediaSyncFolderOption, mediaSyncName, mediaSyncTenant, mediaSyncUrl,
 } from "../media-sync.js";
 
 const REPLACE_NOTE_HELP = "Note kept with the new version and shown to a person who reviews it (at most 280 characters)";
 const SECRET_FILE = "Read the client secret's value from this file, or - for stdin (never an argument)";
+const KEY_FILE = "Read your own Google Cloud service account's JSON key file from this file, or - for stdin (never an argument)";
+
+/** The options every media sync create command takes after --account-id and --url. */
+function syncCreateOptions(command: Command): Command {
+  return command
+    .option("--folder-id <ID>", "The media folder the files land in (mfd_...); omitted creates one named after the source folder", mediaSyncFolderOption)
+    .option("--every <DURATION>", "How often to look for changes, 5 minutes to 24 hours (default 15m)", mediaSyncEvery)
+    .option("--name <NAME>", "Name the sync, 1 to 80 characters (default: the source folder's name)", mediaSyncName);
+}
 
 export function registerMediaCommands(root: Command, bind: CommandActionBinder): void {
   const media = root.command("media").description("Generate, upload, and manage images, videos, and soundtrack audio");
@@ -180,25 +190,32 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaFolderDelete));
 
-  const sync = media.command("sync").description("Keep a SharePoint or OneDrive for work folder in step with a media folder");
+  const sync = media.command("sync").description("Keep a SharePoint, OneDrive for work, Dropbox or Google Drive folder in step with a media folder");
   addCommandNotes(sync, [
     "Media sync:",
-    "  A sync imports the images, videos and audio directly inside a SharePoint or",
-    "  OneDrive for work folder into a media folder,",
+    "  A sync imports the images, videos and audio directly inside a SharePoint,",
+    "  OneDrive for work, Dropbox or Google Drive folder into a media folder,",
     "  and keeps them in step: a changed file replaces its bytes under the same media",
     "  ID, so every playlist that plays it updates, and a file removed at the source",
-    "  is taken out of play.",
-    "  SharePoint reads through your own Microsoft Entra app (an account):",
+    "  is taken out of play. Each sync reads through an account of the project:",
+    "  SharePoint and OneDrive for work read through your own Microsoft Entra app:",
     "  application permission Sites.Selected, granted on each site, or Files.Read.All,",
     "  with admin consent. The client secret is sealed on the server and never shown.",
     "  An account may instead read through a Microsoft connection of the project",
     "  (--connection-id; connection create microsoft), which holds the app once for",
     "  data sources and Power BI too, in either mode.",
+    "  Dropbox reads through the Dropbox account of a person, who allows read-only",
+    "  access by opening a one-time link (account add dropbox prints it, account connect",
+    "  makes a new one), to screenRIG's Dropbox app or your own (--app-key).",
+    "  Google Drive reads the folders shared with a service account's address (Viewer",
+    "  is enough): screenRIG's, or your own with a JSON key file (--key-file; the key",
+    "  is sealed on the server and never shown). account add google-drive prints the",
+    "  address.",
     "  Play the media folder with a folder selector in a playlist.",
   ].join("\n"));
 
-  const account = sync.command("account").description("Add, test and manage the Microsoft Entra apps a project's syncs read through");
-  const add = account.command("add").description("Add the credentials of your own app");
+  const account = sync.command("account").description("Add, connect, test and manage the accounts a project's syncs read through: a Microsoft Entra app, a Dropbox account or a Google Drive service account");
+  const add = account.command("add").description("Add an account a sync reads through");
   const addMicrosoft = add.command("microsoft365").description("Add a Microsoft Entra app: its tenant, application id and a client secret, or a Microsoft connection of this project")
     .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
     .option("--tenant-id <TENANT>", "Your organization's directory (tenant) id, or its primary domain such as contoso.onmicrosoft.com", mediaSyncTenant)
@@ -208,19 +225,31 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .action(bind(handleMediaSyncAccountAdd));
   requireOptionGroup(addMicrosoft, "exactlyOne", ["--connection-id", "--tenant-id"]);
   requireOptionGroup(addMicrosoft, "together", ["--tenant-id", "--client-id", "--secret-file"]);
+  add.command("dropbox").description("Add a Dropbox account: prints the link the person who owns it opens, signed in to Dropbox, to connect it")
+    .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
+    .option("--app-key <KEY>", "The app key of your own Dropbox app (never its app secret); omitted: screenRIG's Dropbox app", mediaSyncAppKey)
+    .action(bind(handleMediaSyncAccountAddDropbox));
+  add.command("google-drive").description("Add a Google Drive account: the service account address folders are shared with, screenRIG's or your own")
+    .requiredOption("--name <NAME>", "Name the account, 1 to 80 characters", mediaSyncName)
+    .option("--key-file <FILE>", `${KEY_FILE}; omitted: the account reads through screenRIG's service account`)
+    .action(bind(handleMediaSyncAccountAddGoogleDrive));
   account.command("list").description("List this project's media sync accounts").action(bind(handleMediaSyncAccountList));
   account.command("show").description("Inspect one account and its last test")
     .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountShow));
-  const accountUpdate = account.command("update").description("Change an account's name, tenant, application id or client secret")
+  const accountUpdate = account.command("update").description("Change an account's name, tenant, application id, client secret or Google Drive key")
     .argument("<id>", "Account identifier (msa_...)")
     .option("--name <NAME>", "Rename the account", mediaSyncName)
     .option("--tenant-id <TENANT>", "The tenant's directory id or primary domain", mediaSyncTenant)
     .option("--client-id <ID>", "The app registration's application (client) id", mediaSyncClientId)
     .option("--secret-file <FILE>", `${SECRET_FILE}; it replaces the stored secret`)
+    .option("--key-file <FILE>", `${KEY_FILE}; it replaces a Google Drive account's own key`)
     .option("--expect-rev <REVISION>", "Optionally require this account revision", revision)
     .action(bind(handleMediaSyncAccountUpdate));
-  requireOptionGroup(accountUpdate, "atLeastOne", ["--name", "--tenant-id", "--client-id", "--secret-file"]);
-  account.command("test").description("Check an account: a Microsoft app's sign-in and Graph permissions")
+  requireOptionGroup(accountUpdate, "atLeastOne", ["--name", "--tenant-id", "--client-id", "--secret-file", "--key-file"]);
+  requireOptionGroup(accountUpdate, "atMostOne", ["--secret-file", "--key-file"]);
+  account.command("connect").description("Make a new link to connect (or reconnect) a Dropbox account; send it to the person who owns the Dropbox account")
+    .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountConnect));
+  account.command("test").description("Check an account: a Microsoft app's sign-in and Graph permissions, or the connection or key of a Dropbox or Google Drive account")
     .argument("<id>", "Account identifier (msa_...)").action(bind(handleMediaSyncAccountTest));
   account.command("delete").description("Delete an account no sync uses")
     .argument("<id>", "Account identifier (msa_...)")
@@ -228,13 +257,18 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .action(bind(handleMediaSyncAccountDelete));
 
   const create = sync.command("create").description("Start keeping a folder in step with a media folder");
-  create.command("sharepoint").description("Sync a SharePoint or OneDrive for work folder")
+  syncCreateOptions(create.command("sharepoint").description("Sync a SharePoint or OneDrive for work folder")
     .requiredOption("--account-id <ID>", "The account to read through (msa_...)", mediaSyncAccountOption)
-    .requiredOption("--url <URL>", "The folder's SharePoint address, or its sharing link", mediaSyncUrl)
-    .option("--folder-id <ID>", "The media folder the files land in (mfd_...); omitted creates one named after the source folder", mediaSyncFolderOption)
-    .option("--every <DURATION>", "How often to look for changes, 5 minutes to 24 hours (default 15m)", mediaSyncEvery)
-    .option("--name <NAME>", "Name the sync, 1 to 80 characters (default: the source folder's name)", mediaSyncName)
+    .requiredOption("--url <URL>", "The folder's SharePoint address, or its sharing link", mediaSyncUrl))
     .action(bind(handleMediaSyncCreate));
+  syncCreateOptions(create.command("dropbox").description("Sync a Dropbox folder")
+    .requiredOption("--account-id <ID>", "The connected Dropbox account to read through (msa_...)", mediaSyncAccountOption)
+    .requiredOption("--url <URL|PATH>", "The folder's Dropbox address, a shared folder link the account has added to its Dropbox, or a path that starts with /", mediaSyncDropboxUrl))
+    .action(bind(handleMediaSyncCreateDropbox));
+  syncCreateOptions(create.command("google-drive").description("Sync a Google Drive folder shared with an account's service account")
+    .requiredOption("--account-id <ID>", "The Google Drive account to read through (msa_...)", mediaSyncAccountOption)
+    .requiredOption("--url <URL|ID>", "The folder's Google Drive address (https://drive.google.com/drive/folders/ID), or its id", mediaSyncDriveUrl))
+    .action(bind(handleMediaSyncCreateGoogleDrive));
   sync.command("list").description("List this project's media syncs").action(bind(handleMediaSyncList));
   sync.command("show").description("Inspect one sync and what its last run did")
     .argument("<id>", "Sync identifier (msy_...)").action(bind(handleMediaSyncShow));

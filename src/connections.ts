@@ -9,6 +9,7 @@ import { ExitCode } from "./exit-codes.js";
 import { quotedRevision } from "./if-match.js";
 import { CliError, usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
+import { readServiceAccountKey } from "./service-account-key.js";
 import { table } from "./webhooks.js";
 
 // Project connections: /api/connections. A connection is the project's reusable
@@ -64,28 +65,6 @@ async function readClientSecret(file: string, runtime: CliRuntime): Promise<stri
   if (/\s/.test(text)) throw usageError(`${where} must hold only the client secret's Value: one value without spaces or line breaks.`);
   if ([...text].length > CLIENT_SECRET_MAX_CHARACTERS) throw usageError(`The client secret in ${where} is longer than ${CLIENT_SECRET_MAX_CHARACTERS} characters.`);
   return text;
-}
-
-/**
- * The service account's JSON key file, sent whole and compacted to one line. The
- * server checks it again at save and never returns it.
- */
-async function readServiceAccountKey(file: string, runtime: CliRuntime): Promise<string> {
-  const where = file === "-" ? "stdin" : file;
-  const text = await readAuthoringText(file, runtime, SECRET_FILE_MAX_BYTES);
-  let key: unknown;
-  try {
-    key = JSON.parse(text);
-  } catch {
-    key = undefined;
-  }
-  const object = key && typeof key === "object" && !Array.isArray(key) ? key as Record<string, unknown> : undefined;
-  if (!object || object.type !== "service_account" || typeof object.client_email !== "string" || typeof object.private_key !== "string") {
-    throw usageError(`${where} must be the service account's JSON key file (Google Cloud console: IAM and admin, Service accounts, Keys, Add key, JSON).`);
-  }
-  const compact = JSON.stringify(object);
-  if ([...compact].length > KEY_FILE_MAX_CHARACTERS) throw usageError(`The key file in ${where} is larger than ${KEY_FILE_MAX_CHARACTERS} characters.`);
-  return compact;
 }
 
 /** The next step of the problems a connection call is known to answer. */
@@ -251,7 +230,7 @@ function createHandler(provider: ConnectionProvider) {
         body = { provider, mode, name };
       } else {
         if (keyFile === undefined) throw usageError("--mode own_app needs --service-account-key-file: the service account's JSON key file.");
-        body = { provider, mode, name, secret: await readServiceAccountKey(keyFile, runtime) };
+        body = { provider, mode, name, secret: await readServiceAccountKey(keyFile, runtime, KEY_FILE_MAX_CHARACTERS) };
       }
     }
     const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -285,7 +264,7 @@ export const handleConnectionUpdate = commandHandler(async (args, runtime, resol
     ...(name !== undefined ? { name: biName(name) } : {}),
     ...(Object.keys(config).length ? { config } : {}),
     ...(secretFile !== undefined ? { secret: await readClientSecret(secretFile, runtime) }
-      : keyFile !== undefined ? { secret: await readServiceAccountKey(keyFile, runtime) } : {}),
+      : keyFile !== undefined ? { secret: await readServiceAccountKey(keyFile, runtime, KEY_FILE_MAX_CHARACTERS) } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await connectionCall(client, { method: "PATCH", path: `${CONNECTIONS_PATH}/${id}`, idempotent: true, body, headers: revisionHeader(args) }, id);
