@@ -53,7 +53,8 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   screen.command("update").description("Update a screen")
     .argument("<id>", "Screen identifier")
     .option("--name <NAME>", "Set the screen name")
-    .option("--playlist-id <ID>", "Select the playlist to assign")
+    .addOption(new Option("--playlist-id <ID>", "Select the playlist to assign").conflicts("clearPlaylist"))
+    .addOption(new Option("--clear-playlist", "Clear this screen's default assignment; keep pairing and other content levels, showing idle when none applies").conflicts("playlistId"))
     .option("--timezone <ZONE>", "Set an IANA timezone")
     .addOption(new Option("--field <NAME=VALUE>", "Set a field: NAME is 1 to 32 lower case letters, digits or underscores, VALUE 1 to 200 characters (repeatable; at most 32 fields)").argParser(screenFieldSetOption).conflicts(["clearFields"]))
     .addOption(new Option("--unset-field <NAME>", "Remove a field (repeatable)").argParser(screenUnsetFieldOption).conflicts(["clearFields"]))
@@ -489,5 +490,5 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);
   requireOptionGroup(update, "requires", ["--address", "--location"]);
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"]);
 }

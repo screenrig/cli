@@ -995,7 +995,7 @@ export interface Screen {
  */
 export interface ScreenPatch {
   name?: string;
-  playlist_id?: string;
+  playlist_id?: string | null;
   timezone?: string;
   /** Replaces the whole tag set; an empty array clears it. Bumps the screen revision. */
   tags?: ScreenTags;

@@ -266,7 +266,7 @@ test("screen update names the new flags when nothing is asked", async () => {
   const { transport } = screenBackend();
   const result = await cli(["--json", "screen", "update", SCREEN], transport, env);
   assert.equal(result.code, ExitCode.Usage);
-  assert.match(result.envelope.error!.detail, /--name or --playlist-id or --timezone or --field or --unset-field or --clear-fields or --location or --clear-location/);
+  assert.match(result.envelope.error!.detail, /--name or --playlist-id or --clear-playlist or --timezone or --field or --unset-field or --clear-fields or --location or --clear-location/);
   assert.equal(transport.calls.length, 0);
 });
 
@@ -558,7 +558,7 @@ test("help lists the new options, their relationships and the tokens a card read
   assert.deepEqual(update.relationships, [
     { kind: "requires", options: ["--location-name", "--location"] },
     { kind: "requires", options: ["--address", "--location"] },
-    { kind: "atLeastOne", options: ["--name", "--playlist-id", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"] },
+    { kind: "atLeastOne", options: ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"] },
   ]);
   const note = update.notes.join("\n");
   for (const token of ["{screen.field.NAME}", "{screen.name}", "{screen.timezone}", '"location": "{screen.location}"', "menu-{screen.field.store_number}"]) assert.ok(note.includes(token), token);
@@ -570,4 +570,19 @@ test("help lists the new options, their relationships and the tokens a card read
   assert.ok(list.options.some((candidate) => candidate.name === "--near" && /KM kilometres/.test(candidate.description)));
   assert.ok(list.examples.some((example) => example.includes("--near 47.6062,-122.3321,25")));
   assert.match(list.notes.join("\n"), /--near LAT,LON,KM/);
+});
+
+test("screen update clears only the default with null, revision guard and idempotency", async () => {
+  const env = await enrolled();
+  const { transport, patches } = screenBackend({ playlist_id: "pl_old" });
+  const result = await cli(["screen", "update", SCREEN, "--clear-playlist", "--expect-rev", "3"], transport, env);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(patchOf(patches).body, { playlist_id: null });
+  assert.equal(patchOf(patches).headers?.["if-match"], '\"3\"');
+  assert.ok(patchOf(patches).headers?.["idempotency-key"]);
+  assert.ok(transport.calls.every(call => !call.path.startsWith("/api/playlists")), "clearing needs no playlist preflight");
+  const count = transport.calls.length;
+  const refused = await cli(["screen", "update", SCREEN, "--clear-playlist", "--playlist-id", "pl_other"], transport, env);
+  assert.equal(refused.code, ExitCode.Usage);
+  assert.equal(transport.calls.length, count);
 });

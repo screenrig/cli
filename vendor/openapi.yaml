@@ -672,7 +672,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: requestSignInReset
-      description: Accepts a sign-in reset request without revealing whether a person holds the address. A person whose address is unverified, such as a self-serve signup, is found too, and completing that reset, which its owner must confirm with replace_unverified_account, gives the inbox's owner a new account (a new person with the reset's credential, a new organization and project) and deletes the unverified person, whom nobody had shown the address belonged to. A live reset is superseded and expires after one hour. With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan, and pending organization admin invitations to live organizations, fill the rest, newest first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other expired invitations, and revoked, accepted and link invitations, are not re-sent.
+      description: Accepts a sign-in reset request without revealing whether a person holds the address. A person whose address is unverified, such as a self-serve signup, is found too, and completing that reset, which its owner must confirm with replace_unverified_account, gives the inbox's owner a new account (a new person with the reset's credential, a new organization and project) and deletes the unverified person, whom nobody had shown the address belonged to. A reset link expires one hour after it was last requested. While a person's link is live and less than a day old, another request sends that same link again (at most once every ten minutes) and moves its expiry to one hour from the request, so a request never stops the link already in the inbox; otherwise a new link replaces it. There is no limit per address. Completing a reset removes the person's other passkeys (every passkey for a password reset), removes the password when the new credential is a passkey, discards a pending email change and ends every session. With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan, and pending organization admin invitations to live organizations, fill the rest, newest first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other expired invitations, and revoked, accepted and link invitations, are not re-sent.
       security: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -699,9 +699,6 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
       x-rate-limit-policies:
-        - name: sign-in-reset-email
-          quota: 3
-          windowSeconds: 3600
         - name: sign-in-reset-ip
           quota: 10
           windowSeconds: 3600
@@ -1242,7 +1239,7 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: listDashboardPasskeys
-      description: Lists the person’s passkeys.
+      description: Lists the person’s passkeys with what a client needs to keep the browser’s password manager in step with them (the WebAuthn Signal API). The list carries the relying party ID and the user handle the passkeys are registered under, and each passkey carries its credential ID and the provider its authenticator reported.
       security:
         - dashboardSession: []
       responses:
@@ -1284,7 +1281,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: completeDashboardPasskeyRegistration
-      description: Stores the new passkey, revokes the person’s other sessions, and queues a sign-in changed notice.
+      description: Stores the new passkey, revokes the person’s other sessions, and queues a sign-in changed notice. A passkey sent without a name is named after its provider, or Passkey when its authenticator reported none the list knows.
       security:
         - dashboardSession: []
       requestBody:
@@ -1546,7 +1543,7 @@ paths:
     get:
       operationId: oauthAuthorize
       description: >-
-        OAuth 2.0 authorization endpoint for connected apps (MCP clients). client_id is a client ID metadata document URL (https, port 443, fetched with no redirects, 64 KiB and 5 seconds at most, public addresses only) or a registered client id. The request is validated in order: the client, the exact redirect_uri (an http loopback redirect of 127.0.0.1, [::1] or localhost matches on any port), response_type code, code_challenge with code_challenge_method S256, resource (https://api.<domain>/mcp, or absent), then scope (access:read, the default, access:propose, access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error redirects to the redirect_uri with error, error_description, state and iss (RFC 9207). Success answers 303 to the dashboard consent page, where a person chooses the project, the access level (Read only by default, Propose or Manage) and the capabilities; approval redirects with code, state and iss. 30 requests per client address per minute.
+        OAuth 2.0 authorization endpoint for connected apps (MCP clients). client_id is a client ID metadata document URL (https, port 443, fetched with no redirects, 64 KiB and 5 seconds at most, public addresses only) or a registered client id. The request is validated in order: the client, the exact redirect_uri (an http loopback redirect of 127.0.0.1, [::1] or localhost matches on any port), response_type code, code_challenge with code_challenge_method S256, resource (https://api.<domain>/mcp, another MCP resource whose protected resource metadata names this server, or absent), then scope (access:read, the default, access:propose, access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error redirects to the redirect_uri with error, error_description, state and iss (RFC 9207). Success answers 303 to the dashboard consent page, where a person chooses the project, the access level (Read only by default, Propose or Manage) and the capabilities; approval redirects with code, state and iss. 30 requests per client address per minute.
       security: []
       parameters:
         - {name: client_id, in: query, required: true, schema: {type: string}}
@@ -2159,6 +2156,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Operation'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{id}/usage:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDashboardApplicationUsage
+      description: >-
+        Where an application (web app) of the session's project is placed, computed in one pass over the project's playlists and one read of the screens that hold them. placements are the application primitives whose stored application owner is this application, in playlist (the playlist list's order), page and primitive order; a playlist that places it twice has two. release says how each pinned release stands against the application's latest_ready_release: latest, older, or unknown while it has none. screens are the pairing_pending and active screens that default to, schedule, take over with or currently show a playlist of a placement, newest first; archived screens never count, and a screen whose Player cannot show web apps carries applications_unsupported. A member or agent limited to screens (screen_scope) sees only its screens, and screen_count counts only those. This is not the delete blocker, which is the runtime grants (a screen's manifest holding a release). An id the project does not hold is not_found as for getApplication. The answer is private and no-store.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Where the application is placed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationUsage'
         default:
           $ref: '#/components/responses/Problem'
   /api/applications/{id}:
@@ -12745,6 +12769,7 @@ paths:
         - $ref: '#/components/parameters/MediaTagQuery'
         - $ref: '#/components/parameters/MediaPrimitiveQuery'
         - $ref: '#/components/parameters/MediaFolderQuery'
+        - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -13295,6 +13320,33 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/media/{id}/usage:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getDashboardMediaUsage
+      description: >-
+        Where a ready media item of the session's project is used, computed in one pass over the project's playlists and one read of the screens that hold them. playlists are those that name the file (an image or video primitive's static ids and a by id or ids selector, a stream's fallback, a media:<id> string in a card's params, a stinger's logo, a soundtrack track), then those whose tag, folder or all selectors reach it, each group in the playlist list's order; a playlist is one entry whose uses list each way, the exact kinds first. Selectors are judged as the runtime resolves them: a tag filter matches the file's tag and tags, a folder selector the files directly inside the folder, an all selector every file of the kind, and a pending file by its last-approved tags and folder (a file never approved is reached by none). Rotation (batch_size, one_at_a_time), availability windows, aspect fit and a page's visibility are not judged. screens are the pairing_pending and active screens that default to, schedule, take over with or currently show one of those playlists, newest first; archived screens never count. A member or agent limited to screens (screen_scope) sees only its screens, and screen_count counts only those. An id the project does not hold, or a media item that is not ready, is not_found as for getMedia. The answer is private and no-store.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Where the media is used.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUsage'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/media/{id}/versions/{version}:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -19106,7 +19158,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: completeDashboardPasskeyAssertion
-      description: 'Verifies one usernameless assertion and mints the dashboard session cookie for the user the discoverable credential identifies. No cookie authenticates the request. A ceremony that is unknown, elapsed, or already used returns passkey_invalid, and so does an assertion the relying party cannot verify or a sign counter that moves backwards. The credential identifier is not authorization on its own: the signed assertion is. A person whose verified address is at a domain whose organization requires single sign-on is refused with 403 sso_required, unless they are a break-glass admin of that organization; such a sign-in is audited. When the server runs dashboard development authentication, this route returns passkeys_disabled.'
+      description: 'Verifies one usernameless assertion and mints the dashboard session cookie for the user the discoverable credential identifies. No cookie authenticates the request. A ceremony that is unknown, elapsed, or already used returns passkey_invalid, and so does an assertion the relying party cannot verify or a sign counter that moves backwards. A valid ceremony whose credential identifier is registered to nobody (no stored credential has it, for any person) returns 401 passkey_unknown instead; that answer is for that one case only, so a client may tell the browser to forget the credential (PublicKeyCredential.signalUnknownCredential) on it and on nothing else. The credential identifier is not authorization on its own: the signed assertion is. A person whose verified address is at a domain whose organization requires single sign-on is refused with 403 sso_required, unless they are a break-glass admin of that organization; such a sign-in is audited. When the server runs dashboard development authentication, this route returns passkeys_disabled.'
       requestBody:
         required: true
         content:
@@ -19251,6 +19303,47 @@ paths:
                   - '"cache"'
         '401':
           $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/onboarding/steps:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: recordOnboardingStep
+      x-rate-limit-policies:
+        - name: onboarding-step-ip
+          quota: 600
+          windowSeconds: 600
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Reports one step of one browser's run through the dashboard's entry flows (sign-up, sign-in, reset, invitation and adding a passkey) for the staff onboarding read. Public: it works with and without a dashboard session. The journey is the browser's own random id; the server also keeps the edge visitor cookie when the request carries one, and the person and organization when a session does. A journey is staff-only and keeps the real values people entered (addresses, names, answers); it never receives a password, code or token. The first value of mode, source, utm_source, utm_medium, utm_campaign, click_kind, site_trail and site_cta is kept; each step keeps its first time, and a step's value, detail and the journey's email (from email_submitted) are the latest. source is accepted only with entry_viewed. question is required with the question_* steps and refused with every other. detail is a problem code for a *_failed step, the sign-in method for signed_in, or connected or skipped for signup_finished. email_verified, email_gate_reached, site_visited, site_cta_clicked and the account milestones are written or derived by the server and are refused here. Only lengths are limited. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardingStepRequest'
+      responses:
+        '204':
+          description: The step was recorded.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
   /api/sso/discovery:
@@ -20020,6 +20113,32 @@ paths:
           description: Connection denied.
         '403':
           $ref: '#/components/responses/OutsideScreenScope'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/dashboard/boot:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardBoot
+      description: One request for the dashboard shell. Each member is the body the named route answers for this same session (GET /api/me/email, /api/support/status, /api/projects, /api/organizations, /api/project, /api/project/capabilities, /api/advertising/network, /api/alerts?state=open&limit=1 and /api/reviews?state=all&limit=1), produced by that route's own handler under its own authorization, plan and scope checks. A member is absent when its route would not answer 2xx for this session (a refusal, a role or plan that cannot read it, no current project, a fault), and the dashboard then reads that route itself. advertising_network is null when its route would answer 404 not_found because the project has no network. A session with no current project gets the members that need none.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The dashboard shell's reads.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardBoot'
+        '401':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/summary:
@@ -25028,6 +25147,7 @@ paths:
         - $ref: '#/components/parameters/MediaTagQuery'
         - $ref: '#/components/parameters/MediaPrimitiveQuery'
         - $ref: '#/components/parameters/MediaFolderQuery'
+        - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -26964,6 +27084,7 @@ components:
     MediaTagQuery: {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: Exact media tag. Untagged objects are omitted when this filter is present.}
     MediaPrimitiveQuery: {name: primitive, in: query, required: false, schema: {type: string, enum: [image, video, audio]}}
     MediaFolderQuery: {name: folder, in: query, required: false, schema: {type: string, pattern: "^(root|([a-z]+_)?mfd_[A-Za-z0-9]{1,64})$"}, description: "A media folder ID keeps only the files directly inside that folder, not those of its subfolders; root keeps only the files at the library root. Omitted lists every file."}
+    MediaIDsQuery: {name: ids, in: query, required: false, schema: {type: string, maxLength: 4096}, description: "Comma-separated media ids, at most 200 distinct; more is invalid_request at ids. Keeps only those files: an id that names no ready file is absent, and the other filters and paging still apply. An empty value lists nothing."}
     PlaybackDay: {name: day, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: UTC calendar day of the aggregate.}
     PlaybackDayFrom: {name: day_from, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "First UTC day, inclusive. Excludes day. With day_to spans at most 366 days. CSV defaults it to 30 days before day_to."}
     PlaybackDayTo: {name: day_to, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Last UTC day, inclusive. Excludes day. CSV defaults it to today (UTC)."}
@@ -27333,6 +27454,117 @@ components:
         by: {$ref: "#/components/schemas/MediaVersionActor", description: "Who or which agent put the version in service; absent for the first upload."}
         restored_from: {type: integer, minimum: 1, description: "The version number a restore copied."}
         created_at: {type: string, format: date-time, description: "When the version went into service."}
+    UsageTagFilter:
+      type: object
+      additionalProperties: false
+      required: [all, any, none]
+      description: A tag selector's filter. A file matches when it has every all tag, at least one any tag when any are named, and no none tag; the shorthand tag selector is all with one tag.
+      properties:
+        all: {type: array, items: {type: string}}
+        any: {type: array, items: {type: string}}
+        none: {type: array, items: {type: string}}
+    UsageTrack:
+      type: object
+      additionalProperties: false
+      required: [index, id]
+      properties:
+        index: {type: integer, minimum: 1, description: "The track's 1-based position in the playlist's audio.tracks."}
+        id: {type: string, description: "The track's own id in the playlist."}
+    MediaUse:
+      type: object
+      additionalProperties: false
+      required: [kind, where]
+      description: One way one playlist holds or reaches the media file; a playlist that does it on several pages is one use.
+      properties:
+        kind:
+          type: string
+          enum: [id, stream, card, stinger, track, tag, folder, all]
+          description: "id: an image or video primitive names the file (resolved media, by id or ids). stream: a stream primitive's fallback image. card: a media:<id> string in a card's params. stinger: a transition's stinger logo. track: soundtrack tracks. tag, folder and all: a selector that reaches the file."
+        where: {type: string, enum: [pages, transition, soundtrack], description: "The pages (page_ids), the transition of the pages in page_ids, or the soundtrack."}
+        page_ids: {type: array, items: {type: string}, description: "The pages involved, in page order. Absent for the soundtrack."}
+        tracks: {type: array, minItems: 1, items: {$ref: "#/components/schemas/UsageTrack"}, description: "Present for kind track."}
+        filter: {$ref: "#/components/schemas/UsageTagFilter", description: "Present for kind tag."}
+        folder_id: {type: string, description: "Present for kind folder: the media folder whose direct children the selector takes."}
+        primitive: {type: string, enum: [image, video], description: "Present for kind all: the kind of file the selector takes."}
+        frames: {type: array, minItems: 1, items: {$ref: "#/components/schemas/UsageFrame"}, description: "Present for kind id: each image or video primitive that names the file, in page and primitive order."}
+    UsageFrame:
+      type: object
+      additionalProperties: false
+      required: [page_id, primitive_id, rect]
+      description: One image or video primitive that names the media file, with its frame and how the file fills it.
+      properties:
+        page_id: {type: string}
+        primitive_id: {type: string}
+        rect: {$ref: "#/components/schemas/PlaylistRect"}
+        content_fit: {type: string, description: "The primitive's content_fit (contain, cover or fill); absent when the primitive leaves the default."}
+    MediaUsagePlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name, uses, screen_count]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        uses: {type: array, minItems: 1, items: {$ref: "#/components/schemas/MediaUse"}, description: "Every way the playlist holds or reaches the file; the exact kinds (id, stream, card, stinger, track) come before the selectors (tag, folder, all)."}
+        screen_count: {type: integer, minimum: 0, description: "How many of the listed screens use the playlist."}
+    UsageScreenHow:
+      type: object
+      additionalProperties: false
+      required: [playlist_id, uses]
+      properties:
+        playlist_id: {type: string}
+        uses:
+          type: array
+          minItems: 1
+          items: {type: string, enum: [playing, takeover, scheduled, default]}
+          description: "How the screen holds the playlist, in this order: playing (its effective playlist), takeover, scheduled (an entry of its playlist schedule, a paused one too), default (its assigned playlist)."
+    UsageScreen:
+      type: object
+      additionalProperties: false
+      required: [id, label, screen, playlist_ids, how]
+      description: One active screen that uses at least one of the listed playlists.
+      properties:
+        id: {type: string}
+        label: {type: string}
+        screen: {$ref: "#/components/schemas/Screen", description: "The screen as listScreens answers it."}
+        playlist_ids: {type: array, items: {type: string}, description: "The listed playlists the screen uses, in the answer's playlist order."}
+        how: {type: array, items: {$ref: "#/components/schemas/UsageScreenHow"}, description: "One entry for each of playlist_ids, in the same order."}
+    MediaUsage:
+      type: object
+      additionalProperties: false
+      required: [playlists, screens]
+      properties:
+        playlists: {type: array, items: {$ref: "#/components/schemas/MediaUsagePlaylist"}, description: "The playlists that name the file, then those only selectors reach it; each group in the playlist list's order (newest first)."}
+        screens: {type: array, items: {$ref: "#/components/schemas/UsageScreen"}}
+    ApplicationPlacement:
+      type: object
+      additionalProperties: false
+      required: [playlist_id, playlist_name, page_id, primitive_id, release_id, release, controller, rect, canvas, screen_count]
+      description: One application primitive on one page of one playlist.
+      properties:
+        playlist_id: {type: string}
+        playlist_name: {type: string}
+        page_id: {type: string}
+        primitive_id: {type: string}
+        release_id: {type: string, description: The release the primitive pins.}
+        release: {type: string, enum: [latest, older, unknown], description: "The pin against the application's latest_ready_release; unknown while it has none."}
+        controller: {type: boolean, description: The page advances when this application says so.}
+        rect: {$ref: "#/components/schemas/PlaylistRect"}
+        canvas:
+          type: object
+          additionalProperties: false
+          required: [width, height]
+          description: The page's canvas, which rect is measured on.
+          properties:
+            width: {type: number}
+            height: {type: number}
+        screen_count: {type: integer, minimum: 0, description: "How many of the listed screens use the playlist."}
+    ApplicationUsage:
+      type: object
+      additionalProperties: false
+      required: [placements, screens]
+      properties:
+        placements: {type: array, items: {$ref: "#/components/schemas/ApplicationPlacement"}, description: "In playlist (newest first), page and primitive order."}
+        screens: {type: array, items: {$ref: "#/components/schemas/UsageScreen"}}
     MediaVersionPage:
       type: object
       additionalProperties: false
@@ -27429,7 +27661,7 @@ components:
       additionalProperties: false
       required: [action, screens, request, playlist_ids]
       properties:
-        action: {type: string, enum: [assign, set_playlist_schedule, clear_playlist_schedule, takeover, takeover_clear]}
+        action: {type: string, enum: [assign, clear_playlist, set_playlist_schedule, clear_playlist_schedule, takeover, takeover_clear]}
         screens:
           type: object
           additionalProperties: false
@@ -28410,6 +28642,94 @@ components:
       enum: [no_email, email_unverified, domain_not_allowed, account_exists, managed_elsewhere, subject_mismatch, not_provisioned, sso_required, staff_account, expired, bad_state, interaction_required, provider_refused, provider_unavailable, verification_failed, deactivated]
       description: >-
         The stable code a single sign-in ends with when it does not complete: the value of #sso_error= in the address POST /api/sso/finish redirects to, and the code of a failed identity-provider test. no_email: the provider asserted no email address. email_unverified: it marked the address unverified. domain_not_allowed: the address is not at one of the organization's verified domains. account_exists: the address already belongs to an account with its own sign-in; the person signs in as before and links the identity from their account (intent link). managed_elsewhere: another organization manages the person. subject_mismatch: the account is linked to a different identity at the same provider. not_provisioned: nobody holds the address and the connection does not create people. sso_required: the organization requires single sign-on for the address. staff_account: a screenRIG staff account is never signed in, adopted or linked by a customer's identity provider. expired: the sign-in outlived its 10 minutes. bad_state: the sign-in's state or browser binding does not match, or it was used already. interaction_required: a silent renewal needs the person. provider_refused: the provider answered with an error. provider_unavailable: the provider could not be reached or read. verification_failed: the provider's token or assertion failed verification. deactivated: the person is deactivated.
+    OnboardingStepName:
+      type: string
+      description: A step of the entry flows, in display order. email_verified, email_gate_reached and the account milestones (agent_connected, screen_paired, playlist_with_content, activated) are written or joined by the server and are not names a client sends.
+      enum:
+        - entry_viewed
+        - returning_shown
+        - email_submitted
+        - address_new
+        - address_existing
+        - address_sso
+        - address_failed
+        - signup_form_viewed
+        - signup_name_entered
+        - signup_marketing_choice
+        - passkey_unsupported
+        - passkey_started
+        - passkey_cancelled
+        - signup_failed
+        - account_created
+        - question_shown
+        - question_answered
+        - question_follow_up
+        - question_skipped
+        - connect_viewed
+        - connect_copied
+        - agent_approved
+        - signup_finished
+        - dashboard_opened
+        - signin_passkey_started
+        - signin_passkey_cancelled
+        - signin_password_started
+        - signin_sso_started
+        - signin_failed
+        - signed_in
+        - reset_viewed
+        - reset_requested
+        - reset_opened
+        - reset_completed
+        - invite_viewed
+        - invite_email_sent
+        - invite_passkey_started
+        - invite_passkey_cancelled
+        - invite_failed
+        - invite_accepted
+        - passkey_upgrade_shown
+        - passkey_add_started
+        - passkey_add_cancelled
+        - passkey_added
+    OnboardingStepRequest:
+      type: object
+      additionalProperties: false
+      required: [journey_id, step]
+      properties:
+        journey_id: {type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", description: "The browser's journey: a lower-case RFC 4122 UUID the dashboard keeps in its own storage."}
+        step: {$ref: '#/components/schemas/OnboardingStepName'}
+        mode: {type: string, enum: [login, signup], description: "The entry page's mode. The first value is kept."}
+        source: {type: string, maxLength: 500, description: "Only with entry_viewed: where the person came from, as the entry page names it: the sign-up link's path, the last website page, the referring host, or direct. Kept as sent. The first value is kept."}
+        utm_source: {type: string, maxLength: 80, description: "Lower-cased. The first value is kept."}
+        utm_medium: {type: string, maxLength: 80, description: "Lower-cased. The first value is kept."}
+        utm_campaign: {type: string, maxLength: 80, description: "Lower-cased. The first value is kept."}
+        click_kind: {type: string, enum: [gclid, gbraid, wbraid, fbclid, msclkid, li_fat_id, ttclid, rdt_cid, twclid], description: "The advertising click id the landing carried; the id itself is never sent."}
+        question: {type: string, enum: [who_for, use_case, screen_range, go_live, devices, role, firm_kind, agent, heard, agent_other, heard_text, heard_kind], description: "Required with question_shown, question_answered, question_follow_up and question_skipped; refused with every other step. agent_other, heard_text and heard_kind name follow-ups and go only with question_follow_up."}
+        detail: {type: string, maxLength: 200, description: "A problem code for a *_failed step, the method for signed_in (passkey, password, sso, autofill), connected or skipped for signup_finished. Kept as sent."}
+        value: {$ref: '#/components/schemas/OnboardingValue'}
+        site_trail: {type: array, maxItems: 30, items: {$ref: '#/components/schemas/OnboardingSiteVisit'}, description: "The pages the browser viewed on the website in this tab, oldest first. The first value is kept."}
+        site_cta: {$ref: '#/components/schemas/OnboardingSiteCTA'}
+    OnboardingValue:
+      description: "What the person entered at a step: the address typed (email_submitted, reset_requested), the name (signup_name_entered), yes or no (signup_marketing_choice), the options chosen or the follow-up text (question_answered, question_follow_up), an address or name entered on an invitation. Never a password, code or token. Empty is absent."
+      oneOf:
+        - {type: string, maxLength: 2000}
+        - {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+    OnboardingSiteVisit:
+      type: object
+      additionalProperties: false
+      required: [path, at]
+      properties:
+        path: {type: string, minLength: 1, maxLength: 500, description: "The page's path with its query."}
+        at: {type: string, format: date-time}
+    OnboardingSiteCTA:
+      type: object
+      additionalProperties: false
+      required: [label, path, href, at]
+      description: The sign-up or sign-in link the person clicked on the website.
+      properties:
+        label: {type: string, maxLength: 200, description: "The link's data-cta label or its text."}
+        path: {type: string, minLength: 1, maxLength: 500}
+        href: {type: string, minLength: 1, maxLength: 500}
+        at: {type: string, format: date-time}
     SSODiscoveryRequest:
       type: object
       additionalProperties: false
@@ -29139,6 +29459,8 @@ components:
       required:
         - id
         - name
+        - credential_id
+        - provider
         - created_at
         - last_used_at
       properties:
@@ -29148,6 +29470,18 @@ components:
           type: string
           minLength: 1
           maxLength: 60
+        credential_id:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+          description: The WebAuthn credential ID, base64url without padding. It is the identifier the browser's password manager knows the passkey by (PublicKeyCredential.signalAllAcceptedCredentials takes it).
+        provider:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 60
+            - type: 'null'
+          description: The passkey provider named by the AAGUID the authenticator reported when the passkey was registered (for example 1Password or Google Password Manager), from a community list of providers. Null when the authenticator reported none or one the list does not know. It is for display only and says nothing about whether the passkey can be trusted.
         created_at:
           type: string
           format: date-time
@@ -29160,8 +29494,19 @@ components:
       type: object
       additionalProperties: false
       required:
+        - rp_id
+        - user_handle
         - items
       properties:
+        rp_id:
+          type: string
+          minLength: 1
+          description: The relying party ID that new passkeys are registered under, which is the site apex.
+        user_handle:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+          description: The person's WebAuthn user ID, base64url without padding. It is the user.id of every registration ceremony and the userHandle of every assertion, so a client may pass it to PublicKeyCredential.signalAllAcceptedCredentials as userId.
         items:
           type: array
           items:
@@ -29184,7 +29529,7 @@ components:
           type: string
           minLength: 1
           maxLength: 60
-          default: Passkey
+          description: The name the person gives the passkey. Left out, the passkey is named after its provider (for example iCloud Keychain), or Passkey when the authenticator reported none the list knows.
     DashboardPasskeyPatch:
       type: object
       additionalProperties: false
@@ -29982,7 +30327,7 @@ components:
         remove_other_passkeys:
           type: boolean
           default: true
-          description: Sign-in reset only (mode reset). Removes the person's passkeys other than the one this reset registers, or every passkey when the reset sets a password, so a lost or stolen device stops signing in. Absent means true; any other invitation refuses it. A reset of an unverified address creates a new person who has no other passkeys, and ignores it.
+          description: Sign-in reset only (mode reset). Removes the person's passkeys other than the one this reset registers, or every passkey when the reset sets a password, so a lost or stolen device stops signing in. Absent means true; any other invitation refuses it. A reset of an unverified address creates a new person who has no other passkeys, and ignores it. A reset that registers a passkey removes the password whatever this says.
         replace_unverified_account:
           type: boolean
           default: false
@@ -30426,6 +30771,7 @@ components:
         client_domain: {type: string, description: "The host the client's metadata was fetched from, or a registered client's domain."}
         client_registered: {type: boolean, description: "A client registered by screenRIG rather than identified by a metadata document."}
         redirect_host: {type: string}
+        resource: {type: string, enum: [mcp, staff_mcp], description: "What the application connects to: mcp, the project MCP, or staff_mcp, read-only staff analytics that only screenRIG staff can approve (always Read only; capabilities do not apply)."}
         access: {type: string, enum: [read, propose, manage], description: "The level the application asked for."}
         capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, minItems: 1, uniqueItems: true}
         requested_from: {type: string}
@@ -32334,7 +32680,7 @@ components:
         arrangement: {type: string, enum: [row, column, grid]}
         columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
-    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {type: string}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}}}
+    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}}}
     ScreenLocation:
       type: object
       additionalProperties: false
@@ -32409,7 +32755,7 @@ components:
       description: >-
         An assignment of a screen's playlist (patchScreenPlaylist). The body has no other member.
       properties:
-        playlist_id: {type: string, minLength: 1, description: "The playlist the screen shows: its default, behind a takeover, a campaign that holds or a matching schedule entry."}
+        playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default playlist; null clears its own assignment. A takeover, campaign, schedule entry or inherited folder default can still show content; otherwise the paired Player shows its idle display."}
     PairScreen: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, label: {type: string, minLength: 1, maxLength: 120}, folder_id: {type: string, minLength: 1, description: "The screen folder the screen lands in; omitted lands it at the project root. A caller limited to screens must send a folder inside its scope (outside_screen_scope otherwise). A folder the project does not hold is invalid_request for a caller of the whole project. Part of the idempotent request: another folder_id under the same Idempotency-Key is idempotency_mismatch."}}}
     ProvisionScreen: {type: object, additionalProperties: false, properties: {label: {type: string, minLength: 1, maxLength: 120}, folder_id: {type: string, minLength: 1, description: "The screen folder the screen lands in, as on PairScreen."}}}
     ScreenProvisioning: {type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: {screen: {$ref: "#/components/schemas/Screen"}, public_url: {type: string, format: uri}, provisioning_url: {type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time}}}
@@ -33221,6 +33567,7 @@ components:
     ScreenAction:
       oneOf:
         - {$ref: "#/components/schemas/ScreenActionAssign"}
+        - {$ref: "#/components/schemas/ScreenActionClearPlaylist"}
         - {$ref: "#/components/schemas/ScreenActionReload"}
         - {$ref: "#/components/schemas/ScreenActionToast"}
         - {$ref: "#/components/schemas/ScreenActionSetTags"}
@@ -33248,6 +33595,13 @@ components:
       properties:
         type: {type: string, enum: [assign]}
         playlist_id: {type: string, minLength: 1}
+    ScreenActionClearPlaylist:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: "Clear each screen's own default playlist, retaining pairing and other content levels. With no effective content the Player shows its idle display. Review-class, like assign."
+      properties:
+        type: {type: string, enum: [clear_playlist]}
     ScreenActionReload:
       type: object
       additionalProperties: false
@@ -33391,7 +33745,7 @@ components:
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: {type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, set_reboot_schedule, clear_reboot_schedule, clear_cache, restart_app, update]}
+        action: {type: string, enum: [assign, clear_playlist, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, set_reboot_schedule, clear_reboot_schedule, clear_cache, restart_app, update]}
         matched: {type: integer, minimum: 0}
         succeeded: {type: integer, minimum: 0}
         failed: {type: integer, minimum: 0}
@@ -34126,7 +34480,7 @@ components:
       additionalProperties: false
       required: [screen_id, page_id, media_id, primitive, received_at]
       description: >-
-        One durable Player-reported start of an image, video, or application. The session authenticates screen and project; item, page, manifest, primitive and release identities are reported observations and do not authorize content access. playlist_id and playlist_revision are optional metadata enriched asynchronously from a matching screen manifest; missing metadata stays absent. Application starts carry release_id with empty media_id and primitive. primitive_id and started_at are present only when the Player reports them; started_at is clamped to [received_at - 24h, received_at + 5m].
+        One durable Player-reported start of an image, video, or application. The session authenticates screen and project; item, page, manifest, primitive and release identities are reported observations and do not authorize content access. playlist_id and playlist_revision are optional metadata enriched asynchronously from a matching screen manifest; missing metadata stays absent. Application starts carry release_id with empty media_id and primitive. primitive_id and started_at are present only when the Player reports them; started_at is clamped to [received_at - 24h, received_at + 5m]. A JSON page also names its screen, media, playlist and application as display text read when it is served; the CSV export and the xlsx and pdf reports omit those names.
       properties:
         screen_id: {type: string}
         playlist_id: {type: string}
@@ -34137,6 +34491,10 @@ components:
         media_id: {type: string}
         primitive: {type: string, enum: [image, video, ""]}
         release_id: {type: string, description: "Exact application release for an application start."}
+        screen_label: {type: string, description: "The screen's label when the play was read. Display text only, never an identifier or authorization; absent when the screen no longer exists."}
+        media_name: {type: string, description: "The media's display name when the play was read: its source filename, else its stored filename. Display text only; absent when the media was deleted or the play carries none."}
+        playlist_name: {type: string, description: "The playlist's name when the play was read. Display text only; absent when the playlist was deleted or the play carries none."}
+        application_name: {type: string, description: "The name of the application that release_id belongs to, when the play was read. Display text only; absent when the application was deleted or the play is not an application start."}
         started_at: {type: string, format: date-time}
         received_at: {type: string, format: date-time}
     PlaybackPlayList:
@@ -37349,7 +37707,7 @@ components:
       required: [ceremony_id, creation_options]
       properties:
         ceremony_id: {type: string, description: "Opaque handle for this ceremony. It is bound to the presenting cookie and is not a credential on its own."}
-        creation_options: {type: object, additionalProperties: true, description: "WebAuthn PublicKeyCredentialCreationOptions, passed verbatim to navigator.credentials.create. The relying party is the dashboard host, credentials are discoverable, user verification is required, and attestation is none."}
+        creation_options: {type: object, additionalProperties: true, description: "WebAuthn PublicKeyCredentialCreationOptions, passed verbatim to navigator.credentials.create. The relying party is the dashboard host and is named screenRIG, credentials are discoverable, user verification is required, and attestation is none. user.name is the account's email address, which password managers show as the passkey's username, and user.displayName is the person's name. Adding a passkey to a signed-in account excludes the credentials the person already has, so the same password manager cannot hold two."}
     DashboardPasskeyAssertion:
       type: object
       additionalProperties: false
@@ -37514,6 +37872,40 @@ components:
         linked:
           type: boolean
           description: The person's account holds an identity at that provider.
+    DashboardBoot:
+      type: object
+      additionalProperties: false
+      description: One request for the dashboard shell. Each member is the body the named route answers for this same session, and is absent when that route would not answer 2xx for it. advertising_network is null when the project has no network.
+      properties:
+        me_email:
+          description: GET /api/me/email.
+          $ref: '#/components/schemas/DashboardEmail'
+        support_status:
+          description: GET /api/support/status.
+          $ref: '#/components/schemas/SupportStatus'
+        projects:
+          description: GET /api/projects.
+          $ref: '#/components/schemas/DashboardProjectList'
+        organizations:
+          description: GET /api/organizations.
+          $ref: '#/components/schemas/OrganizationList'
+        project:
+          description: GET /api/project.
+          $ref: '#/components/schemas/DashboardProject'
+        capabilities:
+          description: GET /api/project/capabilities.
+          $ref: '#/components/schemas/ProjectCapabilities'
+        advertising_network:
+          description: GET /api/advertising/network; null when that route answers 404 not_found.
+          anyOf:
+            - $ref: '#/components/schemas/AdvertisingNetwork'
+            - type: 'null'
+        open_alerts:
+          description: GET /api/alerts?state=open&limit=1, the alert counts the rail shows.
+          $ref: '#/components/schemas/AlertList'
+        reviews:
+          description: GET /api/reviews?state=all&limit=1, the review counts the rail shows.
+          $ref: '#/components/schemas/ReviewList'
     DashboardSummary:
       type: object
       additionalProperties: false
@@ -38055,10 +38447,13 @@ components:
       type: object
       additionalProperties: false
       required: [count, bytes]
-      description: Ready media counters for the session's project. bytes counts stored media bytes only; it is not the project used_bytes total, which also covers release trees and key/value entries.
+      description: Ready media counters for the session's project. bytes counts stored media bytes only; it is not the project used_bytes total, which also covers release trees and key/value entries. image_bytes, video_bytes and audio_bytes split bytes by primitive and always sum to bytes while image, video and audio are the only primitives; if another primitive is ever stored, the three sum to less than bytes.
       properties:
         count: {type: integer, minimum: 0}
         bytes: {type: integer, minimum: 0}
+        image_bytes: {type: integer, minimum: 0, description: Stored bytes of ready image media; part of bytes.}
+        video_bytes: {type: integer, minimum: 0, description: Stored bytes of ready video media; part of bytes.}
+        audio_bytes: {type: integer, minimum: 0, description: Stored bytes of ready audio media; part of bytes.}
     DashboardApplicationSummary:
       type: object
       additionalProperties: false
@@ -38222,6 +38617,7 @@ x-problem-codes:
   - screen_archived
   - screen_archive_required
   - passkey_invalid
+  - passkey_unknown
   - passkeys_disabled
   - application_in_use
   - agent_connection_invalid

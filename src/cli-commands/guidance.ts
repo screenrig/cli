@@ -198,7 +198,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "screen publish": ["scr_SCREEN lobby.json", 'scr_SCREEN lobby.json --note "Spring menu for the lobby"'],
     "screen pair": ['234567 --name "Lobby screen"', 'ABC 234', 'ABC 234 --folder sfd_NORTH'],
     "screen provision": ['--open --name "Lobby screen"', '--print-url --name "Lobby screen" --folder sfd_NORTH'],
-    "screen update": ['scr_SCREEN --name "Lobby screen"', "scr_SCREEN --field store_number=0142 --field region=north", "scr_SCREEN --unset-field region",
+    "screen update": ["scr_SCREEN --clear-playlist --expect-rev 3", 'scr_SCREEN --name "Lobby screen"', "scr_SCREEN --field store_number=0142 --field region=north", "scr_SCREEN --unset-field region",
       'scr_SCREEN --location 47.6062,-122.3321 --location-name "Seattle HQ"', "scr_SCREEN --clear-fields --clear-location"],
     "screen list": ["", "--state archived", "--tag Lobby", "--folder sfd_NORTH", "--folder root", "--field region=north", "--near 47.6062,-122.3321,25"], "screen show": ["scr_SCREEN"],
     "screen assign": ["scr_SCREEN --playlist-id pl_PLAYLIST", "--tag Lobby --playlist-id pl_PLAYLIST", "--folder sfd_NORTH --playlist-id pl_PLAYLIST", "scr_LOBBY scr_ENTRANCE --playlist-id pl_PLAYLIST"],

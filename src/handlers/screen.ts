@@ -644,11 +644,12 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const ifMatch = flagString(args.flags, "expect-rev");
   const name = flagString(args.flags, "name");
   const playlistId = flagString(args.flags, "playlist-id");
+  const clearPlaylist = flagBool(args.flags, "clear-playlist");
   const timezone = flagString(args.flags, "timezone");
   const facts = screenFactsPatch(args.flags);
   const changesFacts = facts.fields !== undefined || facts.location !== undefined;
-  if (!id || (!name && !playlistId && !timezone && !changesFacts)) {
-    throw usageError("screen update requires <id>, and --name, --playlist-id, --timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
+  if (!id || (!name && !playlistId && !clearPlaylist && !timezone && !changesFacts)) {
+    throw usageError("screen update requires <id>, and --name, --playlist-id, --clear-playlist, --timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
   }
   // A patch that sets both a playlist and a timezone satisfies the schedule
   // rule in one request, so only check when the patch leaves the screen
@@ -667,11 +668,11 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   }
   const body: ScreenPatch = {
     ...(name ? { name } : {}),
-    ...(playlistId ? { playlist_id: playlistId } : {}),
+    ...(clearPlaylist ? { playlist_id: null } : playlistId ? { playlist_id: playlistId } : {}),
     ...(timezone ? { timezone } : {}),
     ...facts,
   };
-  const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
+  const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: { ...reviewNoteFrom(args), ...(ifMatch ? { "if-match": quotedRevision(ifMatch) } : {}) }, body });
   // A playlist-only change under Propose access waits for review.
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
