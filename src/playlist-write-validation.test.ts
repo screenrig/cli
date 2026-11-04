@@ -39,6 +39,39 @@ function playlistWithVisibility(visibility: unknown) {
   return { ...value, pages: [...value.pages, { ...value.pages[0], id: "conditional", visibility }] };
 }
 
+test("bundle selectors accept the authoring contract's full 1024-media range without changing order", () => {
+  for (const primitive of ["image", "video"] as const) {
+    for (const count of [32, 33, 40, 1024]) {
+      const ids = Array.from({ length: count }, (_, index) => `med_${count - index}`);
+      const value = playlistWithPrimitives([{
+        id: "slideshow", primitive,
+        selector: { by: "ids", media_ids: ids, one_at_a_time: true },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain",
+      }]);
+      const original = structuredClone(value);
+      assert.deepEqual(playlistIssues(value), [], `${primitive}: ${count}`);
+      assert.deepEqual(validatePlaylistWrite(value, new Map(ids.map(id => [id, primitive]))), new Set(ids));
+      assert.deepEqual(value, original);
+    }
+  }
+});
+
+test("bundle selectors still reject empty, oversized, duplicate and invalid media ids", () => {
+  const ids = Array.from({ length: 1025 }, (_, index) => `med_${index}`);
+  for (const media_ids of [[], ids, [...ids.slice(0, 39), ids[0]], [...ids.slice(0, 39), "invalid"]]) {
+    const value = playlistWithPrimitives([{
+      id: "slideshow", primitive: "image",
+      selector: { by: "ids", media_ids, one_at_a_time: true },
+      rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain",
+    }]);
+    assert.throws(
+      () => validatePlaylistWrite(value, new Map(ids.map(id => [id, "image" as const]))),
+      (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" &&
+        /media_ids must contain 1 to 1024 unique media ids/.test(error.problem.detail),
+    );
+  }
+});
+
 test("authoring and bundle validators accept data-only and mixed visibility without changing predicates", () => {
   for (const data of [{ key: "agenda" }, { key: "agenda", path: "/a~1b/~0c", equals: true }, { key: "agenda", equals: false }, { key: "agenda", equals: null }, { key: "agenda", equals: 0 }]) {
     for (const bounds of [{}, { from: "2026-10-27T09:00" }]) {

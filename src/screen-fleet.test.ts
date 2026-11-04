@@ -449,6 +449,31 @@ test("a dropped connection in a fleet result is a transport error with no HTTP s
   assert.equal("status" in failure, false);
 });
 
+test("fleet screenshot failures retain each screen's reported display context", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  const displays = new Map([
+    [A, { power: "off", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false }],
+    [B, { power: "on", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false }],
+  ]);
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, (req) => ({
+    status: 202, headers: {}, body: { capture_id: `shot_${req.path.split("/")[3]!.slice(4, 20)}`, expires_at: "2026-08-14T17:00:30Z" },
+  }));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, (req) => {
+    const id = req.path.split("/")[3]!;
+    return { status: 200, headers: {}, body: { state: "unavailable", reason: "capture_failed", capture_id: `shot_${id.slice(4, 20)}`, display: displays.get(id) } };
+  });
+  const result = await cli(["--json", "screen", "screenshot", A, B, "--output", "shots"], transport, env);
+  assert.equal(result.code, ExitCode.Conflict, result.stdout);
+  assert.equal(result.envelope.data.failed, 2);
+  for (const item of result.envelope.data.results) {
+    assert.equal(item.status, "failed");
+    assert.equal(item.problem.code, "screenshot_unavailable");
+    assert.match(item.problem.detail, /capture_failed/);
+    assert.deepEqual(item.problem.display, displays.get(item.screen_id));
+  }
+});
+
 test("screen screenshot --tag fans out client-side with bounded concurrency into a directory", async () => {
   const env = await enrolled();
   const inFlight = { now: 0, max: 0 };

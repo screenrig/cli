@@ -355,6 +355,65 @@ test("screen screenshot names capture_failed when the Player could not capture",
   }
 });
 
+test("failed screenshots retain reported display context without claiming it caused the failure", async (t) => {
+  for (const display of [
+    { power: "off", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false },
+    { power: "standby", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false },
+    { power: "on", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false },
+    { power: "unknown", connected: false, reported_at: "2026-08-14T16:59:00Z", stale: false },
+    { power: "off", connected: true, reported_at: "2026-08-14T16:00:00Z", stale: true },
+  ]) {
+    await t.test(`${display.power}, stale=${display.stale}`, async () => {
+      const configDir = await testTemp("screenshot-display-");
+      const cwdDir = await testTemp("screenshot-display-cwd-");
+      const fsLike = await enrolledFs(configDir);
+      try {
+        const result = await withRuntime(
+          ["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
+          screenshotTransport({ statuses: [{ state: "unavailable", reason: "capture_failed", capture_id: CAPTURE_ID, display }] }),
+          { fs: fsLike, configDir, cwdDir },
+        );
+        assert.equal(result.code, ExitCode.Conflict, result.stdout);
+        const { error } = JSON.parse(result.stdout);
+        assert.equal(error.code, "screenshot_unavailable");
+        assert.match(error.detail, /capture_failed/);
+        assert.deepEqual(error.display, display);
+        assert.match(error.detail, new RegExp(`reported display power ${display.power}`));
+        assert.equal(error.detail.includes("stale"), display.stale);
+        assert.equal(error.hint.includes("when the display is on"), !display.stale && ["off", "standby"].includes(display.power));
+        assert.doesNotMatch(error.detail, /failed because|caused by/);
+      } finally {
+        await rm(configDir, { recursive: true, force: true });
+        await rm(cwdDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("a screenshot download problem preserves the server's display context", async () => {
+  const configDir = await testTemp("screenshot-download-display-");
+  const cwdDir = await testTemp("screenshot-download-display-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  const display = { power: "off", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false };
+  try {
+    const result = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID], screenshotTransport({
+      statuses: [readyStatus()],
+      image: {
+        status: 409,
+        headers: { "content-type": "application/problem+json" },
+        body: { errors: [{ status: 409, code: "screenshot_unavailable", title: "Screenshot is not available", detail: "capture_failed; the Player reported display power off.", display }] },
+      },
+    }), { fs: fsLike, configDir, cwdDir });
+    assert.equal(result.code, ExitCode.Conflict, result.stdout);
+    const { error } = JSON.parse(result.stdout);
+    assert.deepEqual(error.display, display);
+    assert.match(error.detail, /reported display power off/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
 test("screen screenshot keeps no recovery entry: a rerun after a refusal requests a new capture with a new key", async () => {
   const configDir = await testTemp("screenshot-rerun-");
   const cwdDir = await testTemp("screenshot-rerun-cwd-");
