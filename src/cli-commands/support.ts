@@ -10,7 +10,7 @@ export function registerSupportCommands(root: Command, bind: CommandActionBinder
     .option("--conversation-id <ID>", "Reply in this conversation; omit to start a new one")
     .addOption(new Option("--body <TEXT>", "Supply the support message").conflicts("bodyFile"))
     .addOption(new Option("--body-file <FILE>", "Read the support message from a file").conflicts("body"))
-    .option("--human-requested", "Ask staff to respond and pause the AI assistant")
+    .option("--human-requested", "Ask for a person (Education, Premium and Enterprise); on Standard and Plus the AI assistant answers")
     .action(bind(handleSupportSubmit));
   requireOptionGroup(submit, "exactlyOne", ["--body", "--body-file"]);
   support.command("history").description("List conversations or a conversation's messages")
