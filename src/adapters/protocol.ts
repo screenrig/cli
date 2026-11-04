@@ -622,6 +622,14 @@ export interface ScreenDisplayOverride {
   set_at: string;
 }
 
+/** The Player's latest health display report, independent of requested power. */
+export interface ScreenDisplayReported {
+  power?: "on" | "off" | "standby" | "unknown";
+  connected?: boolean;
+  reported_at: string;
+  stale: boolean;
+}
+
 /** Screen.display: requested power now, why, until when, and the Player's reported power. */
 export interface ScreenDisplay {
   requested: "on" | "off";
@@ -629,7 +637,7 @@ export interface ScreenDisplay {
   until?: string;
   schedule?: ScreenDisplaySchedule;
   override?: ScreenDisplayOverride;
-  reported?: { power?: "on" | "off" | "standby" | "unknown"; connected?: boolean; reported_at: string; stale: boolean };
+  reported?: ScreenDisplayReported;
 }
 
 export interface ScreenDisplayScheduleView {
@@ -1158,6 +1166,8 @@ export interface ScreenScreenshotStatus {
   bytes?: number;
   capture_id?: ScreenshotCaptureID;
   captured_at?: string;
+  /** Latest reported display context on unavailable or timed_out captures; not proof of the failure's cause. */
+  display?: ScreenDisplayReported;
   expires_at?: string;
   /** What the backend read of this ready image: one frame, not a verdict about the screen. Absent when the image could not be read. */
   frame?: ScreenScreenshotFrame;

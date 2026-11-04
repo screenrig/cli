@@ -21,6 +21,16 @@ test("normalizes incomplete problem bodies", () => {
   assert.match(problem.type, /resource-conflict/);
 });
 
+test("screenshot display context requires a timestamp and explicit freshness, and drops unknown fields", () => {
+  const display = { power: "off", connected: false, reported_at: "2026-11-04T14:00:00Z", stale: true };
+  const input = (report: unknown) => ({ errors: [{ status: 409, code: "screenshot_unavailable", detail: "capture_failed", display: report }] });
+  assert.deepEqual(normalizeProblem(input({ ...display, unrelated: "not display context" })).display, display);
+  for (const malformed of [{ ...display, stale: undefined }, { ...display, stale: "false" }, { ...display, reported_at: "not a date" }]) {
+    assert.equal(normalizeProblem(input(malformed)).display, undefined);
+  }
+  assert.deepEqual(normalizeProblem(input({ ...display, power: "future_value" })).display, { connected: false, reported_at: display.reported_at, stale: true });
+});
+
 test("reads the error from errors[0] of the backend problem document", () => {
   const document = {
     action: "hold_lkg",

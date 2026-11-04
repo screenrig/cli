@@ -40,6 +40,7 @@ export function makeProblem(
     request_id: extras?.request_id,
     operation_id: extras?.operation_id,
     current_revision: extras?.current_revision,
+    ...(extras?.display ? { display: extras.display } : {}),
     errors: extras?.errors ?? [],
     next: extras?.next,
   };
@@ -58,6 +59,20 @@ function asString(value: unknown): string | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Keep only the documented display context; missing freshness is not a current report. */
+export function reportedDisplayOf(value: unknown): NormalizedProblem["display"] {
+  const display = asRecord(value);
+  const reportedAt = asString(display?.reported_at);
+  if (!reportedAt || !Number.isFinite(Date.parse(reportedAt)) || typeof display?.stale !== "boolean") return undefined;
+  const power = display.power === "on" || display.power === "off" || display.power === "standby" || display.power === "unknown" ? display.power : undefined;
+  return {
+    ...(power ? { power } : {}),
+    ...(typeof display.connected === "boolean" ? { connected: display.connected } : {}),
+    reported_at: reportedAt,
+    stale: display.stale,
+  };
 }
 
 function asArgv(value: unknown): string[] | undefined {
@@ -271,6 +286,7 @@ export function normalizeProblem(
   const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
   const uploadScope = uploadScopeOf(rec?.upload_scope);
   const screenScope = screenScopeOf(rec?.screen_scope);
+  const display = code === "screenshot_unavailable" ? reportedDisplayOf(rec?.display) : undefined;
   const feature = planIdOf(rec?.feature), plan = planIdOf(rec?.plan), requiredPlan = planIdOf(rec?.required_plan);
   return {
     type: asString(rec?.type) ?? problemType(code),
@@ -287,6 +303,7 @@ export function normalizeProblem(
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
     ...(uploadScope ? { upload_scope: uploadScope } : {}),
     ...(screenScope ? { screen_scope: screenScope } : {}),
+    ...(display ? { display } : {}),
     ...(feature ? { feature } : {}),
     ...(plan ? { plan } : {}),
     ...(requiredPlan ? { required_plan: requiredPlan } : {}),

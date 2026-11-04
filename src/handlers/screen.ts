@@ -16,7 +16,7 @@ import { flatFrameNote, frameRow, glassLines } from "../screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "../screen-live.js";
 import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "../screen-live-frame.js";
 import { levelsLines, sumLevels } from "../screen-folders.js";
-import type { LiveStartRequest, ScreenLevelChanges, ScreenRebootScheduleView } from "../adapters/protocol.js";
+import type { LiveStartRequest, ScreenDisplayReported, ScreenLevelChanges, ScreenRebootScheduleView } from "../adapters/protocol.js";
 import { healthLines, screenHealthIssues } from "../screen-health.js";
 import { outageLines } from "../screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "../screen-manifest-upgrade.js";
@@ -33,7 +33,7 @@ import { loggerOf } from "../log/index.js";
 import { PENDING_REVIEW_SENTENCE, pendingReviewOf, pendingReviewWarning, reviewNext } from "../reviews.js";
 import { successEnvelope, type ProblemNext, type Warning } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { CliError, makeProblem, unexpectedResponseError, usageError } from "../problems.js";
+import { CliError, makeProblem, reportedDisplayOf, unexpectedResponseError, usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
 import { screenLinkSummaryLines } from "../screen-link-format.js";
@@ -1270,14 +1270,20 @@ export const SCREENSHOT_FAILURE_HINT: Record<ScreenshotFailure, string> = {
   offline: "Bring the Player back online (screenrig screen show ID shows last_online_at), then run screen screenshot again.",
 };
 
-export function screenshotUnavailable(requestId: string, failure: ScreenshotFailure, lastSeen?: string): CliError {
-  const detail = failure === "offline" && lastSeen
+export function screenshotUnavailable(requestId: string, failure: ScreenshotFailure, lastSeen?: string, reportedDisplay?: ScreenDisplayReported): CliError {
+  const display = reportedDisplayOf(reportedDisplay);
+  let detail = failure === "offline" && lastSeen
     ? `The screen is offline (last online ${lastSeen}), so its Player cannot take a screenshot.`
     : SCREENSHOT_FAILURE_DETAIL[failure];
+  if (display?.power) detail += ` The Player last reported display power ${display.power} at ${display.reported_at}${display.stale ? " (stale report)" : ""}.`;
+  const hint = display && !display.stale && (display.power === "off" || display.power === "standby")
+    ? "Request a new screenshot when the display is on."
+    : SCREENSHOT_FAILURE_HINT[failure];
   return new CliError(
     makeProblem("screenshot_unavailable", "Screenshot is not available", 409, detail, {
       request_id: requestId,
-      hint: SCREENSHOT_FAILURE_HINT[failure],
+      hint,
+      display,
     }),
   );
 }
@@ -1501,16 +1507,16 @@ export async function requestScreenshotCapture(client: ApiClient, id: string, ke
  * A capture that expired or outlived --timeout usually means the Player is not
  * connected. Read the screen once to say so instead of the bare state.
  */
-export async function explainedScreenshotFailure(client: ApiClient, id: string, failure: ScreenshotFailure): Promise<CliError> {
+export async function explainedScreenshotFailure(client: ApiClient, id: string, failure: ScreenshotFailure, display?: ScreenDisplayReported): Promise<CliError> {
   if (failure === "timed_out" || failure === "deadline") {
     try {
       const screen = (await client.call({ method: "GET", path: `/api/screens/${id}` })).body as Partial<Screen> | undefined;
-      if (screen?.online === false) return screenshotUnavailable(client.requestId, "offline", typeof screen.last_online_at === "string" ? screen.last_online_at : undefined);
+      if (screen?.online === false) return screenshotUnavailable(client.requestId, "offline", typeof screen.last_online_at === "string" ? screen.last_online_at : undefined, display);
     } catch {
       // The explanation is best effort; the capture's own state still stands.
     }
   }
-  return screenshotUnavailable(client.requestId, failure);
+  return screenshotUnavailable(client.requestId, failure, undefined, display);
 }
 
 /** One read, retried on transient failures until the shared retry budget runs out. */
@@ -1558,7 +1564,7 @@ export async function captureScreenshot(runtime: CliRuntime, client: ApiClient, 
           return;
         }
         if ((status.state === "timed_out" || status.state === "unavailable") && currentId === captureId) {
-          throw await explainedScreenshotFailure(client, id, screenshotFailure(status));
+          throw await explainedScreenshotFailure(client, id, screenshotFailure(status), status.display);
         }
         if (Date.now() >= retry.deadline) {
           throw await explainedScreenshotFailure(client, id, "deadline");
@@ -1731,6 +1737,7 @@ export async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntim
             title: error.problem.title,
             detail: error.problem.detail,
             ...(error.problem.hint ? { hint: error.problem.hint } : {}),
+            ...(error.problem.display ? { display: error.problem.display } : {}),
             ...(typeof error.problem.retry_after_seconds === "number" ? { retry_after_seconds: error.problem.retry_after_seconds } : {}),
             ...(error.problem.request_id ? { request_id: error.problem.request_id } : {}),
           });

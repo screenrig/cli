@@ -31256,7 +31256,7 @@ components:
           items: {type: string, enum: [all, enterprise, founding, premium]}
         features:
           type: array
-          description: "Every plan feature, always the same twenty in the same order: Premium's twelve, then Enterprise's eight."
+          description: "Every plan feature, always the same eighteen in the same order: Premium's ten, then Enterprise's eight."
           items: {$ref: "#/components/schemas/ProjectPlanFeature"}
     ProjectPlanFeature:
       type: object
@@ -31265,7 +31265,7 @@ components:
       properties:
         id:
           type: string
-          enum: [video_walls, live_view, glass_monitoring, alert_routing, reports, bi_dashboards, connectors, media_sync, playlist_templates, uploaders, direct_campaigns, scheduled_reboots, sso, scim, screen_scope, protected_folders, change_control, audit_log, schedule_import, momentus]
+          enum: [video_walls, alert_routing, reports, bi_dashboards, connectors, media_sync, playlist_templates, uploaders, direct_campaigns, scheduled_reboots, sso, scim, screen_scope, protected_folders, change_control, audit_log, schedule_import, momentus]
         enabled: {type: boolean, description: "Whether the project has the feature now."}
         required_plan: {type: string, enum: [premium, enterprise], description: "The lowest sold plan that includes the feature, whether or not the project has it."}
     ProjectPlanLimits:
@@ -34362,6 +34362,9 @@ components:
         capture_id: {$ref: "#/components/schemas/ScreenshotCaptureID"}
         state: {type: string, enum: [idle, pending, ready, timed_out, unavailable]}
         reason: {type: string, enum: [unsupported_surface, capture_failed], description: Present when state is unavailable.}
+        display:
+          $ref: "#/components/schemas/ScreenDisplayReported"
+          description: "On unavailable or timed_out: the latest reported health display at read time, not a capture-time sample or proof of the failure's cause. Absent when no display telemetry exists. A stale report does not establish current power."
         expires_at: {type: string, format: date-time}
         width: {type: integer, minimum: 1}
         height: {type: integer, minimum: 1}
@@ -38286,15 +38289,17 @@ components:
         until: {type: string, format: date-time}
         schedule: {$ref: "#/components/schemas/ScreenDisplaySchedule"}
         override: {$ref: "#/components/schemas/ScreenDisplayOverride"}
-        reported:
-          type: object
-          additionalProperties: false
-          required: [reported_at, stale]
-          properties:
-            power: {type: string, enum: [on, off, standby, unknown]}
-            connected: {type: boolean}
-            reported_at: {type: string, format: date-time}
-            stale: {type: boolean}
+        reported: {$ref: "#/components/schemas/ScreenDisplayReported"}
+    ScreenDisplayReported:
+      type: object
+      additionalProperties: false
+      required: [reported_at, stale]
+      description: "The Player's latest health display report. Observed power and connectivity, independent of requested power. stale is true after 35 minutes without a report; this is context, not proof that power caused a capture failure."
+      properties:
+        power: {type: string, enum: [on, off, standby, unknown]}
+        connected: {type: boolean}
+        reported_at: {type: string, format: date-time}
+        stale: {type: boolean}
     ScreenDisplayScheduleView:
       type: object
       additionalProperties: false
@@ -38496,6 +38501,7 @@ components:
         current_revision: {type: integer, description: "The resource's current revision, on revision_conflict."}
         upload_scope: {$ref: "#/components/schemas/UploadScope", description: "On outside_upload_scope: the playlists and media folders the caller does work in (docs/uploaders.md). An id outside them and an id that does not exist get the same answer."}
         screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "On outside_screen_scope: the screen folders and screens the caller does work on (docs/screen-scope.md). An id outside them and an id that does not exist get the same answer."}
+        display: {$ref: "#/components/schemas/ScreenDisplayReported", description: "On screenshot_unavailable for an unavailable or timed-out named capture: latest reported health display, when present. Context at read time, not proof of the capture failure's cause."}
         access_limited_by: {type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request."}
         next: {$ref: "#/components/schemas/NextAction"}
     RuntimeProblem:

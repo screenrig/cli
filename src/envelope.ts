@@ -37,6 +37,8 @@ export interface NormalizedProblem {
   retryable?: boolean;
   /** Present only on 429, taken from the server's Retry-After header. */
   retry_after_seconds?: number;
+  /** screenshot_unavailable: the Player's latest reported display, not the cause of capture failure. */
+  display?: import("./adapters/protocol.js").ScreenDisplayReported;
   errors: unknown[];
   next?: ProblemNext;
 }
