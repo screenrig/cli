@@ -5,7 +5,7 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import path from "node:path";
 import { requireCapability } from "./project-capabilities.js";
 import { ApiClient } from "./client.js";
-import { validatePlaylistCards } from "./cards.js";
+import { cardUid, validatePlaylistCards } from "./cards.js";
 import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
@@ -21,12 +21,27 @@ type Resource = { id: string; revision: number; playlist_id?: string; timezone?:
 export interface PublishReview { id: string; kind: string; state: string; url: string }
 interface Journal {
   version: 1; created_at: number; fingerprint: string; create_key: string; assign_key: string; playlist?: Resource; assigned?: boolean;
+  /** Saved-card params snapshot at authoring; dynamic data has its own revision. */
+  cards?: Pick<Resource, "id" | "revision">[];
   /** The assignment became a review: nothing is on glass until a person approves it. */
   proposed?: boolean; reviews?: PublishReview[];
   /** What the server said about the playlist this publish created (a page the Player web app cannot frame), kept so a rerun reports it again. */
   warnings?: PlaylistWarningItem[];
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+async function savedCardRevisions(client: ApiClient, document: any): Promise<Pick<Resource, "id" | "revision">[]> {
+  const ids = new Set<string>();
+  for (const page of document.pages ?? []) for (const item of page.primitives ?? []) {
+    if (item.primitive === "card" && typeof item.card === "string" && /^(?:(?:stage|qa|development)_)?crd_/.test(item.card)) ids.add(cardUid(item.card));
+  }
+  const cards: Pick<Resource, "id" | "revision">[] = [];
+  for (const id of [...ids].sort()) {
+    const card = (await client.call({ method: "GET", path: `/api/cards/${id}` })).body as Resource | undefined;
+    if (card?.id !== id || !Number.isSafeInteger(card.revision) || card.revision < 1) throw usageError("Server response has invalid card identity or revision.");
+    cards.push({ id, revision: card.revision });
+  }
+  return cards;
+}
 function resource(value: unknown, kind: ResourceIDKind): Resource {
   const item = value as Resource;
   if (!item || typeof item.id !== "string" || !isResourceID(item.id, kind) || !Number.isSafeInteger(item.revision) || item.revision < 1) throw usageError("Server response has invalid resource identity or revision.");
@@ -146,6 +161,8 @@ export async function publishScreen(options: {
     }
   }
   let state: Journal | undefined;
+  let currentCards: Journal["cards"];
+  const readCards = async () => currentCards ??= await savedCardRevisions(client, document);
   const save = async () => {
     const temporary = `${journalPath}.${randomUUID()}.tmp`;
     const file = await open(temporary, "wx", 0o600);
@@ -161,6 +178,7 @@ export async function publishScreen(options: {
       if (state.playlist) resource(state.playlist, "playlist");
       if (state.warnings !== undefined && (!Array.isArray(state.warnings) || state.warnings.some((item) => typeof item?.code !== "string" || typeof item.message !== "string"))) throw usageError("Publish journal is invalid.");
       if (state.reviews !== undefined && (!Array.isArray(state.reviews) || state.reviews.some((review) => typeof review?.id !== "string" || typeof review.url !== "string"))) throw usageError("Publish journal is invalid.");
+      if (state.cards !== undefined && (!Array.isArray(state.cards) || state.cards.some((card) => typeof card?.id !== "string" || !Number.isSafeInteger(card.revision) || card.revision < 1))) throw usageError("Publish journal is invalid.");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const noteHeaders = reviewNoteHeaders(options.note);
     const pendingResult = (reviews: PublishReview[]) => {
@@ -199,11 +217,12 @@ export async function publishScreen(options: {
     const resumed = state !== undefined;
     let alreadyPublished = false;
     if (state?.assigned && state.playlist) {
-      // A finished publish leaves its journal. If the screen still shows that
-      // playlist, the identical rerun reports it; if the screen has moved on,
-      // the journal is history, so start a fresh publish against the current screen.
+      // Reuse a finished publish only while its assignment and saved-card
+      // params are current. Older journals have no card snapshot, so a card
+      // placement needs fresh authoring. Incomplete writes still resume below.
       const current = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
-      if (current.id === screenId && current.playlist_id === state.playlist.id) alreadyPublished = true;
+      if (current.id === screenId && current.playlist_id === state.playlist.id
+        && JSON.stringify(state.cards ?? []) === JSON.stringify(await readCards())) alreadyPublished = true;
       else {
         await rm(journalPath, { force: true });
         state = undefined;
@@ -226,7 +245,7 @@ export async function publishScreen(options: {
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
       if (expected !== undefined && screen.revision !== expected) staleRevision("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
       if (playlistNeedsTimezone(document) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
-      state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey() };
+      state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey(), cards: await readCards() };
       await save();
     }
     const proposal = (response: { status: number; body: unknown }) => {
