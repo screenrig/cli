@@ -16,7 +16,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes, and the same change through a screen (its playlist, a schedule, a takeover) or the provisioning of a screen. A key/value write (card data and application key/value, by an agent or a webhook), a read, and a command to a screen that changes nothing it plays (screenshot, live view, reload, reboot, toast, display) are never refused for balance: they are charged and remaining may go negative. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes, and the same change through a screen (its playlist, a schedule, a takeover) or the provisioning of a screen. A key/value write (card data and application key/value, by an agent or a webhook), a read, and a command to a screen that changes nothing it plays (screenshot, live view, reload, reboot, toast, display) are never refused for balance: they are charged and remaining may go negative. Plus, Education, Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above the free storage of its plan (1 GB on Standard, 100 GB on Plus, 1,000 GB on Education and Premium, 10,000 GB on Enterprise, Staff and Promo) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -125,7 +125,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: moveProjectAgent
-      description: Owner-authorized move transfers screen occupancy and new usage to the destination payer atomically; historical charges keep their payer. A destination already holding as many live projects as its plan allows is project_limit_reached, whose required_plan names the plan with room, absent at Enterprise.
+      description: Owner-authorized move transfers screen occupancy and new usage to the destination payer atomically; historical charges keep their payer. A destination already holding as many live projects as its plan allows is project_limit_reached, whose required_plan names the plan with room, absent at Education and Enterprise.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -199,7 +199,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createAgentProject
-      description: Creates a named project owned by the verified responsible person. With no organization named, it goes to the person's verified-domain organization, else the current project's organization, else the organization the person used most recently among those they administer or hold as their free one, else a new organization. An organization name selects exactly one visible match, otherwise creates a new organization. A person holds one free Standard organization; a new organization beyond it is free_organization_limit, naming the one they hold. An organization holds at most as many live projects as its plan allows (Standard 1, Premium 10, Enterprise 100, widened by its featuresets); one more is project_limit_reached, whose required_plan names the plan with room, absent at Enterprise (contact support). An exact idempotent retry redelivers its sealed membership credential for ten minutes. Enrollment is exempt from the limit. Under an agent access JWT (identity scope, access:manage, a grant with identity access Manage) no project token is delivered; the project joins the grant with Manage and every capability, and a refresh with its project_id returns a token for it.
+      description: Creates a named project owned by the verified responsible person. With no organization named, it goes to the person's verified-domain organization, else the current project's organization, else the organization the person used most recently among those they administer or hold as their free one, else a new organization. An organization name selects exactly one visible match, otherwise creates a new organization. A person holds one free Standard organization; a new organization beyond it is free_organization_limit, naming the one they hold. An organization holds at most as many live projects as its plan allows (Standard 1, Plus 3, Premium 10, Education 100, Enterprise 100, widened by its featuresets); one more is project_limit_reached, whose required_plan names the plan with room, absent at Education and Enterprise (contact support). An exact idempotent retry redelivers its sealed membership credential for ten minutes. Enrollment is exempt from the limit. Under an agent access JWT (identity scope, access:manage, a grant with identity access Manage) no project token is delivered; the project joins the grant with Manage and every capability, and a refresh with its project_id returns a token for it.
       security:
         - agentIdentityBearer: []
         - dashboardSession: []
@@ -592,7 +592,7 @@ paths:
             RateLimit:
               $ref: '#/components/headers/RateLimit'
         '402':
-          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Premium; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
+          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Plus; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
           content:
             application/problem+json:
               schema:
@@ -2362,7 +2362,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Premium; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Plus; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2420,7 +2420,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Premium. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Plus. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2455,7 +2455,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Premium. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. Setting a video wall format (2 or more displays) other than the playlist's own is part of Plus. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -3517,7 +3517,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Optional browser-only new-screen provisioning. Always creates one new quota-counted pairing_pending screen; exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow. folder_id names the folder the screen lands in. A caller limited to screens (docs/screen-scope.md) must send a folder inside its scope (outside_screen_scope otherwise).
+        Optional browser-only new-screen provisioning. Always creates one new pairing_pending screen; at most five wait to pair at once (quota_exceeded). Exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow. folder_id names the folder the screen lands in. A caller limited to screens (docs/screen-scope.md) must send a folder inside its scope (outside_screen_scope otherwise).
       security:
         - projectBearer: []
       parameters:
@@ -3642,7 +3642,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Premium; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Plus; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -3712,7 +3712,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Screen'
         '402':
-          description: 'feature_not_in_plan — Video walls are part of Premium: setting a wall other than the screen''s own needs it, null clears it in every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Video walls are part of Plus: setting a wall other than the screen''s own needs it, null clears it in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -4467,7 +4467,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 2 or beyond of a video wall (displays) other than the screen's stored entry is part of Premium. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 2 or beyond of a video wall (displays) other than the screen's stored entry is part of Plus. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -5888,7 +5888,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — Scheduled reboots are part of Premium; enabled true needs it, enabled false and DELETE do not. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Scheduled reboots are part of Plus; enabled true needs it, enabled false and DELETE do not. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -6141,7 +6141,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Premium. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Plus. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -6244,7 +6244,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Campaign'
         '402':
-          description: "feature_not_in_plan — Protected folders are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. Setting displays other than the campaign's own is part of Premium; null clears it in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Protected folders are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. Setting displays other than the campaign's own is part of Plus; null clears it in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -8110,12 +8110,6 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
-        '402':
-          description: 'feature_not_in_plan — Live view is part of Premium. Ending a session stays open. The problem names the feature, the project''s plan and required_plan.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -8232,12 +8226,6 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
-        '402':
-          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -8349,12 +8337,6 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
-        '402':
-          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -8437,12 +8419,6 @@ paths:
           $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
-        '402':
-          description: 'feature_not_in_plan — Live view is part of Premium. The problem names the feature, the project''s plan and required_plan.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -8645,7 +8621,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getBillingUsage
-      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free 1 GB stored, and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free storage of the payer's plan (allowance.storage_bytes), and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10973,7 +10949,7 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — Reports are part of Premium: every kind but fleet_health as JSON, and csv, xlsx and pdf of any kind, need them. fleet_health as JSON (the default format) is open in every plan, as are the report kinds and the existing report routes'' exports. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Reports are part of Plus: every kind but fleet_health as JSON, and csv, xlsx and pdf of any kind, need them. fleet_health as JSON (the default format) is open in every plan, as are the report kinds and the existing report routes'' exports. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -11035,7 +11011,7 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — Reports are part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Reports are part of Plus. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -11107,7 +11083,7 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — Reports are part of Premium; a change that only turns the subscription off stays open. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Reports are part of Plus; a change that only turns the subscription off stays open. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -11615,7 +11591,7 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — Reports are part of Premium. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Reports are part of Plus. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -12231,7 +12207,7 @@ paths:
       x-screenrig-access: write
       operationId: putCardData
       description: >-
-        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per organization by plan (Standard 60 a minute, Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per organization by plan (Standard and Plus 60 a minute, Education and Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
       security:
         - projectBearer: []
       parameters:
@@ -12391,7 +12367,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Plus) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
           content:
             application/problem+json:
               schema:
@@ -12444,7 +12420,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Plus) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
           content:
             application/problem+json:
               schema:
@@ -12537,7 +12513,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A change that only replaces secrets, alone or with enabled false, is always allowed, so a source whose token expired stays current."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Plus) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A change that only replaces secrets, alone or with enabled false, is always allowed, so a source whose token expired stays current."
           content:
             application/problem+json:
               schema:
@@ -15057,7 +15033,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLink
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. An organization has at most 50 fleet links across its projects (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does. An organization has at most 50 fleet links across its projects (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -15731,7 +15707,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (the loop_stalled, glass_blank and glass_frozen conditions) are part of Premium. Email and webhook notifications with the default rules are in every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) is part of Plus. Email and webhook notifications with the default rules, and the loop_stalled, glass_blank and glass_frozen conditions, are in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -15805,7 +15781,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: 'feature_not_in_plan — Alert routing (changing a Slack, Teams, PagerDuty or Telegram notification other than turning it off, snoozing it or describing it, or setting a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (adding the loop_stalled, glass_blank or glass_frozen condition) are part of Premium. Clearing a rule is open in every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Alert routing (changing a Slack, Teams, PagerDuty or Telegram notification other than turning it off, snoozing it or describing it, or setting a min_severity, severity, active_hours or audience rule) is part of Plus. Clearing a rule is open in every plan; the loop_stalled, glass_blank and glass_frozen conditions are in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -22860,7 +22836,7 @@ paths:
             RateLimit:
               $ref: '#/components/headers/RateLimit'
         '402':
-          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Premium; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
+          description: "feature_not_in_plan — a screen scope needs Enterprise, and an upload scope (an uploader) needs Plus; the problem names the feature, the plan the account is on and required_plan. Narrowing an upload scope and removing either scope are always allowed."
           content:
             application/problem+json:
               schema:
@@ -23149,7 +23125,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Premium; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template is always allowed. A format of 2 or more displays (a video wall) is part of Plus; a region format and a playlist with no format are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -23596,7 +23572,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Optional browser-only new-screen provisioning. Always creates one new quota-counted pairing_pending screen; exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow. folder_id names the folder the screen lands in. A caller limited to screens (docs/screen-scope.md) must send a folder inside its scope (outside_screen_scope otherwise).
+        Optional browser-only new-screen provisioning. Always creates one new pairing_pending screen; at most five wait to pair at once (quota_exceeded). Exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow. folder_id names the folder the screen lands in. A caller limited to screens (docs/screen-scope.md) must send a folder inside its scope (outside_screen_scope otherwise).
       security:
         - projectBearer: []
       parameters:
@@ -23733,7 +23709,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Premium; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — set_reboot_schedule with enabled true (Scheduled reboots) and set_playlist_schedule with a displays lock (Video walls) are part of Plus; the clearing actions and one-off commands are open. payment_required — the project has no credit left. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -23865,7 +23841,7 @@ paths:
         '202':
           $ref: '#/components/responses/PendingReview'
         '402':
-          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Premium. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Protected folders and schedule change control are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Plus. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -24379,7 +24355,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getBillingUsageInProject
-      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free 1 GB stored, and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free storage of the payer's plan (allowance.storage_bytes), and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
       security:
         - projectBearer: []
       parameters:
@@ -25772,7 +25748,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLinkInProject
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. An organization has at most 50 fleet links across its projects (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does. An organization has at most 50 fleet links across its projects (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
       parameters:
@@ -26022,7 +25998,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) and Blank and frozen screen detection (the loop_stalled, glass_blank and glass_frozen conditions) are part of Premium. Email and webhook notifications with the default rules are in every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — Alert routing (a Slack, Teams, PagerDuty or Telegram channel, or a min_severity, severity, active_hours or audience rule) is part of Plus. Email and webhook notifications with the default rules, and the loop_stalled, glass_blank and glass_frozen conditions, are in every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -26311,7 +26287,7 @@ paths:
       x-screenrig-access: write
       operationId: projectScoped_putCardData
       description: >-
-        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per organization by plan (Standard 60 a minute, Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per organization by plan (Standard and Plus 60 a minute, Education and Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
       security:
         - projectBearer: []
       parameters:
@@ -28172,7 +28148,7 @@ components:
           description: The most live projects the organization's plan, widened by its featuresets, admits; 0 is no cap. Always sent. Adding or moving in one more is project_limit_reached. Checked only then, so a plan change removes no project.
         project_required_plan:
           type: string
-          enum: [premium, enterprise]
+          enum: [plus, premium, enterprise]
           description: The lowest sold plan with room for more projects than project_limit; absent when none has more.
         plan_id:
           type: string
@@ -29036,7 +29012,7 @@ components:
         status: {type: string, description: "The HTTP status as a string."}
         scimType: {type: string, enum: [invalidFilter, tooMany, uniqueness, mutability, invalidSyntax, invalidPath, noTarget, invalidValue, invalidVers, sensitive]}
         detail: {type: string}
-    DemoSource: {type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, resellers, direct]}
+    DemoSource: {type: string, enum: [home_hero, home_paid_plans, pricing_plus, pricing_education, pricing_premium, pricing_enterprise, resellers, direct]}
     DemoRequestInput:
       type: object
       additionalProperties: false
@@ -30530,12 +30506,12 @@ components:
         application_path_bytes: {type: integer, enum: [255]}
         media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies each image is at most 16383 pixels wide and 16383 tall and at most 67,108,864 pixels (8192 by 8192) in one frame, so an ultra-wide canvas such as 12000 by 540 or 9216 by 2160 uploads, and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
-        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan and on a Standard project whose featuresets give Premium's limits. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
+        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan and on a Standard project whose featuresets give Plus's or Premium's limits. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
         playlist_max_pages: {type: integer, enum: [100]}
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
         transition_max_duration_ms: {type: integer, enum: [60000]}
-        screens_per_project: {type: integer, enum: [50], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
+        screens_per_project: {type: integer, enum: [0], description: "Always 0: no plan caps screens. Removed in a later release."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
         founding_period_ends_at: {type: string, format: date-time, description: "When the founding period ends, in RFC 3339 UTC. Accounts created before it are founding accounts: their featureset gives them Premium's features and limits for as long as they exist, and no billing applies before it beyond the metering that runs today."}
         features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
@@ -30659,11 +30635,11 @@ components:
           description: Storage ceiling the project's plan allows. Zero means no product storage cap.
         screen_limit:
           type: integer
-          description: Screen limit the project's plan allows. Zero means no screen cap.
+          description: "Always 0: no plan caps screens. Removed in a later release."
         credit_remaining:
           type: integer
           minimum: 0
-          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Bandwidth is never charged. Every project stores its first 1 GB free, and the first 10,000 API or billed listen-stream taxes each UTC month are waived.
+          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Bandwidth is never charged. Every payer stores its plan's free storage (1 GB on Standard, 100 GB on Plus, 1,000 GB on Education and Premium, 10,000 GB on Enterprise, Staff and Promo) at no charge, and the first 10,000 API or billed listen-stream taxes each UTC month are waived.
         created_at:
           type: string
           format: date-time
@@ -31242,21 +31218,21 @@ components:
         feature_revision: {type: integer}
         plan_features: {$ref: "#/components/schemas/ProjectPlanFeatures"}
         limits: {$ref: "#/components/schemas/ProjectPlanLimits"}
-        media_video_bytes: {type: integer, enum: [500000000, 1000000000], description: "The most one video/mp4 or video/webm upload may declare on this project's plan, in decimal bytes: 500000000 (500 MB) on Standard, 1000000000 (1 GB) on every other plan and on a Standard project whose featuresets give Premium's limits (limits.video_bytes is the same figure). A larger declaration is rejected with invalid_request before any byte is transferred. A plan change never affects a stored video, only later uploads and replacements. GET /api/capabilities publishes the Standard value for callers that have no project."}
+        media_video_bytes: {type: integer, enum: [500000000, 1000000000], description: "The most one video/mp4 or video/webm upload may declare on this project's plan, in decimal bytes: 500000000 (500 MB) on Standard, 1000000000 (1 GB) on every other plan and on a Standard project whose featuresets give Plus's or Premium's limits (limits.video_bytes is the same figure). A larger declaration is rejected with invalid_request before any byte is transferred. A plan change never affects a stored video, only later uploads and replacements. GET /api/capabilities publishes the Standard value for callers that have no project."}
         capabilities: {type: array, items: {type: string, enum: [media, credits, signage.pairing, signage.playlists, signage.publish, advertising]}}
     ProjectPlanFeatures:
       type: object
       additionalProperties: false
       required: [featuresets, features]
-      description: "The plan features the project has. The plan and the project's featuresets decide them; credit never unlocks one. A feature the project does not have is refused with feature_not_in_plan (402), whose required_plan names the lowest sold plan that includes it."
+      description: "The plan features the project has. The plan and the project's featuresets decide them; credit never unlocks one. A feature the project does not have is refused with feature_not_in_plan (402), whose required_plan names the lowest generally sold plan that includes it."
       properties:
         featuresets:
           type: array
-          description: "The featureset tags the project and its organization hold, sorted: founding, premium, enterprise or all. Empty when it holds none; the plan's own featureset is not listed. A tag also widens limits to the plan it names."
-          items: {type: string, enum: [all, enterprise, founding, premium]}
+          description: "The featureset tags the project and its organization hold, sorted: founding, plus, premium, education, enterprise or all. Empty when it holds none; the plan's own featureset is not listed. A tag also widens limits to the plan it names."
+          items: {type: string, enum: [all, education, enterprise, founding, plus, premium]}
         features:
           type: array
-          description: "Every plan feature, always the same eighteen in the same order: Premium's ten, then Enterprise's eight."
+          description: "Every plan feature, always the same eighteen in the same order: Plus's nine, Premium's one (direct_campaigns), then Enterprise's eight."
           items: {$ref: "#/components/schemas/ProjectPlanFeature"}
     ProjectPlanFeature:
       type: object
@@ -31265,16 +31241,16 @@ components:
       properties:
         id:
           type: string
-          enum: [video_walls, alert_routing, reports, bi_dashboards, connectors, media_sync, playlist_templates, uploaders, direct_campaigns, scheduled_reboots, sso, scim, screen_scope, protected_folders, change_control, audit_log, schedule_import, momentus]
+          enum: [video_walls, alert_routing, reports, bi_dashboards, connectors, media_sync, playlist_templates, uploaders, scheduled_reboots, direct_campaigns, sso, scim, screen_scope, protected_folders, change_control, audit_log, schedule_import, momentus]
         enabled: {type: boolean, description: "Whether the project has the feature now."}
-        required_plan: {type: string, enum: [premium, enterprise], description: "The lowest sold plan that includes the feature, whether or not the project has it."}
+        required_plan: {type: string, enum: [plus, premium, enterprise], description: "The lowest generally sold plan that includes the feature, whether or not the project has it. Education, a plan staff assign to verified K-12 schools, is never named."}
     ProjectPlanLimits:
       type: object
       additionalProperties: false
       required: [screens, members, video_bytes, event_retention_days]
       description: "The project's limits as its plan and featuresets give them, the figures admission enforces. Zero is no plan cap."
       properties:
-        screens: {type: integer, minimum: 0, description: "Most pairing_pending and active screens. Archived screens do not count."}
+        screens: {type: integer, minimum: 0, description: "Always 0: no plan caps screens. Removed in a later release."}
         members: {type: integer, minimum: 0, description: "Most people in the project, counting outstanding invitations when one is created. A plan change never removes a member. The service ceiling of 200 people across the organization's projects holds whatever this says."}
         video_bytes: {type: integer, minimum: 0, description: "Most one video/mp4 or video/webm upload may declare, in decimal bytes; the same figure as media_video_bytes."}
         event_retention_days: {type: integer, minimum: 0, description: "How many days the project's events are kept."}
@@ -31320,7 +31296,7 @@ components:
                 - type: integer
                   minimum: 0
                 - type: 'null'
-              description: The plan's screen limit across the organization; null when unlimited or while each project still has its own limit.
+              description: "Always null: no plan caps screens. Removed in a later release."
         edge_media_bytes:
           $ref: "#/components/schemas/McrString"
           description: Media bytes the edge delivered this month for every project the organization paid for, refreshed about once a minute. Add it to pool.bandwidth_bytes for the organization's total bandwidth, which is counted and never charged. Absent when the edge usage source is unavailable.
@@ -31369,7 +31345,7 @@ components:
       properties:
         storage_bytes:
           $ref: "#/components/schemas/McrString"
-          description: Bytes the payer may store free at any time, across all its projects. Only the bytes above it accrue storage_mcr_per_gb_month. A Standard payer with no credit left is refused new storage that would take it past it (payment_required); what it already stores stays.
+          description: Bytes the payer may store free at any time, across all its projects, which is the free storage of the plan it pays on (1 GB on Standard, 100 GB on Plus, 1,000 GB on Education and Premium, 10,000 GB on Enterprise, Staff and Promo). Only the bytes above it accrue storage_mcr_per_gb_month, the same on every plan. A Standard payer with no credit left is refused new storage that would take it past it (payment_required); what it already stores stays.
         api_events:
           $ref: "#/components/schemas/McrString"
           description: API requests, billed project stream events and webhook delivery attempts waived each UTC month. Unused allowance does not roll over.
@@ -31464,7 +31440,7 @@ components:
       required: [subscription_id, plan, status, entitlement, cancel_at_period_end]
       properties:
         subscription_id: {type: string}
-        plan: {type: string, enum: [premium, enterprise]}
+        plan: {type: string, enum: [plus, education, premium, enterprise]}
         status: {type: string}
         entitlement: {type: string, enum: [awaiting_payment, pending_application, accepted, refused]}
         invoice_id: {type: string}
@@ -34970,7 +34946,7 @@ components:
         quality: {type: string, enum: [low, medium, high]}
         credits: {type: integer, minimum: 1}
         usd: {type: string}
-    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded by the project's plan, 500000000 bytes, 500 MB, on Standard and 1000000000 bytes, 1 GB, on every other plan, and a larger one is rejected the same way, naming the limit that applies; read media_video_bytes from GET /api/project/capabilities to preflight it. A plan change affects only later declarations: stored videos keep playing. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
+    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB, Standard's free storage); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded by the project's plan, 500000000 bytes, 500 MB, on Standard and 1000000000 bytes, 1 GB, on every other plan, and a larger one is rejected the same way, naming the limit that applies; read media_video_bytes from GET /api/project/capabilities to preflight it. A plan change affects only later declarations: stored videos keep playing. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
     MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
@@ -35320,7 +35296,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "Fields each screen the link creates starts with; card placements read them through {screen.field.NAME}. Absent when none."}
         playlist_id: {type: string, description: Playlist assigned to each screen the link creates.}
-        max_screens: {type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means only the project's screen limit applies.}
+        max_screens: {type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means no cap.}
         expires_at: {type: string, format: date-time, description: "When the link expires (RFC 3339). From then on it creates and recovers no screens, like a disabled link, and a device opening it shows its pairing code. Absent means it never expires."}
         screens_created: {type: integer, minimum: 0, description: Screens this link has created; recoveries are not counted.}
         last_used_at: {type: string, format: date-time, description: Last time the link created or recovered a screen.}
@@ -35358,7 +35334,7 @@ components:
       required: [status]
       description: What the presented fleet link did for this pairing session. claimed and recovered mean the screen is already chosen, and the Player completes pairing without showing its code. Any other status leaves the code on the glass for an ordinary claim.
       properties:
-        status: {type: string, enum: [claimed, recovered, invalid, disabled, limit_reached, screen_limit_reached, expired], description: "claimed: a new screen was created for this device. recovered: the device's earlier screen was recovered onto its new key. invalid: no link has this secret (deleted or rotated). disabled: the link is turned off. limit_reached: the link created its max_screens. screen_limit_reached: the project is at its screen limit. expired: the link is past its expires_at. Readers treat an unknown status like invalid."}
+        status: {type: string, enum: [claimed, recovered, invalid, disabled, limit_reached, expired], description: "claimed: a new screen was created for this device. recovered: the device's earlier screen was recovered onto its new key. invalid: no link has this secret (deleted or rotated). disabled: the link is turned off. limit_reached: the link created its max_screens. expired: the link is past its expires_at. Readers treat an unknown status like invalid."}
     WebhookList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Webhook"}}}}
     WebhookDelivery:
       type: object
@@ -38387,7 +38363,7 @@ components:
         screen_limit:
           type: integer
           minimum: 0
-          description: Plan screen cap. Zero means no cap, not a cap of zero.
+          description: "Always 0: no plan caps screens. Removed in a later release."
         used_bytes:
           type: integer
           minimum: 0
