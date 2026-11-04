@@ -17,7 +17,7 @@ export function registerFleetLinksCommands(root: Command, bind: CommandActionBin
     .option("--tag <TAG>", "Give each new screen this tag (repeatable, or comma-separated; at most 16)", fleetLinkTags)
     .option("--field <NAME=VALUE>", "Give each new screen this field, which card placements read as {screen.field.NAME} (repeatable; at most 32)", fleetLinkFieldOption)
     .option("--playlist-id <ID>", "Assign this playlist to each new screen", fleetLinkPlaylistId)
-    .option("--max-screens <N>", "Create at most N screens, 1 to 10000 (default: only the project's screen limit)", fleetLinkMaxScreens)
+    .option("--max-screens <N>", "Create at most N screens, 1 to 10000 (default: no cap)", fleetLinkMaxScreens)
     .option("--expires-at <TIME>", "Stop creating and recovering screens at this RFC 3339 time with a zone, such as 2026-12-31T23:59:59Z (default: never)", fleetLinkExpiresAt)
     .option("--disabled", "Create it disabled; devices show their pairing code until fleet-links update --enable")
     .action(bind(handleFleetLinksCreate));
@@ -42,7 +42,7 @@ export function registerFleetLinksCommands(root: Command, bind: CommandActionBin
     .addOption(new Option("--playlist-id <ID>", "Assign this playlist to each new screen").argParser(fleetLinkPlaylistId).conflicts(["clearPlaylist"]))
     .addOption(new Option("--clear-playlist", "New screens get no playlist").conflicts(["playlistId"]))
     .addOption(new Option("--max-screens <N>", "Create at most N screens in all, 1 to 10000").argParser(fleetLinkMaxScreens).conflicts(["clearMaxScreens"]))
-    .addOption(new Option("--clear-max-screens", "Remove the cap; only the project's screen limit applies").conflicts(["maxScreens"]))
+    .addOption(new Option("--clear-max-screens", "Remove the cap on the screens this link creates").conflicts(["maxScreens"]))
     .addOption(new Option("--expires-at <TIME>", "Stop creating and recovering screens at this RFC 3339 time with a zone, such as 2026-12-31T23:59:59Z").argParser(fleetLinkExpiresAt).conflicts(["clearExpiresAt"]))
     .addOption(new Option("--clear-expires-at", "Remove the expiry; the link never expires").conflicts(["expiresAt"]))
     .option("--expect-rev <REVISION>", "Optionally require this fleet link revision", revision)

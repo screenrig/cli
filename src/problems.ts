@@ -507,7 +507,7 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
   });
 }
 
-/** "premium" as the plan is named to a person: Premium. */
+/** A plan id as the plan is named to a person: plus is Plus, premium Premium, education Education. */
 function planTitle(id: string): string {
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
@@ -516,7 +516,7 @@ function planTitle(id: string): string {
  * Plan guidance. feature_not_in_plan is a 402 that credit does not unlock, so
  * it must not read like the credit 402s above: the feature belongs to the plan
  * `required_plan` names, retrying is refused the same way, and the task goes on
- * without it. member_limit_reached, quota_exceeded and project_limit_reached that carry
+ * without it. member_limit_reached and project_limit_reached that carry
  * `required_plan` also name the plan that has room. Server guidance is kept;
  * the plan is added to a hint that does not already name it.
  */
@@ -535,7 +535,7 @@ export function withPlanGuidance(problem: NormalizedProblem): NormalizedProblem 
     }
     return guided;
   }
-  if ((problem.code === "member_limit_reached" || problem.code === "quota_exceeded" || problem.code === "project_limit_reached") && plan && problem.hint && !problem.hint.includes(plan)) {
+  if ((problem.code === "member_limit_reached" || problem.code === "project_limit_reached") && plan && problem.hint && !problem.hint.includes(plan)) {
     return { ...problem, hint: `${problem.hint} The ${plan} plan raises this limit; tell the user if more is needed.` };
   }
   return guided;

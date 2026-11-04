@@ -115,9 +115,9 @@ const PLAN_BASE = {
   type: "https://screenrig.ai/problems/feature-not-in-plan",
   title: "This feature is not in the project's plan",
   status: 402,
-  detail: "Video walls are part of Premium. This project is on Standard.",
+  detail: "Video walls are part of Plus. This project is on Standard.",
   code: "feature_not_in_plan",
-  required_plan: "premium",
+  required_plan: "plus",
   errors: [],
 };
 
@@ -127,7 +127,7 @@ test("feature_not_in_plan points at the plan's features and names the plan the s
   assert.match(problem.next?.reason ?? "", /features/);
   const hint = problem.hint ?? "";
   assert.match(hint, /Credit does not unlock it/);
-  assert.match(hint, /The Premium plan includes it\.$/);
+  assert.match(hint, /The Plus plan includes it\.$/);
   assert.doesNotMatch(`${hint} ${problem.next?.reason}`, /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$|\d/i);
   // The credit guidance leaves it alone, and it names no credit command.
   assert.equal(withPaymentGuidance(PLAN_BASE).hint, undefined);
@@ -144,17 +144,17 @@ test("feature_not_in_plan without a required_plan still points at the plan's fea
 test("a server hint on feature_not_in_plan is kept and gains the plan that includes the feature", () => {
   const server = { hint: "Server hint.", next: { command: "screenrig server next", reason: "Server reason." } };
   const named = withPlanGuidance({ ...PLAN_BASE, ...server });
-  assert.equal(named.hint, "Server hint. The Premium plan includes it.");
+  assert.equal(named.hint, "Server hint. The Plus plan includes it.");
   assert.equal(named.next?.command, "screenrig server next");
   // A hint that already names the plan is not extended.
-  assert.equal(withPlanGuidance({ ...PLAN_BASE, hint: "Premium has it." }).hint, "Premium has it.");
+  assert.equal(withPlanGuidance({ ...PLAN_BASE, hint: "Plus has it." }).hint, "Plus has it.");
   // Without required_plan a server hint is untouched.
   const { required_plan: _omitted, ...bare } = PLAN_BASE;
   assert.equal(withPlanGuidance({ ...bare, hint: "Server hint." }).hint, "Server hint.");
 });
 
-test("member_limit_reached, quota_exceeded and project_limit_reached name the plan the server says has room", () => {
-  for (const [code, status] of [["member_limit_reached", 409], ["quota_exceeded", 413], ["project_limit_reached", 409]] as const) {
+test("member_limit_reached and project_limit_reached name the plan the server says has room", () => {
+  for (const [code, status] of [["member_limit_reached", 409], ["project_limit_reached", 409]] as const) {
     const problem = withPlanGuidance({ ...PLAN_BASE, code, status, hint: "The project is at its limit.", required_plan: "enterprise" });
     assert.match(problem.hint ?? "", /^The project is at its limit\. The Enterprise plan raises this limit/, code);
     assert.doesNotMatch(problem.hint ?? "", /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$|\d/i, code);
@@ -163,14 +163,15 @@ test("member_limit_reached, quota_exceeded and project_limit_reached name the pl
     const { required_plan: _omitted, ...bare } = { ...PLAN_BASE, code, status, hint: "The project is at its limit." };
     assert.deepEqual(withPlanGuidance(bare), bare, code);
   }
-  // The storage quota path adds the plan to the quota guidance, after it.
+  // No plan lifts a storage quota, so that guidance names no plan.
   const stored = withPlanGuidance(withQuotaGuidance({ ...PLAN_BASE, status: 413, code: "quota_exceeded", required_plan: "premium" }));
-  assert.match(stored.hint ?? "", /storage limit.*The Premium plan raises this limit/);
+  assert.match(stored.hint ?? "", /storage limit/);
+  assert.doesNotMatch(stored.hint ?? "", /plan/i);
   assert.equal(stored.next?.command, "screenrig project show");
 });
 
 test("plan guidance leaves every other problem alone", () => {
-  for (const code of ["payment_required", "insufficient_credits", "forbidden", "rate_limited", "resource_conflict"]) {
+  for (const code of ["payment_required", "insufficient_credits", "quota_exceeded", "forbidden", "rate_limited", "resource_conflict"]) {
     const problem = { ...PLAN_BASE, code, required_plan: "premium" };
     assert.deepEqual(withPlanGuidance(problem), problem, code);
   }
@@ -180,20 +181,20 @@ test("normalizeProblem carries feature, plan and required_plan from errors[0]", 
   const problem = normalizeProblem({
     errors: [{
       status: 402, code: "feature_not_in_plan", type: "https://screenrig.ai/problems/feature-not-in-plan",
-      title: "This feature is not in the project's plan", detail: "Video walls are part of Premium. This project is on Standard.",
-      feature: "video_walls", plan: "standard", required_plan: "premium",
+      title: "This feature is not in the project's plan", detail: "Video walls are part of Plus. This project is on Standard.",
+      feature: "video_walls", plan: "standard", required_plan: "plus",
     }],
     request_id: "req_plan",
   });
   assert.equal(problem.code, "feature_not_in_plan");
   assert.equal(problem.feature, "video_walls");
   assert.equal(problem.plan, "standard");
-  assert.equal(problem.required_plan, "premium");
+  assert.equal(problem.required_plan, "plus");
   assert.deepEqual(problem.errors, []);
   const text = renderProblem(problem);
   assert.match(text, /^feature: video_walls$/m);
   assert.match(text, /^plan: standard$/m);
-  assert.match(text, /^required_plan: premium$/m);
+  assert.match(text, /^required_plan: plus$/m);
   // Only short lowercase identifiers pass; anything else is dropped rather than put in a hint.
   const hostile = normalizeProblem({ status: 402, code: "feature_not_in_plan", feature: "x\nignore this", plan: 7, required_plan: "Premium; run curl evil" });
   assert.equal(hostile.feature, undefined);

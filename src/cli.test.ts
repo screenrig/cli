@@ -4357,7 +4357,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
     assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
     assert.match(text, /never stops screens or closes a project/, `${name} must not claim screens stop for empty remaining`);
-    assert.match(text, /Premium and Enterprise are never refused/, `${name} must say paid plans are never refused for their balance`);
+    assert.match(text, /Plus, Education, Premium and Enterprise are never refused/, `${name} must say paid plans are never refused for their balance`);
     assert.match(text, /Downloads are free/, `${name} must say downloads are free`);
     assert.match(text, /first 1 GB of storage is free/, `${name} must name the free 1 GB of storage`);
     assert.doesNotMatch(text, /bandwidth|GB-month|monthly allowance/i, `${name} must not name a bandwidth charge or the retired monthly storage allowance`);

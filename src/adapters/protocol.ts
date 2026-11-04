@@ -97,21 +97,22 @@ export interface ProjectFeatures {
 export interface ProjectPlanFeature {
   enabled: boolean;
   id: "video_walls" | "live_view" | "glass_monitoring" | "alert_routing" | "reports" | "bi_dashboards" | "connectors" | "media_sync" | "playlist_templates" | "uploaders" | "direct_campaigns" | "scheduled_reboots" | "sso" | "scim" | "screen_scope" | "protected_folders" | "change_control" | "audit_log" | "schedule_import" | "momentus";
-  /** The lowest plan that includes the feature. */
-  required_plan: "premium" | "enterprise";
+  /** The lowest sold plan that includes the feature. */
+  required_plan: "plus" | "premium" | "enterprise";
 }
 
 /** The plan features of the authenticated project, in catalog order (`ProjectPlanFeatures`). */
 export interface ProjectPlanFeatures {
   features: ProjectPlanFeature[];
   /** The featuresets the account holds beyond its plan's own (founding). */
-  featuresets: Array<"all" | "enterprise" | "founding" | "premium">;
+  featuresets: Array<"all" | "education" | "enterprise" | "founding" | "plus" | "premium">;
 }
 
 /** The project's effective plan limits (`ProjectPlanLimits`). A limit of 0 is no plan cap. */
 export interface ProjectPlanLimits {
   event_retention_days: number;
   members: number;
+  /** Always 0: no plan caps screens. */
   screens: number;
   video_bytes: number;
 }

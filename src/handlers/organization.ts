@@ -13,7 +13,7 @@ export const handleOrganizationList = commandHandler(async (args, runtime, resol
   if (!Array.isArray(body?.organizations) || body.organizations.some(org => !org || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(org.id) || typeof org.name !== "string" || typeof org.admin !== "boolean")) throw configError("Organization list does not match the contract.");
   const tags = (org: { admin: boolean; free?: boolean; plan_required?: boolean }) => [org.admin && "admin", org.free === true && "free", org.plan_required === true && "plan required"].filter(Boolean).join(", ");
   const lines = body.organizations.map(org => `${validateDisplayName(org.name, "Organization name")}: ${org.id}${tags(org) ? ` (${tags(org)})` : ""}`);
-  if (body.new_organization_allowed === false) lines.push("New organization: add projects to an existing organization; another needs Premium or Enterprise.");
+  if (body.new_organization_allowed === false) lines.push("New organization: add projects to an existing organization; another needs a paid plan.");
   return { envelope: successEnvelope(body, { request_id: client.requestId }), exitCode: ExitCode.Success,
     human: lines.join("\n") || "No visible organizations." };
 }, false);

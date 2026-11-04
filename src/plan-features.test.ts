@@ -55,8 +55,8 @@ function planProblem(error: Record<string, unknown>): unknown {
   return {
     errors: [{
       status: 402, code: "feature_not_in_plan", type: "https://screenrig.ai/problems/feature-not-in-plan",
-      title: "This feature is not in the project's plan", detail: "Video walls are part of Premium. This project is on Standard.",
-      feature: "video_walls", plan: "standard", required_plan: "premium", ...error,
+      title: "This feature is not in the project's plan", detail: "Video walls are part of Plus. This project is on Standard.",
+      feature: "video_walls", plan: "standard", required_plan: "plus", ...error,
     }],
     instance: "urn:screenrig:request:req_plan", request_id: "req_plan",
   };
@@ -74,13 +74,14 @@ const CAPABILITIES = {
   plan_features: {
     featuresets: ["founding"],
     features: [
-      { id: "video_walls", enabled: true, required_plan: "premium" },
-      { id: "reports", enabled: true, required_plan: "premium" },
+      { id: "video_walls", enabled: true, required_plan: "plus" },
+      { id: "reports", enabled: true, required_plan: "plus" },
+      { id: "direct_campaigns", enabled: false, required_plan: "premium" },
       { id: "sso", enabled: false, required_plan: "enterprise" },
       { id: "audit_log", enabled: false, required_plan: "enterprise" },
     ],
   },
-  limits: { screens: 250, members: 25, video_bytes: 1_000_000_000, event_retention_days: 7 },
+  limits: { screens: 0, members: 25, video_bytes: 1_000_000_000, event_retention_days: 7 },
 };
 
 test("feature_not_in_plan reaches the agent with its fields, the plan and the capabilities command", async () => {
@@ -94,16 +95,16 @@ test("feature_not_in_plan reaches the agent with its fields, the plan and the ca
   assert.equal(error.status, 402);
   assert.equal(error.feature, "video_walls");
   assert.equal(error.plan, "standard");
-  assert.equal(error.required_plan, "premium");
+  assert.equal(error.required_plan, "plus");
   assert.equal(error.next.command, "screenrig project capabilities");
-  assert.match(error.hint, /Premium/);
+  assert.match(error.hint, /Plus/);
   assert.match(error.hint, /[Cc]redit does not unlock it/);
   assert.equal(transport.calls.length, 1, "a refusal that credit cannot lift is not retried");
   assert.doesNotMatch(result.stdout, /stripe|x402|billing balance|top.?up|\$/i);
 
   const human = await invoke(["--human", "screen", "list"], transport);
   assert.match(human.stderr, /feature_not_in_plan\/402/);
-  assert.match(human.stderr, /^required_plan: premium$/m);
+  assert.match(human.stderr, /^required_plan: plus$/m);
   assert.match(human.stderr, /next: screenrig project capabilities/);
 });
 
@@ -112,20 +113,20 @@ test("the server's own hint on feature_not_in_plan is kept and the plan is added
     status: 402, headers: { "content-type": "application/problem+json" }, body: planProblem({ hint: SERVER_HINT }),
   }));
   const error = JSON.parse((await invoke(["--json", "screen", "list"], transport)).stdout).error;
-  assert.equal(error.hint, `${SERVER_HINT} The Premium plan includes it.`);
+  assert.equal(error.hint, `${SERVER_HINT} The Plus plan includes it.`);
   assert.equal(error.next.command, "screenrig project capabilities");
 });
 
 test("a plan-limit refusal that carries required_plan names the plan; one that does not is untouched", async () => {
   const limit = (status: number, code: string, extra: Record<string, unknown>) => planProblem({ status, code, hint: "At the limit.", feature: undefined, plan: undefined, required_plan: undefined, ...extra });
   const transport = new FakeTransport()
-    .on("GET", "/api/screens", () => ({ status: 413, headers: {}, body: limit(413, "quota_exceeded", { required_plan: "premium" }) }))
+    .on("GET", "/api/screens", () => ({ status: 409, headers: {}, body: limit(409, "project_limit_reached", { required_plan: "plus" }) }))
     .on("GET", "/api/media", () => ({ status: 409, headers: {}, body: limit(409, "member_limit_reached", { required_plan: "enterprise" }) }))
     .on("GET", "/api/playlists", () => ({ status: 409, headers: {}, body: limit(409, "member_limit_reached", {}) }));
-  const screens = JSON.parse((await invoke(["--json", "screen", "list"], transport)).stdout).error;
-  assert.equal(screens.code, "quota_exceeded");
-  assert.equal(screens.required_plan, "premium");
-  assert.match(screens.hint, /^At the limit\. The Premium plan raises this limit/);
+  const projects = JSON.parse((await invoke(["--json", "screen", "list"], transport)).stdout).error;
+  assert.equal(projects.code, "project_limit_reached");
+  assert.equal(projects.required_plan, "plus");
+  assert.match(projects.hint, /^At the limit\. The Plus plan raises this limit/);
   const media = JSON.parse((await invoke(["--json", "media", "list"], transport)).stdout).error;
   assert.equal(media.code, "member_limit_reached");
   assert.match(media.hint, /^At the limit\. The Enterprise plan raises this limit/);
@@ -165,13 +166,13 @@ test("project capabilities shows the featuresets and which plan features are on 
   assert.match(result.stdout, /^plan_id: standard$/m);
   assert.match(result.stdout, /^featuresets: founding$/m);
   assert.match(result.stdout, /^plan_features_on: video_walls, reports$/m);
-  assert.match(result.stdout, /^plan_features_off: sso \(enterprise\), audit_log \(enterprise\)$/m);
-  assert.match(result.stdout, /^limits: screens=250 members=25 video_bytes=1000000000 event_retention_days=7$/m);
+  assert.match(result.stdout, /^plan_features_off: direct_campaigns \(premium\), sso \(enterprise\), audit_log \(enterprise\)$/m);
+  assert.match(result.stdout, /^limits: screens=none members=25 video_bytes=1000000000 event_retention_days=7$/m);
 });
 
 test("a limit of 0 reads as none, because the plan has no cap on it", async () => {
-  const body = { ...CAPABILITIES, limits: { screens: 250, members: 0 } };
+  const body = { ...CAPABILITIES, limits: { screens: 0, members: 0 } };
   const transport = new FakeTransport().on("GET", "/api/project/capabilities", () => ({ status: 200, headers: NO_STORE, body }));
   const result = await invoke(["--human", "project", "capabilities"], transport);
-  assert.match(result.stdout, /^limits: screens=250 members=none$/m);
+  assert.match(result.stdout, /^limits: screens=none members=none$/m);
 });
