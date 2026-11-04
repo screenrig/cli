@@ -367,10 +367,10 @@ function validateSelector(
     if (selector.one_at_a_time !== undefined && selector.one_at_a_time !== false) throw usageError(`${name}.one_at_a_time must be false for by:id.`);
   } else if (selector.by === "ids") {
     exact(selector, ["by", "media_ids", "one_at_a_time"], name);
-    if (!Array.isArray(selector.media_ids) || selector.media_ids.length < 1 || selector.media_ids.length > 32 ||
+    if (!Array.isArray(selector.media_ids) || selector.media_ids.length < 1 || selector.media_ids.length > 1024 ||
       new Set(selector.media_ids).size !== selector.media_ids.length ||
       selector.media_ids.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id))) {
-      throw usageError(`${name}.media_ids must contain 1 to 32 unique media ids.`);
+      throw usageError(`${name}.media_ids must contain 1 to 1024 unique media ids.`);
     }
     optionalBoolean(selector, "one_at_a_time", name);
     ids = selector.media_ids as string[];
