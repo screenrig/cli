@@ -1338,6 +1338,55 @@ test("bundle export pins a folder selector to the folder's files at export", asy
   assert.deepEqual((transport.calls[0]?.body as any)?.selector, { by: "folder", folder_id: "mfd_Lobby1", order: "filename", one_at_a_time: true });
 });
 
+test("an untouched 40-image folder export imports into an empty project with every file in slideshow order", async () => {
+  const dir = await testTemp("bundle-forty-images-");
+  try {
+    // Filename order deliberately differs from the media ids and upload order.
+    const media = Array.from({ length: 40 }, (_, index) => {
+      const bytes = Buffer.from([index, 7, 8, 9]);
+      const item = remoteMedia(`med_SOURCE_${String(40 - index).padStart(2, "0")}`, bytes, {
+        filename: `photo-${String(index + 1).padStart(2, "0")}.png`,
+      });
+      return { item, bytes, destinationId: `med_RESTORED_${index}` };
+    });
+    const source = playlist(mediaPrimitive({ by: "folder", folder_id: "mfd_Photos", order: "filename", one_at_a_time: true }));
+    source.pages[0]!.primitives.splice(1);
+    source.pages[0]!.advance.after_ms = 2000;
+    const transport = new FakeTransport()
+      .on("GET", "/api/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }))
+      .on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: {
+        candidates: media.map(({ item }) => ({ media_id: item.id, filename: item.filename })),
+      } }));
+    for (const { item, bytes } of media) {
+      const headers = { "content-type": item.content_type, "content-length": String(bytes.byteLength), etag: `"${item.sha256}"` };
+      transport.on("GET", `/api/media/${item.id}`, () => ({ status: 200, headers: {}, body: item }))
+        .on("HEAD", `/api/media/${item.id}/content`, () => ({ status: 200, headers, body: undefined }))
+        .onDownload("GET", `/api/media/${item.id}/content`, () => ({ status: 200, headers, body: byteStream(bytes) }));
+    }
+    const directory = path.join(dir, "bundle");
+    const exported = await exportPlaylistBundle({ playlistId: source.id, outputDirectory: directory, client: new ApiClient({ transport, token: "token" }) });
+    assert.equal(exported.media_count, 40);
+    const manifest = JSON.parse(await readFile(path.join(directory, PLAYLIST_BUNDLE_MANIFEST), "utf8")) as PlaylistBundleManifest;
+    const bySourceId = new Map(media.map(item => [item.item.id, item]));
+    const destinationIds = manifest.media.map(item => bySourceId.get(item.source_id)!.destinationId);
+    const destination = importTransport([], destinationIds);
+    const uploaded: Uint8Array[] = [];
+    const imported = await importPlaylistBundle({ directory, client: new ApiClient({ transport: destination, token: "token" }), runtime: runtimeForImport(uploaded, importClock()) });
+    assert.deepEqual(imported.media, { total: 40, reused: 0, uploaded: 40 });
+    assert.deepEqual(uploaded, manifest.media.map(item => bySourceId.get(item.source_id)!.bytes));
+    const writes = destination.calls.filter(call => call.method === "POST" && call.path === "/api/playlists");
+    assert.equal(writes.length, 1);
+    const restored = writes[0]!.body as { pages: Array<{ advance: unknown; primitives: Array<{ selector: unknown }> }> };
+    assert.equal(restored.pages.length, 1);
+    assert.deepEqual(restored.pages[0]!.advance, { mode: "duration", after_ms: 2000 });
+    assert.deepEqual(restored.pages[0]!.primitives[0]!.selector, {
+      by: "ids", media_ids: media.map(item => item.destinationId), one_at_a_time: true,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("empty dynamic selectors leave other bundle primitives intact", async () => {
   const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
   const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "all", one_at_a_time: true })));
