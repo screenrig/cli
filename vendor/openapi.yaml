@@ -26974,7 +26974,7 @@ paths:
     get:
       operationId: getAppStoreOffer
       description: >-
-        What an organization may buy through the App Store in the screenRIG iPhone and iPad app (bundle ai.screenrig.app), and the account token its purchases carry. Requires a designated admin of the live organization (the person who manages its plan and billing); staff may read the offer without products or token, and anyone else answers 404 not_found. account_token is a random UUID the server creates once per organization and keeps: the app passes it to StoreKit as appAccountToken, so every transaction and server notification names its organization. It is the all-zero UUID for a reader who cannot buy. products lists the plans the caller may buy now, one App Store product each: plus, education (only while education_eligible is true, which staff set after verifying a K-12 school or district) and premium. A plan the organization already holds through another source (staff, invoicing, another subscription) at the same or a higher level is not offered, except to the person whose App Store subscription holds it, who may change plans within the subscription group. can_purchase is true when products is not empty. subscription is the organization's App Store subscription, or null. Response is private and no-store.
+        What an organization may buy through the App Store in the screenRIG iPhone and iPad app (bundle ai.screenrig.app), and the account token its purchases carry. Requires a designated admin of the live organization (the person who manages its plan and billing); staff may read the offer without products or token, and anyone else answers 404 not_found. account_token is a random UUID the server creates once per organization and keeps: the app passes it to StoreKit as appAccountToken, so every transaction and server notification names its organization. It is the all-zero UUID for a reader who cannot buy. products lists the plans the caller may buy now, one App Store product each: plus, education (only while education_eligible is true) and premium. education_eligible is true when staff verified a K-12 school or district, or when the admin reading the offer has a verified account email address at a K-12 school domain (education_eligibility_source school_email): opening the offer, or recording a transaction, as such an admin makes the organization eligible once, writes an organization audit entry naming the matched domain, and includes Education in the same offer. A staff decision, either way, is final and automatic eligibility never overrides it. A plan the organization already holds through another source (staff, invoicing, another subscription) at the same or a higher level is not offered, except to the person whose App Store subscription holds it, who may change plans within the subscription group. can_purchase is true when products is not empty. subscription is the organization's App Store subscription, or null. Response is private and no-store.
       security:
         - dashboardSession: []
       responses:
@@ -28209,6 +28209,7 @@ components:
         - free
         - plan_required
         - education_eligible
+        - education_eligibility_source
       properties:
         id:
           type: string
@@ -28264,7 +28265,9 @@ components:
           description: Whom the organization admits to its projects as guests (people whose home is another organization, or who have none). Admins only; absent for anyone else. Present for every admin, with mode allow until one is set.
         education_eligible:
           type: boolean
-          description: Staff have verified the organization as a K-12 school or district, which lets its admins buy the Education plan (getAppStoreOffer). Always present; false until staff set it (putDashboardStaffOrganizationEducationEligible).
+          description: The organization is a K-12 school or district, which lets its admins buy the Education plan (getAppStoreOffer). Always present; false until staff verify it (putDashboardStaffOrganizationEducationEligible) or an admin who may buy opens the offer with a verified K-12 school email address.
+        education_eligibility_source:
+          $ref: '#/components/schemas/EducationEligibilitySource'
     OrganizationPersonal:
       type: boolean
       description: "The organization is only its one project's wrapper: exactly one live project, no verified domain, no organization plan now or scheduled, and no admin other than that project's owner. The dashboard hides the organization level for it."
@@ -38657,7 +38660,7 @@ components:
     AppStoreOffer:
       type: object
       additionalProperties: false
-      required: [account_token, products, education_eligible, can_purchase, current_plan_id, subscription]
+      required: [account_token, products, education_eligible, education_eligibility_source, can_purchase, current_plan_id, subscription]
       properties:
         account_token:
           type: string
@@ -38670,7 +38673,9 @@ components:
           description: The plans the caller may buy now; none when the caller cannot manage the plan.
         education_eligible:
           type: boolean
-          description: Staff have verified the organization as a K-12 school or district.
+          description: The organization is a K-12 school or district, because staff verified it or because the admin reading the offer has a verified K-12 school email address.
+        education_eligibility_source:
+          $ref: '#/components/schemas/EducationEligibilitySource'
         can_purchase:
           type: boolean
         current_plan_id:
@@ -38680,6 +38685,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AppStoreSubscription'
             - type: 'null'
+    EducationEligibilitySource:
+      type: string
+      enum: ['', staff, school_email]
+      description: Who decided education_eligible. staff is a staff decision, either way, and is final. school_email is the automatic decision from an admin's verified K-12 school email address (a school domain such as k12.ca.us or sch.uk; never a general education domain such as .edu or .ac.uk). The empty string means nobody decided.
     AppStoreTransactionRequest:
       type: object
       additionalProperties: false
