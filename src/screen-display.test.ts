@@ -10,7 +10,7 @@ import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
 import { type CliRuntime } from "./runtime.js";
 import { commandLines } from "./screen-commands.js";
-import { displayLines, displayScheduleWrite, displayUntil, rebootScheduleLines, rebootScheduleWrite, rebootWindowList, rebootWindowOption } from "./screen-display.js";
+import { displayLines, displayScheduleWrite, displayUntil, displayWarnings, rebootScheduleLines, rebootScheduleWrite, rebootWindowList, rebootWindowOption } from "./screen-display.js";
 import { testTemp } from "./test-temp.js";
 import { memoryBackend, type FakeTransport } from "./transport/fake.js";
 
@@ -51,7 +51,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env) {
   stdout.end();
   stderr.end();
   const text = await out;
-  let envelope: { ok: boolean; data?: any; error?: { code: string; detail: string; next?: { command: string; reason: string } } } = { ok: false };
+  let envelope: { ok: boolean; data?: any; warnings?: { code: string; message: string }[]; error?: { code: string; detail: string; next?: { command: string; reason: string } } } = { ok: false };
   try { envelope = JSON.parse(text); } catch { /* human */ }
   return { code, stdout: text, envelope };
 }
@@ -180,7 +180,7 @@ test("screen display: --power or trailing on|off, until rules, fleet action, Dis
   assert.deepEqual(call?.body, { power: "off", until: "2026-08-14T19:00:00Z" });
   assert.equal(off.envelope.data.display.requested, "off");
   const human = await cli(["--human", "screen", "display", LOBBY, "on"], transport, env);
-  assert.match(human.stdout, /^Display on on scr_LOBBYAAAAAAAAAAAAAAAAAA until the display schedule's next boundary, or until replaced\nDisplay: on \(manual override until replaced\)/m);
+  assert.match(human.stdout, /^Display override saved on scr_LOBBYAAAAAAAAAAAAAAAAAA: requested on until the display schedule's next boundary, or until replaced\nDisplay: on \(manual override until replaced\)/m);
   assert.deepEqual(transport.calls.filter((item) => item.path === `/api/screens/${LOBBY}/display`).at(-1)?.body, { power: "on" });
   const mixed = await cli(["--json", "screen", "display", LOBBY, "on", "--power", "off"], transport, env);
   assert.equal(mixed.code, ExitCode.Usage);
@@ -195,6 +195,72 @@ test("screen display: --power or trailing on|off, until rules, fleet action, Dis
   const ids = await cli(["--json", "screen", "display", LOBBY, PLAIN, "off"], transport, env);
   assert.deepEqual((transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1)?.body as { selector: unknown }).selector, { by: "ids", screen_ids: [LOBBY, PLAIN] });
   assert.equal(ids.envelope.data.succeeded, 2);
+});
+
+test("display warnings distinguish a differing observation from a saved unconfirmed request", () => {
+  const display: NonNullable<Screen["display"]> = {
+    requested: "on", source: "override", control: "hardware",
+    override: { override_id: "dsp_TEST", power: "on", until: null, ends_at: null, set_at: NOW.toISOString() },
+    reported: { power: "off", connected: true, reported_at: NOW.toISOString(), stale: false },
+  };
+  for (const status of ["pending", "stale", "unknown", "matches", "mismatch"] as const) {
+    const warnings = displayWarnings(LOBBY, { ...display, override_status: status });
+    assert.deepEqual(warnings.map((warning) => warning.code), status === "matches" ? []
+      : [status === "mismatch" ? "display_power_mismatch" : "display_power_unconfirmed"]);
+    if (status === "mismatch") {
+      assert.match(warnings[0]!.message, /latest report still says power off/);
+      assert.match(warnings[0]!.message, /does not confirm a wake or explain a capture failure/);
+    }
+  }
+  const scrim = displayWarnings(LOBBY, { ...display, control: "scrim", override_status: "pending" });
+  assert.deepEqual(scrim.map((warning) => warning.code), ["display_power_unconfirmed", "display_scrim_only"]);
+  assert.match(scrim[1]!.message, /sends no hardware wake command/);
+  assert.deepEqual(displayWarnings(LOBBY, { requested: "on", source: "default", control: "scrim" }), []);
+  assert.deepEqual(displayWarnings(LOBBY, undefined), []);
+});
+
+test("display write, show and fleet preserve successful saves while exposing observation warnings", async () => {
+  const env = await enrolled();
+  const transport = fleet();
+  const original = transport.request.bind(transport);
+  const display: NonNullable<Screen["display"]> = {
+    requested: "on", source: "override", control: "scrim", override_status: "pending",
+    override: { override_id: "dsp_OBSERVE", power: "on", until: null, ends_at: null, set_at: NOW.toISOString() },
+    reported: { power: "off", connected: true, reported_at: NOW.toISOString(), stale: false },
+  };
+  transport.request = async (request) => {
+    const response = await original(request);
+    if (response.status === 200 && request.path === `/api/screens/${LOBBY}/display`) {
+      return { ...response, body: { ...(response.body as object), display } };
+    }
+    if (response.status === 200 && request.path === "/api/screens/actions") {
+      const body = response.body as { results: object[] };
+      return { ...response, body: { ...body, results: body.results.map((item) => ({ ...item, display })) } };
+    }
+    return response;
+  };
+  const saved = await cli(["--json", "screen", "display", LOBBY, "--power", "on"], transport, env);
+  assert.equal(saved.code, ExitCode.Success, saved.stdout);
+  assert.equal(saved.envelope.ok, true);
+  assert.deepEqual(saved.envelope.warnings!.map((warning) => warning.code), ["display_power_unconfirmed", "display_scrim_only"]);
+  assert.equal(transport.calls.filter((call) => call.method === "POST" && call.path.endsWith("/display")).length, 1);
+
+  display.override_status = "mismatch";
+  transport.putScreen!(screen(LOBBY, { display }));
+  const shown = await cli(["--json", "screen", "show", LOBBY], transport, env);
+  assert.equal(shown.code, ExitCode.Success, shown.stdout);
+  assert.equal(shown.envelope.data.display.override_status, "mismatch");
+  assert.ok(shown.envelope.warnings!.some((warning) => warning.code === "display_power_mismatch"));
+  const human = await cli(["--human", "screen", "show", LOBBY], transport, env);
+  assert.match(human.stdout, /Display override observation: mismatch/);
+  assert.equal(human.stdout.match(/latest report still says power off/g)?.length, 1);
+
+  display.override_status = "pending";
+  const many = await cli(["--json", "screen", "display", LOBBY, PLAIN, "on"], transport, env);
+  assert.equal(many.code, ExitCode.Success, many.stdout);
+  assert.equal(many.envelope.data.succeeded, 2);
+  assert.equal(many.envelope.data.results[0].display.override_status, "pending");
+  assert.equal(many.envelope.warnings!.filter((warning) => warning.code === "display_scrim_only").length, 2);
 });
 
 test("screen display-schedule show|set|clear, single and fleet", async () => {

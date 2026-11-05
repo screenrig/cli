@@ -5553,7 +5553,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Turns the display on or off now: a manual override of the display schedule (docs/player-compatibility.md §6.5). power is on or off. until (RFC 3339, strictly future, at most 7 days ahead) ends it; without until it ends at the display schedule''s next boundary when a schedule is enabled, else it holds until replaced. Stores the override (Screen.display.override), re-mints the manifest (its display member carries the override so an offline Player keeps it), appends the runtime command player.display (details override_id, power, until, at, expires_at) and the project-only screen.display_changed, and bumps the screen revision (If-Match guards it). The screen must be active. What the Player achieved is reported back in its health display.power (Screen.display.reported). Without until and without a schedule boundary inside the next eight days (no enabled schedule, or none that changes), the override holds until DELETE /api/screens/{id}/display or a replacement; a later display-schedule PUT or DELETE, or a timezone change, re-bounds an until-less override to the new next boundary. A refused or failed request, and an exact Idempotency-Key replay, spend no budget. A screen in a protected screen folder is protected_target (409).'
+      description: 'Requests display on or off now: a manual override of the display schedule (docs/player-compatibility.md §6.5). power is on or off. until (RFC 3339, strictly future, at most 7 days ahead) ends it; without until it ends at the display schedule''s next boundary when a schedule is enabled, else it holds until replaced. Stores the override (Screen.display.override), re-mints the manifest (its display member carries the override so an offline Player keeps it), appends the runtime command player.display (details override_id, power, until, at, expires_at) and the project-only screen.display_changed, and bumps the screen revision (If-Match guards it). The screen must be active. What the Player achieved is reported back in its health display.power (Screen.display.reported). Success saves intent without waiting for a report; Screen.display.override_status compares subsequent observations and Screen.display.control names the advertised control method. A scrim-only Player removes its overlay on an on request without a hardware wake command. Without until and without a schedule boundary inside the next eight days (no enabled schedule, or none that changes), the override holds until DELETE /api/screens/{id}/display or a replacement; a later display-schedule PUT or DELETE, or a timezone change, re-bounds an until-less override to the new next boundary. A refused or failed request, and an exact Idempotency-Key replay, spend no budget. A screen in a protected screen folder is protected_target (409).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -20152,7 +20152,7 @@ paths:
       - url: https://screenrig.ai
     post:
       operationId: createOrganizationPortal
-      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. Actor and return URL are server-owned. Response is private and no-store.
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. Actor and return URL are server-owned. Response is private and no-store. Open to an organization delegated to a reseller too, for its card and past invoices.
       security:
         - dashboardSession: []
       parameters:
@@ -20180,7 +20180,7 @@ paths:
       - url: https://screenrig.ai
     put:
       operationId: setOrganizationAutoTopUp
-      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. The actor is server-owned. Disabling preserves saved amounts and monthly spend; amount fields are ignored when disabled. Response is private and no-store. Changing settings clears a recoverable pause only after any failed payable invoice is safely voided.
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. The actor is server-owned. Disabling preserves saved amounts and monthly spend; amount fields are ignored when disabled. Response is private and no-store. Changing settings clears a recoverable pause only after any failed payable invoice is safely voided. Enabling it for an organization delegated to a reseller answers 409 billed_by_reseller; disabling stays open.
       security:
         - dashboardSession: []
       parameters:
@@ -20233,7 +20233,7 @@ paths:
         description: Backend-owned dashboard origin
     post:
       operationId: createOrganizationCheckout
-      description: Start a prepaid purchase for a live organization designated admin. Requires same-origin cookie authentication and, for JWT sessions, a matching CSRF header. Organization, customer, actor and return URLs are server-owned. Credit applies only after the billing service confirms payment. Retry ambiguous responses with the same Idempotency-Key and amount.
+      description: Start a prepaid purchase for a live organization designated admin. Requires same-origin cookie authentication and, for JWT sessions, a matching CSRF header. Organization, customer, actor and return URLs are server-owned. Credit applies only after the billing service confirms payment. Retry ambiguous responses with the same Idempotency-Key and amount. An organization delegated to a reseller answers 409 billed_by_reseller.
       security:
         - dashboardSession: []
       parameters:
@@ -20279,7 +20279,7 @@ paths:
         description: Backend-owned dashboard origin
     get:
       operationId: getOrganizationBillingBalance
-      description: The organization wallet. Requires a designated organization admin or staff session. Does not expose a reseller wallet or grant project membership.
+      description: The organization wallet. Requires a designated organization admin, an admin of the reseller the organization is delegated to, or a staff session. Grants no project membership.
       security:
         - dashboardSession: []
       parameters:
@@ -20309,7 +20309,7 @@ paths:
         description: Backend-owned dashboard origin
     get:
       operationId: getOrganizationBillingStatement
-      description: Journal entries attributed to this organization at charge time, with project and payer identities. Moves do not transfer historical access. Entries predating recorded organization context remain in their project statements.
+      description: Journal entries attributed to this organization at charge time, with project and payer identities. Moves do not transfer historical access. Entries predating recorded organization context remain in their project statements. Read by the same people as the balance (getOrganizationBillingBalance).
       security:
         - dashboardSession: []
       parameters:
@@ -20351,7 +20351,7 @@ paths:
         description: Backend-owned dashboard origin
     get:
       operationId: getOrganizationBillingUsage
-      description: The organization's usage pool and each project's share for a UTC month. Covers usage paid by this organization; other payer costs are in the organization statement.
+      description: The organization's usage pool and each project's share for a UTC month. Covers usage paid by this organization; other payer costs are in the organization statement. Read by the same people as the balance (getOrganizationBillingBalance).
       security:
         - dashboardSession: []
       parameters:
@@ -20782,6 +20782,34 @@ paths:
   /api/organizations/{org_id}:
     servers:
       - url: https://api.screenrig.ai
+    get:
+      operationId: getDashboardOrganization
+      description: One organization as an item of GET /api/organizations shows it to the caller, with admin, home and reseller. A signed-in person reads it when they administer it, administer the reseller it is delegated to, are staff, or would see it in that listing (a member of one of its live projects, or it is their home organization). Anyone else, and an organization that does not exist, gets 404 not_found. Grants no project membership. Cookie sessions only; an agent credential is refused.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationView'
+        default:
+          $ref: '#/components/responses/Problem'
     patch:
       x-screenrig-access: write
       operationId: agentOrganizationsRename
@@ -20861,6 +20889,292 @@ paths:
             minimum: 1
             maximum: 100
             default: 100
+  /api/resellers:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardResellers
+      description: The live resellers whose organization the signed-in person administers (admin_user_ids), ordered by name; empty for everyone else. Cookie sessions only. A reseller is an organization staff made a reseller; its admins run its customers' organizations (docs/resellers.md).
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The caller's resellers.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    get:
+      operationId: getDashboardReseller
+      description: One reseller the caller administers, with its spread. Anyone else gets 404 not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The reseller.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reseller'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/customers:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    get:
+      operationId: listDashboardResellerCustomers
+      description: The reseller's current customers (organizations delegated to it), ordered by name, with plan, counts and stored bytes. Reseller admins only; anyone else gets 404 not_found.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        '200':
+          description: One page of customers.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerCustomerPage'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createDashboardResellerCustomer
+      description: Creates a customer organization delegated to the reseller from its creation, on Standard, with the calling reseller admin as its one admin. The caller's home organization does not change. The organization's own admins may later end the delegation (DELETE /api/organizations/{org_id}/reseller). Appends organization.created and reseller.customer_started to the organization audit.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {$ref: '#/components/schemas/ProjectName'}
+      responses:
+        '201':
+          description: The new customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerCustomer'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/customers/{org_id}:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: org_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    get:
+      operationId: getDashboardResellerCustomer
+      description: One current customer of the reseller. Reseller admins only; an organization that is not a current customer answers 404 not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The customer.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerCustomer'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/customers/{org_id}/plan:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: org_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    put:
+      operationId: setDashboardResellerCustomerPlan
+      description: Sets a current customer's plan, which the reseller pays for. standard removes the plan; plus and premium are always allowed, education only for an education-eligible organization. Enterprise, staff and promo are staff-assigned. An upgrade applies at once, a downgrade or removal at the next UTC month boundary, as organization plan changes do (docs/billing-rollup.md). Appends reseller.customer_plan to the organization audit.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan_id]
+              properties:
+                plan_id: {type: string, enum: [standard, plus, education, premium]}
+      responses:
+        '200':
+          description: The customer with its plan as now stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerCustomer'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/customers/{org_id}/projects:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: org_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    get:
+      operationId: listDashboardResellerCustomerProjects
+      description: A current customer's live projects with names, status, screen counts and whether the caller is already a member. Listing grants no project access; POST .../access joins one.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        '200':
+          description: One page of projects.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerCustomerProjectPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/customers/{org_id}/projects/{project_id}/access:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: org_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    post:
+      operationId: joinDashboardResellerCustomerProject
+      description: Makes the calling reseller admin a full member of a current customer's project (can_approve, no scopes, source reseller_admin), as an organization admin's join does, so they can open it with PUT /api/session/project. Already a member answers the project unchanged. Appends member.added_by_reseller to the project and reseller.project_joined to the organization audit, and emails the project owner. The membership stays until removed; ending the delegation does not remove it.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project the caller can now open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardProjectReference'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/resellers/{reseller_id}/statement:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - name: reseller_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    get:
+      operationId: getDashboardResellerStatement
+      description: What the reseller owes for one UTC month. One line per customer delegated at any time in the month, with the part of its usage charges in the delegated part of the month that its own credit did not cover (at list price and at the reseller's price), and its plan's annual price. The reseller's price is list less the spread in force at the later of the month's start and the reseller's (re)creation. Reseller admins only.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: period
+          in: query
+          description: The UTC month, YYYY-MM. Omitted is the current month.
+          schema: {type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$'}
+      responses:
+        '200':
+          description: The statement.
+          headers:
+            Cache-Control: {schema: {type: string, enum: ["private, no-store"]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResellerStatement'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/reseller:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+    delete:
+      operationId: endDashboardOrganizationReseller
+      description: An admin of the organization ends its delegation to its reseller at once. From then the organization pays for itself; its plan, projects and members stay as they are, including memberships reseller admins hold. The overage its wallet accrued while delegated, which the reseller is billed for, is written off in the same change. Appends reseller.customer_ended to the organization audit. An organization with no reseller answers 404 not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization, now without a reseller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationView'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/discovery:
     servers:
       - url: https://screenrig.ai
@@ -27018,7 +27332,7 @@ paths:
     get:
       operationId: getAppStoreOffer
       description: >-
-        What an organization may buy through the App Store in the screenRIG iPhone and iPad app (bundle ai.screenrig.app), and the account token its purchases carry. Requires a designated admin of the live organization (the person who manages its plan and billing); staff may read the offer without products or token, and anyone else answers 404 not_found. account_token is a random UUID the server creates once per organization and keeps: the app passes it to StoreKit as appAccountToken, so every transaction and server notification names its organization. It is the all-zero UUID for a reader who cannot buy. products lists the plans the caller may buy now, one App Store product each: plus, education (only while education_eligible is true) and premium. education_eligible is true when staff verified a K-12 school or district, or when the admin reading the offer has a verified account email address at a K-12 school domain (education_eligibility_source school_email): opening the offer, or recording a transaction, as such an admin makes the organization eligible once, writes an organization audit entry naming the matched domain, and includes Education in the same offer. A staff decision, either way, is final and automatic eligibility never overrides it. A plan the organization already holds through another source (staff, invoicing, another subscription) at the same or a higher level is not offered, except to the person whose App Store subscription holds it, who may change plans within the subscription group. can_purchase is true when products is not empty. subscription is the organization's App Store subscription, or null. Response is private and no-store.
+        What an organization may buy through the App Store in the screenRIG iPhone and iPad app (bundle ai.screenrig.app), and the account token its purchases carry. Requires a designated admin of the live organization (the person who manages its plan and billing); staff and the admins of the reseller the organization is delegated to may read the offer without products or token, and anyone else answers 404 not_found. An organization delegated to a reseller lists no products: its reseller pays for its plan. account_token is a random UUID the server creates once per organization and keeps: the app passes it to StoreKit as appAccountToken, so every transaction and server notification names its organization. It is the all-zero UUID for a reader who cannot buy. products lists the plans the caller may buy now, one App Store product each: plus, education (only while education_eligible is true) and premium. education_eligible is true when staff verified a K-12 school or district, or when the admin reading the offer has a verified account email address at a K-12 school domain (education_eligibility_source school_email): opening the offer, or recording a transaction, as such an admin makes the organization eligible once, writes an organization audit entry naming the matched domain, and includes Education in the same offer. A staff decision, either way, is final and automatic eligibility never overrides it. A plan the organization already holds through another source (staff, invoicing, another subscription) at the same or a higher level is not offered, except to the person whose App Store subscription holds it, who may change plans within the subscription group. can_purchase is true when products is not empty. subscription is the organization's App Store subscription, or null. Response is private and no-store.
       security:
         - dashboardSession: []
       responses:
@@ -27045,7 +27359,7 @@ paths:
     post:
       operationId: recordAppStoreTransaction
       description: >-
-        Records one StoreKit 2 signed transaction (Transaction.jwsRepresentation) bought for the organization and puts the organization on its plan. Requires a designated admin of the live organization, same-origin cookie authentication and, for JWT sessions, the CSRF header. The server verifies the JWS with its x5c chain to Apple Root CA - G3 (outside production also Xcode's StoreKit testing root), the bundle id ai.screenrig.app, the product id, the environment (Production on production only; Sandbox everywhere, because App Review and TestFlight buy with sandbox accounts against production; Xcode outside production only) and that appAccountToken equals the organization's account_token (getAppStoreOffer); nothing in the request names who paid. The plan follows the product of the newest transaction of the subscription: a higher plan applies at once and a lower one when billing's next UTC month boundary reaches it, as for any plan change. Sending a transaction again, or an older one, changes nothing and answers the subscription as it stands; an expired transaction is recorded and changes no plan. The app finishes the transaction after a 2xx or a definitive 4xx problem. Problems: app_store_transaction_invalid (422), app_store_account_mismatch (409), education_not_eligible (403), app_store_plan_conflict (409).
+        Records one StoreKit 2 signed transaction (Transaction.jwsRepresentation) bought for the organization and puts the organization on its plan. Requires a designated admin of the live organization, same-origin cookie authentication and, for JWT sessions, the CSRF header. The server verifies the JWS with its x5c chain to Apple Root CA - G3 (outside production also Xcode's StoreKit testing root), the bundle id ai.screenrig.app, the product id, the environment (Production on production only; Sandbox everywhere, because App Review and TestFlight buy with sandbox accounts against production; Xcode outside production only) and that appAccountToken equals the organization's account_token (getAppStoreOffer); nothing in the request names who paid. The plan follows the product of the newest transaction of the subscription: a higher plan applies at once and a lower one when billing's next UTC month boundary reaches it, as for any plan change. Sending a transaction again, or an older one, changes nothing and answers the subscription as it stands; an expired transaction is recorded and changes no plan. The app finishes the transaction after a 2xx or a definitive 4xx problem. Problems: app_store_transaction_invalid (422), app_store_account_mismatch (409), education_not_eligible (403), app_store_plan_conflict (409), billed_by_reseller (409, the organization is delegated to a reseller, which pays for its plan).
       security:
         - dashboardSession: []
       requestBody:
@@ -28299,6 +28613,9 @@ components:
         plan_id:
           type: string
           description: The plan the organization holds now (a scheduled plan counts from its effective time), "standard" when it holds no other. Always present. Read-only display; customers do not change organization plans. The staff organization view reports the stored plan_id with previous_plan_id and plan_effective_at instead.
+        reseller:
+          $ref: '#/components/schemas/ResellerSummary'
+          description: The reseller the organization is delegated to, which is billed for its plan and usage. Absent when it pays for itself. Its admins end the delegation with DELETE /api/organizations/{org_id}/reseller.
         free:
           type: boolean
           description: The organization is a person's, or an unaccepted agent's, one free Standard organization. A plan attached to it leaves it their free one.
@@ -28668,6 +28985,105 @@ components:
         new_organization_allowed:
           type: boolean
           description: The person (an agent's responsible person) may open a new free organization. False once they hold their one; creating with a new organization name is then free_organization_limit.
+    ResellerSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: {type: string, description: The reseller's organization id.}
+        name: {type: string}
+    ResellerList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/ResellerSummary'}}
+    Reseller:
+      type: object
+      additionalProperties: false
+      required: [id, name, spread_bps, spread_effective_at, customer_count]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        spread_bps: {type: integer, minimum: 0, maximum: 10000, description: "The reseller's spread now, in basis points of list price: it pays list less this."}
+        spread_effective_at: {type: string, format: date-time}
+        pending_spread_bps: {type: integer, minimum: 0, maximum: 10000}
+        pending_spread_effective_at: {type: string, format: date-time}
+        customer_count: {type: integer, minimum: 0}
+    ResellerCustomer:
+      type: object
+      additionalProperties: false
+      required: [organization_id, name, plan_id, delegated_at, project_count, screen_count, stored_bytes, annual_list_cents, annual_wholesale_cents]
+      properties:
+        organization_id: {type: string}
+        name: {type: string}
+        plan_id: {type: string, description: The plan the organization holds now; standard when none.}
+        scheduled_plan_id: {type: string, description: A plan change waiting for plan_effective_at; standard is a removal.}
+        plan_effective_at: {type: string, format: date-time}
+        education_eligible: {type: boolean}
+        delegated_at: {type: string, format: date-time}
+        project_count: {type: integer, minimum: 0}
+        screen_count: {type: integer, minimum: 0}
+        stored_bytes: {type: integer, minimum: 0}
+        annual_list_cents: {type: integer, minimum: 0, description: "The plan's annual list price for this customer (0 on Standard): the staff quote while the organization holds the plan it was quoted for, else the plan's."}
+        annual_wholesale_cents: {type: integer, minimum: 0, description: "annual_list_cents less the current spread, rounded half up to the cent."}
+    ResellerCustomerPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/ResellerCustomer'}}
+        next_cursor: {type: string}
+    ResellerCustomerProject:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, screen_count, member]
+      properties:
+        id: {type: string}
+        name: {$ref: '#/components/schemas/ProjectName'}
+        owner_user_id: {type: string}
+        status: {type: string}
+        screen_count: {type: integer, minimum: 0}
+        member: {type: boolean, description: The caller is already a member and can open it.}
+    ResellerCustomerProjectPage:
+      type: object
+      additionalProperties: false
+      required: [projects, next_cursor]
+      properties:
+        projects: {type: array, items: {$ref: '#/components/schemas/ResellerCustomerProject'}}
+        next_cursor: {type: string}
+    ResellerStatementLine:
+      type: object
+      additionalProperties: false
+      required: [organization_id, name, plan_id, delegated_from, project_count, screen_count, stored_bytes, api_events, usage_list_mcr, usage_wholesale_mcr, plan_annual_list_cents, plan_annual_wholesale_cents]
+      properties:
+        organization_id: {type: string}
+        name: {type: string}
+        plan_id: {type: string, description: The plan held at the end of the delegated part of the month.}
+        delegated_from: {type: string, format: date-time, description: The later of the month start and the delegation start.}
+        delegated_until: {type: string, format: date-time, description: "The delegation's end, when it ended in the month."}
+        project_count: {type: integer, minimum: 0}
+        screen_count: {type: integer, minimum: 0}
+        stored_bytes: {type: integer, minimum: 0, description: "Stored now, for every month."}
+        api_events: {type: integer, minimum: 0, description: Metered agent requests in the month's usage pool.}
+        usage_list_mcr: {type: string, pattern: '^-?[0-9]+$', description: "The part of the usage charged to the organization's wallet in the delegated part of the month that none of its own credit (included, granted, purchased or earned) covered, the overage those charges accrued, in millicredits at list price. A charge counts when it reached the wallet. When the delegation ends, that overage is written off the organization's wallet."}
+        usage_wholesale_mcr: {type: string, pattern: '^-?[0-9]+$', description: usage_list_mcr less the spread.}
+        plan_annual_list_cents: {type: integer, minimum: 0}
+        plan_annual_wholesale_cents: {type: integer, minimum: 0}
+    ResellerStatement:
+      type: object
+      additionalProperties: false
+      required: [reseller_id, name, period, spread_bps, lines, usage_list_mcr, usage_wholesale_mcr, plan_annual_list_cents, plan_annual_wholesale_cents]
+      properties:
+        reseller_id: {type: string}
+        name: {type: string}
+        period: {type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$'}
+        spread_bps: {type: integer, minimum: 0, maximum: 10000, description: "The spread in force at the later of the month's start and the reseller's (re)creation."}
+        lines: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/ResellerStatementLine'}}
+        usage_list_mcr: {type: string, pattern: '^-?[0-9]+$'}
+        usage_wholesale_mcr: {type: string, pattern: '^-?[0-9]+$'}
+        plan_annual_list_cents: {type: integer, minimum: 0}
+        plan_annual_wholesale_cents: {type: integer, minimum: 0}
     OrganizationProject:
       type: object
       additionalProperties: false
@@ -31437,7 +31853,7 @@ components:
       additionalProperties: false
       required: [kind, id]
       properties:
-        kind: {type: string, enum: [project, organization, reseller]}
+        kind: {type: string, enum: [project, organization]}
         id: {type: string}
     OrganizationBillingUsage:
       type: object
@@ -31497,7 +31913,7 @@ components:
         period: {type: string, description: UTC month in YYYY-MM form.}
         payer:
           $ref: "#/components/schemas/BillingPayer"
-          description: Present when an organization or reseller pays for the project. Its usage pool is shared across the projects it pays for, and usage is this project's share of it. Absent when the project pays for itself.
+          description: Present when an organization pays for the project. Its usage pool is shared across the projects it pays for, and usage is this project's share of it. Absent when the project pays for itself.
         usage:
           $ref: "#/components/schemas/BillingUsageAmounts"
           description: Usage counted against the pool this month. bandwidth_bytes counts the bytes the control plane served or received (uploads and downloads it served itself), not media the edge delivers; total bandwidth is usage.bandwidth_bytes plus edge_media_bytes. bandwidth_bytes and storage_mcr count settled hours, each closed hour once it settles. api_events counts each metered API request, billed project stream event and webhook delivery attempt as it is metered, including those billed after the allowance is spent, so it can exceed allowance.api_events.
@@ -33918,6 +34334,7 @@ components:
         toast: {$ref: "#/components/schemas/ScreenToastAccepted"}
         reboot: {$ref: "#/components/schemas/ScreenRebootAccepted"}
         command: {$ref: "#/components/schemas/ScreenMaintenanceAccepted"}
+        display: {$ref: "#/components/schemas/ScreenDisplay", description: "Display actions: the saved intent, control methods and latest observation; success does not confirm panel power."}
         problem: {$ref: "#/components/schemas/Problem"}
     ScreenRecoveryPending:
       type: object
@@ -38438,6 +38855,16 @@ components:
         schedule: {$ref: "#/components/schemas/ScreenDisplaySchedule"}
         override: {$ref: "#/components/schemas/ScreenDisplayOverride"}
         reported: {$ref: "#/components/schemas/ScreenDisplayReported"}
+        control:
+          type: string
+          enum: [hardware, scrim, unknown]
+          description: >-
+            Advertised control: hardware means serial, CEC, DDC or backlight; scrim means only a black overlay, so on removes that overlay and sends no hardware wake command; unknown means no known method was declared. A hardware method is not proof that a panel obeyed it.
+        override_status:
+          type: string
+          enum: [pending, matches, mismatch, stale, unknown]
+          description: >-
+            Present only for an active manual override. Compares the latest display observation with that override: pending means no report newer than set_at; stale means the report is over 35 minutes old; unknown means unusable time, unknown power or a disconnected display. A fresh newer report is matches when on is reported for requested on, or off/standby for requested off; otherwise mismatch. This comparison neither acknowledges command execution nor proves physical panel power. Saving an override does not wait for a report.
     ScreenDisplayReported:
       type: object
       additionalProperties: false
@@ -38785,6 +39212,8 @@ x-problem-registry: ./problems.yaml
 x-problem-codes:
   - free_organization_limit
   - project_limit_reached
+  - billed_by_reseller
+  - reseller_conflict
   - feature_not_in_plan
   - organization_plan_required
   - project_name_conflict

@@ -639,6 +639,9 @@ export interface ScreenDisplay {
   schedule?: ScreenDisplaySchedule;
   override?: ScreenDisplayOverride;
   reported?: ScreenDisplayReported;
+  control?: "hardware" | "scrim" | "unknown";
+  /** Observation comparison for an active override, never command acknowledgement. */
+  override_status?: "pending" | "matches" | "mismatch" | "stale" | "unknown";
 }
 
 export interface ScreenDisplayScheduleView {
@@ -1078,6 +1081,7 @@ export interface ScreenActionScreenResult {
   toast?: ScreenToastAccepted;
   reboot?: ScreenRebootAccepted;
   command?: ScreenMaintenanceAccepted;
+  display?: ScreenDisplay;
   problem?: { type?: string; title?: string; status?: number; detail?: string; code?: string; [key: string]: unknown };
 }
 

@@ -1,4 +1,5 @@
 import type { ScreenDisplay, ScreenRebootSchedule, ScreenScheduleWindow } from "./adapters/protocol.js";
+import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import { campaignWindow, campaignWindowSpec, CAMPAIGN_WINDOWS_MAX } from "./campaigns.js";
 import { durationMs, instantInZone, normalizeInstant, scheduleWindow } from "./screen-control.js";
@@ -111,12 +112,41 @@ export function untilOption(value: string): string {
   return value;
 }
 
+/** Saving an override succeeds independently of what the next health report observes. */
+export function displayWarnings(screenId: string, display: ScreenDisplay | undefined): Warning[] {
+  if (!display?.override) return [];
+  const warnings: Warning[] = [];
+  const status = display.override_status;
+  if (status === "mismatch") {
+    warnings.push({
+      code: "display_power_mismatch",
+      message: `Screen ${screenId}: The ${display.requested} override is saved, but the latest report still says power ${display.reported?.power} at ${display.reported?.reported_at}. Recheck screen show ${screenId} before capturing; saving an override does not confirm a wake or explain a capture failure.`,
+    });
+  } else if (status === "pending" || status === "stale" || status === "unknown") {
+    const reason = status === "pending" ? "waiting for a display report newer than the override"
+      : status === "stale" ? "the latest display report is stale"
+        : "the latest display observation cannot establish power";
+    warnings.push({
+      code: "display_power_unconfirmed",
+      message: `Screen ${screenId}: The ${display.requested} override is saved; ${reason}. Recheck screen show ${screenId} before capturing.`,
+    });
+  }
+  if (display.control === "scrim") {
+    warnings.push({
+      code: "display_scrim_only",
+      message: `Screen ${screenId}: This Player controls only a black overlay. Display on removes that overlay and sends no hardware wake command. Wake a sleeping display with its device controls.`,
+    });
+  }
+  return warnings;
+}
+
 /** `Display:` lines for screen show --human; nothing when the screen has no display state. */
 export function displayLines(display: ScreenDisplay | undefined, timezone: string | undefined): string[] {
   if (!display || typeof display !== "object" || (display.requested !== "on" && display.requested !== "off")) return [];
   const source = display.source === "override" ? "manual override" : display.source === "schedule" ? "display schedule" : "default";
   const until = typeof display.until === "string" ? ` until ${instantInZone(display.until, timezone)}` : display.source === "override" ? " until replaced" : "";
   const lines = [`Display: ${display.requested} (${source}${until})`];
+  if (display.override_status) lines.push(`Display override observation: ${display.override_status} (report comparison, not command acknowledgement)`);
   const schedule = display.schedule;
   if (schedule && Array.isArray(schedule.windows)) {
     lines.push(`Display schedule: ${schedule.enabled ? "enabled" : "disabled (display stays on)"}, ${schedule.windows.length} window${schedule.windows.length === 1 ? "" : "s"}${timezone ? ` in ${timezone}` : ""}`);

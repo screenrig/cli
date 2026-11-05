@@ -10,7 +10,7 @@ import { callPlaylist } from "../playlist-api.js";
 import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
-import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
+import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, displayWarnings, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "../screen-commands.js";
 import { flatFrameNote, frameRow, glassLines } from "../screen-glass.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "../screen-live.js";
@@ -562,7 +562,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
   const screen = response.body as Screen | undefined;
   const requestId = client.requestId;
   const notes = await resourceNotes(runtime, client, "screen", id);
-  const warnings = screenStorageWarnings(id, screen, runtime.now());
+  const warnings = [...screenStorageWarnings(id, screen, runtime.now()), ...displayWarnings(id, screen?.display)];
   return {
     envelope: jsonBody(response, requestId, undefined, [...notes.warnings, ...warnings]),
     exitCode: ExitCode.Success,
@@ -1059,11 +1059,12 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
     if (wait > 0 && Number.isFinite(wait)) await runtime.sleep(wait * 1000);
   }
   const outcome = fleetOutcome(result);
+  const displayNotes = result.results.flatMap((item) => item.status === "ok" ? displayWarnings(item.screen_id, item.display) : []);
   // The tag actions answer the campaigns the screens entered or left, page by page; the envelope carries them added up.
   const levels = sumLevels(pageLevels);
   if (levels) result.levels = levels;
   return {
-    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, [...outcome.warnings, ...answerWarnings]),
+    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, [...outcome.warnings, ...answerWarnings, ...displayNotes]),
     exitCode: outcome.exitCode,
     human: [
       fleetHumanLines(title, result, (item) => {
@@ -1078,6 +1079,7 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
       }),
       ...levelsLines(levels),
       ...outcome.warnings.map((warning) => `warning: ${warning.message}`),
+      ...displayNotes.map((warning) => `warning: ${warning.message}`),
     ].join("\n"),
     keepRecoveryUntilOutput: true,
   };
@@ -2432,10 +2434,11 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
     throw displayProblem(screenControlProblem(error, id), id);
   }
   const screen = response.body as Screen | undefined;
+  const warnings = displayWarnings(id, screen?.display);
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: displayHuman(`Display ${power} on ${id} ${until ? `until ${instantInZone(until, screen?.timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen),
+    human: [displayHuman(`Display override saved on ${id}: requested ${power} ${until ? `until ${instantInZone(until, screen?.timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
