@@ -283,7 +283,14 @@ export async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntim
   invocationTargets.set(runtime, resolved);
   if (!resolved.projectName || !resolved.organizationName) {
     const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
-    const response = await client.call({ method: "GET", path: "/api/project" });
+    const response = await client.call({ method: "GET", path: "/api/project" }).catch((error: unknown) => {
+      // Uploaders cannot read project settings. Display names are optional;
+      // the requested operation still enforces the client's current scope.
+      if (serviceCredentials.has(runtime) && error instanceof CliError
+        && error.problem.status === 403 && error.problem.code === "outside_upload_scope") return undefined;
+      throw error;
+    });
+    if (!response) return resolved;
     const context = contextFromProject(response.body as Project);
     if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
     resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });

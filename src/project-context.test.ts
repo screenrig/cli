@@ -101,6 +101,17 @@ test("legacy credentials retain their flat routes and exact human publish output
   assert.ok(f.transport.calls.every(call => !call.path.startsWith("/api/projects/")));
 });
 
+test("an uploader context refusal is not ignored for an agent credential", async t => {
+  const f = await fixture(t, { token: subset(A) });
+  f.transport.on("GET", `/api/projects/${A}/project`, () => ({ status: 403, headers: {}, body: {
+    status: 403, code: "outside_upload_scope", title: "Outside upload scope", detail: "Refused project context.",
+  } }));
+  const result = await f.invoke("playlist", "list");
+  assert.equal(result.code, 3, result.stdout);
+  assert.equal(JSON.parse(result.stdout).error.code, "outside_upload_scope");
+  assert.deepEqual(f.transport.calls.map(call => call.path), [`/api/projects/${A}/project`]);
+});
+
 test("project-scoped remote playlist preparation resolves context before reading the screen", async t => {
   const f = await fixture(t, { token: subset(A) });
   f.transport.on("GET", `/api/projects/${A}/project`, () => ({ status: 200, headers: {}, body: project(A) }));
