@@ -2630,6 +2630,8 @@
   var LOCAL_PLAYER_ORIGIN = "http://play.screenrig.localhost:8088";
   var LOCAL_EDGE_PLAYER_ORIGIN = "http://play.screenrig.localhost:18880";
   var STAGE_PLAYER_ORIGIN = "https://play.stage.screenrig.ai";
+  var DASHBOARD_ORIGIN = "https://screenrig.ai";
+  var STAGE_DASHBOARD_ORIGIN = "https://stage.screenrig.ai";
   var LOCAL_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.screenrig\.localhost$/;
   var LOCAL_PORTS = [
     { port: "8088", playerOrigin: LOCAL_PLAYER_ORIGIN },
@@ -2670,10 +2672,27 @@
     }
     return [DEFAULT_PLAYER_ORIGIN];
   }
+  function resolveDashboardParentOrigin(location) {
+    if (location === void 0) {
+      return void 0;
+    }
+    const localParent = localReleaseParentOrigin(location);
+    if (localParent !== void 0) {
+      return localParent.replace("://play.", "://");
+    }
+    if (isStageReleaseDocument(location)) {
+      return STAGE_DASHBOARD_ORIGIN;
+    }
+    if (isNativePackageDocument(location) || location.protocol !== "https:") {
+      return void 0;
+    }
+    return DASHBOARD_ORIGIN;
+  }
   function resolveTrustedParentPolicy(location) {
     const namedQtPackage = (location == null ? void 0 : location.protocol) === "screenrig-app:" && /^[a-f0-9]{32}\.[a-f0-9]{32}$/.test(location.hostname) && location.port === "" && location.origin === `screenrig-app://${location.hostname}`;
+    const dashboard = resolveDashboardParentOrigin(location);
     return {
-      origins: resolveTrustedPlayerOrigins(location),
+      origins: [...resolveTrustedPlayerOrigins(location), ...dashboard === void 0 ? [] : [dashboard]],
       allowOpaqueNativeParent: (location == null ? void 0 : location.protocol) === "screenrig-app:" && location.origin === "null",
       ...namedQtPackage ? { nativeParentOrigin: "qrc:" } : {}
     };

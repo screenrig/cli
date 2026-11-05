@@ -11147,9 +11147,10 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listKV
-      description: Returns at most 200 entries in ascending key order. next_cursor is the last returned key; pass it back as after to fetch the next page. next_cursor is null when there are no more entries.
+      description: Returns at most 200 entries in ascending key order. next_cursor is the last returned key; pass it back as after to fetch the next page. next_cursor is null when there are no more entries. A dashboard session reads its project's entries here for the web app preview; the dashboard has no KV write.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ApplicationID'
         - name: after
@@ -11180,6 +11181,7 @@ paths:
       operationId: getKV
       security:
         - projectBearer: []
+        - dashboardSession: []
       responses:
         '200':
           description: KV entry
