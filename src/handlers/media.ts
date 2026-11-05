@@ -18,7 +18,7 @@ import { quotedRevision } from "../if-match.js";
 import { uploadMediaFile } from "../media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "../media-upload-batch.js";
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "../media-generate-retry.js";
-import { MEDIA_FOLDER_ID_PATTERN, clientFor, commandHandler, humanLines, jsonBody, mediaFolderId, progressReporterFor, requireFlagValue, requireInputFile, resolveDownloadOutput, simpleGet, simpleList, transcodeOptionsFromArgs, type CommandResult } from "../commands.js";
+import { MEDIA_FOLDER_ID_PATTERN, clientFor, commandHandler, libraryQuery, humanLines, jsonBody, mediaFolderId, progressReporterFor, requireFlagValue, requireInputFile, resolveDownloadOutput, simpleGet, simpleList, transcodeOptionsFromArgs, type CommandResult } from "../commands.js";
 
 
 export const MEDIA_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
@@ -53,6 +53,7 @@ export const handleMediaList = commandHandler(async (args, runtime, resolved) =>
   return simpleList(args, runtime, resolved, "/api/media", "Media", {
     tag: mediaTagFromArgs(args),
     primitive: mediaPrimitiveFromArgs(args),
+    ...libraryQuery(args),
     ...(folder === undefined ? {} : { folder: folder === "root" ? folder : mediaFolderId(folder, "--folder") }),
   });
 }, true);
@@ -130,7 +131,7 @@ export async function uploadFolderFromArgs(args: ParsedArgs, client: ApiClient):
 }
 
 export const handleMediaFolderList = commandHandler(async (args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/media-folders", "Media folders"), true);
+  simpleGet(args, runtime, resolved, "/api/media-folders", "Media folders", libraryQuery(args)), true);
 
 export const handleMediaFolderShow = commandHandler(async (args, runtime, resolved) =>
   simpleGet(args, runtime, resolved, `/api/media-folders/${mediaFolderId(args.positionals[3], "media folder show <id>")}`, "Media folder"), true);

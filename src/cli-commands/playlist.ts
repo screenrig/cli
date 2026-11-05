@@ -143,6 +143,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("list").description("List playlists")
     .option("--templates", "Only templates: playlists that declare fields")
+    .option("--library", "List the organization Library's playlists instead (read-only)")
     .action(bind(handlePlaylistList));
 
   playlist.command("revisions").description("List a playlist's revisions, newest first, one page at a time")

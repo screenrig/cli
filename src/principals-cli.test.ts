@@ -38,7 +38,7 @@ async function fixture(t: TestContext, config?: ScreenRigConfig) {
     stdout.on("data", chunk => { out += String(chunk); });
     stderr.on("data", chunk => { err += String(chunk); });
     const code = await run({ argv, settings: fs.settings, fs, homedir: fs.homedir, cwd: () => process.cwd(), stdout, stderr, transport, now: () => new Date("2026-10-04T12:00:00Z"), sleep: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 10))) });
-    return { code, out, err, result: JSON.parse(out) };
+    return { code, out, err, get result() { return JSON.parse(out); } };
   };
   /** The authorization server renews a project's access token the first time a command targets it. */
   const renews = (tokens: Record<string, string>) => {
@@ -83,11 +83,15 @@ test("organization administration uses explicit IDs and preserves concurrent pro
   const id = context(A, "Screens").organization.id;
   f.transport.on("GET", "/api/organizations", req => {
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
-    return { status: 200, headers: {}, body: { organizations: [{ id, name: "Acme", admin: true, free: true, plan_required: false, revision: 1 }, { id: "org_BBBBBBBBBBBBBBBBBBBBBBBB", name: "Acme", admin: false, revision: 1 }], new_organization_allowed: false } };
+    return { status: 200, headers: {}, body: { organizations: [{ id, name: "Acme", admin: true, free: true, plan_required: false, library_project_id: B, revision: 1 }, { id: "org_BBBBBBBBBBBBBBBBBBBBBBBB", name: "Acme", admin: false, revision: 1 }], new_organization_allowed: false } };
   });
   const listed = await f.invoke("organization", "list");
   assert.equal(listed.result.data.organizations.length, 2);
   assert.equal(listed.result.data.organizations[0].free, true);
+  assert.equal(listed.result.data.organizations[0].library_project_id, B);
+  const human = await f.invoke("--human", "organization", "list");
+  assert.match(human.out, new RegExp(`Acme: ${id} \\(admin, free, Library ${B}\\)`));
+  assert.match(human.out, /^Acme: org_BBBBBBBBBBBBBBBBBBBBBBBB$/m);
   assert.equal(listed.result.data.new_organization_allowed, false);
   assert.equal((await f.saved())?.project_id, A);
   f.transport.on("PATCH", `/api/organizations/${id}`, async req => {

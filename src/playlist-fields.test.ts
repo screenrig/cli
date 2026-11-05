@@ -161,6 +161,32 @@ test("playlist instances and list --templates", async (t) => {
   assert.equal(all.length, 2);
 });
 
+test("playlist list --library lists the organization Library and marks its rows in the table", async (t) => {
+  const LIBRARY = "prj_LLLLLLLLLLLLLLLLLLLLLLLL";
+  const library = [{ id: TEMPLATE, name: "Notice template", revision: 4, library: true, project_id: LIBRARY, fields: fields() }, { id: COPY, name: "House loop", revision: 2, library: true, project_id: LIBRARY }];
+  const own = [{ id: COPY, name: "Monday", revision: 3, updated_at: "2026-10-20T10:00:00Z" }];
+  const transport = new FakeTransport().on("GET", "/api/playlists", (request) => answer({ items: request.query?.library === "true" ? library : own, next_cursor: null }));
+  const invoke = await cli(t, transport);
+
+  const listed = await invoke(["--json", "playlist", "list", "--library"]);
+  assert.equal(listed.code, ExitCode.Success, listed.output);
+  assert.equal(transport.calls.at(-1)?.query?.library, "true");
+  assert.deepEqual(JSON.parse(listed.output).data.items, library, "JSON rows pass through unchanged");
+
+  const templates = JSON.parse((await invoke(["--json", "playlist", "list", "--library", "--templates"])).output).data.items;
+  assert.equal(transport.calls.at(-1)?.query?.library, "true");
+  assert.deepEqual(templates.map((item: { id: string }) => item.id), [TEMPLATE]);
+
+  const human = (await invoke(["--human", "playlist", "list", "--library"])).output;
+  assert.match(human, /ID\tRevision\tUpdated\tName\tLibrary/);
+  assert.match(human, new RegExp(`${TEMPLATE}\\t4\\t—\\tNotice template\\tLibrary`));
+
+  const ownHuman = (await invoke(["--human", "playlist", "list"])).output;
+  assert.equal(transport.calls.at(-1)?.query?.library, undefined, "the project's own list sends no library query");
+  assert.match(ownHuman, /ID\tRevision\tUpdated\tName\n/);
+  assert.doesNotMatch(ownHuman, /Library/);
+});
+
 test("playlist create from a file keeps fields and refuses a template that fails offline", async (t) => {
   const bodies: unknown[] = [];
   const transport = new FakeTransport().on("POST", "/api/playlists", (request) => { bodies.push(request.body); return answer({ id: TEMPLATE, name: "Notice template", revision: 1, pages: [] }, 201); });

@@ -579,6 +579,11 @@ export function requireFlagValue(args: ParsedArgs, name: string, example: string
 
 export const MEDIA_FOLDER_ID_PATTERN = /^(?:(?:stage|qa|development)_)?mfd_[A-Za-z0-9]{1,64}$/;
 
+/** `--library` on a media, media folder or playlist list: the query that lists the organization Library's items instead. */
+export function libraryQuery(args: ParsedArgs): { library?: string } {
+  return flagBool(args.flags, "library") ? { library: "true" } : {};
+}
+
 export function mediaFolderId(value: string | undefined, label: string): string {
   if (!value || !MEDIA_FOLDER_ID_PATTERN.test(value)) {
     throw usageError(`${label} must be a media folder ID (mfd_...); media folder list shows them.`);

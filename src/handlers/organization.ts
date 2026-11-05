@@ -9,9 +9,9 @@ export const handleOrganizationList = commandHandler(async (args, runtime, resol
   const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const response = await client.call({ method: "GET", path: "/api/organizations" });
-  const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean; free?: boolean; plan_required?: boolean }>; new_organization_allowed?: boolean };
+  const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean; free?: boolean; plan_required?: boolean; library_project_id?: string }>; new_organization_allowed?: boolean };
   if (!Array.isArray(body?.organizations) || body.organizations.some(org => !org || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(org.id) || typeof org.name !== "string" || typeof org.admin !== "boolean")) throw configError("Organization list does not match the contract.");
-  const tags = (org: { admin: boolean; free?: boolean; plan_required?: boolean }) => [org.admin && "admin", org.free === true && "free", org.plan_required === true && "plan required"].filter(Boolean).join(", ");
+  const tags = (org: { admin: boolean; free?: boolean; plan_required?: boolean; library_project_id?: string }) => [org.admin && "admin", org.free === true && "free", org.plan_required === true && "plan required", org.library_project_id && `Library ${org.library_project_id}`].filter(Boolean).join(", ");
   const lines = body.organizations.map(org => `${validateDisplayName(org.name, "Organization name")}: ${org.id}${tags(org) ? ` (${tags(org)})` : ""}`);
   if (body.new_organization_allowed === false) lines.push("New organization: add projects to an existing organization; another needs a paid plan.");
   return { envelope: successEnvelope(body, { request_id: client.requestId }), exitCode: ExitCode.Success,

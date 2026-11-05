@@ -96,7 +96,7 @@ export interface ProjectFeatures {
 /** One plan feature and whether the project's plan or featuresets include it (`ProjectPlanFeature` in the contract). */
 export interface ProjectPlanFeature {
   enabled: boolean;
-  id: "video_walls" | "live_view" | "glass_monitoring" | "alert_routing" | "reports" | "bi_dashboards" | "connectors" | "media_sync" | "playlist_templates" | "uploaders" | "direct_campaigns" | "scheduled_reboots" | "sso" | "scim" | "screen_scope" | "protected_folders" | "change_control" | "audit_log" | "schedule_import" | "momentus";
+  id: "video_walls" | "live_view" | "glass_monitoring" | "alert_routing" | "reports" | "bi_dashboards" | "connectors" | "media_sync" | "playlist_templates" | "uploaders" | "direct_campaigns" | "library" | "scheduled_reboots" | "sso" | "scim" | "screen_scope" | "protected_folders" | "change_control" | "audit_log" | "schedule_import" | "momentus";
   /** The lowest sold plan that includes the feature. */
   required_plan: "plus" | "premium" | "enterprise";
 }

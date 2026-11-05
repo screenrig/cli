@@ -28,7 +28,7 @@ import { playlistNeedsTimezone } from "../generated/playlist-write-semantics.js"
 import { uploadMediaFile, type MediaUploadTiming } from "../media-upload.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "../playlist-bundle.js";
 import { validatePlaylistCards } from "../cards.js";
-import { clientFor, commandHandler, humanLines, jsonBody, pendingReviewResult, playlistWriteResult, progressReporterFor, requireFlagValue, resolveProjectContext, resourceNotes, reviewNoteFrom, scheduleZoneError, simpleList, transcodeOptionsFromArgs, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
+import { clientFor, commandHandler, humanLines, jsonBody, libraryQuery, pendingReviewResult, playlistWriteResult, progressReporterFor, requireFlagValue, resolveProjectContext, resourceNotes, reviewNoteFrom, scheduleZoneError, simpleList, transcodeOptionsFromArgs, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
 export const handlePlaylistValidate = commandHandler(async (args, runtime) => {
@@ -55,15 +55,17 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime) => {
 
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
 
-  const result = await simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
+  const result = await simpleList(args, runtime, resolved, "/api/playlists", "Playlists", libraryQuery(args));
   if (result.envelope.ok) {
-    const data = result.envelope.data as { items?: Array<{ id: string; name: string; revision: number; updated_at?: string; fields?: unknown[] }> };
+    const data = result.envelope.data as { items?: Array<{ id: string; name: string; revision: number; updated_at?: string; fields?: unknown[]; library?: boolean }> };
     if (Array.isArray(data.items) && flagBool(args.flags, "templates")) {
       data.items = data.items.filter((item) => Array.isArray(item.fields) && item.fields.length > 0);
     }
     if (Array.isArray(data.items)) {
-      result.human = ["Playlists", "ID\tRevision\tUpdated\tName",
-        ...data.items.map((item) => `${item.id}\t${item.revision}\t${item.updated_at ?? "—"}\t${item.name}`),
+      // Library rows (read-only items of the organization Library) get a Library column; a project's own list keeps its four.
+      const marked = data.items.some((item) => item.library === true);
+      result.human = ["Playlists", `ID\tRevision\tUpdated\tName${marked ? "\tLibrary" : ""}`,
+        ...data.items.map((item) => `${item.id}\t${item.revision}\t${item.updated_at ?? "—"}\t${item.name}${marked ? `\t${item.library === true ? "Library" : ""}` : ""}`),
       ].join("\n");
     }
   }

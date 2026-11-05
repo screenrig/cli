@@ -187,6 +187,38 @@ const mediaRow = (id: string, folderId?: string) => ({
   ...(folderId ? { folder_id: folderId } : {}),
 });
 
+test("media list and media folder list --library list the organization Library and pass its rows through", async () => {
+  const configDir = await testTemp("media-library-");
+  await enrolled(configDir);
+  const LIBRARY = "prj_LLLLLLLLLLLLLLLLLLLLLLLL";
+  const libraryFolder = { ...folder(FOLDER, "Brand", null), library: true, project_id: LIBRARY };
+  const libraryFile = { ...mediaRow(FILE, FOLDER), library: true, project_id: LIBRARY };
+  const transport = new FakeTransport()
+    .on("GET", "/api/media", (req) => json(200, { items: req.query?.library === "true" ? [libraryFile] : [mediaRow(FILE_2)], next_cursor: null }))
+    .on("GET", "/api/media-folders", (req) => json(200, { items: req.query?.library === "true" ? [libraryFolder] : [folder(OTHER, "Menus", null)] }));
+  try {
+    const items = async (...argv: string[]) => {
+      const result = await withRuntime(["--json", ...argv], transport, configDir);
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      return (JSON.parse(result.stdout) as { data: { items: unknown[] } }).data.items;
+    };
+    assert.deepEqual(await items("media", "list", "--library"), [libraryFile]);
+    assert.equal(transport.calls.at(-1)?.query?.library, "true");
+    assert.deepEqual(await items("media", "list", "--library", "--folder", FOLDER), [libraryFile]);
+    assert.equal(transport.calls.at(-1)?.query?.library, "true");
+    assert.equal(transport.calls.at(-1)?.query?.folder, FOLDER);
+    assert.deepEqual(await items("media", "folder", "list", "--library"), [libraryFolder]);
+    assert.equal(transport.calls.at(-1)?.query?.library, "true");
+    // Without the flag the project's own items are listed and no library query is sent.
+    assert.equal(((await items("media", "list"))[0] as { id: string }).id, FILE_2);
+    assert.equal(transport.calls.at(-1)?.query?.library, undefined);
+    assert.equal(((await items("media", "folder", "list"))[0] as { id: string }).id, OTHER);
+    assert.equal(transport.calls.at(-1)?.query?.library, undefined);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("media list --folder sends the folder to the API and refuses a malformed id", async () => {
   const configDir = await testTemp("media-list-folder-");
   await enrolled(configDir);

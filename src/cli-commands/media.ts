@@ -127,6 +127,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--tag <TAG>", "Filter media by tag")
     .addOption(new Option("--primitive <image|video|audio>", "Filter by media primitive").choices(["image", "video", "audio"]))
     .option("--folder <ID|root>", "Only files directly in this folder (mfd_...), or root for the library root")
+    .option("--library", "List the organization Library's media instead (read-only)")
     .action(bind(handleMediaList));
 
   const selectorPreview = media.command("selector-preview").description("Preview current selector matches without advancing playback")
@@ -169,6 +170,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
 
   const folder = media.command("folder").description("List, create, rename, move, and delete media library folders");
   folder.command("list").description("List the project's media folders; parent_id builds the tree")
+    .option("--library", "List the organization Library's folders instead (read-only)")
     .action(bind(handleMediaFolderList));
   folder.command("show").description("Inspect a media folder")
     .argument("<id>", "Media folder identifier (mfd_...)")
