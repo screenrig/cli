@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
+import type { SignedRawPut } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
@@ -30,9 +31,9 @@ function decodePart(part: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
 }
 
-function serviceToken(): string {
+function serviceToken(scope = "access:manage screens content"): string {
   const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${part({ alg: "EdDSA", typ: "at+jwt" })}.${part({ sub: `client:${CLIENT}`, client_id: CLIENT, prj: PROJECT, scope: "access:manage screens content", exp: Math.floor(NOW.getTime() / 1000) + 900, jti: `j${Math.random()}` })}.${"c2lnbmF0dXJl".repeat(4)}`;
+  return `${part({ alg: "EdDSA", typ: "at+jwt" })}.${part({ sub: `client:${CLIENT}`, client_id: CLIENT, prj: PROJECT, scope, exp: Math.floor(NOW.getTime() / 1000) + 900, jti: `j${Math.random()}` })}.${"c2lnbmF0dXJl".repeat(4)}`;
 }
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): TransportResponse {
@@ -43,17 +44,17 @@ function form(req: TransportRequest): URLSearchParams {
   return new URLSearchParams(String(req.body));
 }
 
-function server(onToken: (req: TransportRequest) => TransportResponse): FakeTransport {
+function server(onToken: (req: TransportRequest) => TransportResponse, projectResponse = json(200, { id: PROJECT, name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", revision: 1, status: "active" })): FakeTransport {
   return new FakeTransport()
     .on("GET", "/.well-known/oauth-authorization-server", () => json(200, {
       issuer: API, token_endpoint: `${API}/oauth/token`, revocation_endpoint: `${API}/oauth/revoke`,
       token_endpoint_auth_methods_supported: ["none", "private_key_jwt", "client_secret_basic"],
     }))
     .on("POST", "/oauth/token", onToken)
-    .on("GET", "/api/project", () => json(200, { id: PROJECT, name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", revision: 1, status: "active" }));
+    .on("GET", "/api/project", () => projectResponse);
 }
 
-async function cli(dir: string, argv: string[], transport: FakeTransport) {
+async function cli(dir: string, argv: string[], transport: FakeTransport, signedRawPut?: SignedRawPut) {
   const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, settings: { XDG_CONFIG_HOME: dir } };
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -61,7 +62,7 @@ async function cli(dir: string, argv: string[], transport: FakeTransport) {
   const err: Buffer[] = [];
   stdout.on("data", (chunk) => out.push(Buffer.from(chunk)));
   stderr.on("data", (chunk) => err.push(Buffer.from(chunk)));
-  const code = await run({ argv, settings: fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir, cwd: () => dir, fs, transport });
+  const code = await run({ argv, settings: fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined, homedir: () => dir, cwd: () => dir, fs, transport, signedRawPut });
   return { code, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), fs };
 }
 
@@ -80,6 +81,113 @@ async function writeSecret(dir: string): Promise<string> {
   await writeFile(file, `${SECRET}\n`, { mode: 0o600 });
   return file;
 }
+
+const UPLOADER_PLAYLIST = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
+const UPLOADER_MEDIA = "med_AAAAAAAAAAAAAAAAAAAAAAAA";
+const UPLOADER_FOLDER = "mfd_AAAAAAAAAAAAAAAAAAAAAAAA";
+const uploadScope = { playlist_ids: [UPLOADER_PLAYLIST], folder_ids: [UPLOADER_FOLDER], access: "propose" };
+const outsideUploadScope = json(403, { status: 403, title: "Outside upload scope", errors: [{ code: "outside_upload_scope", detail: "This request is outside the uploader's scope.", upload_scope: uploadScope }] });
+
+for (const method of ["key", "secret"] as const) {
+  test(`a scoped uploader using a ${method} can read, upload and propose pages without project display access`, async t => {
+    const dir = await testTemp("service-uploader-");
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    if (method === "key") {
+      const keyFile = path.join(dir, "client.jwk");
+      await writeFile(keyFile, JSON.stringify(generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" })), { mode: 0o600 });
+      await saveClient(dir, { keyFile });
+    } else {
+      await saveClient(dir, { secretFile: await writeSecret(dir) });
+    }
+    const configPath = path.join(dir, "screenrig", "config.json");
+    const before = await readFile(configPath, "utf8");
+    const imageFile = path.join(dir, "poster.png");
+    const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9ioAAAAASUVORK5CYII=", "base64");
+    await writeFile(imageFile, bytes);
+    const token = serviceToken("access:propose content playlists");
+    const transport = server(() => json(200, { access_token: token, token_type: "Bearer", expires_in: 900 }), outsideUploadScope);
+    const page = { id: "regular", canvas: { width: 1920, height: 1080, background: "#000000FF" },
+      transition: { type: "crossfade", duration_ms: 600 }, advance: { mode: "duration", after_ms: 10000 },
+      primitives: [{ id: "media", primitive: "image", selector: { by: "id", media_id: UPLOADER_MEDIA }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" }] };
+    const playlist = { id: UPLOADER_PLAYLIST, name: "Menu", revision: 7, pages: [page] };
+    const media = { id: UPLOADER_MEDIA, filename: "poster.png", primitive: "image", folder_id: UPLOADER_FOLDER };
+    const pending = { status: "pending_review", review: { id: "rvw_TEST", state: "pending", kind: "playlist_change", subject: { id: UPLOADER_PLAYLIST, type: "playlist", name: "Menu" }, url: "https://screenrig.ai/dashboard/reviews/rvw_TEST" } };
+    const operation = { id: "op_UPLOAD", kind: "media.upload", state: "queued", created_at: NOW.toISOString(), updated_at: NOW.toISOString() };
+    transport
+      .on("GET", "/api/playlists", () => json(200, { items: [playlist], next_cursor: null }))
+      .on("GET", `/api/playlists/${UPLOADER_PLAYLIST}`, () => json(200, playlist))
+      .on("GET", `/api/media/${UPLOADER_MEDIA}`, () => json(200, media))
+      .on("GET", `/api/media-folders/${UPLOADER_FOLDER}`, () => json(200, { id: UPLOADER_FOLDER, name: "Menu" }))
+      .on("GET", "/api/media", request => {
+        assert.equal(request.query?.folder, UPLOADER_FOLDER);
+        return json(200, { items: [media], next_cursor: null });
+      })
+      .on("PUT", `/api/playlists/${UPLOADER_PLAYLIST}/pages/regular`, request => {
+        assert.equal(request.headers?.["if-match"], '"7"');
+        assert.deepEqual(request.body, page);
+        return json(202, pending);
+      })
+      .on("POST", `/api/playlists/${UPLOADER_PLAYLIST}/pages`, request => {
+        assert.deepEqual(request.body, { page: { ...page, id: "lunch" } });
+        return json(202, pending);
+      })
+      .on("POST", "/api/media/uploads", request => {
+        assert.equal((request.body as { folder_id?: string }).folder_id, UPLOADER_FOLDER);
+        return json(201, { id: "upload_TEST", operation, method: "PUT", upload_url: "https://storage.example.invalid/upload",
+          headers: { "content-type": "image/png" }, expires_at: "2099-01-01T00:00:00Z" }, { "cache-control": "private, no-store" });
+      })
+      .on("POST", "/api/media/uploads/upload_TEST/commit", () => json(202, operation))
+      .on("GET", "/api/playlists/pl_BBBBBBBBBBBBBBBBBBBBBBBB", () => outsideUploadScope)
+      .on("GET", "/api/screens", () => outsideUploadScope);
+    let puts = 0;
+    const signedPut: SignedRawPut = async request => {
+      puts += 1;
+      assert.deepEqual(request.body, bytes);
+      return { status: 200 };
+    };
+    const commands = [
+      ["playlist", "list"], ["playlist", "show", UPLOADER_PLAYLIST], ["media", "show", UPLOADER_MEDIA],
+      ["media", "list", "--folder", UPLOADER_FOLDER],
+      ["playlist", "page", "replace", UPLOADER_PLAYLIST, "regular", "--media", UPLOADER_MEDIA],
+      ["playlist", "page", "add", UPLOADER_PLAYLIST, "--page-id", "lunch", "--media", UPLOADER_MEDIA],
+      ["media", "upload", imageFile, "--folder", UPLOADER_FOLDER, "--no-transcode", "--no-wait"],
+    ];
+    for (const command of commands) {
+      const result = await cli(dir, ["--json", ...command], transport, signedPut);
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      const envelope = JSON.parse(result.stdout);
+      assert.equal(envelope.context, undefined, "no display names are invented or borrowed");
+      if (command[1] === "page") assert.equal(envelope.data.status, "pending_review");
+    }
+    assert.equal(puts, 1);
+    assert.equal(transport.calls.filter(call => call.path === "/api/media/uploads/upload_TEST/commit").length, 1);
+    for (const command of [["playlist", "show", "pl_BBBBBBBBBBBBBBBBBBBBBBBB"], ["screen", "list"], ["project", "show"]]) {
+      const result = await cli(dir, ["--json", ...command], transport);
+      assert.equal(result.code, ExitCode.Auth, result.stdout);
+      assert.equal(JSON.parse(result.stdout).error.code, "outside_upload_scope", "the requested operation's refusal is retained");
+    }
+    const calls = transport.calls.length;
+    const mismatch = await cli(dir, ["--project-id", "prj_BBBBBBBBBBBBBBBBBBBBBBBB", "playlist", "list"], transport);
+    assert.equal(JSON.parse(mismatch.stdout).error.code, "config_error");
+    assert.equal(transport.calls.length, calls, "a mismatched project never reaches the API");
+    assert.ok(transport.calls.every(call => call.headers?.authorization === `Bearer ${token}`));
+    assert.equal(await readFile(configPath, "utf8"), before, "credentials and project state stay out of the saved config");
+  });
+}
+
+test("a service client's unrelated project-context failures still stop before its requested operation", async t => {
+  const dir = await testTemp("service-context-refusal-");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await saveClient(dir, { secretFile: await writeSecret(dir) });
+  for (const [status, code] of [[403, "insufficient_access"], [500, "internal_error"], [500, "outside_upload_scope"]] as const) {
+    const transport = server(() => json(200, { access_token: serviceToken(), token_type: "Bearer", expires_in: 900 }),
+      json(status, { status, code, title: "Refused", detail: "Project context unavailable." }));
+    const result = await cli(dir, ["playlist", "list"], transport);
+    assert.notEqual(result.code, ExitCode.Success);
+    assert.equal(JSON.parse(result.stdout).error.code, code);
+    assert.ok(transport.calls.every(call => call.path === "/api/project"));
+  }
+});
 
 test("login --client-id saves the client and its secret file in the config; the secret itself is never stored", async () => {
   const dir = await testTemp("service-save-");
