@@ -1,6 +1,7 @@
 import { assertProjectCredential, projectConfigFor, withProjectConfig } from "./project-state.js";
 import { createHash } from "node:crypto";
-import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig, type ScreenRigConfig } from "./config.js";
+import { readConfigFile, sameCredential, withConfigLock, writeConfigAtomic, type ResolvedConfig, type ScreenRigConfig } from "./config.js";
+import { accessClaims } from "./oauth.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
 import { configError, usageError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
@@ -46,7 +47,13 @@ export class WriteRecovery {
         if (!config) {
           throw configError("Agent credential changed during write recovery; retry with the current installation.");
         }
-        assertProjectCredential(config, this.resolved);
+        // Project creation is an identity write and refreshes its own subset
+        // before finishing. That rotation must not strand its recovery key.
+        if (this.command === "project create") {
+          if (!sameCredential(config.identity_token, this.resolved.token, "identity")) {
+            throw configError("The sign-in changed during project creation. Retry with the current sign-in.");
+          }
+        } else assertProjectCredential(config, this.resolved);
         const pending = ledger(config);
         const result = work(config, pending);
         const { pending_writes: _old, ...rest } = config;
@@ -76,12 +83,17 @@ export class WriteRecovery {
       .map(([name, value]) => [name.toLowerCase(), value]).sort(([a], [b]) => a!.localeCompare(b!));
     const body = request.body === undefined ? undefined : request.body instanceof Uint8Array
       ? request.body : typeof request.body === "string" ? request.body : JSON.stringify(request.body);
-    const hash = createHash("sha256").update(JSON.stringify([
-      this.resolved.apiUrl, this.resolved.token, request.method, request.path,
-      Object.entries(request.query ?? {}).sort(), headers, body === undefined ? "absent" : "present",
-    ]));
-    if (body !== undefined) hash.update(body);
-    const fingerprint = hash.digest("hex");
+    const fingerprintFor = (credential: string | undefined) => {
+      const hash = createHash("sha256").update(JSON.stringify([
+        this.resolved.apiUrl, credential, request.method, request.path,
+        Object.entries(request.query ?? {}).sort(), headers, body === undefined ? "absent" : "present",
+      ]));
+      if (body !== undefined) hash.update(body);
+      return hash.digest("hex");
+    };
+    const grant = this.command === "project create" ? accessClaims(this.resolved.token)?.sid : undefined;
+    const fingerprint = fingerprintFor(grant ? `grant:${grant}` : this.resolved.token);
+    const legacyFingerprint = fingerprintFor(this.resolved.token);
     const scope = supersede === undefined ? undefined : createHash("sha256")
       .update(JSON.stringify([this.resolved.apiUrl, this.resolved.token, "supersede", supersede])).digest("hex");
     const pending = await this.update((_config, entries) => {
@@ -90,7 +102,8 @@ export class WriteRecovery {
           if (other !== fingerprint && entry.supersede === scope) delete entries[other];
         }
       }
-      const existing = entries[fingerprint];
+      // Recover creations saved by a released CLI before grant-bound keys.
+      const existing = entries[fingerprint] ?? entries[legacyFingerprint];
       const reuse = existing && (!requestedKey || requestedKey === existing.idempotency_key);
       if (reuse && this.runtime.now().getTime() - Date.parse(existing.created_at) >= SAFE_REPLAY_MS) {
         throw usageError("This unresolved write is older than the safe replay window. Run screenrig recovery list and inspect the resource before using screenrig recovery reconcile ID or explicitly supplying a new --idempotency-key for a reconciled write.");
@@ -99,6 +112,7 @@ export class WriteRecovery {
         throw configError("Too many unresolved writes. Run screenrig recovery list, inspect the remote outcome, then use screenrig recovery reconcile ID before starting another mutation.");
       }
       const key = reuse ? existing.idempotency_key : requestedKey ?? newIdempotencyKey();
+      if (legacyFingerprint !== fingerprint) delete entries[legacyFingerprint];
       entries[fingerprint] = reuse ? existing : { idempotency_key: key, created_at: this.runtime.now().toISOString(),
         ...(safeCommand(this.command) ? { command: safeCommand(this.command)! } : {}),
         ...(scope ? { supersede: scope } : {}) };

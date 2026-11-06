@@ -19,6 +19,10 @@ const SCOPE = "access:manage screens content playlists advertising reports proje
 function access(project?: string): string {
   return fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", exp: 4102444800, scope: SCOPE, ...(project ? { prj: project } : {}) });
 }
+function subset(...projects: string[]): string {
+  return fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", exp: 4102444800, scope: SCOPE,
+    projects: Object.fromEntries(projects.map(id => [id, [...AGENT_CAPABILITIES]])) });
+}
 const TOKEN_A = access(A), IDENTITY = TOKEN_A, TOKEN_B = TOKEN_A;
 const REFRESH = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", gen: 1, exp: 4102444800 });
 const GRANT = { issuer: API, client_id: "screenrig-cli", refresh_token: REFRESH, identity: true };
@@ -40,11 +44,12 @@ async function fixture(t: TestContext, config?: ScreenRigConfig) {
     const code = await run({ argv, settings: fs.settings, fs, homedir: fs.homedir, cwd: () => process.cwd(), stdout, stderr, transport, now: () => new Date("2026-10-04T12:00:00Z"), sleep: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 10))) });
     return { code, out, err, get result() { return JSON.parse(out); } };
   };
-  /** The authorization server renews a project's access token the first time a command targets it. */
-  const renews = (tokens: Record<string, string>) => {
+  /** Authorization-server fixture for explicit subset refreshes. */
+  const renews = (tokens: Record<string, string>, before?: () => void) => {
     transport.on("GET", "/.well-known/oauth-authorization-server", () => ({ status: 200, headers: { "content-type": "application/json" },
       body: { issuer: API, token_endpoint: `${API}/oauth/token`, revocation_endpoint: `${API}/oauth/revoke`, device_authorization_endpoint: `${API}/oauth/device_authorization` } }));
     transport.on("POST", "/oauth/token", req => {
+      before?.();
       const token = tokens[new URLSearchParams(String(req.body)).get("projects") ?? ""];
       assert.ok(token, "a renewal names a project this test expects");
       return { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -182,10 +187,100 @@ test("project list and project use under a sign-in preserve both project retries
   assert.doesNotMatch(listed.out + used.out + shown.out, /eyJ|identity_token/);
 });
 
+test("project creation refreshes its subset before selecting a project for ordinary reads", async t => {
+  const original = subset(A, B), refreshed = subset(A, B, C);
+  const f = await fixture(t, { ...initial(), token: original, identity_token: original });
+  f.renews({ [[A, B, C].join(" ")]: refreshed });
+  f.transport.on("POST", "/api/projects", () => ({ status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Branch") }));
+  f.transport.on("GET", `/api/projects/${C}/project`, req => {
+    assert.equal(req.headers?.authorization, "Bearer " + refreshed);
+    return { status: 200, headers: {}, body: context(C, "Branch").project };
+  });
+  f.transport.on("GET", "/api/media", req => {
+    assert.equal(req.headers?.authorization, "Bearer " + refreshed);
+    assert.equal(req.query?.project, C);
+    return { status: 200, headers: {}, body: { items: [], next_cursor: null } };
+  });
+  const created = await f.invoke("project", "create", "Branch");
+  assert.equal(created.code, 0, created.out);
+  const saved = (await f.saved())!;
+  assert.equal(saved.project_id, C);
+  assert.equal(saved.token, refreshed);
+  assert.deepEqual(saved.token_projects, [A, B, C]);
+  for (const command of [["project", "show"], ["media", "list"]]) {
+    const result = await f.invoke(...command);
+    assert.equal(result.code, 0, result.out);
+    assert.equal(result.result.context.project.id, C);
+  }
+  assert.equal(f.transport.oauthCalls.filter(req => req.path === "/oauth/token").length, 1);
+  assert.doesNotMatch(created.out, /eyJ|refresh_token/);
+});
+
+test("a full project token subset refuses creation before writing anything", async t => {
+  const token = subset(...Array.from({ length: 64 }, (_, i) => `prj_${String(i).padStart(24, "A")}`));
+  const f = await fixture(t, { ...initial(), token, identity_token: token });
+  const created = await f.invoke("project", "create", "Branch");
+  assert.notEqual(created.code, 0);
+  assert.equal(created.result.error.code, "config_error");
+  assert.match(created.result.error.detail, /64|subset/);
+  assert.equal(f.transport.calls.length, 0);
+  assert.equal(f.transport.oauthCalls.length, 0);
+  assert.equal((await f.saved())?.project_id, A);
+});
+
+test("a lost creation refresh keeps the previous selection and replays both writes after token renewal", async t => {
+  const original = subset(A), refreshed = subset(A, C);
+  const f = await fixture(t, { ...initial(), token: original, identity_token: original });
+  let rotations = 0;
+  f.renews({ [[A, C].join(" ")]: refreshed }, () => {
+    if (++rotations === 1) throw networkError("Refresh response lost");
+  });
+  const keys: (string | undefined)[] = [];
+  f.transport.on("POST", "/api/projects", req => {
+    keys.push(req.headers?.["idempotency-key"]);
+    return { status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Branch") };
+  });
+  const failed = await f.invoke("project", "create", "Branch");
+  assert.notEqual(failed.code, 0);
+  const pending = (await f.saved())!;
+  assert.equal(pending.project_id, A);
+  assert.ok(pending.oauth?.refresh_request);
+  assert.equal(Object.keys(pending.pending_writes ?? {}).length, 1);
+  // A renewed access token in the same grant must not create another branch
+  // or discard the saved rotation after the CLI's response was lost.
+  const renewed = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", exp: 4102444801, scope: SCOPE,
+    projects: { [A]: [...AGENT_CAPABILITIES] } });
+  await writeConfigAtomic(f.configPath, { ...pending, token: renewed, identity_token: renewed }, f.fs);
+  const retried = await f.invoke("project", "create", "Branch");
+  assert.equal(retried.code, 0, retried.out);
+  assert.ok(keys[0]);
+  assert.equal(keys[1], keys[0]);
+  const requests = f.transport.oauthCalls.filter(req => req.path === "/oauth/token").map(req => new URLSearchParams(String(req.body)));
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1]!.get("request_id"), requests[0]!.get("request_id"));
+  const saved = (await f.saved())!;
+  assert.equal(saved.project_id, C);
+  assert.equal(saved.oauth?.refresh_request, undefined);
+  assert.equal(saved.projects?.[A]?.pending_writes, undefined);
+});
+
+test("a refresh response omitting the created project cannot select it", async t => {
+  const token = subset(A);
+  const f = await fixture(t, { ...initial(), token, identity_token: token });
+  f.renews({ [[A, C].join(" ")]: token });
+  f.transport.on("POST", "/api/projects", () => ({ status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Branch") }));
+  const created = await f.invoke("project", "create", "Branch");
+  assert.notEqual(created.code, 0);
+  assert.equal(created.result.error.code, "config_error");
+  assert.equal((await f.saved())?.project_id, A);
+});
+
 test("a captured create retry stays in A while another process selects B", async t => {
   const config = initial();
   config.projects = { [B]: { project_name: "Lobby", organization_id: config.organization_id, organization_name: "Acme" } };
   const f = await fixture(t, config);
+  const refreshed = subset(A, C);
+  f.renews({ [[A, C].join(" ")]: refreshed });
   let count = 0, key: string | undefined;
   f.transport.on("POST", "/api/projects", async req => {
     assert.equal(req.headers?.["screenrig-project"], undefined);
@@ -206,8 +301,7 @@ test("a captured create retry stays in A while another process selects B", async
   const retried = await f.invoke("--project-id", A, "project", "create", "Menu");
   assert.equal(retried.code, 0, retried.out);
   const saved = (await f.saved())!;
-  // The new project delivers no token: the next command renews one for it.
-  assert.equal(saved.project_id, C); assert.equal(saved.token, TOKEN_A);
+  assert.equal(saved.project_id, C); assert.equal(saved.token, refreshed);
   assert.equal(saved.projects?.[A]?.token, undefined);
   assert.equal(saved.projects?.[A]?.pending_writes, undefined);
   assert.equal(saved.projects?.[B]?.token, undefined);
@@ -219,6 +313,7 @@ test("identity without a current project lets the server place the project and p
   const config: ScreenRigConfig = { api_url: API, identity_token: IDENTITY, agent_id: AGENT.id, oauth: GRANT,
     projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };
   const f = await fixture(t, config);
+  f.renews({ [[A, C].join(" ")]: subset(A, C) });
   const hint = "Add the project to Acme: screenrig project create NAME --organization-id org_AAAAAAAAAAAAAAAAAAAAAAAA.";
   const bodies: unknown[] = [];
   f.transport.on("POST", "/api/projects", req => {
@@ -355,6 +450,7 @@ test("identity without a current project creates in an explicit organization and
   const config: ScreenRigConfig = { api_url: API, identity_token: IDENTITY, agent_id: AGENT.id, oauth: GRANT,
     projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };
   const f = await fixture(t, config);
+  f.renews({ [[A, C].join(" ")]: subset(A, C) });
   let attempts = 0, key: string | undefined;
   f.transport.on("POST", "/api/projects", async req => {
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);

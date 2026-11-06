@@ -102,6 +102,9 @@ export async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resol
   const organizationName = flagString(args.flags, "organization");
   if (organizationId && organizationName) throw usageError("Use one of --organization-id or --organization.");
   const identity = await identityForCommand(runtime, resolved);
+  const claims = accessClaims(identity.identityToken);
+  const projects = claims?.projects ? Object.keys(claims.projects) : claims?.prj ? [claims.prj] : [];
+  if (projects.length >= 64) throw configError("The current token already carries 64 projects. Narrow its subset with project token --projects ID,ID before creating another project.");
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),
     ...(organizationName !== undefined ? { organization_name: validateDisplayName(organizationName, "Organization name") } : {}) };
@@ -110,7 +113,15 @@ export async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resol
     throw configError("The project create response did not prohibit storage.");
   }
   const context = validateProjectContext(response.body as CreatedProject);
-  // Creating a project does not expand the current token subset.
+  // Creation adds consent to the grant, but the current access token still
+  // carries its old subset. Renew it before selecting the new project.
+  if (!projects.includes(context.project.id)) {
+    const token = await oauthSessionFor(runtime, identity).selectProjects([...projects, context.project.id]);
+    const refreshed = accessClaims(token);
+    if (!refreshed?.projects?.[context.project.id] && refreshed?.prj !== context.project.id) {
+      throw configError("The refreshed token does not carry the created project. The previous project remains selected.");
+    }
+  }
   await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id });
   return { envelope: successEnvelope({ project: context.project, organization: context.organization, ...(context.owner_user_id ? { owner_user_id: context.owner_user_id } : {}) }, { request_id: client.requestId }),
     exitCode: ExitCode.Success, human: `Created ${context.organization.name} / ${context.project.name} (${context.project.id})` };
