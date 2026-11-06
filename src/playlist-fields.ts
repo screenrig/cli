@@ -136,10 +136,12 @@ export const handlePlaylistFields = commandHandler(async (args, runtime, resolve
   const source = typeof playlist.template_id === "string" ? playlist.template_id : undefined;
   if (!source) throw usageError(`Playlist ${id} is neither a template (it declares no fields) nor made from one.`);
   const values = isObject(playlist.values) ? playlist.values : {};
-  const template = (await client.call({ method: "GET", path: playlistPath(source) }).catch(() => undefined))?.body;
-  const current = isObject(template) && typeof template.revision === "number" ? template.revision : undefined;
+  const template = (await client.call({ method: "GET", path: playlistPath(source) })).body;
+  if (!isObject(template) || typeof template.revision !== "number") throw usageError("The template answer does not include its current revision.");
+  const current = template.revision;
   const built = typeof playlist.template_revision === "number" ? playlist.template_revision : undefined;
-  const outdated = current !== undefined && built !== undefined && built < current;
+  if (built === undefined) throw usageError("The playlist answer does not include its template revision.");
+  const outdated = built < current;
   const labels = new Map((isObject(template) && Array.isArray(template.fields) ? template.fields : []).filter(isObject).map((field) => [String(field.name), String(field.label)]));
   const data = { playlist_id: id, kind: "instance", name: playlist.name, revision: playlist.revision, template_id: source, template_revision: built, template_current_revision: current, outdated, values };
   return { envelope: successEnvelope(data, { request_id: client.requestId }), exitCode: ExitCode.Success,

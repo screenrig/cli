@@ -83,6 +83,32 @@ async function cli(t: TestContext, transport: FakeTransport) {
 const answer = (body: unknown, status = 200) => ({ status, headers: { etag: '"3"' }, body });
 const copy = (extra: Record<string, unknown> = {}) => ({ id: COPY, name: "Monday", revision: 3, pages: [], template_id: TEMPLATE, template_revision: 1, values: { logo: IMAGE, headline: "Open late" }, ...extra });
 
+test("playlist fields never reports a copy current when its source read fails", async (t) => {
+  for (const [status, code] of [[404, "not_found"], [503, "dependency_unavailable"]] as const) {
+    const transport = new FakeTransport()
+      .on("GET", `/api/playlists/${COPY}`, () => answer(copy()))
+      .on("GET", `/api/playlists/${TEMPLATE}`, () => answer({
+        type: `https://screenrig.ai/problems/${code}`, title: "Source unavailable", status,
+        errors: [{ code, detail: "The template could not be read." }],
+      }, status));
+    const invoke = await cli(t, transport);
+    const result = await invoke(["--json", "playlist", "fields", COPY]);
+    assert.notEqual(result.code, ExitCode.Success, result.output);
+    const envelope = JSON.parse(result.output);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, code);
+  }
+});
+
+test("playlist fields refuses a source answer without its current revision", async (t) => {
+  const transport = new FakeTransport()
+    .on("GET", `/api/playlists/${COPY}`, () => answer(copy()))
+    .on("GET", `/api/playlists/${TEMPLATE}`, () => answer({ id: TEMPLATE, fields: fields() }));
+  const result = await (await cli(t, transport))(["--json", "playlist", "fields", COPY]);
+  assert.notEqual(result.code, ExitCode.Success, result.output);
+  assert.equal(JSON.parse(result.output).ok, false);
+});
+
 test("playlist create --from-template sends the values and nothing else", async (t) => {
   const bodies: Array<{ body: unknown; headers: Record<string, string | undefined> | undefined }> = [];
   const transport = new FakeTransport().on("POST", "/api/playlists", (request) => { bodies.push({ body: request.body, headers: request.headers }); return answer(copy(), 201); });

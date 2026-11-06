@@ -14,11 +14,17 @@ const PROJECT_ROUTES = new Set([
 ]);
 const GLOBAL_LISTS = new Set(["screens", "applications", "playlists", "media", "cards", "media-folders", "screen-folders", "notes"]);
 
-/** Apply selection only to collections, local names and object-less operations. */
+/** Apply selection to collections, local names, object-less operations and Library playlist reads. */
 export function projectRequest<T extends Pick<TransportRequest, "method" | "path" | "query">>(request: T, projectId?: string): T {
   if (!projectId) return request;
   const route = request.path.startsWith("/api/") ? request.path.slice(5) : "";
   const read = request.method === "GET" || request.method === "HEAD";
+  // A Library source is owned elsewhere, but its copies and preview values
+  // belong to the selected branch. Mutations keep their global object scope.
+  if (read && /^playlists\/[^/]+(?:\/instances)?$/.test(route)
+    || request.method === "POST" && /^playlists\/[^/]+\/expand$/.test(route)) {
+    return { ...request, query: { ...request.query, project: projectId } };
+  }
   if (read && GLOBAL_LISTS.has(route)) return { ...request, query: { ...request.query, project: projectId } };
   // Catalogue details are public type IDs; instance IDs remain global.
   if (route === "card-types" || route.startsWith("card-types/")) return { ...request, query: { ...request.query, project: projectId } };

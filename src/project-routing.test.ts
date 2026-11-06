@@ -8,6 +8,29 @@ import { fakeSessionJwt, FakeTransport } from "./transport/fake.js";
 const id = "prj_SELECTED";
 const prefix = `/api/projects/${id}`;
 
+test("Library playlist reads and previews retain the selected branch with a multi-project token", async () => {
+  const token = fakeSessionJwt({ exp: 4102444800, projects: {
+    [id]: ["access:read", "playlists"], prj_LIBRARY: ["access:manage", "playlists"],
+  }, scope: "identity" });
+  const transport = new FakeTransport();
+  const requests = [
+    ["GET", "/api/playlists/pl_TEMPLATE"],
+    ["GET", "/api/playlists/pl_TEMPLATE/instances"],
+    ["POST", "/api/playlists/pl_TEMPLATE/expand"],
+  ] as const;
+  for (const [method, path] of requests) {
+    transport.on(method, path, request => {
+      assert.equal(request.query?.project, id, "the selected branch must reach the Library-aware handler");
+      return { status: 200, headers: {}, body: {} };
+    });
+  }
+  const client = new ApiClient({ token, projectId: id, transport });
+  for (const [method, path] of requests) await client.call({ method, path });
+  for (const method of ["PATCH", "PUT", "DELETE"] as const) {
+    assert.deepEqual(projectRequest({ method, path: "/api/playlists/pl_TEMPLATE" }, id), { method, path: "/api/playlists/pl_TEMPLATE" });
+  }
+});
+
 test("object-less writes and local names use project parents, while object IDs remain global", () => {
   for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"], ["GET", "/api/campaigns"], ["POST", "/api/campaigns"], ["GET", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/availability"], ["GET", "/api/advertising/reports/fill"], ["GET", "/api/notifications"], ["POST", "/api/notifications"], ["GET", "/api/alerts"], ["GET", "/api/alert-mutes"], ["POST", "/api/alert-mutes"]] as const) {
     assert.equal(projectRequest({ method, path }, id).path, prefix + path.slice(4));
