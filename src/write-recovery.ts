@@ -50,7 +50,7 @@ export class WriteRecovery {
         // Project creation is an identity write and refreshes its own subset
         // before finishing. That rotation must not strand its recovery key.
         if (this.command === "project create") {
-          if (!sameCredential(config.identity_token, this.resolved.token, "identity")) {
+          if (!sameCredential(config.token ?? config.identity_token, this.resolved.token, "identity")) {
             throw configError("The sign-in changed during project creation. Retry with the current sign-in.");
           }
         } else assertProjectCredential(config, this.resolved);

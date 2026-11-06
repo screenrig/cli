@@ -187,34 +187,36 @@ test("project list and project use under a sign-in preserve both project retries
   assert.doesNotMatch(listed.out + used.out + shown.out, /eyJ|identity_token/);
 });
 
-test("project creation refreshes its subset before selecting a project for ordinary reads", async t => {
-  const original = subset(A, B), refreshed = subset(A, B, C);
-  const f = await fixture(t, { ...initial(), token: original, identity_token: original });
-  f.renews({ [[A, B, C].join(" ")]: refreshed });
-  f.transport.on("POST", "/api/projects", () => ({ status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Branch") }));
-  f.transport.on("GET", `/api/projects/${C}/project`, req => {
-    assert.equal(req.headers?.authorization, "Bearer " + refreshed);
-    return { status: 200, headers: {}, body: context(C, "Branch").project };
+for (const identityAlias of [true, false]) {
+  test(`project creation refreshes its subset before ordinary reads (identity alias: ${identityAlias})`, async t => {
+    const original = subset(A, B), refreshed = subset(A, B, C);
+    const f = await fixture(t, { ...initial(), token: original, identity_token: identityAlias ? original : undefined });
+    f.renews({ [[A, B, C].join(" ")]: refreshed });
+    f.transport.on("POST", "/api/projects", () => ({ status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Branch") }));
+    f.transport.on("GET", `/api/projects/${C}/project`, req => {
+      assert.equal(req.headers?.authorization, "Bearer " + refreshed);
+      return { status: 200, headers: {}, body: context(C, "Branch").project };
+    });
+    f.transport.on("GET", "/api/media", req => {
+      assert.equal(req.headers?.authorization, "Bearer " + refreshed);
+      assert.equal(req.query?.project, C);
+      return { status: 200, headers: {}, body: { items: [], next_cursor: null } };
+    });
+    const created = await f.invoke("project", "create", "Branch");
+    assert.equal(created.code, 0, created.out);
+    const saved = (await f.saved())!;
+    assert.equal(saved.project_id, C);
+    assert.equal(saved.token, refreshed);
+    assert.deepEqual(saved.token_projects, [A, B, C]);
+    for (const command of [["project", "show"], ["media", "list"]]) {
+      const result = await f.invoke(...command);
+      assert.equal(result.code, 0, result.out);
+      assert.equal(result.result.context.project.id, C);
+    }
+    assert.equal(f.transport.oauthCalls.filter(req => req.path === "/oauth/token").length, 1);
+    assert.doesNotMatch(created.out, /eyJ|refresh_token/);
   });
-  f.transport.on("GET", "/api/media", req => {
-    assert.equal(req.headers?.authorization, "Bearer " + refreshed);
-    assert.equal(req.query?.project, C);
-    return { status: 200, headers: {}, body: { items: [], next_cursor: null } };
-  });
-  const created = await f.invoke("project", "create", "Branch");
-  assert.equal(created.code, 0, created.out);
-  const saved = (await f.saved())!;
-  assert.equal(saved.project_id, C);
-  assert.equal(saved.token, refreshed);
-  assert.deepEqual(saved.token_projects, [A, B, C]);
-  for (const command of [["project", "show"], ["media", "list"]]) {
-    const result = await f.invoke(...command);
-    assert.equal(result.code, 0, result.out);
-    assert.equal(result.result.context.project.id, C);
-  }
-  assert.equal(f.transport.oauthCalls.filter(req => req.path === "/oauth/token").length, 1);
-  assert.doesNotMatch(created.out, /eyJ|refresh_token/);
-});
+}
 
 test("a full project token subset refuses creation before writing anything", async t => {
   const token = subset(...Array.from({ length: 64 }, (_, i) => `prj_${String(i).padStart(24, "A")}`));
