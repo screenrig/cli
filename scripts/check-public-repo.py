@@ -104,7 +104,7 @@ def check_public_tree(errors: list[str]) -> None:
             "name: screenrig-cli",
             "name: npm install (${{ matrix.os }}, Node 22.23.4)",
             'node-version: "22.23.4"',
-            "os: [ubuntu-24.04, macos-14, windows-2022]",
+            "os: [ubuntu-24.04, macos-15, windows-2022]",
             "npm run check:npm-install",
             "gitleaks\" git",
             "contents: write",
@@ -145,7 +145,7 @@ def check_public_tree(errors: list[str]) -> None:
             "node scripts/calver.mjs stamp",
             "npm publish --access public",
             "screenrig@${{ needs.publish.outputs.version }}",
-            "ubuntu-24.04, macos-14, windows-2022",
+            "ubuntu-24.04, macos-15, windows-2022",
             'node-version: "22.23.4"',
             "gh release upload",
         ):
