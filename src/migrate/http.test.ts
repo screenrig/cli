@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { CliError } from "../problems.js";
 import { testTemp } from "../test-temp.js";
 import { createMemoryLogger } from "../log/logger.js";
@@ -9,6 +9,11 @@ import type { CliRuntime } from "../runtime.js";
 import { vendorHttpFor } from "./cli.js";
 import { backoffMs, createVendorHttp, cursorPages, offsetPages, retryAfterSeconds } from "./http.js";
 import type { VendorAdapter, VendorClient, VendorClientOptions } from "./types.js";
+
+// The transport unrefs its time limits because a real request's socket keeps the process alive. The fixtures' fake
+// requests hold no handle, so without this Node 22 ends the test file while a request waits on its limit.
+const keepAlive = setInterval(() => undefined, 60_000);
+after(() => clearInterval(keepAlive));
 
 interface Call {
   url: string;

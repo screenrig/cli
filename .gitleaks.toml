@@ -15,3 +15,23 @@ description = "campaign retry idempotency fixture"
 condition = "AND"
 paths = ['''^src/campaigns\.test\.ts$''']
 regexes = ['''^campaign-key-0001$''']
+
+# Made-up source secrets in the source-create test; the commit is in history.
+[[allowlists]]
+description = "source secret fixtures"
+condition = "AND"
+targetRules = ["generic-api-key"]
+commits = ["f99448ab5bc82a3863c0c3010f41298882c74303"]
+paths = ['''^src/sources\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^(key|q|cs)-1234567890$''']
+
+# A made-up PagerDuty routing key in the notifications test; the commit is in history.
+[[allowlists]]
+description = "PagerDuty routing key fixture"
+condition = "AND"
+targetRules = ["generic-api-key"]
+commits = ["613f9fd66708832e482e3bb5f8dd07fe771beb82"]
+paths = ['''^src/notifications\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^R0123456789abcdefghijklmnopqrstu$''']
