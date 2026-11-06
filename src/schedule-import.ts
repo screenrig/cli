@@ -160,7 +160,7 @@ export async function readImportSheet(file: string, runtime: CliRuntime): Promis
   if (file === "-") {
     if (bytes.subarray(0, 4).equals(Buffer.from("PK\x03\x04", "latin1"))) kind = "xlsx";
     else {
-      const first = bytes.toString("utf8", 0, Math.min(bytes.length, 64)).replace(/^﻿/, "").trimStart()[0];
+      const first = bytes.toString("utf8", 0, Math.min(bytes.length, 64)).replace(/^\uFEFF/, "").trimStart()[0];
       kind = first === "[" || first === "{" ? "json" : "csv";
     }
   } else {
@@ -173,7 +173,7 @@ export async function readImportSheet(file: string, runtime: CliRuntime): Promis
   const base = file === "-" ? undefined : path.basename(file);
   const source = base ? [...base].slice(0, SOURCE_MAX).join("") : undefined;
   const defaultName = base ? path.basename(base, path.extname(base)) : undefined;
-  if (kind === "json") return { kind, source, defaultName, rows: importRowsFromJson(bytes.toString("utf8").replace(/^﻿/, "")) };
+  if (kind === "json") return { kind, source, defaultName, rows: importRowsFromJson(bytes.toString("utf8").replace(/^\uFEFF/, "")) };
   return { kind, source, defaultName, bytes };
 }
 

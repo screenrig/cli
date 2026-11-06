@@ -9,7 +9,7 @@ import type { VendorAdapter } from "./types.js";
  */
 export function parseCredentialFile(text: string): Record<string, string> {
   const values: Record<string, string> = {};
-  for (const line of text.replace(/^﻿/, "").split(/\r?\n/)) {
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
     if (!match) continue;
     let value = match[2]!;
