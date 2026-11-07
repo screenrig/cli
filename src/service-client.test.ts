@@ -116,6 +116,7 @@ for (const method of ["key", "secret"] as const) {
     transport
       .on("GET", "/api/playlists", () => json(200, { items: [playlist], next_cursor: null }))
       .on("GET", `/api/playlists/${UPLOADER_PLAYLIST}`, () => json(200, playlist))
+      .on("GET", "/api/reviews", () => json(200, { items: [], next_cursor: null, pending_count: 0 }))
       .on("GET", `/api/media/${UPLOADER_MEDIA}`, () => json(200, media))
       .on("GET", `/api/media-folders/${UPLOADER_FOLDER}`, () => json(200, { id: UPLOADER_FOLDER, name: "Menu" }))
       .on("GET", "/api/media", request => {

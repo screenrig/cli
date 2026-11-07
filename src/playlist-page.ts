@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { ScreenWallArrangement } from "./adapters/protocol.js";
+import type { ReviewList, ScreenWallArrangement } from "./adapters/protocol.js";
 import { requireToken } from "./client.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import {
@@ -8,7 +8,8 @@ import {
 import { isResourceID } from "./generated/resource-ids.js";
 import { quotedRevision } from "./if-match.js";
 import { readAuthoringJson } from "./authoring-input.js";
-import { CliError, usageError } from "./problems.js";
+import { accessClaims } from "./oauth.js";
+import { CliError, unexpectedResponseError, usageError } from "./problems.js";
 import { pendingReviewOf } from "./reviews.js";
 import { wallSize } from "./screen-wall.js";
 
@@ -311,6 +312,29 @@ async function playlistOf(client: ReturnType<typeof clientFor>, id: string): Pro
   return { playlist, revision: playlist.revision as number };
 }
 
+/** A shortcut edits the caller's own pending pages, just as the server chains page changes. */
+async function playlistAsProposed(client: ReturnType<typeof clientFor>, id: string, playlist: JSONObject, token: string | undefined): Promise<JSONObject> {
+  const claims = accessClaims(token);
+  if (!claims?.clientId && !claims?.sub) return playlist;
+  const response = await client.listAll("/api/reviews", { state: "pending", kind: "playlist_change", limit: "100" }, { cursorParam: "cursor", uncapped: true });
+  const list = response.body as ReviewList | undefined;
+  if (!Array.isArray(list?.items)) throw unexpectedResponseError("The review list answer does not match the generated contract.", client.requestId);
+  const review = list.items.find((candidate) => {
+    const change = candidate.playlist_change;
+    const own = claims.clientId
+      ? candidate.proposer.kind === "client" && candidate.proposer.client_id === claims.clientId
+      : candidate.proposer.kind === "agent" && candidate.proposer.agent_id === claims.sub;
+    return own && candidate.kind === "playlist_change" && candidate.state === "pending"
+      && candidate.subject.type === "playlist" && candidate.subject.id === id
+      && change?.operation === "update" && change.base_revision === playlist.revision
+      && Array.isArray(change.proposed.page_edits) && change.proposed.page_edits.length > 0;
+  });
+  if (!review) return playlist;
+  const pages = review.playlist_change!.proposed.pages;
+  if (!Array.isArray(pages)) throw unexpectedResponseError("The proposed playlist answer does not match the generated contract.", client.requestId);
+  return { ...playlist, pages };
+}
+
 function pageWrite(client: ReturnType<typeof clientFor>, args: ParsedArgs, request: { method: "POST" | "PUT" | "DELETE"; path: string; body?: unknown; revision?: string }) {
   const expected = request.revision ?? flagString(args.flags, "expect-rev");
   return client.call({
@@ -381,7 +405,8 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
       if (visibility) page.visibility = visibility;
     }
   } else {
-    const { playlist, revision: current } = await playlistOf(client, id);
+    const { playlist: live, revision: current } = await playlistOf(client, id);
+    const playlist = await playlistAsProposed(client, id, live, resolved.token);
     const stored = (Array.isArray(playlist.pages) ? playlist.pages : []).find((candidate): candidate is JSONObject => isObject(candidate) && candidate.id === pageId);
     if (!stored) throw usageError(`Playlist ${id} has no page ${pageId}; playlist show ${id} lists its pages.`);
     const kind = media !== undefined ? await mediaOf(client, media) : undefined;

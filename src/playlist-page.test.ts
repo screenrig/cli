@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { HostSettings } from "./host-settings.js";
+import type { ReviewProposer } from "./adapters/protocol.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { run } from "./main.js";
 import { processRuntime } from "./runtime.js";
 import { buildMediaPage, civilTime, formatCanvas, newPageId, pageCanvas, replaceMedia, stingerLogo, visibilityOf, withoutDates } from "./playlist-page.js";
 import { normalizeProblem } from "./problems.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";
 
 const PLAYLIST = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
 const IMAGE = "med_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -121,12 +122,12 @@ test("replacing media keeps everything else, dates included, and rebuilds across
     (error: { problem?: { code?: string } }) => error.problem?.code === "usage_error");
 });
 
-async function cli(t: TestContext, transport: FakeTransport, settings: HostSettings = {}) {
+async function cli(t: TestContext, transport: FakeTransport, settings: HostSettings = {}, token = "test-token") {
   const directory = await mkdtemp(path.join(tmpdir(), "playlist-page-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const config = path.join(directory, "config.json");
   await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
-    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token }), { mode: 0o600 });
   return Object.assign(async (argv: string[], input = "") => {
     let output = "";
     const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, settings, transport,
@@ -218,6 +219,133 @@ test("playlist page replace --media reads the page and holds the write to the re
   const missing = await invoke(["playlist", "page", "replace", PLAYLIST, "nowhere", "--media", VIDEO]);
   assert.equal(missing.code, ExitCode.Usage, missing.output);
   assert.equal(writes.length, 3);
+});
+
+const CLIENT = "scl_AAAAAAAAAAAAAAAAAAAAAAAA";
+const AGENT = "agt_AAAAAAAAAAAAAAAAAAAAAAAA";
+const PROJECT = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
+const REPLACEMENT = "med_CCCCCCCCCCCCCCCCCCCCCCCC";
+const supplier: ReviewProposer = { kind: "client", client_id: CLIENT };
+const proposerToken = (client = true) => fakeSessionJwt({
+  exp: Math.floor(Date.now() / 1000) + 3600, scope: "access:propose content playlists",
+  ...(client ? { sub: `client:${CLIENT}`, client_id: CLIENT, prj: PROJECT } : { sub: AGENT, projects: { [PROJECT]: ["access:propose", "content", "playlists"] } }),
+});
+const pageReview = (page: Record<string, unknown>, proposer = supplier, op = "replace") => ({
+  id: "rvw_TEST", state: "pending", kind: "playlist_change", proposer,
+  subject: { type: "playlist", id: PLAYLIST, name: "Lobby" }, url: "https://screenrig.ai/dashboard/reviews/rvw_TEST",
+  playlist_change: { operation: "update", base_revision: 7, proposed: {
+    name: "Lobby", pages: [page], page_edits: [{ op, page_id: page.id, page }],
+  } },
+});
+
+for (const client of [true, false]) {
+  test(`successive ${client ? "supplier" : "multi-project agent"} page edits keep pending artwork and dates`, async (t) => {
+    const proposer: ReviewProposer = client ? supplier : { kind: "agent", agent_id: AGENT };
+    let review: unknown;
+    const writes: Record<string, unknown>[] = [];
+    const transport = new FakeTransport()
+      .on("GET", `/api/media/${REPLACEMENT}`, () => media("image"))
+      .on("GET", `/api/media/${VIDEO}`, () => media("video"))
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody() }))
+      .on("GET", client ? "/api/reviews" : `/api/projects/${PROJECT}/reviews`, (request) => {
+        assert.equal(request.query?.state, "pending");
+        assert.equal(request.query?.kind, "playlist_change");
+        return { status: 200, headers: {}, body: { items: review ? [review] : [], next_cursor: null, pending_count: review ? 1 : 0 } };
+      })
+      .on("PUT", `/api/playlists/${PLAYLIST}/pages/up-ab12cd34`, (request) => {
+        assert.equal(request.headers?.["if-match"], '"7"', "proposals keep the published revision guard");
+        const page = structuredClone(request.body) as Record<string, unknown>;
+        writes.push(page);
+        review = pageReview(page, proposer);
+        return { status: 202, headers: {}, body: { status: "pending_review", review } };
+      });
+    const invoke = await cli(t, transport, {}, proposerToken(client));
+    for (const flags of [
+      ["--media", REPLACEMENT, "--fit", "contain", "--seconds", "12"],
+      ["--until", "2026-11-30"],
+      ["--from", "2026-11-07"],
+      ["--always"],
+    ]) {
+      const answer = await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", ...flags]);
+      assert.equal(answer.code, ExitCode.Success, answer.output);
+      assert.equal(JSON.parse(answer.output).data.status, "pending_review");
+      const page = writes.at(-1)!;
+      assert.deepEqual((page.primitives as Record<string, unknown>[])[0]!.selector, { by: "id", media_id: REPLACEMENT });
+      assert.deepEqual(page.advance, { mode: "duration", after_ms: 12000 });
+    }
+    assert.deepEqual(writes[1]!.visibility, { enabled: true, until: "2026-12-01T00:00" });
+    assert.deepEqual(writes[2]!.visibility, { enabled: true, from: "2026-11-07T00:00", until: "2026-12-01T00:00" });
+    assert.equal("visibility" in writes[3]!, false);
+    // Swapping the artwork after proposing dates keeps those proposed dates too.
+    await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--until", "2026-11-30"]);
+    const swapped = await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--media", VIDEO]);
+    assert.equal(swapped.code, ExitCode.Success, swapped.output);
+    assert.deepEqual(writes.at(-1)!.visibility, { enabled: true, until: "2026-12-01T00:00" });
+    assert.deepEqual((writes.at(-1)!.primitives as Record<string, unknown>[])[0]!.selector, { by: "id", media_id: VIDEO });
+  });
+}
+
+test("replace finds a newly proposed page through every page of the review list", async (t) => {
+  const pending = storedImagePage({ id: "new-offer", visibility: { enabled: true, until: "2026-12-01T00:00" } });
+  const writes: Record<string, unknown>[] = [];
+  const transport = new FakeTransport()
+    .on("GET", `/api/media/${REPLACEMENT}`, () => media("image"))
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody() }))
+    .on("GET", "/api/reviews", request => ({ status: 200, headers: {}, body: {
+      items: request.query?.cursor === "next" ? [pageReview(pending, supplier, "add")] : [],
+      next_cursor: request.query?.cursor === "next" ? null : "next", pending_count: 1,
+    } }))
+    .on("PUT", `/api/playlists/${PLAYLIST}/pages/new-offer`, request => {
+      writes.push(request.body as Record<string, unknown>);
+      assert.equal(request.headers?.["if-match"], '"7"');
+      return playlistAnswer();
+    });
+  const answer = await (await cli(t, transport, {}, proposerToken()))(["playlist", "page", "replace", PLAYLIST, "new-offer", "--media", REPLACEMENT]);
+  assert.equal(answer.code, ExitCode.Success, answer.output);
+  assert.deepEqual(writes[0]!.visibility, pending.visibility);
+  assert.deepEqual((writes[0]!.primitives as Record<string, unknown>[])[0]!.selector, { by: "id", media_id: REPLACEMENT });
+  assert.equal(transport.calls.filter(call => call.path === "/api/reviews").length, 2);
+});
+
+test("shortcut replacements exclude another proposer, stale or unrelated reviews and complete-playlist proposals", async (t) => {
+  const proposed = storedImagePage({ visibility: { enabled: true, from: "2026-11-01T00:00" } });
+  const own = pageReview(proposed);
+  const cases = [
+    { ...own, proposer: { kind: "client", client_id: "scl_BBBBBBBBBBBBBBBBBBBBBBBB" } },
+    { ...own, playlist_change: { ...own.playlist_change, base_revision: 6 } },
+    { ...own, subject: { ...own.subject, id: "pl_BBBBBBBBBBBBBBBBBBBBBBBB" } },
+    { ...own, state: "superseded" },
+    { ...own, playlist_change: { ...own.playlist_change, proposed: { name: "Lobby", pages: [proposed] } } },
+  ];
+  for (const review of cases) {
+    let sent: Record<string, unknown> | undefined;
+    const transport = new FakeTransport()
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody() }))
+      .on("GET", "/api/reviews", () => ({ status: 200, headers: {}, body: { items: [review], next_cursor: null, pending_count: 1 } }))
+      .on("PUT", `/api/playlists/${PLAYLIST}/pages/up-ab12cd34`, request => { sent = request.body as Record<string, unknown>; return playlistAnswer(); });
+    const answer = await (await cli(t, transport, {}, proposerToken()))(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--until", "2026-11-30"]);
+    assert.equal(answer.code, ExitCode.Success, answer.output);
+    assert.deepEqual(sent!.visibility, { enabled: true, until: "2026-12-01T00:00" }, "never adopt an unrelated proposal's start date");
+  }
+});
+
+test("an unreadable review list or a page removed in the caller's proposal prevents a shortcut write", async (t) => {
+  const removed = pageReview(storedImagePage());
+  const responses = [
+    { status: 503, headers: {}, body: { code: "not_ready", detail: "Reviews unavailable" } },
+    { status: 200, headers: {}, body: {} },
+    { status: 200, headers: {}, body: { items: [{ ...removed, playlist_change: { ...removed.playlist_change, proposed: {
+      name: "Lobby", pages: [], page_edits: [{ op: "remove", page_id: "up-ab12cd34" }],
+    } } }], next_cursor: null, pending_count: 1 } },
+  ];
+  for (const response of responses) {
+    const transport = new FakeTransport()
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody() }))
+      .on("GET", "/api/reviews", () => response);
+    const answer = await (await cli(t, transport, {}, proposerToken()))(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--until", "2026-11-30"]);
+    assert.notEqual(answer.code, ExitCode.Success, answer.output);
+    assert.equal(transport.calls.filter(call => call.method !== "GET").length, 0);
+  }
 });
 
 for (const [before, after] of [["image", "video"], ["video", "image"], ["image", "image"], ["video", "video"]] as const) {
