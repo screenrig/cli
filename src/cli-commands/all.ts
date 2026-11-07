@@ -9,5 +9,6 @@ import { register as screens } from "../bundles/screens.js";
 import { register as monitoring } from "../bundles/monitoring.js";
 import { register as integrations } from "../bundles/integrations.js";
 import { register as migrate } from "../bundles/migrate.js";
+import { register as docs } from "../bundles/docs.js";
 
-export const ALL_COMMAND_REGISTRARS: readonly CommandRegistrar[] = [account, ads, media, playlists, screens, monitoring, integrations, migrate];
+export const ALL_COMMAND_REGISTRARS: readonly CommandRegistrar[] = [account, ads, media, playlists, screens, monitoring, integrations, migrate, docs];

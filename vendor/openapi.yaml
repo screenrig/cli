@@ -1666,6 +1666,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Capabilities'
+  /api/docs/search:
+    get:
+      operationId: searchDocs
+      security: []
+      summary: Search the official documentation
+      description: >-
+        Searches the official screenRIG documentation, the pages of screenrig.ai/docs, the problem types, pricing and the other customer pages, and answers the best matching sections, best first, at most limit (8 by default). Public: no credential is needed and the call is never charged. A hit's url is its page (with the section's fragment where the page names one), section is the heading and snippet shows the text around the match; read the page or the section with getDocsPage. Held to 120 requests per client IP per minute (IPv6 grouped by /64). The corpus reloads every 15 minutes; before the first load the route answers 500 not_ready with Retry-After.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Words, a command or flag, or an error code, 1 to 200 characters.
+          schema: {type: string, minLength: 1, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 25, default: 8}
+      responses:
+        '200':
+          description: The matching sections, best first. Empty when nothing matches.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocsSearchResponse'
+              example:
+                results:
+                  - url: https://screenrig.ai/docs/cli
+                    title: CLI command reference
+                    section: schedule set
+                    snippet: Sets the playlist schedule of a screen from a schedule file. Each entry names a playlist and its windows…
+                    score: 14.2
+                corpus_commit: 3f2a9c1
+        default:
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+      x-rate-limit-policies:
+        - name: docs-ip
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+  /api/docs/page:
+    get:
+      operationId: getDocsPage
+      security: []
+      summary: Read an official documentation page or section
+      description: >-
+        Answers an official documentation page, or with section one section of it with the sections under it, as Markdown. url is the page's address as searchDocs answers it, its .md form, or only its path, with or without a #fragment (a fragment names the section when section is not given). section is a heading or an anchor of the page, or part of a heading. A section is cut at a line end within 48 KiB with truncated true; a whole page over 48 KiB answers its introduction with truncated true and its outline. sections lists the headings to read next (the page's, or the section's own sub-headings). Unknown pages and sections answer 404 not_found. Public, never charged, and held to the same 120 requests per client IP per minute as searchDocs.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: The page's address, 1 to 500 characters.
+          schema: {type: string, minLength: 1, maxLength: 500}
+        - name: section
+          in: query
+          required: false
+          description: A heading or anchor of the page, at most 200 characters.
+          schema: {type: string, maxLength: 200}
+      responses:
+        '200':
+          description: The page or section as Markdown.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocsPage'
+              example:
+                url: https://screenrig.ai/docs/cli
+                title: CLI command reference
+                markdown: "### `schedule set`\n\nSets the playlist schedule of a screen from a schedule file."
+                truncated: false
+                sections: []
+                corpus_commit: 3f2a9c1
+        default:
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+      x-rate-limit-policies:
+        - name: docs-ip
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
   /api/enrollments:
     post:
       x-screenrig-access: write
@@ -31107,6 +31203,37 @@ components:
           description: >-
             Plain-language consequence of each degraded dependency, keyed by its name, for a client to show verbatim. For example application_processing states that application upload is unavailable and that POST /api/applications answers 500 dependency_unavailable until the workers run. Never carries hosts, addresses, or probe error text.
     VersionResponse: {type: object, additionalProperties: false, required: [version, commit, api_version, protocol_version], properties: {version: {type: string}, commit: {type: string}, api_version: {type: string}, protocol_version: {type: string}}}
+    DocsSearchResponse:
+      type: object
+      additionalProperties: false
+      required: [results, corpus_commit]
+      properties:
+        results:
+          type: array
+          maxItems: 25
+          items: {$ref: '#/components/schemas/DocsSearchResult'}
+        corpus_commit: {type: string, description: "The website commit the searched documentation was published from; empty when the corpus names none."}
+    DocsSearchResult:
+      type: object
+      additionalProperties: false
+      required: [url, title, section, snippet, score]
+      properties:
+        url: {type: string, format: uri, description: "The page's address, with a #fragment naming the section when section is not empty."}
+        title: {type: string, description: "The page's title."}
+        section: {type: string, description: "The heading of the matching section; empty when the match is the page's opening."}
+        snippet: {type: string, description: "About 300 characters of the section around the match, on one line, cut with an ellipsis."}
+        score: {type: number, description: "Relative rank within this answer; higher is better and it is not comparable across searches."}
+    DocsPage:
+      type: object
+      additionalProperties: false
+      required: [url, title, markdown, truncated, sections, corpus_commit]
+      properties:
+        url: {type: string, format: uri, description: "The page's address, with a #fragment when a section was read."}
+        title: {type: string}
+        markdown: {type: string, description: "The page or section as Markdown, at most 48 KiB."}
+        truncated: {type: boolean, description: "True when the Markdown was cut; read the sections it lacks by name."}
+        sections: {type: array, items: {type: string}, description: "The page's section headings, or those under the section read, in page order."}
+        corpus_commit: {type: string}
     Capabilities:
       type: object
       additionalProperties: false

@@ -14,6 +14,7 @@ export const COMMAND_BUNDLES = {
   monitoring: () => import("../bundles/monitoring.js"),
   integrations: () => import("../bundles/integrations.js"),
   migrate: () => import("../bundles/migrate.js"),
+  docs: () => import("../bundles/docs.js"),
 } satisfies Record<string, () => Promise<{ register: CommandRegistrar }>>;
 
 export type CommandBundle = keyof typeof COMMAND_BUNDLES;
@@ -58,6 +59,7 @@ export const TOP_LEVEL_COMMANDS: Record<string, CommandBundle> = {
   audit: "integrations",
   feedback: "account",
   support: "account",
+  docs: "docs",
   doctor: "account",
   version: "account",
   status: "account",

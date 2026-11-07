@@ -300,6 +300,33 @@ export interface EventPage {
   next_cursor: string | null;
 }
 
+/** One matching section of the official documentation (`DocsSearchResult`, GET /api/docs/search). */
+export interface DocsSearchResult {
+  score: number;
+  section: string;
+  snippet: string;
+  title: string;
+  url: string;
+}
+
+/** `DocsSearchResponse`: the matching sections, best first. */
+export interface DocsSearchResponse {
+  corpus_commit: string;
+  results: DocsSearchResult[];
+}
+
+/** `DocsPage` (GET /api/docs/page): a page or one section of it as Markdown. */
+export interface DocsPage {
+  corpus_commit: string;
+  markdown: string;
+  /** The headings to read next: the page's, or the section's own sub-headings. */
+  sections: string[];
+  title: string;
+  /** The Markdown was cut short; read a section for the rest. */
+  truncated: boolean;
+  url: string;
+}
+
 export interface Capabilities {
   application_compressed_bytes: 104857600;
   application_expanded_bytes: 262144000;
