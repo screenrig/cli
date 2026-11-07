@@ -1284,10 +1284,10 @@
     const result = [];
     let cssText = source.replace(COMMENTS_RE, "");
     while (true) {
-      const matches = KEYFRAMES_RE.exec(cssText);
-      if (!matches)
+      const matches2 = KEYFRAMES_RE.exec(cssText);
+      if (!matches2)
         break;
-      result.push(matches[0]);
+      result.push(matches2[0]);
     }
     cssText = cssText.replace(KEYFRAMES_RE, "");
     const IMPORT_RE = /@import[\s\S]*?url\([^)]*\)[\s\S]*?;/gi;
@@ -1297,10 +1297,10 @@
       "gi"
     );
     while (true) {
-      let matches = IMPORT_RE.exec(cssText);
-      if (!matches) {
-        matches = UNIFIED_RE.exec(cssText);
-        if (!matches) {
+      let matches2 = IMPORT_RE.exec(cssText);
+      if (!matches2) {
+        matches2 = UNIFIED_RE.exec(cssText);
+        if (!matches2) {
           break;
         } else {
           IMPORT_RE.lastIndex = UNIFIED_RE.lastIndex;
@@ -1308,7 +1308,7 @@
       } else {
         UNIFIED_RE.lastIndex = IMPORT_RE.lastIndex;
       }
-      result.push(matches[0]);
+      result.push(matches2[0]);
     }
     return result;
   }
@@ -1439,7 +1439,8 @@
   var PARENT_HANDSHAKE_PROTOCOL = "screenrig.parent-handshake/1";
   var CAPTURE_PROTOCOL = "screenrig.capture/1";
   var LIVENESS_PROTOCOL = "screenrig.liveness/1";
-  var SIDE_CHANNEL_PROTOCOLS = [CAPTURE_PROTOCOL, LIVENESS_PROTOCOL];
+  var INPUT_PROTOCOL = "screenrig.input/1";
+  var SIDE_CHANNEL_PROTOCOLS = [CAPTURE_PROTOCOL, LIVENESS_PROTOCOL, INPUT_PROTOCOL];
   var DEFAULT_PLAYER_ORIGIN = "https://play.screenrig.ai";
   var MAX_MESSAGE_BYTES = 65536;
   var MAX_LOG_MESSAGE_BYTES = 2048;
@@ -1841,6 +1842,41 @@
     };
     win.addEventListener("message", listener);
     return () => win.removeEventListener("message", listener);
+  }
+
+  // src/input.ts
+  function matches(value, kind, binding) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const message = value;
+    return !Object.prototype.hasOwnProperty.call(message, "__proto__") && !Object.prototype.hasOwnProperty.call(message, "constructor") && message.protocol === INPUT_PROTOCOL && message.kind === kind && message.primitive_id === binding.primitive_id && message.generation === binding.generation && message.nonce === binding.nonce;
+  }
+  function attachInputReporter(win, doc, context) {
+    let watched;
+    const onMessage = (event) => {
+      const current = context();
+      if (!current || event.source !== win.parent || event.origin === "null" || event.origin !== current.player_origin || !matches(event.data, "watch", current)) return;
+      watched = current;
+    };
+    const onInput = (event) => {
+      const current = context();
+      if (!event.isTrusted || !current || !watched || current.primitive_id !== watched.primitive_id || current.generation !== watched.generation || current.nonce !== watched.nonce || current.player_origin !== watched.player_origin) return;
+      win.parent.postMessage({
+        protocol: INPUT_PROTOCOL,
+        kind: "input",
+        primitive_id: current.primitive_id,
+        generation: current.generation,
+        nonce: current.nonce
+      }, current.player_origin);
+    };
+    const events = ["pointerdown", "touchstart", "keydown", "wheel"];
+    const options = { capture: true, passive: true };
+    win.addEventListener("message", onMessage);
+    for (const name of events) doc.addEventListener(name, onInput, options);
+    return () => {
+      watched = void 0;
+      win.removeEventListener("message", onMessage);
+      for (const name of events) doc.removeEventListener(name, onInput, options);
+    };
   }
 
   // src/validate.ts
@@ -2717,7 +2753,10 @@
   if ((candidate == null ? void 0 : candidate.parent) && typeof candidate.addEventListener === "function") {
     const client = attachScreenRig(candidate);
     const active = () => client.readyState === "active" ? client.context : null;
-    if (typeof document !== "undefined") attachCaptureReceiver(window, active);
+    if (typeof document !== "undefined") {
+      attachCaptureReceiver(window, active);
+      attachInputReporter(window, document, active);
+    }
     attachLivenessReceiver(candidate, active);
   }
 })();
