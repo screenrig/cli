@@ -5,11 +5,11 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { test } from "node:test";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
-import { writeConfigAtomic } from "./config.js";
+import { readConfigFile, writeConfigAtomic } from "./config.js";
 import { run } from "./main.js";
 import type { SignedRawPutRequest } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
-import { FakeTransport, memoryBackend } from "./transport/fake.js";
+import { FakeTransport, fakeSessionJwt, memoryBackend } from "./transport/fake.js";
 
 const DIRECT = { application_direct_uploads: true };
 
@@ -97,6 +97,57 @@ for (const action of ["upload", "update"] as const) {
     assert.equal(direct.envelope.operation_id, data.application.operation_id);
     assert.equal(data.operation.state, "succeeded");
     assert.deepEqual(data.pack, legacy.envelope.data.pack);
+  });
+}
+
+for (const explicit of [false, true]) {
+  test(`app upload selects its project with a multi-project token (explicit: ${explicit})`, async (t) => {
+    const fixture = await appFixture(t);
+    const north = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", south = "prj_BBBBBBBBBBBBBBBBBBBBBBBB";
+    const token = fakeSessionJwt({ sub: "agent:agt_EXAMPLE", sid: "grt_UPLOAD", exp: 4102444800, scope: "identity", projects: {
+      [north]: ["access:manage", "content", "project"], [south]: ["access:manage", "content", "project"],
+    } });
+    const configPath = path.join(fixture.configDir, "screenrig", "config.json");
+    const context = (id: string, name: string) => ({
+      project: { id, name, organization_id: "org_EXAMPLE", organization_name: "Cafes" },
+      organization: { id: "org_EXAMPLE", name: "Cafes" },
+    });
+    await writeConfigAtomic(configPath, {
+      api_url: "https://api.screenrig.ai", token, identity_token: token, project_id: north, project_name: "North",
+      oauth: { issuer: "https://api.screenrig.ai", client_id: "screenrig-cli", identity: true,
+        refresh_token: fakeSessionJwt({ sid: "grt_UPLOAD", exp: 4102444800 }) },
+      organization_id: "org_EXAMPLE", organization_name: "Cafes",
+      projects: { [south]: { project_name: "South", organization_id: "org_EXAMPLE", organization_name: "Cafes" } },
+    }, fixture.fs);
+    const backend = memoryBackend({ features: DIRECT });
+    const declarationPath = `/api/projects/${south}/applications/uploads`;
+    const transport = new FakeTransport()
+      .on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(north, "North"), context(south, "South")] } }))
+      .on("POST", declarationPath, request => backend.request({ ...request, path: "/api/applications/uploads" }))
+      .on("POST", "/api/applications/uploads", () => ({ status: 400, headers: {}, body: {
+        status: 400, code: "project_required", detail: "Select a granted project.",
+      } }));
+    for (const method of ["GET", "POST"]) transport.on(method, /.*/, request => backend.request(request));
+    if (!explicit) {
+      const selected = await runApp(fixture, ["project", "use", south], transport, []);
+      assert.equal(selected.code, 0, JSON.stringify(selected.envelope));
+      assert.equal((await readConfigFile(configPath, fixture.fs))?.project_id, south);
+    }
+    const puts: SignedRawPutRequest[] = [];
+    const result = await runApp(fixture, ["app", "upload", fixture.appDir, "--name", "Cafe Menu",
+      ...(explicit ? ["--project-id", south] : [])], transport, puts);
+    assert.equal(result.code, 0, JSON.stringify(result.envelope));
+    assert.equal(result.envelope.context.project.id, south);
+    assert.equal(result.envelope.data.operation.state, "succeeded");
+    assert.equal(puts.length, 1);
+    assert.deepEqual(transport.calls.filter(call => call.method === "POST").map(call => call.path),
+      [declarationPath, "/api/applications/uploads/op_AAAAAAAAAAAAAAAAAAAAAAAA/commit"]);
+    const updated = await runApp(fixture, ["app", "update", "app_EXISTING", fixture.appDir, "--expect-rev", "7",
+      ...(explicit ? ["--project-id", south] : [])], transport, []);
+    assert.equal(updated.code, 0, JSON.stringify(updated.envelope));
+    assert.deepEqual(transport.calls.filter(call => call.method === "POST").slice(-2).map(call => call.path),
+      ["/api/applications/app_EXISTING/uploads", "/api/applications/uploads/op_AAAAAAAAAAAAAAAAAAAAAAAA/commit"]);
+    assert.equal((await readConfigFile(configPath, fixture.fs))?.project_id, explicit ? north : south);
   });
 }
 
