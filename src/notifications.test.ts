@@ -205,7 +205,7 @@ test("notifications create validates input and declared relationships before any
     [["--webhook", "not a url", "--conditions", "screen_offline"], /--webhook must be an absolute https URL/],
     [["--webhook", "https://user:pass@hooks.example.com/x", "--conditions", "screen_offline"], /--webhook must not carry credentials/],
     [["--webhook", "https://hooks.example.com/x#frag", "--conditions", "screen_offline"], /--webhook must not carry a fragment/],
-    [["--email", "owner", "--conditions", "screen_offline,bogus"], /--conditions does not take "bogus"; use screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing/],
+    [["--email", "owner", "--conditions", "screen_offline,bogus"], /--conditions does not take "bogus"; use screen_offline, display_disconnected, running_hot, on_battery, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing/],
     [["--email", "owner", "--conditions", "Screen_Offline"], /--conditions does not take "Screen_Offline"/],
     [["--email", "owner", "--conditions", "screen_offline,,running_hot"], /--conditions takes comma-separated conditions with no empty entries/],
     [["--email", "owner", "--conditions", "screen_offline,screen_offline"], /--conditions must not repeat a condition/],
@@ -240,6 +240,24 @@ test("notifications create validates input and declared relationships before any
     assert.match(refused.envelope.error!.detail, message, args.join(" "));
   }
   assert.equal(notificationCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("--conditions and --severity accept on_battery, and update and show carry it", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "on_battery,screen_offline", "--severity", "on_battery=error"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { channel: "email", recipients: ["owner"], conditions: ["on_battery", "screen_offline"], severity: { on_battery: "error" } });
+  assert.deepEqual(created.envelope.data.conditions, ["on_battery", "screen_offline"]);
+  const updated = await cli(["--json", "notifications", "update", created.envelope.data.id, "--conditions", "on_battery", "--severity", "on_battery=info"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { conditions: ["on_battery"], severity: { on_battery: "info" } });
+  const human = await cli(["--human", "notifications", "show", created.envelope.data.id], transport, env);
+  assert.match(human.stdout, /on_battery/);
+  const help = commandHelp(["notifications", "create"]);
+  assert.match(help.options.find((option) => option.name === "--conditions")?.description ?? "", /\bon_battery\b/);
+  assert.match(help.options.find((option) => option.name === "--severity")?.description ?? "", /\bon_battery\b/);
+  assert.match(help.notes.join("\n"), /on_battery \(the device has a battery and reports it is unplugged/);
 });
 
 test("--conditions accepts glass_blank and glass_frozen beside the other conditions", async () => {

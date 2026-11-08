@@ -125,3 +125,37 @@ test("screen.health_changed renders its changes compactly", () => {
   assert.equal(line, 'at=2026-09-25T10:00:00Z type=screen.health_changed severity=warning resource_type=screen resource_id=scr_LOBBY changes="display_disconnected,display_power from=on to=standby,temperature_high temperature_c=82.5,crash_spike crashes_24h=5 previous=1" reported_at=2026-09-25T10:00:00Z');
   assert.equal(healthChangesText([{ change: "Bad Name" }, "x"]), undefined);
 });
+
+test("a battery the device reports prints in the health block, and running on it is an issue", () => {
+  const unplugged: ScreenHealth = { ...healthy, battery: { level_percent: 41.6, charging: false, source: "none", temperature_c: 31.25 } };
+  assert.ok(healthLines(unplugged).includes("battery: 42%, on battery, not charging, 31.3 °C"));
+  assert.ok(healthLines(unplugged).includes("attention: on battery 42%"));
+  assert.deepEqual(healthIssues(unplugged), ["on battery 42%"]);
+  assert.deepEqual(healthIssues({ ...healthy, battery: { source: "none" } }), ["on battery"], "no level reported");
+
+  const plugged: ScreenHealth = { ...healthy, battery: { level_percent: 88, charging: true, source: "ac" } };
+  assert.ok(healthLines(plugged).includes("battery: 88%, powered by ac, charging"));
+  assert.deepEqual(healthIssues(plugged), []);
+  assert.deepEqual(healthIssues({ ...healthy, battery: {} }), []);
+  assert.ok(!healthLines(healthy).some((line) => line.startsWith("battery:")), "a device with no battery prints no battery line");
+});
+
+test("screen list flags a screen that runs on its battery", async () => {
+  const transport = new FakeTransport().on("GET", "/api/screens", () => ({
+    status: 200, headers: {},
+    body: { items: [screen("scr_LOBBY", "Lobby", healthy), screen("scr_KIOSK", "Kiosk", { ...healthy, battery: { level_percent: 20, source: "none" } })] },
+  }));
+  const listed = await cli(["--human", "screen", "list"], transport);
+  const lines = listed.stdout.split("\n");
+  assert.match(lines.find((line) => line.startsWith("scr_LOBBY"))!, /\bok$/);
+  assert.match(lines.find((line) => line.startsWith("scr_KIOSK"))!, /on battery 20%$/);
+});
+
+test("screen.health_changed renders the battery changes", () => {
+  const line = formatEventLine({
+    cursor: "ev1_10", type: "screen.health_changed", severity: "warning", message: "Screen health changed", at: "2026-09-25T10:00:00Z",
+    resource: { type: "screen", id: "scr_KIOSK" },
+    details: { reported_at: "2026-09-25T10:00:00Z", changes: [{ change: "on_battery", level_percent: 64 }, { change: "plugged_in", source: "usb" }] },
+  } as never);
+  assert.match(line ?? "", /changes="on_battery level_percent=64,plugged_in source=usb"/);
+});

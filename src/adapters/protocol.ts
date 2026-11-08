@@ -616,8 +616,18 @@ export interface ScreenHealth {
   temperature_c?: number;
   display?: { connected?: boolean; power?: "on" | "off" | "standby" | "unknown" };
   network?: { kind?: "ethernet" | "wifi" | "cellular" | "unknown"; wifi_rssi_dbm?: number };
+  /** Present only when the device reports a battery. source none means it runs on the battery (unplugged). */
+  battery?: ScreenBattery;
   crashes_24h?: number;
   renderer_restarts_24h?: number;
+}
+
+/** Screen.health.battery. The backend reads nothing from it but source, for the on_battery condition. */
+export interface ScreenBattery {
+  level_percent?: number;
+  charging?: boolean;
+  source?: "ac" | "usb" | "wireless" | "dock" | "none";
+  temperature_c?: number;
 }
 
 /**
@@ -658,13 +668,42 @@ export interface ScreenDisplayReported {
   stale: boolean;
 }
 
-/** Screen.display: requested power now, why, until when, and the Player's reported power. */
+/** display.idle: the glass goes dark after after_s seconds (30 to 86400) without use and lights on a wake event. */
+export interface ScreenDisplayIdle {
+  after_s: number;
+  wake: Array<"touch" | "presence">;
+}
+
+/** display.brightness: auto follows the device's light sensor, fixed (the default) keeps the operator's brightness. */
+export interface ScreenDisplayBrightness {
+  mode: "auto" | "fixed";
+}
+
+/** The display member of ScreenPatch: a member sent replaces it, null clears it, a member left out stays. */
+export interface ScreenDisplayPatch {
+  idle?: ScreenDisplayIdle | null;
+  brightness?: ScreenDisplayBrightness | null;
+}
+
+/** Screen.kiosk: present only while the lock is on. */
+export interface ScreenKiosk {
+  lock: boolean;
+}
+
+/** The kiosk member of ScreenPatch: lock true pins the Player to the screen, false or null releases it. */
+export interface ScreenKioskPatch {
+  lock: boolean;
+}
+
+/** Screen.display: requested power now, why, until when, the idle and brightness settings, and the Player's reported power. */
 export interface ScreenDisplay {
   requested: "on" | "off";
   source: "override" | "schedule" | "default";
   until?: string;
   schedule?: ScreenDisplaySchedule;
   override?: ScreenDisplayOverride;
+  idle?: ScreenDisplayIdle;
+  brightness?: ScreenDisplayBrightness;
   reported?: ScreenDisplayReported;
   control?: "hardware" | "scrim" | "unknown";
   /** Observation comparison for an active override, never command acknowledgement. */
@@ -991,6 +1030,8 @@ export interface Screen {
   storage?: ScreenStorage;
   health?: ScreenHealth;
   display?: ScreenDisplay;
+  /** The kiosk lock; present only while it is on. Set by ScreenPatch. */
+  kiosk?: ScreenKiosk;
   /** The windows in which the backend reboots the screen. Present while one is set. Read-only: screen reboot-schedule set and clear change it. */
   reboot_schedule?: ScreenRebootSchedule;
   /** The start of the next window the backend reboots the screen at; absent with no enabled reboot schedule. Read-only. */
@@ -1048,6 +1089,10 @@ export interface ScreenPatch {
   fields?: Record<string, string | null> | null;
   /** Replaces the whole location; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. */
   location?: ScreenLocation | null;
+  /** The idle-dark and brightness settings; a member sent replaces it, null clears it, a null display clears both. Protected screens refuse it (protected_target). */
+  display?: ScreenDisplayPatch | null;
+  /** The kiosk lock; null releases it. */
+  kiosk?: ScreenKioskPatch | null;
 }
 
 /** Where a screen is, in decimal degrees: Screen.location and the ScreenPatch location. */

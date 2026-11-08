@@ -98,6 +98,19 @@ function seeded(now: () => Date = () => NOW): FakeTransport {
   return transport;
 }
 
+test("an on_battery alert lists and shows like any other condition", async () => {
+  const env = await enrolled();
+  const transport = seeded();
+  const BATTERY = alertId("BATTERY");
+  transport.putAlert!({ id: BATTERY, screen_id: ENTRANCE, screen_name: "Entrance", condition: "on_battery", state: "open", since: "2026-10-27T16:30:00Z" });
+  const listed = await cli(["--human", "alerts", "list"], transport, env);
+  assert.equal(listed.code, 0, listed.stderr);
+  assert.match(listed.stdout, new RegExp(`^${BATTERY}\\s+Entrance\\s+on_battery\\s+2026-10-27T16:30:00Z\\s+30m\\s+open$`, "m"));
+  const shown = await cli(["--json", "alerts", "show", BATTERY], transport, env);
+  assert.equal(shown.code, 0, shown.stdout);
+  assert.equal(shown.envelope.data.condition, "on_battery");
+});
+
 test("alerts list reads the open alerts and prints the table with how long each has lasted and the counts line", async () => {
   const env = await enrolled();
   const transport = seeded();

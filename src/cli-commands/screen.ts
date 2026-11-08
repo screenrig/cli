@@ -5,6 +5,8 @@ import type { CommandHandler } from "../commands.js";
 import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
 import { calendarInstantOption } from "../change-control.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
+import { handleScreenBrightness, handleScreenDisplayIdle, handleScreenKioskLock } from "../handlers/screen-device-settings.js";
+import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption } from "../screen-device-settings.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
@@ -135,6 +137,30 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenWallClear));
+
+  const displayIdle = screen.command("display-idle").description("Darken a screen's glass after a time without use, or turn that off")
+    .argument("<id>", "Screen identifier")
+    .option("--after <SECONDS>", "Go dark after this many seconds without use, 30 to 86400 (with --wake)", displayIdleAfterOption)
+    .option("--wake <WAKE>", "What lights the glass again: touch, presence or touch,presence (with --after)", displayIdleWakeOption)
+    .addOption(new Option("--off", "Turn idle-dark off").conflicts(["after", "wake"]))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenDisplayIdle));
+  requireOptionGroup(displayIdle, "exactlyOne", ["--after", "--off"]);
+  requireOptionGroup(displayIdle, "together", ["--after", "--wake"]);
+
+  screen.command("brightness").description("Set whether a screen's brightness follows the device's light sensor")
+    .argument("<id>", "Screen identifier")
+    .addOption(new Option("--mode <MODE>", "auto follows the device's light sensor; fixed keeps the operator's brightness (required)").choices([...DISPLAY_BRIGHTNESS_MODES]).makeOptionMandatory())
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenBrightness));
+
+  const kioskLock = screen.command("kiosk-lock").description("Pin a screen's Player to the screen, or release it")
+    .argument("<id>", "Screen identifier")
+    .addOption(new Option("--on", "Pin the Player to the screen").conflicts("off"))
+    .addOption(new Option("--off", "Release the pin").conflicts("on"))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenKioskLock));
+  requireOptionGroup(kioskLock, "exactlyOne", ["--on", "--off"]);
 
   screen.command("archive").description("Archive a screen")
     .argument("<id>", "Screen identifier")

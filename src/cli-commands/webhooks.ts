@@ -11,7 +11,7 @@ const cursorOption = (value: string): string => webhookDeliveryCursor(value);
 
 export function registerWebhooksCommands(root: Command, bind: CommandActionBinder): void {
   const webhooks = root.command("webhooks").description("Send this project's events to your HTTPS endpoints as signed POSTs");
-  addCommandNotes(webhooks, "Webhooks:\n  An organization has at most 50 notifications across its projects, email and webhook together. Each\n  matching project event is POSTed as the same JSON object events list returns,\n  signed with ScreenRig-Signature t=<unix>,v1=<hex HMAC-SHA256 over\n  \"<t>.<raw body>\">. The secret is printed only by create and rotate-secret.\n  Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id.\n  Email and screen alerts (offline, display disconnected, running hot, storage\n  full, content stuck, not playing, crashing) are screenrig notifications.");
+  addCommandNotes(webhooks, "Webhooks:\n  An organization has at most 50 notifications across its projects, email and webhook together. Each\n  matching project event is POSTed as the same JSON object events list returns,\n  signed with ScreenRig-Signature t=<unix>,v1=<hex HMAC-SHA256 over\n  \"<t>.<raw body>\">. The secret is printed only by create and rotate-secret.\n  Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id.\n  Email and screen alerts (offline, display disconnected, running hot, on battery, storage\n  full, content stuck, not playing, crashing) are screenrig notifications.");
 
   webhooks.command("create").description("Register an HTTPS endpoint and print its signing secret once")
     .requiredOption("--url <URL>", "https URL on a public Internet host, port 443 or 8443 (required)", urlOption)

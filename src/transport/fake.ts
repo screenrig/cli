@@ -23,6 +23,7 @@ import type {
   ScreenCommand,
   ScreenMaintenanceAccepted,
   ScreenMaintenanceCommand,
+  ScreenPatch,
 } from "../adapters/protocol.js";
 import type {
   Transport,
@@ -42,6 +43,14 @@ export interface FakeDownloadRoute {
   method: string;
   path: string | RegExp;
   handler: (req: TransportRequest) => TransportDownloadResponse | Promise<TransportDownloadResponse>;
+}
+
+/** The Screen.display a ScreenPatch display leaves: a member sent replaces it, null clears it, a member left out stays, and a null display clears idle and brightness. */
+function patchedDisplay(current: Screen["display"], patch: ScreenPatch["display"]): NonNullable<Screen["display"]> {
+  const { idle: _idle, brightness: _brightness, ...kept } = current ?? { requested: "on" as const, source: "default" as const };
+  const idle = patch === null ? undefined : patch?.idle === undefined ? current?.idle : patch.idle ?? undefined;
+  const brightness = patch === null ? undefined : patch?.brightness === undefined ? current?.brightness : patch.brightness ?? undefined;
+  return { ...kept, ...(idle ? { idle } : {}), ...(brightness ? { brightness } : {}) };
 }
 
 function matchPath(route: string | RegExp, path: string): boolean {
@@ -1396,7 +1405,7 @@ export function memoryBackend(options: {
   });
   transport.on("PATCH", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const id = req.path.split("/").pop() ?? "";
-    const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[] };
+    const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[]; display?: ScreenPatch["display"]; kiosk?: ScreenPatch["kiosk"] };
     const ifMatch = req.headers?.["if-match"];
     const existing = screens.get(id);
     // Only tag writes model the revision guard; older fixtures reuse fixed revisions.
@@ -1420,10 +1429,15 @@ export function memoryBackend(options: {
       // A screen has no timezone until one is set, and a patch never clears it.
       ...(body.timezone ? { timezone: body.timezone } : {}),
       ...(body.tags ? { tags: body.tags } : {}),
+      // display and kiosk keep the backend's merge rules: a member sent replaces it, null clears it, a member left out stays.
+      ...(body.display !== undefined ? { display: patchedDisplay(existing?.display, body.display) } : {}),
       revision: body.tags && existing ? existing.revision + 1 : 2,
     };
-    screens.set(id, item);
-    return { status: 200, headers: {}, body: item };
+    // Screen.kiosk is present only while the lock is on.
+    const { kiosk: _kiosk, ...unlocked } = item as typeof item & Pick<Screen, "kiosk">;
+    const stored = body.kiosk === undefined ? item : body.kiosk?.lock === true ? { ...unlocked, kiosk: { lock: true } } : unlocked;
+    screens.set(id, stored as Screen);
+    return { status: 200, headers: {}, body: stored };
   });
   transport.on("POST", /^\/api\/screens\/[^/]+\/public-id\/rotate$/, (req) => {
     const id = req.path.split("/")[3] ?? "";
@@ -2003,7 +2017,7 @@ export function memoryBackend(options: {
     if (added.length) notifications.set(id, { ...stored, unsubscribed: [...listed, ...added], revision: (stored.revision as number) + 1 });
   };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale", "reach_dropped", "group_empty", "card_data_stale"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "on_battery", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing", "source_failed", "source_stale", "reach_dropped", "group_empty", "card_data_stale"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },

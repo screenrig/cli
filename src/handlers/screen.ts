@@ -9,6 +9,7 @@ import { shortApplicationPageWarning } from "../playlist-authoring.js";
 import { callPlaylist } from "../playlist-api.js";
 import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
+import { kioskLines } from "../screen-device-settings.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, displayWarnings, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "../screen-commands.js";
@@ -232,7 +233,7 @@ export function screenTableLines(items: Screen[], now: Date): string[] {
   // Only when a listed screen has a manifest upgrade story: a target versus
   // acknowledged mismatch, a failed/retrying/partial report, or an overdue retry.
   const withUpgrade = anyManifestUpgrade(items, now);
-  // Only when a listed screen needs attention: display disconnected, hot, crashing, or a stale report.
+  // Only when a listed screen needs attention: display disconnected, hot, on battery, crashing, or a stale report.
   const withHealth = items.some((screen) => screenHealthIssues(screen).length > 0);
   const rows = items.map((screen) => [
     screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
@@ -589,6 +590,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
+      ...kioskLines(screen?.kiosk),
       ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone),
       ...healthLines(screen?.health),
       ...outageLines(screen),

@@ -3,6 +3,7 @@ import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import { campaignWindow, campaignWindowSpec, CAMPAIGN_WINDOWS_MAX } from "./campaigns.js";
 import { durationMs, instantInZone, normalizeInstant, scheduleWindow } from "./screen-control.js";
+import { displaySettingsLines } from "./screen-device-settings.js";
 
 /**
  * Reboot and display power (backend "Reboot and display power",
@@ -154,6 +155,7 @@ export function displayLines(display: ScreenDisplay | undefined, timezone: strin
       lines.push(`  ${window.days.join(",")} ${window.start !== undefined ? `${window.start}-${window.end}` : "all day"}`);
     }
   }
+  lines.push(...displaySettingsLines(display));
   const reported = display.reported;
   if (reported && typeof reported.reported_at === "string") {
     const parts = [

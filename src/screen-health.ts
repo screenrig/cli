@@ -17,7 +17,8 @@ const number = (value: unknown): value is number => typeof value === "number" &&
 
 /**
  * The problems `screen list` flags: a disconnected display, a hot device
- * (80 °C or more), crashing (3 or more crashes in 24 hours), or a stale report.
+ * (80 °C or more), a device running on its battery, crashing (3 or more
+ * crashes in 24 hours), or a stale report.
  */
 export function healthIssues(health: ScreenHealth | undefined): string[] {
   if (!health || typeof health !== "object") return [];
@@ -25,6 +26,8 @@ export function healthIssues(health: ScreenHealth | undefined): string[] {
   if (health.stale === true) issues.push("stale");
   if (health.display?.connected === false) issues.push("display disconnected");
   if (number(health.temperature_c) && health.temperature_c >= HEALTH_HOT_C) issues.push(`hot ${Math.round(health.temperature_c)}°C`);
+  // The on_battery condition: the device has a battery and reports no power source.
+  if (health.battery?.source === "none") issues.push(number(health.battery.level_percent) ? `on battery ${Math.round(health.battery.level_percent)}%` : "on battery");
   if (number(health.crashes_24h) && health.crashes_24h >= HEALTH_CRASHING_24H) issues.push(`crashing ${health.crashes_24h}/24h`);
   return issues;
 }
@@ -66,6 +69,15 @@ export function healthLines(health: ScreenHealth | undefined): string[] {
   const network = health.network;
   if (network) {
     add("network", [network.kind, number(network.wifi_rssi_dbm) ? `${network.wifi_rssi_dbm} dBm` : undefined].filter(Boolean).join(", "));
+  }
+  const battery = health.battery;
+  if (battery) {
+    add("battery", [
+      number(battery.level_percent) ? `${Math.round(battery.level_percent)}%` : undefined,
+      battery.source === "none" ? "on battery" : battery.source ? `powered by ${battery.source}` : undefined,
+      battery.charging === true ? "charging" : battery.charging === false ? "not charging" : undefined,
+      number(battery.temperature_c) ? `${battery.temperature_c.toFixed(1)} °C` : undefined,
+    ].filter(Boolean).join(", "));
   }
   const crashes = [
     number(health.crashes_24h) ? `${health.crashes_24h} crashes` : undefined,
