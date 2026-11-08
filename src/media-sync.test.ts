@@ -558,7 +558,7 @@ test("account add dropbox prints the one-time link and its expiry, and keeps the
   assert.match(human.stdout, /^state: pending_consent$/m);
   assert.match(human.stdout, /^Connect link, for the person who owns the Dropbox account\. Send it to that person only, or open it yourself if that is you: it is the credential of one consent, and works once until 2026-10-28T17:15:00Z\.$/m);
   assert.ok(human.stdout.includes(`authorize_url: ${AUTHORIZE_URL}`));
-  assert.match(human.stdout, /allow screenRIG read-only access to the files in that Dropbox \(files\.metadata\.read, files\.content\.read, account_info\.read\)\. The CLI never opens a browser\./);
+  assert.match(human.stdout, /allow screenRIG read-only access to the files in that Dropbox \(files\.metadata\.read, files\.content\.read, account_info\.read, sharing\.read\)\. The CLI never opens a browser\./);
   assert.match(human.stdout, /^Then: screenrig media sync create dropbox --account-id msa_DROPBOXAAAAAAAAAAAA --url FOLDER$/m);
   assert.doesNotMatch(human.stdout, /redirect URI/);
 });
