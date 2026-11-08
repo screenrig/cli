@@ -1459,6 +1459,9 @@
     "kv.delete",
     "kv.watch",
     "kv.changed",
+    "device.display",
+    "device.watch",
+    "device.event",
     "response.ack",
     "response.problem"
   ];
@@ -1479,11 +1482,16 @@
   var MAX_FEATURES = 64;
   var MAX_FEATURE_LENGTH = 64;
   var MAX_SKIP_REASON_CODE_POINTS = 64;
+  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys"];
+  var DEVICE_KEYS = ["volume_up", "volume_down"];
   var EMPTY_CAPABILITIES = {
     "page.advance": false,
     "page.skip": false,
     "kv.read": false,
-    "kv.write": false
+    "kv.write": false,
+    "device.display": false,
+    "device.presence": false,
+    "device.keys": false
   };
 
   // src/capture.ts
@@ -2027,7 +2035,10 @@
       "page.advance": value["page.advance"] === true,
       "page.skip": value["page.skip"] === true,
       "kv.read": value["kv.read"] === true,
-      "kv.write": value["kv.write"] === true
+      "kv.write": value["kv.write"] === true,
+      "device.display": value["device.display"] === true,
+      "device.presence": value["device.presence"] === true,
+      "device.keys": value["device.keys"] === true
     };
   }
   function parseContextPayload(payload, expectedOrigin) {
@@ -2092,6 +2103,59 @@
     }
     return { key, deleted, generation, nonce, ...revision === void 0 || deleted ? {} : { revision } };
   }
+  function isBrightness(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+  }
+  function parseDeviceDisplayRequest(state) {
+    if (!isRecord(state)) {
+      throw new SdkValidationError("invalid_request", "A display state is an object with on and brightness");
+    }
+    const request = {};
+    for (const [member, value] of Object.entries(state)) {
+      if (member !== "on" && member !== "brightness") {
+        throw new SdkValidationError("invalid_request", `Unknown display member ${member}`);
+      }
+      if (value === void 0) continue;
+      if (member === "on") {
+        if (typeof value !== "boolean") throw new SdkValidationError("invalid_request", "on must be a boolean");
+        request.on = value;
+      } else {
+        if (!isBrightness(value)) throw new SdkValidationError("invalid_request", "brightness must be a number from 0 to 1");
+        request.brightness = value;
+      }
+    }
+    return request;
+  }
+  function parseDeviceDisplayState(value, code = "invalid_response") {
+    if (!isRecord(value) || typeof value.on !== "boolean") {
+      throw new SdkValidationError(code, "Invalid display state");
+    }
+    const brightness = value.brightness === void 0 ? null : value.brightness;
+    if (brightness !== null && !isBrightness(brightness)) {
+      throw new SdkValidationError(code, "Invalid display brightness");
+    }
+    return { on: value.on, brightness };
+  }
+  function parseDeviceEventPayload(payload) {
+    const { type, generation, nonce } = payload;
+    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || typeof nonce !== "string" || !NONCE_RE.test(nonce)) {
+      throw new SdkValidationError("invalid_device_event", "Invalid device.event binding");
+    }
+    if (type === "display") {
+      const state = parseDeviceDisplayState(payload, "invalid_device_event");
+      return { type, generation, nonce, ...state };
+    }
+    if (type === "presence") {
+      return { type, generation, nonce };
+    }
+    if (type === "key") {
+      const key = payload.key;
+      if (typeof key !== "string") throw new SdkValidationError("invalid_device_event", "Invalid device.event key");
+      const known = DEVICE_KEYS.includes(key);
+      return known ? { type, generation, nonce, key } : void 0;
+    }
+    return void 0;
+  }
   function parseResponseProblemPayload(payload) {
     const requestMessageId = payload.request_message_id;
     const generation = payload.generation;
@@ -2133,7 +2197,10 @@
       "page.advance": offered["page.advance"] === true,
       "page.skip": offered["page.skip"] === true,
       "kv.read": offered["kv.read"] === true,
-      "kv.write": offered["kv.write"] === true
+      "kv.write": offered["kv.write"] === true,
+      "device.display": offered["device.display"] === true,
+      "device.presence": offered["device.presence"] === true,
+      "device.keys": offered["device.keys"] === true
     };
   }
   function sanitizeSkipReason(reason) {
@@ -2200,6 +2267,13 @@
     kvChangeHandlers = /* @__PURE__ */ new Set();
     /** The context (generation and nonce) kv.watch was last sent under; a new context sends it again. */
     watchedContext = null;
+    deviceHandlers = {
+      display: /* @__PURE__ */ new Set(),
+      presence: /* @__PURE__ */ new Set(),
+      keys: /* @__PURE__ */ new Set()
+    };
+    /** The context and event types device.watch last carried; a new context sends it again. */
+    deviceWatched = null;
     unsubscribe;
     advanced = false;
     /** `ready()` was called for this activation: a skip is no longer a start-time decision. */
@@ -2216,6 +2290,15 @@
       delete: (key, expectedRevision, options) => this.kvDelete(key, expectedRevision, options),
       onChange: (handler) => this.kvOnChange(handler)
     };
+    device = {
+      display: {
+        get: () => this.deviceDisplay(void 0),
+        set: (state) => this.deviceDisplay(state)
+      },
+      onDisplay: (handler) => this.deviceOn("onDisplay", this.deviceHandlers.display, handler),
+      onPresence: (handler) => this.deviceOn("onPresence", this.deviceHandlers.presence, handler),
+      onKey: (handler) => this.deviceOn("onKey", this.deviceHandlers.keys, handler)
+    };
     destroy() {
       this.destroyed = true;
       this.unsubscribe();
@@ -2231,6 +2314,10 @@
       this.pending.clear();
       this.kvChangeHandlers.clear();
       this.watchedContext = null;
+      this.deviceHandlers.display.clear();
+      this.deviceHandlers.presence.clear();
+      this.deviceHandlers.keys.clear();
+      this.deviceWatched = null;
       this.readied = false;
       this.readyState = "inert";
       this.context = null;
@@ -2318,6 +2405,12 @@
           }
           return;
         }
+        if (message.kind === "device.event") {
+          const event2 = parseDeviceEventPayload(message.payload);
+          if (event2 === void 0 || !this.matchesRuntime(event2.generation, event2.nonce)) return;
+          this.dispatchDeviceEvent(event2);
+          return;
+        }
       } catch (err) {
         if (err instanceof SdkValidationError && err.code === "wildcard_origin") {
           this.readyState = "failed";
@@ -2379,6 +2472,7 @@
         handler(this.capabilities);
       }
       this.watchKv();
+      this.watchDevice();
     }
     supports(kind) {
       var _a2;
@@ -2628,6 +2722,77 @@
         },
         false
       );
+    }
+    async deviceDisplay(state) {
+      const context = this.requireActive();
+      if (!this.supports("device.display")) {
+        throw new SdkValidationError("not_supported", "The Player does not support device.display");
+      }
+      if (!this.capabilities["device.display"]) {
+        throw new SdkValidationError("capability_denied", "This primitive does not have device.display");
+      }
+      const members = state === void 0 ? {} : parseDeviceDisplayRequest(state);
+      const payload = { generation: context.generation, nonce: context.nonce, ...members };
+      const result = await this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.display", primitive_id: context.primitive_id, payload: { ...payload } }, true);
+      return parseDeviceDisplayState(result);
+    }
+    /**
+     * Registers a device handler, as kv.onChange registers one: it throws only for
+     * a non-function, works before activation, and stays quiet without the
+     * capability or the Player's support, where the handler never runs.
+     */
+    deviceOn(name, handlers, handler) {
+      if (typeof handler !== "function") {
+        throw new SdkValidationError("invalid_handler", `device.${name} needs a function`);
+      }
+      handlers.add(handler);
+      this.watchDevice();
+      return () => {
+        handlers.delete(handler);
+        this.watchDevice();
+      };
+    }
+    dispatchDeviceEvent(event) {
+      const call = (invoke) => {
+        try {
+          invoke();
+        } catch {
+          this.report("warn", "device_handler", "A screenrig.device handler threw");
+        }
+      };
+      if (event.type === "display") {
+        for (const handler of [...this.deviceHandlers.display]) call(() => handler({ on: event.on, brightness: event.brightness }));
+      } else if (event.type === "presence") {
+        for (const handler of [...this.deviceHandlers.presence]) call(() => handler());
+      } else {
+        for (const handler of [...this.deviceHandlers.keys]) call(() => handler(event.key));
+      }
+    }
+    /**
+     * The device event types this frame can watch now: a handler exists, the
+     * context holds the capability, and the host advertises device.watch.
+     */
+    deviceWatchEvents() {
+      if (!this.supports("device.watch")) return [];
+      const capability = { display: "device.display", presence: "device.presence", keys: "device.keys" };
+      return DEVICE_WATCH_EVENTS.filter((event) => this.deviceHandlers[event].size > 0 && this.capabilities[capability[event]]);
+    }
+    /**
+     * device.watch carries the full set of event types the frame wants and each
+     * send replaces the previous one. It is sent whenever that set changes and
+     * again for a new context, which starts with no subscription; `[]` stops.
+     */
+    watchDevice() {
+      const context = this.context;
+      if (this.readyState !== "active" || !context) return;
+      const bound = `${context.generation}:${context.nonce}`;
+      const events = this.deviceWatchEvents();
+      const key = events.join(",");
+      const previous2 = this.deviceWatched !== null && this.deviceWatched.bound === bound ? this.deviceWatched.events : "";
+      this.deviceWatched = { bound, events: key };
+      if (key === previous2) return;
+      const payload = { generation: context.generation, nonce: context.nonce, events };
+      void this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.watch", primitive_id: context.primitive_id, payload: { ...payload } }, false);
     }
     onResize(handler) {
       this.resizeHandlers.add(handler);
