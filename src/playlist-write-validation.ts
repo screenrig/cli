@@ -1,3 +1,4 @@
+import { BACKGROUND_ID_MAX, BACKGROUND_ID_PATTERN, IMAGE_BACKGROUND_PRIMITIVES_MAX, imageBackgroundOf } from "./backgrounds.js";
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
@@ -70,10 +71,16 @@ function optionalBoolean(owner: JsonRecord, key: string, name: string): boolean 
 
 function validateBackground(value: unknown, name: string): void {
   if (typeof value === "string") {
-    if (!COLOR_PATTERN.test(value)) throw usageError(`${name} must be an uppercase #RRGGBBAA color or linear gradient.`);
+    if (!COLOR_PATTERN.test(value)) throw usageError(`${name} must be an uppercase #RRGGBBAA color, a linear gradient or a catalog image.`);
     return;
   }
   const background = record(value, name);
+  if (background.type === "image") {
+    exact(background, ["type", "background_id", "color"], name);
+    string(background, "background_id", name, BACKGROUND_ID_MAX, BACKGROUND_ID_PATTERN);
+    if (background.color !== undefined) string(background, "color", name, 9, COLOR_PATTERN);
+    return;
+  }
   exact(background, ["type", "stops"], name);
   if (background.type !== "linear" || !Array.isArray(background.stops) || background.stops.length < 2 || background.stops.length > 8) {
     throw usageError(`${name} must be a linear gradient with 2 to 8 stops.`);
@@ -492,6 +499,9 @@ export function validatePlaylistWrite(
     else if (advance === "audio_end") throw usageError(`${pageName}.advance audio_end requires an audio_cue on the same page.`);
     if (!Array.isArray(page.primitives) || page.primitives.length < 1 || page.primitives.length > 24) {
       throw usageError(`${pageName}.primitives must contain 1 to 24 primitives.`);
+    }
+    if (page.primitives.length > IMAGE_BACKGROUND_PRIMITIVES_MAX && imageBackgroundOf(page)) {
+      throw usageError(`${pageName}.primitives must contain at most ${IMAGE_BACKGROUND_PRIMITIVES_MAX} primitives on a page with an image background.`);
     }
     const primitiveIds = new Set<string>();
     const mediaPrimitivesOnPage: Array<{

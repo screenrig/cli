@@ -4,6 +4,7 @@ import type { CommandActionBinder } from "../cli-commands/types.js";
 import { registerPlaylistCommands } from "../cli-commands/playlist.js";
 import { registerReviewsCommands } from "../cli-commands/reviews.js";
 import { registerCardsCommands } from "../cli-commands/cards.js";
+import { registerBackgroundCommands } from "../cli-commands/background.js";
 import { registerCommentCommands } from "../cli-commands/comment.js";
 import { registerScheduleImportCommands } from "../cli-commands/schedule-import.js";
 
@@ -11,6 +12,7 @@ export function register(root: Command, bind: CommandActionBinder): void {
   registerPlaylistCommands(root, bind);
   registerReviewsCommands(root, bind);
   registerCardsCommands(root, bind);
+  registerBackgroundCommands(root, bind);
   registerCommentCommands(root, bind);
   registerScheduleImportCommands(root, bind);
 }

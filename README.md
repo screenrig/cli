@@ -51,6 +51,7 @@ production availability from the independent monitor without credentials
 - Live weather, clocks, menus and boards: a built-in card (`screenrig cards list`).
   Touch, peripherals, pushed data or an exact look no card has: an application.
 - Live video or an existing web page: playlist primitives.
+- A backdrop behind cards and primitives: a catalog image (`screenrig background sets`, then `background apply`).
 
 ## Configuration
 

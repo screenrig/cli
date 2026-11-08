@@ -607,3 +607,60 @@ test("an application's params pass the canonical validator with the backend's na
 test("a bundle keeps an application out, so params never reach its write path", () => {
   assert.throws(() => validatePlaylistWrite(applicationWith({ params: { kiosk: "a" } }), new Map()), /do not support application primitives/);
 });
+
+const BACKGROUND = "bg_blockbuster-laser-rush__landscape__bottom-banner-73d2f112";
+
+function playlistWithBackground(background: unknown, primitives: unknown[] = TWO_IFRAMES) {
+  const value = playlistWithPrimitives(primitives);
+  return { ...value, pages: [{ ...value.pages[0], canvas: { width: 1920, height: 1080, background } }] };
+}
+
+test("a canvas background is a colour, a gradient or a catalog image with an optional colour", () => {
+  for (const background of [
+    "#09111BFF",
+    { type: "linear", stops: [{ at: 0, color: "#000000FF" }, { at: 1, color: "#FFFFFFFF" }] },
+    { type: "image", background_id: BACKGROUND },
+    { type: "image", background_id: BACKGROUND, color: "#09111BFF" },
+    { type: "image", background_id: "bg_a-00000000" },
+  ]) {
+    assert.deepEqual(validatePlaylistWrite(playlistWithBackground(background), new Map()), new Set(), JSON.stringify(background));
+  }
+});
+
+test("an image background takes exactly a catalog id and a canonical colour", () => {
+  for (const background of [
+    { type: "image" },
+    { type: "image", background_id: "blockbuster-laser-rush" },
+    { type: "image", background_id: "bg_x" },
+    { type: "image", background_id: "bg_Upper-case-00000000" },
+    { type: "image", background_id: `bg_${"a".repeat(160)}-00000000` },
+    { type: "image", background_id: 7 },
+    { type: "image", background_id: BACKGROUND, color: "#09111B" },
+    { type: "image", background_id: BACKGROUND, color: "#09111bff" },
+    { type: "image", background_id: BACKGROUND, color: 7 },
+    { type: "image", background_id: BACKGROUND, fit: "cover" },
+    { type: "image", background_id: BACKGROUND, stops: [] },
+    { type: "photo", background_id: BACKGROUND },
+  ]) {
+    assert.throws(
+      () => validatePlaylistWrite(playlistWithBackground(background), new Map()),
+      (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /canvas\.background/.test(error.problem.detail),
+      JSON.stringify(background),
+    );
+  }
+});
+
+test("a page with an image background holds at most 23 primitives; any other background holds 24", () => {
+  const images = (count: number) => Array.from({ length: count }, (_, index) => ({
+    id: `image_${index}`, primitive: "image", selector: { by: "id", media_id: `med_${index}` },
+    rect: { x: 0, y: 0, width: 100, height: 100 }, layer: index, content_fit: "contain",
+  }));
+  const known = new Map(Array.from({ length: 24 }, (_, index) => [`med_${index}`, "image" as const]));
+  const image = { type: "image", background_id: BACKGROUND, color: "#09111BFF" };
+  assert.equal(validatePlaylistWrite(playlistWithBackground(image, images(23)), known).size, 23);
+  assert.equal(validatePlaylistWrite(playlistWithBackground("#09111BFF", images(24)), known).size, 24);
+  assert.throws(
+    () => validatePlaylistWrite(playlistWithBackground(image, images(24)), known),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /at most 23 primitives on a page with an image background/.test(error.problem.detail),
+  );
+});

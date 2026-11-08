@@ -20,7 +20,7 @@ import { wallSize } from "./screen-wall.js";
  * video, dated by the page's own visibility.
  */
 
-const PAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export const PAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const DEFAULT_CANVAS = { width: 1920, height: 1080, background: "#000000FF" } as const;
 const DEFAULT_TRANSITION = { type: "crossfade", duration_ms: 600 } as const;
@@ -351,6 +351,25 @@ function pageResult(response: Awaited<ReturnType<typeof pageWrite>>, requestId: 
 
 const pagesPath = (id: string): string => `/api/playlists/${encodeURIComponent(id)}/pages`;
 
+/**
+ * A stored page as the caller sees it (its own pending edits included), with the
+ * playlist it belongs to and the revision the playlist was read at. A shortcut
+ * that derives a page from the stored one holds its write to that revision.
+ */
+export async function storedPageOf(client: ReturnType<typeof clientFor>, id: string, pageId: string, token: string | undefined): Promise<{ stored: JSONObject; playlist: JSONObject; revision: string }> {
+  const { playlist: live, revision } = await playlistOf(client, id);
+  const playlist = await playlistAsProposed(client, id, live, token);
+  const stored = (Array.isArray(playlist.pages) ? playlist.pages : []).find((candidate): candidate is JSONObject => isObject(candidate) && candidate.id === pageId);
+  if (!stored) throw usageError(`Playlist ${id} has no page ${pageId}; playlist show ${id} lists its pages.`);
+  return { stored, playlist, revision: String(revision) };
+}
+
+/** Replace one page in place (PUT): held to `revision` unless --expect-rev names another, with --note and a review answered like every page write. */
+export async function putPage(client: ReturnType<typeof clientFor>, args: ParsedArgs, id: string, pageId: string, page: JSONObject, revision: string | undefined, title: string) {
+  const response = await pageWrite(client, args, { method: "PUT", path: `${pagesPath(id)}/${encodeURIComponent(pageId)}`, body: page, ...(revision && flagString(args.flags, "expect-rev") === undefined ? { revision } : {}) });
+  return pageResult(response, client.requestId, title);
+}
+
 export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolved) => {
   const id = playlistId(args, "add");
   const file = flagString(args.flags, "file"), media = flagString(args.flags, "media");
@@ -405,17 +424,13 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
       if (visibility) page.visibility = visibility;
     }
   } else {
-    const { playlist: live, revision: current } = await playlistOf(client, id);
-    const playlist = await playlistAsProposed(client, id, live, resolved.token);
-    const stored = (Array.isArray(playlist.pages) ? playlist.pages : []).find((candidate): candidate is JSONObject => isObject(candidate) && candidate.id === pageId);
-    if (!stored) throw usageError(`Playlist ${id} has no page ${pageId}; playlist show ${id} lists its pages.`);
+    const { stored, playlist, revision: current } = await storedPageOf(client, id, pageId, resolved.token);
     const kind = media !== undefined ? await mediaOf(client, media) : undefined;
     page = replaceMedia({ stored, ...(media !== undefined ? { mediaId: media, kind: kind! } : {}), ...(fit(args) ? { fit: fit(args)! } : {}), ...(seconds(args) !== undefined ? { seconds: seconds(args)! } : {}), playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), always: when.always });
     // The page was derived from the stored one, so the write is held to the revision it was read at.
-    revision = String(current);
+    revision = current;
   }
-  const response = await pageWrite(client, args, { method: "PUT", path: `${pagesPath(id)}/${encodeURIComponent(pageId)}`, body: page, ...(revision && flagString(args.flags, "expect-rev") === undefined ? { revision } : {}) });
-  return pageResult(response, client.requestId, `Page ${pageId} of ${id} replaced.`);
+  return putPage(client, args, id, pageId, page, revision, `Page ${pageId} of ${id} replaced.`);
 }, true);
 
 export const handlePlaylistPageRemove = commandHandler(async (args, runtime, resolved) => {
