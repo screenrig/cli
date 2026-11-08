@@ -11602,6 +11602,110 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/backgrounds/categories:
+    get:
+      x-screenrig-access: read
+      operationId: listBackgroundCategories
+      description: >-
+        The categories of the page background catalog, in catalog order, each with its set count and a thumbnail. The catalog is platform-owned: every project browses the same images and sets one as a page's canvas background with canvas.background {"type":"image","background_id":"bg_…"} (PUT /api/playlists/{id}/pages/{page_id}). Nothing is copied into project media. Names are data and are not translated.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The background categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundCategoryList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/backgrounds/sets:
+    get:
+      x-screenrig-access: read
+      operationId: listBackgroundSets
+      description: >-
+        The sets of the page background catalog that match the filters, all of them in catalog order. A set groups the backgrounds of one visual style. q keeps the sets whose name, style, category name and search terms contain every one of its words, ignoring case. orientation keeps the sets with at least one background in it. Read one set's images with GET /api/backgrounds/sets/{set_id}.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema: {type: string, maxLength: 64}
+          description: A category id from GET /api/backgrounds/categories. An unknown id matches no set.
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+          description: Words to find in the set's name, style, category name and search terms.
+        - name: orientation
+          in: query
+          required: false
+          schema: {type: string, enum: [landscape, portrait]}
+          description: Keep the sets with at least one background in this orientation.
+      responses:
+        '200':
+          description: The matching background sets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundSetList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/backgrounds/sets/{set_id}:
+    parameters:
+      - name: set_id
+        in: path
+        required: true
+        schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", maxLength: 64}
+    get:
+      x-screenrig-access: read
+      operationId: getBackgroundSet
+      description: >-
+        One background set with all its backgrounds in catalog order, landscape (1280x720) and portrait (720x1280). Each background carries the composition in layout and label, its overall lightness in tone (light content reads on dark) and the root-relative image_path of its image. An unknown set answers not_found (404).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The set and its backgrounds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundSetDetail'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/backgrounds/{background_id}:
+    parameters:
+      - name: background_id
+        in: path
+        required: true
+        schema: {type: string, pattern: "^bg_[a-z0-9][a-z0-9._-]*-[0-9a-f]{8}$", maxLength: 160}
+    get:
+      x-screenrig-access: read
+      operationId: getBackground
+      description: >-
+        One background and the set it belongs to. Use its id as canvas.background.background_id. An unknown background answers not_found (404).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The background and its set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundDetail'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/cards:
     get:
       operationId: listCards
@@ -25595,6 +25699,65 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       parameters: []
+  /api/projects/{project_id}/backgrounds/categories:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBackgroundCategoriesInProject
+      description: The categories of the page background catalog, as GET /api/backgrounds/categories answers.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The background categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundCategoryList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/backgrounds/sets:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBackgroundSetsInProject
+      description: The sets of the page background catalog that match the filters, as GET /api/backgrounds/sets answers.
+      security:
+        - projectBearer: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema: {type: string, maxLength: 64}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+        - name: orientation
+          in: query
+          required: false
+          schema: {type: string, enum: [landscape, portrait]}
+      responses:
+        '200':
+          description: The matching background sets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackgroundSetList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/card-data:
     parameters:
       - name: project_id
@@ -31656,7 +31819,7 @@ components:
           $ref: '#/components/schemas/EnrollmentInvitation'
         access_token:
           type: string
-          description: Agent access JWT, 15 minutes, for /api with the Bearer scheme.
+          description: Agent access JWT, 10 minutes, for /api with the Bearer scheme.
         token_type:
           type: string
           enum:
@@ -33186,7 +33349,7 @@ components:
         width: {type: number, minimum: 1, maximum: 1000000}
         height: {type: number, minimum: 1, maximum: 1000000}
         viewport_fit: {type: string, enum: [contain, cover, fill], default: contain}
-        background: {$ref: "#/components/schemas/CanvasBackground"}
+        background: {$ref: "#/components/schemas/PlaylistCanvasBackground"}
     PlaylistRect:
       type: object
       additionalProperties: false
@@ -33415,6 +33578,21 @@ components:
         - {$ref: "#/components/schemas/CanvasColor"}
         - {$ref: "#/components/schemas/LinearGradientBackground"}
       description: "Solid canonical uppercase #RRGGBBAA, or a top-to-bottom linear gradient."
+    ImageCanvasBackground:
+      type: object
+      additionalProperties: false
+      required: [type, background_id]
+      description: A background from the platform catalog (GET /api/backgrounds/sets) drawn over the page's colour, scaled to cover the canvas. Players receive the colour as the canvas background and the image as the page's first primitive.
+      properties:
+        type: {type: string, enum: [image]}
+        background_id: {type: string, pattern: "^bg_[a-z0-9][a-z0-9._-]*-[0-9a-f]{8}$", maxLength: 160, description: "A catalog background id. Authoring refuses an id the catalog does not hold (invalid_request, field pages[i].canvas.background.background_id)."}
+        color: {$ref: "#/components/schemas/CanvasColor", default: "#000000FF", description: "The colour behind the image and the canvas background Players receive."}
+    PlaylistCanvasBackground:
+      oneOf:
+        - {$ref: "#/components/schemas/CanvasColor"}
+        - {$ref: "#/components/schemas/LinearGradientBackground"}
+        - {$ref: "#/components/schemas/ImageCanvasBackground"}
+      description: "A page's canvas background as authored: solid canonical uppercase #RRGGBBAA, a top-to-bottom linear gradient, or a catalog image over a colour. A page with an image background holds at most 23 primitives, because the image takes one of the 24 a page can hold. Players receive CanvasBackground."
     PlaylistIntrinsicSize: {type: object, additionalProperties: false, required: [width, height], properties: {width: {type: number, exclusiveMinimum: 0}, height: {type: number, exclusiveMinimum: 0}}}
     PlaylistList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Playlist"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     CommentsWrite:
@@ -37858,6 +38036,79 @@ components:
         data:
           type: object
           additionalProperties: true
+    BackgroundCategoryList:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: {$ref: "#/components/schemas/BackgroundCategory"}
+    BackgroundCategory:
+      type: object
+      required: [id, name, set_count, thumbnail_path]
+      properties:
+        id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$"}
+        name: {type: string}
+        set_count: {type: integer, minimum: 0}
+        thumbnail_path: {type: string, description: "Root-relative path of the category thumbnail, a 640x360 WebP."}
+    BackgroundSetList:
+      type: object
+      required: [sets]
+      properties:
+        sets:
+          type: array
+          items: {$ref: "#/components/schemas/BackgroundSet"}
+    BackgroundSet:
+      type: object
+      required: [id, name, category, category_name, style, colors, thumbnail_path, landscape_count, portrait_count]
+      properties:
+        id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$"}
+        name: {type: string}
+        category: {type: string, description: "The category id."}
+        category_name: {type: string}
+        style: {type: string}
+        colors: {type: array, maxItems: 3, items: {type: string, pattern: "^#[0-9A-F]{6}$"}, description: "The set's palette, #RRGGBB."}
+        thumbnail_path: {type: string, description: "Root-relative path of the set thumbnail, a 640x360 WebP."}
+        landscape_count: {type: integer, minimum: 0}
+        portrait_count: {type: integer, minimum: 0}
+    BackgroundSetDetail:
+      type: object
+      description: A BackgroundSet and all its backgrounds in catalog order.
+      required: [id, name, category, category_name, style, colors, thumbnail_path, landscape_count, portrait_count, backgrounds]
+      properties:
+        id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$"}
+        name: {type: string}
+        category: {type: string, description: "The category id."}
+        category_name: {type: string}
+        style: {type: string}
+        colors: {type: array, maxItems: 3, items: {type: string, pattern: "^#[0-9A-F]{6}$"}, description: "The set's palette, #RRGGBB."}
+        thumbnail_path: {type: string, description: "Root-relative path of the set thumbnail, a 640x360 WebP."}
+        landscape_count: {type: integer, minimum: 0}
+        portrait_count: {type: integer, minimum: 0}
+        backgrounds:
+          type: array
+          items: {$ref: "#/components/schemas/BackgroundImage"}
+    BackgroundImage:
+      type: object
+      required: [id, set, orientation, layout, label, width, height, bytes, sha256, tone, image_path]
+      properties:
+        id: {type: string, pattern: "^bg_[a-z0-9][a-z0-9._-]*-[0-9a-f]{8}$", maxLength: 160}
+        set: {type: string, description: "The set id."}
+        orientation: {type: string, enum: [landscape, portrait]}
+        layout: {type: string, description: "The composition: bottom-banner, center-column, full-bleed-balanced, full-bleed-soft, header-footer, left-half, left-rail, light-frame, periphery-frame, right-half, right-rail or top-banner (the decoration sits in the named area and leaves the rest calm for content; full-bleed-* cover the canvas evenly), or a colour name for a texture set."}
+        label: {type: string, description: "The layout in words, for example Left Half."}
+        width: {type: integer, description: "1280 for landscape, 720 for portrait."}
+        height: {type: integer, description: "720 for landscape, 1280 for portrait."}
+        bytes: {type: integer, minimum: 1}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        tone: {type: string, enum: [dark, light], description: "The image's overall lightness; light content reads on dark."}
+        image_path: {type: string, description: "Root-relative path of the WebP image, served publicly."}
+    BackgroundDetail:
+      type: object
+      required: [background, set]
+      properties:
+        background: {$ref: "#/components/schemas/BackgroundImage"}
+        set: {$ref: "#/components/schemas/BackgroundSet"}
     CardCatalogue:
       type: object
       required: [cards]
@@ -38200,6 +38451,7 @@ components:
         applicationId: {type: string}
         releaseId: {type: string}
         launchUrl: {type: string}
+        launchParamsHash: {type: string, pattern: "^[0-9a-f]{64}$", description: "Stable SHA-256 of the expanded application launch query, excluding the ticket. Present when params exist. Playback content: a changed hash requires a fresh application launch even under the same manifest revision; credential rotation and unrelated screen metadata do not change it. Carries no parameter values or authority."}
         origin: {type: string}
         protocol: {type: string, description: "SDK bridge protocol. Known value: \"1\". A reader drops the primitive for a protocol it does not implement."}
         grantId: {type: string}
@@ -38366,7 +38618,7 @@ components:
         - {$ref: "#/components/schemas/RuntimeMediaSelectorByAll"}
         - {$ref: "#/components/schemas/RuntimeMediaSelectorByTag"}
       discriminator: {propertyName: by}
-    RuntimeMediaSelectorByID: {type: object, required: [by, mediaId, oneAtATime], properties: {by: {type: string, enum: [id]}, mediaId: {type: string, pattern: "^med_"}, oneAtATime: {type: boolean, enum: [false]}}}
+    RuntimeMediaSelectorByID: {type: object, required: [by, mediaId, oneAtATime], properties: {by: {type: string, enum: [id]}, mediaId: {type: string, pattern: "^(med|bg)_", description: "A project media id, or the bg_ id of a catalog background that a page with an image canvas background plays as its first primitive."}, oneAtATime: {type: boolean, enum: [false]}}}
     RuntimeMediaSelectorByIDs: {type: object, required: [by, mediaIds, oneAtATime], properties: {by: {type: string, enum: [ids]}, mediaIds: {type: array, minItems: 1, maxItems: 1024, uniqueItems: true, items: {type: string, pattern: "^med_"}}, oneAtATime: {type: boolean}}}
     RuntimeMediaSelectorByAll: {type: object, required: [by, oneAtATime], properties: {batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [all]}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "weighted is sent only to a Player that declared the selector.weighted host capability, and every item of the selector snapshot then carries weight; any other Player gets random."}}}
     RuntimeMediaSelectorByTag: {type: object, required: [by, oneAtATime], oneOf: [{type: object, required: [tag], properties: {tag: {type: string}}}, {type: object, required: [tags], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}}}], properties: {tags: {$ref: "#/components/schemas/MediaSelectorTagFilter"}, batchSize: {type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1.}, by: {type: string, enum: [tag]}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, oneAtATime: {type: boolean}, order: {type: string, enum: [filename, random, weighted], default: filename, description: "weighted is sent only to a Player that declared the selector.weighted host capability, and every item of the selector snapshot then carries weight; any other Player gets random."}}}
@@ -38477,7 +38729,7 @@ components:
     ManifestUpgradeReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One latest-wins manifest-upgrade lifecycle snapshot for the session screen. The server stores one slot per screen and derives the project read model Screen.manifest_upgrade from it; a stale, superseded, or post-activation pre-activation report is accepted with no change (202), never refused as a conflict, and no report ever promotes a grant. severity is envelope-only: the derived project event severity comes from state.", properties: {severity: {type: string, enum: [info, warning, error]}, code: {type: string, enum: [manifest.upgrade]}, context: {$ref: "#/components/schemas/ManifestUpgradeContext"}}}
     ManifestUpgradeContext: {type: object, additionalProperties: true, required: [manifest_revision, state], properties: {manifest_revision: {type: string, pattern: "^man_"}, state: {type: string, enum: [downloading, preparing, activating, retrying, failed, blocked, partial, current]}, code: {type: string, pattern: "^[a-z0-9_]{1,40}$", description: "Safe static code. Required for retrying, failed, blocked and partial; absent for downloading, preparing and activating; an optional warning such as persist_failed on current. Unknown syntax-valid codes are accepted and shown generically; raw exception strings, URLs, and private object keys are never sent."}, attempt: {type: integer, minimum: 1, maximum: 1000, description: "Optional process-local display counter, increased on actual retry preparation. The player clamps what it displays locally; the server refuses out-of-range values."}, retry_in_ms: {type: integer, minimum: 1000, maximum: 86400000, description: "Required only for retrying and forbidden otherwise: the actually scheduled candidate retry. Failed means no scheduled retry."}, missing_page_count: {type: integer, minimum: 0, maximum: 10000, description: "Only for partial: the count of excluded whole pages when measurable. Zero is valid; a partial can lose primitives or audio without losing a whole page."}}}
     PlaybackMediaStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The sending screen is authenticated; media, page, primitive and manifest identities are observations without content or grant membership checks. Success acknowledges durable raw insertion; daily counts follow through a recoverable batched projection. Ordinary playback acknowledgments omit optional credit balance headers.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.media_started]}, context: {$ref: "#/components/schemas/PlaybackMediaStartedContext"}}}
-    PlaybackMediaStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: {media_id: {type: string, pattern: "^med_"}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image, video], description: The primitive kind reported by the Player (image or video).}, primitive_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused."}, started_at: {type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused."}, play_id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused."}, play_seq: {type: integer, minimum: 1, maximum: 9007199254740991, description: "Optional, with play_seq_run. This start's number in its chain: the first media start of a play_seq_run is 1 and every later one, including a start whose report the Player's queue later drops, takes the next number, so a missing number shows a play that never arrived. A report keeps its number across retries and replays, with its play_id, and a number is never reused. The Player saves the counter with its durable report queue, in the same write that queues the report. Application starts and every other report carry neither member. When either member is missing or malformed both are ignored, not refused."}, play_seq_run: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional, with play_seq. The random id (a UUID) of the chain play_seq counts in: one Player install's media starts on one screen. Start a new run, with a fresh id and play_seq back at 1, when the counter storage is first created or lost and when the paired screen differs from the one the run was started for."}}}
+    PlaybackMediaStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: {media_id: {type: string, pattern: "^(med|bg)_", description: "The media that started. A bg_ id (the image behind a page with an image canvas background) is accepted and not recorded."}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image, video], description: The primitive kind reported by the Player (image or video).}, primitive_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused."}, started_at: {type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused."}, play_id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused."}, play_seq: {type: integer, minimum: 1, maximum: 9007199254740991, description: "Optional, with play_seq_run. This start's number in its chain: the first media start of a play_seq_run is 1 and every later one, including a start whose report the Player's queue later drops, takes the next number, so a missing number shows a play that never arrived. A report keeps its number across retries and replays, with its play_id, and a number is never reused. The Player saves the counter with its durable report queue, in the same write that queues the report. Application starts and every other report carry neither member. When either member is missing or malformed both are ignored, not refused."}, play_seq_run: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional, with play_seq. The random id (a UUID) of the chain play_seq counts in: one Player install's media starts on one screen. Start a new run, with a fresh id and play_seq back at 1, when the counter storage is first created or lost and when the paired screen differs from the one the run was started for."}}}
     PlaybackVideoStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.video_started]}, context: {$ref: "#/components/schemas/PlaybackVideoStartedContext"}}}
     PlaybackVideoStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id], properties: {media_id: {type: string, pattern: "^med_"}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}}}
     PlaybackApplicationStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an application primitive on a page: the application became visible on glass, reported once per page appearance by the Player controller — the application content never reports its own visibility, and a package download is never a start. The sending screen is authenticated; page, primitive, release and manifest identities are reported observations without content or grant membership checks. Stores one durable per-play record (GET /api/playback/plays). Project-owned release/application housekeeping timestamps follow through a recoverable batch projection. Ordinary playback acknowledgments omit optional credit balance headers. There is no daily aggregate row for application starts; the play records are the evidence.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.application_started]}, context: {$ref: "#/components/schemas/PlaybackApplicationStartedContext"}}}
