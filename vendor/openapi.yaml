@@ -3786,7 +3786,7 @@ paths:
       x-screenrig-access: review
       operationId: updateScreen
       description: >-
-        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level or toast_level. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields and location included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone and wall are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
+        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level, toast_level, display or kiosk. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. display sets or clears the display's idle-dark and brightness settings: display.idle {after_s, wake} darkens the glass after after_s seconds (30 to 86400) without a touch or key or, when wake lists presence, anybody in front of the screen, and a wake event (touch, presence, or both, each once) lights it at once; display.brightness {mode} is auto (the device's light sensor sets the brightness) or fixed (the default, the operator's brightness). A member you send replaces it, null clears it, a member you leave out stays, and a null display clears both. kiosk {lock} true pins the Player to the screen (Android screen pinning) and false or null releases it. The display schedule and override keep their own routes; a display member naming schedule or override is invalid_request. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). Changing any of them remints the manifest revision of a screen that shows a playlist and changes the manifest ETag of every screen; the manifest carries display.idle and display.brightness in the root display member and the lock as the root member kiosk, and screen.manifest_changed is appended; the screen reads them back as Screen.display.idle, Screen.display.brightness and Screen.kiosk. The backend stores what you send whatever the Player: a Player applies a setting only when its host capabilities declare display_power.idle, brightness.auto or kiosk_lock, and older Players ignore them. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields, location, display and kiosk included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone, wall and display are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
       security:
         - projectBearer: []
       parameters:
@@ -4004,6 +4004,49 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ScreenVerbosityPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/device-settings:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenDeviceSettings
+      description: >-
+        A signed-in person sets or clears a screen's idle-dark and brightness settings and its kiosk lock with updateScreen's display and kiosk members: display.idle {after_s 30 to 86400, wake touch, presence or both}, display.brightness {mode auto or fixed} and kiosk.lock. A member you send replaces it, null clears it, and a member left out stays as it is; a null display clears both. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the Player reads the settings from the manifest members display (idle, brightness) and kiosk. The body names at least one of display and kiosk and no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). On a protected screen a display change is protected_target (409). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenDeviceSettingsPatch'
       responses:
         '200':
           description: The screen as stored now; ETag carries its revision.
@@ -15587,7 +15630,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected, temperature_high or on_battery health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -26336,7 +26379,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected, temperature_high or on_battery health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. A screen restarting for a reboot the backend sent opens no screen_offline or display_disconnected alert until the reboot is done or ten minutes after it was sent; a condition that still holds then opens its alert at that moment. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -33401,7 +33444,45 @@ components:
         arrangement: {type: string, enum: [row, column, grid]}
         columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
-    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}}}
+    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}, display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "The display's idle-dark and brightness settings (display.idle, display.brightness). A member you send replaces it, null clears it, a member you leave out stays; a null display clears both. Changing either remints the manifest revision of a screen that shows a playlist, and the manifest carries them in the root display member. On a protected screen it is protected_target."}, kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "The kiosk lock (kiosk.lock). lock true pins the Player to the screen; false or null releases it. Changing it remints the manifest revision of a screen that shows a playlist, and the manifest carries it as the root member kiosk."}}}
+    ScreenDisplayIdle:
+      type: object
+      additionalProperties: false
+      required: [after_s, wake]
+      description: >-
+        display.idle: the glass goes dark after after_s seconds without a touch, a key or, when wake lists presence, somebody in front of the screen (the device's camera, analysed on the device; no image leaves it). A wake event lights it again at once, and the touch that wakes a dark glass is consumed. While the glass is dark the Player is in a display-off, as for a display schedule: it parks playback (no plays, no ads), reports display.power off in its health and resumes on wake. A display schedule or override that holds the panel off wins, and an application holding device.display wins over idle while its page is on glass. Applied by a Player that declares the host capability display_power.idle.
+      properties:
+        after_s: {type: integer, minimum: 30, maximum: 86400, description: "Seconds without use before the glass goes dark."}
+        wake: {type: array, minItems: 1, maxItems: 2, uniqueItems: true, items: {type: string, enum: [touch, presence]}, description: "What lights the glass again: touch, presence, or both (stored touch first). presence needs a device with a camera and the CAMERA grant."}
+    ScreenDisplayBrightness:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: >-
+        display.brightness: auto maps the device's ambient light to the window brightness; fixed (the default) keeps the operator's brightness. Applied by a Player that declares the host capability brightness.auto, which it declares only when the device has a light sensor.
+      properties:
+        mode: {type: string, enum: [auto, fixed]}
+    ScreenDisplayPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        idle: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayIdle"}, {type: "null"}], description: "Sets display.idle; null turns idle-dark off (the default)."}
+        brightness: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayBrightness"}, {type: "null"}], description: "Sets display.brightness; null clears it (fixed)."}
+    ScreenKioskPatch:
+      type: object
+      additionalProperties: false
+      required: [lock]
+      properties:
+        lock: {type: boolean}
+    ScreenKiosk:
+      type: object
+      additionalProperties: false
+      required: [lock]
+      description: >-
+        kiosk.lock: the Player pins itself to the screen (Android screen pinning with startLockTask; the person at the screen confirms the first time, and status bar, home and recents are blocked while pinned; the managed flavour as device owner keeps its lock task). Present only while the lock is on. The operator settings panel offers Leave kiosk lock, which unpins until the next manifest or restart applies it again. Applied by a Player that declares the host capability kiosk_lock.
+      properties:
+        lock: {type: boolean}
     ScreenLocation:
       type: object
       additionalProperties: false
@@ -33461,6 +33542,15 @@ components:
       properties:
         log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates; error lines are always generated. null clears it (the Player's default). Changing it remints the manifest revision."}
         toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows; error toasts are always shown. null clears it (every toast shows). Changing it remints the manifest revision."}
+    ScreenDeviceSettingsPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >-
+        A change of a screen's idle-dark and brightness settings and kiosk lock (patchScreenDeviceSettings). The body names at least one of the two members and no other.
+      properties:
+        display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "display.idle and display.brightness, as updateScreen's display: a member you send replaces it, null clears it, a member you leave out stays; a null display clears both. Changing either remints the manifest revision of a screen that shows a playlist. On a protected screen it is protected_target."}
+        kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "kiosk.lock, as updateScreen's kiosk: lock true pins the Player to the screen, false or null releases it."}
     ScreenNamePatch:
       type: object
       additionalProperties: false
@@ -34115,6 +34205,7 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
+        kiosk: {$ref: "#/components/schemas/ScreenKiosk"}
         reboot_schedule: {$ref: "#/components/schemas/ScreenRebootSchedule"}
         next_reboot_at: {type: string, format: date-time, description: "The start of the next window the backend reboots the screen at (PUT /api/screens/{id}/reboot-schedule); on a day a spring-forward gap swallows a whole window it is the minute the gap ends, and that occurrence is skipped (screen.reboot_skipped, window_missed). Absent while the screen has no enabled reboot schedule, and while it is archived. Read-only."}
         commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first; GET /api/screens/{id}/commands lists every one). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
@@ -34211,7 +34302,7 @@ components:
         host_version: {type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form."}
         timezone: {type: string, maxLength: 64, description: "Device IANA timezone hint. Used for effective card clock diagnostics when the screen has no explicit timezone."}
         device: {$ref: "#/components/schemas/HostDevice"}
-        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
+        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
     HostDevice:
       type: object
       additionalProperties: false
@@ -36124,12 +36215,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale, reach_dropped, group_empty, card_data_stale]
+      enum: [screen_offline, display_disconnected, running_hot, on_battery, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing, source_failed, source_stale, reach_dropped, group_empty, card_data_stale]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. reach_dropped and group_empty are about a campaign (a shared level of the schedule stack), not a screen: the notice's screen member carries the campaign's id and name, the link is the campaign's calendar in the dashboard, and a campaign is the project's, so screen_tags and audience never limit them. reach_dropped: a recount found the campaign reaching fewer screens than when it was last published, because screens left one of its tags or folders, were archived or deleted (campaign.reach_changed with current below published); reach_drop sets how large a drop is notified; clears when it reaches as many screens again. A publish that sets a new baseline, or deleting the campaign, also clears it, which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). group_empty: a tag or folder of the campaign's audience matches no screen (campaign.group_changed with matched 0); one notice per tag or folder (audience_group); clears when it matches a screen again, or when a publish removes it from the audience (removed true), which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). A screen's own schedule entries target playlists, not screens, so only campaigns have a reach. Neither is a screen alert. card_data_stale is about a card, not a screen: the notice's screen member carries the card's id and its name (the card's type, as in "weather card"), the link is the dashboard's page editor on a page that places the card (the notification's own page when none does), and since is when its data expired. It opens when a card's data document that an agent, a job or a person wrote with an expiry (ttl_seconds or expires_at, as in card data put --ttl) reaches that expiry without another write to renew it, while a screen shows the card (card.data_expired), so the card is blank on that screen; it clears when a write to the card's data lands (card.data_renewed). A data source's documents are not announced: they expire by the source's stale period and source_stale covers them. A card no screen shows sends nothing, and neither does one that was renewed, deleted or taken off every screen before the notice is due. Deleting a card's data ends the notice without a recovery notice, as a publish ends a drop (no_longer_judged). Size ttl_seconds to the writer's schedule, so a job that stopped is noticed. Like a data source, a card has no screen tags: a notification scoped to screen_tags does not watch cards, and it is not a screen alert. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. on_battery: the device has a battery and its latest health report names a battery source of none, which is unplugged (screen.health_changed change on_battery); clears when a report names any other source (plugged_in). The notice says the screen runs on its battery and names no cause. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. A screen that stops being judged closes the alert, but email and chat notifications send no recovery notice for it, since nothing was seen to recover (the resolved row is skipped as no_longer_judged); a media start or two good screenshots do send one. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. source_failed and source_stale are about a data source, not a screen: the notice's screen member carries the source's id and name, the link is the source's page, and screen_tags never matches a source, so a notification scoped to tags does not watch them. source_failed: a refresh of the source failed (source.status_changed with state error); clears on the next refresh that works (state ok). source_stale: the source's last good refresh is older than its stale_after_seconds, the point its card data expires and pages that depend on it fall back (source.stale); clears on the next refresh that works. Neither is a screen alert. reach_dropped and group_empty are about a campaign (a shared level of the schedule stack), not a screen: the notice's screen member carries the campaign's id and name, the link is the campaign's calendar in the dashboard, and a campaign is the project's, so screen_tags and audience never limit them. reach_dropped: a recount found the campaign reaching fewer screens than when it was last published, because screens left one of its tags or folders, were archived or deleted (campaign.reach_changed with current below published); reach_drop sets how large a drop is notified; clears when it reaches as many screens again. A publish that sets a new baseline, or deleting the campaign, also clears it, which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). group_empty: a tag or folder of the campaign's audience matches no screen (campaign.group_changed with matched 0); one notice per tag or folder (audience_group); clears when it matches a screen again, or when a publish removes it from the audience (removed true), which closes a pager incident and a webhook's alert but sends no recovery mail or chat notice (no_longer_judged). A screen's own schedule entries target playlists, not screens, so only campaigns have a reach. Neither is a screen alert. card_data_stale is about a card, not a screen: the notice's screen member carries the card's id and its name (the card's type, as in "weather card"), the link is the dashboard's page editor on a page that places the card (the notification's own page when none does), and since is when its data expired. It opens when a card's data document that an agent, a job or a person wrote with an expiry (ttl_seconds or expires_at, as in card data put --ttl) reaches that expiry without another write to renew it, while a screen shows the card (card.data_expired), so the card is blank on that screen; it clears when a write to the card's data lands (card.data_renewed). A data source's documents are not announced: they expire by the source's stale period and source_stale covers them. A card no screen shows sends nothing, and neither does one that was renewed, deleted or taken off every screen before the notice is due. Deleting a card's data ends the notice without a recovery notice, as a publish ends a drop (no_longer_judged). Size ttl_seconds to the writer's schedule, so a job that stopped is noticed. Like a data source, a card has no screen tags: a notification scoped to screen_tags does not watch cards, and it is not a screen alert. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 15
+      maxItems: 16
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -36161,6 +36252,7 @@ components:
         screen_offline: {$ref: "#/components/schemas/NotificationSeverity"}
         display_disconnected: {$ref: "#/components/schemas/NotificationSeverity"}
         running_hot: {$ref: "#/components/schemas/NotificationSeverity"}
+        on_battery: {$ref: "#/components/schemas/NotificationSeverity"}
         storage_full: {$ref: "#/components/schemas/NotificationSeverity"}
         content_stuck: {$ref: "#/components/schemas/NotificationSeverity"}
         not_playing: {$ref: "#/components/schemas/NotificationSeverity"}
@@ -37964,6 +38056,7 @@ components:
         audio: {$ref: "#/components/schemas/RuntimeAudio"}
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
         verbosity: {$ref: "#/components/schemas/RuntimeVerbosity"}
+        kiosk: {$ref: "#/components/schemas/RuntimeKiosk"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
         suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
         stack: {$ref: "#/components/schemas/RuntimeStack"}
@@ -38686,6 +38779,15 @@ components:
           properties:
             kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}
             wifi_rssi_dbm: {type: integer, minimum: -150, maximum: 0}
+        battery:
+          type: object
+          additionalProperties: true
+          description: "The device's battery. Send it only when the device has one (Android BatteryManager with EXTRA_PRESENT). A change of source (plugged or unplugged) is reported at once, like a display change."
+          properties:
+            level_percent: {type: number, minimum: 0, maximum: 100, description: Charge level.}
+            charging: {type: boolean}
+            source: {type: string, enum: [ac, usb, wireless, dock, none], description: "What powers the device: none is running on the battery (unplugged). A value this backend does not know is dropped."}
+            temperature_c: {type: number, minimum: -50, maximum: 150, description: The battery's own temperature in degrees Celsius.}
         crashes_24h: {type: integer, minimum: 0, maximum: 1000000, description: Player crashes in the rolling last 24 hours.}
         renderer_restarts_24h: {type: integer, minimum: 0, maximum: 1000000, description: Renderer or web-view restarts in the rolling last 24 hours.}
     ScreenHealth:
@@ -38693,7 +38795,7 @@ components:
       additionalProperties: false
       required: [reported_at, stale]
       description: >-
-        The latest device health report (PUT /screen/health), sanitized, with server reported_at. A member the Player did not send is absent. stale is true when reported_at is more than 35 minutes old; stale health is still shown, never deleted; archive and screen recovery clear it. Transitions append the project-only screen.health_changed with details.changes, a list of {change, ...}: display_disconnected, display_reconnected, display_power (from, to), temperature_high (at or above 80 °C), temperature_normal (below 75 °C again), crash_spike and renderer_restart_spike (the 24-hour count rose by 3 or more since the last spike event; crashes_24h or renderer_restarts_24h and previous). Read-only; never authorization.
+        The latest device health report (PUT /screen/health), sanitized, with server reported_at. A member the Player did not send is absent. stale is true when reported_at is more than 35 minutes old; stale health is still shown, never deleted; archive and screen recovery clear it. Transitions append the project-only screen.health_changed with details.changes, a list of {change, ...}: display_disconnected, display_reconnected, display_power (from, to), temperature_high (at or above 80 °C), temperature_normal (below 75 °C again), on_battery (battery.source became none; level_percent when reported) and plugged_in (any other source again; source), crash_spike and renderer_restart_spike (the 24-hour count rose by 3 or more since the last spike event; crashes_24h or renderer_restarts_24h and previous). battery is present only when the device reports one; the backend reads nothing from it but battery.source for the on_battery condition and infers no cause. Read-only; never authorization.
       properties:
         reported_at: {type: string, format: date-time}
         stale: {type: boolean}
@@ -38704,6 +38806,7 @@ components:
         temperature_c: {type: number}
         display: {type: object, additionalProperties: false, properties: {connected: {type: boolean}, power: {type: string, enum: [on, off, standby, unknown]}}}
         network: {type: object, additionalProperties: false, properties: {kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}, wifi_rssi_dbm: {type: integer}}}
+        battery: {type: object, additionalProperties: false, properties: {level_percent: {type: number, minimum: 0, maximum: 100}, charging: {type: boolean}, source: {type: string, enum: [ac, usb, wireless, dock, none]}, temperature_c: {type: number}}}
         crashes_24h: {type: integer, minimum: 0}
         renderer_restarts_24h: {type: integer, minimum: 0}
     ScreenOutage:
@@ -39004,13 +39107,15 @@ components:
       additionalProperties: false
       required: [requested, source]
       description: >-
-        Display power state. requested is what the screen should show now: the active override, else the enabled display schedule evaluated in the screen timezone, else on (source override, schedule, or default); until is when that next changes, when known. reported is the Player's latest health display (power, connected, reported_at, stale after 35 minutes). Absent when the screen has no schedule, no override, and no reported display.
+        Display power state. requested is what the screen should show now: the active override, else the enabled display schedule evaluated in the screen timezone, else on (source override, schedule, or default); until is when that next changes, when known. reported is the Player's latest health display (power, connected, reported_at, stale after 35 minutes). idle and brightness are the screen's display.idle and display.brightness settings (set by ScreenPatch). Absent when the screen has no schedule, no override, no idle or brightness setting, and no reported display.
       properties:
         requested: {type: string, enum: [on, off]}
         source: {type: string, enum: [override, schedule, default]}
         until: {type: string, format: date-time}
         schedule: {$ref: "#/components/schemas/ScreenDisplaySchedule"}
         override: {$ref: "#/components/schemas/ScreenDisplayOverride"}
+        idle: {$ref: "#/components/schemas/ScreenDisplayIdle"}
+        brightness: {$ref: "#/components/schemas/ScreenDisplayBrightness"}
         reported: {$ref: "#/components/schemas/ScreenDisplayReported"}
         control:
           type: string
@@ -39059,12 +39164,35 @@ components:
       properties:
         logLevel: {type: string, description: "debug, info, warn or error: the Player generates no log line below it."}
         toastLevel: {type: string, description: "info, alert or error: the Player shows no toast below it."}
+    RuntimeKiosk:
+      type: object
+      additionalProperties: true
+      required: [lock]
+      description: >-
+        The kiosk lock (docs/player-compatibility.md §6.5). Emitted on every session while the screen's kiosk.lock is on and omitted otherwise. A Player that can pin itself to the screen does while lock is true and releases the pin when the member is absent or lock is false; one that cannot ignores it. Unknown members are ignored.
+      properties:
+        lock: {type: boolean}
     RuntimeDisplay:
       type: object
       additionalProperties: true
       description: >-
-        The screen's display power control, evaluated on the device (docs/player-compatibility.md §6.5). Omitted when the screen has none; then the display stays on. Unknown members are ignored.
+        The screen's display control, evaluated on the device (docs/player-compatibility.md §6.5): the power schedule and override, the idle-dark setting and the brightness mode. Omitted when the screen has none; then the display stays on at the operator's brightness. Unknown members are ignored.
       properties:
+        idle:
+          type: object
+          additionalProperties: true
+          required: [after_s, wake]
+          description: "display.idle: the glass goes dark after after_s seconds without use and lights on a wake event. after_s is 30 to 86400 and wake lists touch, presence, or both; a Player that cannot read a value, or that does not declare display_power.idle, leaves idle off."
+          properties:
+            after_s: {type: integer}
+            wake: {type: array, items: {type: string}}
+        brightness:
+          type: object
+          additionalProperties: true
+          required: [mode]
+          description: "display.brightness: auto follows the device's light sensor, fixed keeps the operator's brightness; any other mode reads as fixed. A Player that does not declare brightness.auto ignores it."
+          properties:
+            mode: {type: string}
         schedule:
           type: object
           additionalProperties: true

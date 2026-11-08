@@ -1461,6 +1461,7 @@
     "kv.changed",
     "device.display",
     "device.watch",
+    "device.vibrate",
     "device.event",
     "response.ack",
     "response.problem"
@@ -1482,7 +1483,9 @@
   var MAX_FEATURES = 64;
   var MAX_FEATURE_LENGTH = 64;
   var MAX_SKIP_REASON_CODE_POINTS = 64;
-  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys"];
+  var DEVICE_VIBRATE_MAX_MS = 200;
+  var DEVICE_VIBRATE_DEFAULT_MS = 12;
+  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys", "light", "network"];
   var DEVICE_KEYS = ["volume_up", "volume_down"];
   var EMPTY_CAPABILITIES = {
     "page.advance": false,
@@ -1491,7 +1494,10 @@
     "kv.write": false,
     "device.display": false,
     "device.presence": false,
-    "device.keys": false
+    "device.keys": false,
+    "device.light": false,
+    "device.network": false,
+    "device.haptics": false
   };
 
   // src/capture.ts
@@ -2038,7 +2044,10 @@
       "kv.write": value["kv.write"] === true,
       "device.display": value["device.display"] === true,
       "device.presence": value["device.presence"] === true,
-      "device.keys": value["device.keys"] === true
+      "device.keys": value["device.keys"] === true,
+      "device.light": value["device.light"] === true,
+      "device.network": value["device.network"] === true,
+      "device.haptics": value["device.haptics"] === true
     };
   }
   function parseContextPayload(payload, expectedOrigin) {
@@ -2126,6 +2135,12 @@
     }
     return request;
   }
+  function parseDeviceVibrateMs(ms) {
+    if (typeof ms !== "number" || !Number.isInteger(ms) || ms < 1 || ms > DEVICE_VIBRATE_MAX_MS) {
+      throw new SdkValidationError("invalid_request", `ms must be an integer from 1 to ${DEVICE_VIBRATE_MAX_MS}`);
+    }
+    return ms;
+  }
   function parseDeviceDisplayState(value, code = "invalid_response") {
     if (!isRecord(value) || typeof value.on !== "boolean") {
       throw new SdkValidationError(code, "Invalid display state");
@@ -2147,6 +2162,18 @@
     }
     if (type === "presence") {
       return { type, generation, nonce };
+    }
+    if (type === "light") {
+      const lux = payload.lux;
+      if (typeof lux !== "number" || !Number.isFinite(lux) || lux < 0) {
+        throw new SdkValidationError("invalid_device_event", "Invalid device.event lux");
+      }
+      return { type, generation, nonce, lux };
+    }
+    if (type === "network") {
+      const online = payload.online;
+      if (typeof online !== "boolean") throw new SdkValidationError("invalid_device_event", "Invalid device.event online");
+      return { type, generation, nonce, online };
     }
     if (type === "key") {
       const key = payload.key;
@@ -2200,7 +2227,10 @@
       "kv.write": offered["kv.write"] === true,
       "device.display": offered["device.display"] === true,
       "device.presence": offered["device.presence"] === true,
-      "device.keys": offered["device.keys"] === true
+      "device.keys": offered["device.keys"] === true,
+      "device.light": offered["device.light"] === true,
+      "device.network": offered["device.network"] === true,
+      "device.haptics": offered["device.haptics"] === true
     };
   }
   function sanitizeSkipReason(reason) {
@@ -2270,7 +2300,9 @@
     deviceHandlers = {
       display: /* @__PURE__ */ new Set(),
       presence: /* @__PURE__ */ new Set(),
-      keys: /* @__PURE__ */ new Set()
+      keys: /* @__PURE__ */ new Set(),
+      light: /* @__PURE__ */ new Set(),
+      network: /* @__PURE__ */ new Set()
     };
     /** The context and event types device.watch last carried; a new context sends it again. */
     deviceWatched = null;
@@ -2297,7 +2329,10 @@
       },
       onDisplay: (handler) => this.deviceOn("onDisplay", this.deviceHandlers.display, handler),
       onPresence: (handler) => this.deviceOn("onPresence", this.deviceHandlers.presence, handler),
-      onKey: (handler) => this.deviceOn("onKey", this.deviceHandlers.keys, handler)
+      onKey: (handler) => this.deviceOn("onKey", this.deviceHandlers.keys, handler),
+      onLight: (handler) => this.deviceOn("onLight", this.deviceHandlers.light, handler),
+      onNetwork: (handler) => this.deviceOn("onNetwork", this.deviceHandlers.network, handler),
+      vibrate: (ms) => this.deviceVibrate(ms)
     };
     destroy() {
       this.destroyed = true;
@@ -2317,6 +2352,8 @@
       this.deviceHandlers.display.clear();
       this.deviceHandlers.presence.clear();
       this.deviceHandlers.keys.clear();
+      this.deviceHandlers.light.clear();
+      this.deviceHandlers.network.clear();
       this.deviceWatched = null;
       this.readied = false;
       this.readyState = "inert";
@@ -2736,6 +2773,17 @@
       const result = await this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.display", primitive_id: context.primitive_id, payload: { ...payload } }, true);
       return parseDeviceDisplayState(result);
     }
+    async deviceVibrate(ms) {
+      const context = this.requireActive();
+      if (!this.supports("device.vibrate")) {
+        throw new SdkValidationError("not_supported", "The Player does not support device.vibrate");
+      }
+      if (!this.capabilities["device.haptics"]) {
+        throw new SdkValidationError("capability_denied", "This primitive does not have device.haptics");
+      }
+      const payload = { generation: context.generation, nonce: context.nonce, ms: parseDeviceVibrateMs(ms === void 0 ? DEVICE_VIBRATE_DEFAULT_MS : ms) };
+      await this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.vibrate", primitive_id: context.primitive_id, payload: { ...payload } }, true);
+    }
     /**
      * Registers a device handler, as kv.onChange registers one: it throws only for
      * a non-function, works before activation, and stays quiet without the
@@ -2764,6 +2812,10 @@
         for (const handler of [...this.deviceHandlers.display]) call(() => handler({ on: event.on, brightness: event.brightness }));
       } else if (event.type === "presence") {
         for (const handler of [...this.deviceHandlers.presence]) call(() => handler());
+      } else if (event.type === "light") {
+        for (const handler of [...this.deviceHandlers.light]) call(() => handler(event.lux));
+      } else if (event.type === "network") {
+        for (const handler of [...this.deviceHandlers.network]) call(() => handler(event.online));
       } else {
         for (const handler of [...this.deviceHandlers.keys]) call(() => handler(event.key));
       }
@@ -2774,7 +2826,7 @@
      */
     deviceWatchEvents() {
       if (!this.supports("device.watch")) return [];
-      const capability = { display: "device.display", presence: "device.presence", keys: "device.keys" };
+      const capability = { display: "device.display", presence: "device.presence", keys: "device.keys", light: "device.light", network: "device.network" };
       return DEVICE_WATCH_EVENTS.filter((event) => this.deviceHandlers[event].size > 0 && this.capabilities[capability[event]]);
     }
     /**
