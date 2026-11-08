@@ -33,6 +33,7 @@ export const CANNED_EVENT_MESSAGES = new Set([
   "Screen effective playlist switched",
   "Screen takeover started",
   "Screen takeover ended",
+  "Screen takeover end changed",
   "A scheduled playlist cannot be shown; its entries were skipped",
   "Screen health changed",
   "Screen reboot requested",
@@ -50,10 +51,10 @@ export const CANNED_EVENT_MESSAGES = new Set([
 
 /**
  * Effective-playlist events carry null for "no playlist" (playlist_switched)
- * and "until cleared" (takeover_started); render it as none rather than
- * dropping the field.
+ * and "until cleared" (takeover_started, takeover_updated and its
+ * previous_until); render it as none rather than dropping the field.
  */
-export const NULL_AS_NONE_EVENT_TYPES = new Set(["screen.display_changed", "screen.playlist_switched", "screen.takeover_started", "screen.takeover_ended", "screen.playlist_unavailable"]);
+export const NULL_AS_NONE_EVENT_TYPES = new Set(["screen.display_changed", "screen.playlist_switched", "screen.takeover_started", "screen.takeover_updated", "screen.takeover_ended", "screen.playlist_unavailable"]);
 
 export const SILENT_EVENT_TYPES = new Set(["application.event", "runtime.reported"]);
 

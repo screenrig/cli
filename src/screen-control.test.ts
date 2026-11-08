@@ -599,6 +599,14 @@ test("effective-playlist events render in human event output", () => {
     formatEventLine({ ...base, type: "screen.takeover_started", message: "Screen takeover started", details: { playlist_id: "pl_DRILL", until: null, reason: "Fire drill" } } as any),
     `at=2026-08-14T17:00:00.000Z type=screen.takeover_started severity=info resource_type=screen resource_id=${A} playlist_id=pl_DRILL reason="Fire drill" until=none`,
   );
+  assert.equal(
+    formatEventLine({ ...base, type: "screen.takeover_updated", message: "Screen takeover end changed", details: { playlist_id: "pl_DRILL", until: "2026-08-14T19:00:00Z", previous_until: null, reason: "Fire drill" } } as any),
+    `at=2026-08-14T17:00:00.000Z type=screen.takeover_updated severity=info resource_type=screen resource_id=${A} playlist_id=pl_DRILL previous_until=none reason="Fire drill" until=2026-08-14T19:00:00Z`,
+  );
+  assert.equal(
+    formatEventLine({ ...base, type: "screen.takeover_updated", message: "Screen takeover end changed", details: { playlist_id: "pl_DRILL", until: null, previous_until: "2026-08-14T19:00:00Z" } } as any),
+    `at=2026-08-14T17:00:00.000Z type=screen.takeover_updated severity=info resource_type=screen resource_id=${A} playlist_id=pl_DRILL previous_until=2026-08-14T19:00:00Z until=none`,
+  );
   for (const reason of ["expired", "cleared", "replaced", "playlist_deleted", "playlist_unavailable"]) {
     assert.equal(
       formatEventLine({ ...base, type: "screen.takeover_ended", message: "Screen takeover ended", details: { playlist_id: "pl_DRILL", reason } } as any),
