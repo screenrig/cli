@@ -68,6 +68,8 @@ const operation = (state: string, extra: Record<string, unknown> = {}) => ({
 
 interface FakeOptions {
   primitive?: string;
+  /** The target's folder and the scoped uploader's only allowed upload destination. */
+  uploaderFolderId?: string;
   /** The operation the replace request starts, as GET /api/operations/ID answers it. */
   finished?: Record<string, unknown>;
   replace?: (request: { headers?: Record<string, string>; body?: unknown }) => { status: number; headers: Record<string, string>; body: unknown };
@@ -79,16 +81,22 @@ function replaceServer(options: FakeOptions = {}): FakeTransport {
   return new FakeTransport()
     .on("GET", `/api/media/${MEDIA}`, () => {
       reads += 1;
-      return { status: 200, headers: {}, body: { id: MEDIA, primitive: options.primitive ?? "image", revision: reads === 1 ? 3 : 4, state: "ready" } };
+      return { status: 200, headers: {}, body: { id: MEDIA, primitive: options.primitive ?? "image", revision: reads === 1 ? 3 : 4, state: "ready", ...(options.uploaderFolderId ? { folder_id: options.uploaderFolderId } : {}) } };
     })
-    .on("POST", "/api/media/uploads", (request) => ({
-      status: 201,
-      headers: { "cache-control": "private, no-store" },
-      body: {
-        id: UPLOAD, operation: operation("receiving"), upload_url: "https://storage.example.invalid/signed/replace", method: "PUT",
-        headers: { "content-type": (request.body as { content_type: string }).content_type }, expires_at: "2099-01-01T00:00:00.000Z",
-      },
-    }))
+    .on("POST", "/api/media/uploads", (request) => {
+      const declaration = request.body as { content_type: string; folder_id?: string };
+      if (options.uploaderFolderId && declaration.folder_id !== options.uploaderFolderId) {
+        return problem(403, "outside_upload_scope", "An uploader uploads into one of its folders: set folder_id.");
+      }
+      return {
+        status: 201,
+        headers: { "cache-control": "private, no-store" },
+        body: {
+          id: UPLOAD, operation: operation("receiving"), upload_url: "https://storage.example.invalid/signed/replace", method: "PUT",
+          headers: { "content-type": declaration.content_type }, expires_at: "2099-01-01T00:00:00.000Z",
+        },
+      };
+    })
     .on("POST", `/api/media/${MEDIA}/replace`, (request) => options.replace?.(request) ?? { status: 202, headers: {}, body: operation("queued") })
     .on("GET", `/api/operations/${OPERATION}`, () => ({ status: 200, headers: {}, body: options.finished ?? operation("succeeded", { result: { media_id: MEDIA, id: MEDIA, version: 2, warnings: [] } }) }))
     .on("POST", `/api/operations/${OPERATION}/cancel`, () => ({ status: 202, headers: {}, body: operation("cancelled") }))
@@ -99,7 +107,7 @@ const header = (call: { headers?: Record<string, string> }, name: string): strin
 
 const writes = (transport: FakeTransport) => transport.calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`);
 
-test("media replace declares without a tag or folder, writes the bytes, replaces and waits on the operation", async (t) => {
+test("media replace at the library root declares without a tag or folder, writes the bytes, replaces and waits on the operation", async (t) => {
   const cli = await harness(t);
   const aspect = { code: "aspect_ratio_changed", detail: "The new file is 9:16 and the media was 16:9.", playlists: [{ id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Lobby loop" }] };
   const transport = replaceServer({ finished: operation("succeeded", { result: { media_id: MEDIA, id: MEDIA, version: 2, warnings: [aspect] } }) });
@@ -155,6 +163,27 @@ test("media replace under Propose reports the waiting review as a success", asyn
   assert.deepEqual(data.next.argv, ["reviews", "show", "rvw_REPLACEAAAAAAAAAAAAAAAA"]);
   assert.deepEqual(answer.envelope.warnings.map((warning: { code: string }) => warning.code), ["pending_review"]);
   assert.match(answer.envelope.warnings[0].message, /https:\/\/screenrig\.ai\/dashboard\/reviews\/rvw_REPLACEAAAAAAAAAAAAAAAA/);
+});
+
+test("media replace carries the target folder into a scoped uploader's Propose declaration", async (t) => {
+  const cli = await harness(t);
+  const folderId = "mfd_AAAAAAAAAAAAAAAAAAAAAAAA";
+  const transport = replaceServer({
+    uploaderFolderId: folderId,
+    finished: operation("succeeded", { result: { media_id: MEDIA, id: MEDIA, status: "pending_review", review_id: "rvw_REPLACEAAAAAAAAAAAAAAAA", version: 2, warnings: [] } }),
+  });
+  const answer = await cli.invoke(["media", "replace", MEDIA, cli.file, "--no-transcode", "--note", "Corrected menu"], transport);
+  assert.equal(answer.code, ExitCode.Success, JSON.stringify(answer.envelope));
+  const declared = transport.calls.find((call) => call.path === "/api/media/uploads")!.body as Record<string, unknown>;
+  assert.equal(declared.folder_id, folderId);
+  assert.equal(Object.hasOwn(declared, "tag"), false);
+  assert.deepEqual(writes(transport), ["POST /api/media/uploads", `POST /api/media/${MEDIA}/replace`]);
+  assert.deepEqual(transport.calls.find((call) => call.path === `/api/media/${MEDIA}/replace`)!.body, { upload_id: UPLOAD, note: "Corrected menu" });
+  assert.equal(cli.puts.length, 1);
+  assert.equal(answer.envelope.data.media_id, MEDIA);
+  assert.equal(answer.envelope.data.status, "pending_review");
+  assert.equal(answer.envelope.data.revision, undefined);
+  assert.deepEqual(answer.envelope.data.next.argv, ["reviews", "show", "rvw_REPLACEAAAAAAAAAAAAAAAA"]);
 });
 
 test("media replace refuses a file of another kind before any transfer", async (t) => {

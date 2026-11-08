@@ -210,9 +210,9 @@ export const handleMediaReplace = commandHandler(async (args, runtime, resolved)
     // Validate unconditionally so a typo such as --webp-quality 500 is rejected whether or not transcoding runs.
     const transcodeOptions = transcodeOptionsFromArgs(args);
     // The media's kind comes first: a file of another kind is refused before any transcode or transfer.
-    let media: { primitive?: unknown };
+    let media: { primitive?: unknown; folder_id?: unknown };
     try {
-      media = (await client.call({ method: "GET", path: `/api/media/${encodeURIComponent(mediaId)}` })).body as { primitive?: unknown };
+      media = (await client.call({ method: "GET", path: `/api/media/${encodeURIComponent(mediaId)}` })).body as typeof media;
     } catch (error) {
       throw mediaVersionProblem(error, mediaId);
     }
@@ -226,6 +226,8 @@ export const handleMediaReplace = commandHandler(async (args, runtime, resolved)
         runtime,
         client,
         sourcePath,
+        // A scoped uploader must declare into the target's existing folder.
+        folderId: typeof media.folder_id === "string" && media.folder_id ? media.folder_id : undefined,
         explicitContentType: flagString(args.flags, "content-type"),
         transcodeOptions,
         noTranscode: flagBool(args.flags, "no-transcode"),
