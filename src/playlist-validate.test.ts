@@ -170,22 +170,25 @@ test("media_end allows a card chip beside its one video, as the server does", ()
   assert.deepEqual(playlistIssues(withChip), []);
   const cardOnly = playlist(); cardOnly.pages[0]!.advance = { mode: "media_end" } as any;
   cardOnly.pages[0]!.primitives = [{ id: "chip", primitive: "card", card: "clock", major: 1, params: {}, layout: "full", content_fit: "fill" }] as any;
-  // The vendored message names the rule: one image or video before the media_end sync, one video after it.
-  assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && /exactly one (image or )?video/.test(issue.message)));
+  assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one video primitive")));
 });
-// These two hold the offline semantics SPEC2 section 2 gives media_end (it advances on its one video; images beside it
-// take no dwell_ms), which `src/generated/playlist-write-semantics.ts` brings with the next contract sync. They stay
-// todo until then; once the sync makes them pass, drop `MEDIA_END_VIDEO_SYNC` and its options argument.
-const MEDIA_END_VIDEO_SYNC = { todo: "passes once the contract sync brings the video-only media_end rule" };
-test("media_end takes images beside its one video, with no dwell_ms", MEDIA_END_VIDEO_SYNC, () => {
+// SPEC2 section 2: a media_end page advances on its one video, and the images beside it take no dwell_ms.
+test("media_end takes images beside its one video, with no dwell_ms", () => {
   const withLogo = playlist({ primitive: "video", loop: false });
   withLogo.pages[0]!.advance = { mode: "media_end" } as any;
   withLogo.pages[0]!.primitives = [...withLogo.pages[0]!.primitives as any[], { id: "logo", primitive: "image", selector: { by: "id", media_id: "med_logo" }, rect: { x: 40, y: 40, width: 200, height: 200 }, layer: 1, content_fit: "contain" }] as any;
   assert.deepEqual(playlistIssues(withLogo), []);
   (withLogo.pages[0]!.primitives[1] as Record<string, unknown>).dwell_ms = 3000;
   assert.ok(playlistIssues(withLogo).some((issue) => issue.path === "/pages/0/primitives/1/dwell_ms"));
+  // Several images rotate like a duration page's and need one_at_a_time; the video plays its whole sequence without it.
+  delete (withLogo.pages[0]!.primitives[1] as Record<string, unknown>).dwell_ms;
+  (withLogo.pages[0]!.primitives[1] as Record<string, unknown>).selector = { by: "all" };
+  assert.ok(playlistIssues(withLogo).some((issue) => issue.path === "/pages/0/primitives/1/selector/one_at_a_time"));
+  (withLogo.pages[0]!.primitives[1] as Record<string, unknown>).selector = { by: "all", one_at_a_time: true };
+  (withLogo.pages[0]!.primitives[0] as Record<string, unknown>).selector = { by: "all" };
+  assert.deepEqual(playlistIssues(withLogo), []);
 });
-test("media_end without a video is refused, whatever images it holds", MEDIA_END_VIDEO_SYNC, () => {
+test("media_end without a video is refused, whatever images it holds", () => {
   const imageOnly = playlist();
   imageOnly.pages[0]!.advance = { mode: "media_end" } as any;
   assert.ok(playlistIssues(imageOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one video")));

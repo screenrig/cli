@@ -517,15 +517,13 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
           if (mediaSelector.weights === undefined) fail(`${itemPath}/selector/weights`, "is required with order weighted");
           if (mediaSelector.one_at_a_time !== true && mediaSelector.batch_size !== 1) fail(`${itemPath}/selector/order`, "weighted plays one item per visit: set one_at_a_time or batch_size 1");
         } else if (mediaSelector.weights !== undefined) fail(`${itemPath}/selector/weights`, "is allowed only with order weighted");
-        if (mode === "duration" || mode === "application" || mode === "audio_end") {
-          if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");
+        if (mode === "duration" || mode === "application" || mode === "audio_end" || mode === "media_end") {
+          if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration, application, audio_end and media_end pages");
           const selector = object(primitive.selector);
-          if ((selector.by === "all" || selector.by === "tag" || selector.by === "folder" || selector.by === "ids" && array(selector.media_ids).length > 1) && selector.one_at_a_time !== true) fail(`${itemPath}/selector/one_at_a_time`, "must be true for multiple media on duration or application pages");
+          // A media_end page's video plays its whole sequence; its images rotate like a duration page's.
+          if ((mode !== "media_end" || primitive.primitive === "image") && (selector.by === "all" || selector.by === "tag" || selector.by === "folder" || selector.by === "ids" && array(selector.media_ids).length > 1) && selector.one_at_a_time !== true) fail(`${itemPath}/selector/one_at_a_time`, "must be true for multiple media on a timed page");
         }
-        if (mode === "media_end") {
-          if (primitive.primitive === "image" && !Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is required for a media_end image");
-          if (primitive.primitive === "video" && primitive.loop === true) fail(`${itemPath}/loop`, "must be false for media_end");
-        }
+        if (mode === "media_end" && primitive.primitive === "video" && primitive.loop === true) fail(`${itemPath}/loop`, "must be false for media_end");
       }
     }
     if (mode === "application" && controllers !== 1) fail(`${path}/primitives`, "application advance requires exactly one controller application");
@@ -533,7 +531,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     if (web > 2) fail(`${path}/primitives`, "must contain at most two application or iframe primitives");
     if (mode === "media_end") {
       if (web > 0) fail(`${path}/advance`, "media_end forbids application and iframe primitives");
-      else if (primitives.filter((primitive) => primitive.primitive === "image" || primitive.primitive === "video").length !== 1) fail(`${path}/advance`, "media_end requires exactly one image or video primitive");
+      else if (primitives.filter((primitive) => primitive.primitive === "video").length !== 1) fail(`${path}/advance`, "media_end needs exactly one video primitive; images never drive advance");
     }
   }
   if (pages.length > 0 && unscheduled === 0) fail("/pages", "must retain at least one page without a visibility rule");
