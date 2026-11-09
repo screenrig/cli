@@ -465,7 +465,7 @@ test("soundtrack audio_end image dwell: an audio_end page follows the duration p
   const cue = { track: "bed", restart: true };
   assert.throws(
     () => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }, cue, { dwell_ms: 3000 })), AUDIO_MEDIA),
-    (error: unknown) => error instanceof CliError && /audio_end pages forbid image dwell_ms/.test(error.problem.detail),
+    (error: unknown) => error instanceof CliError && /primitives\[0\]\.dwell_ms is not accepted/.test(error.problem.detail),
   );
   const several = imagePage("one", { mode: "audio_end" }, cue, { selector: { by: "ids", media_ids: ["med_STILL", "med_STILL2"] } });
   assert.throws(
@@ -517,6 +517,67 @@ test("a duration page may last until its YouTube video ends, and nothing else ma
   assert.throws(
     () => validatePlaylistWrite(withAdvance({ ...until, until: "sunset" }), new Map()),
     (error: unknown) => error instanceof CliError && error.problem.detail.includes("until must be video_end"),
+  );
+});
+
+const MEDIA_END_MEDIA = new Map([["med_clip", "video"], ["med_clip2", "video"], ["med_logo", "image"], ["med_badge", "image"]] as const);
+
+function videoPrimitive(id: string, overrides: Record<string, unknown> = {}) {
+  return { id, primitive: "video", selector: { by: "id", media_id: "med_clip" }, muted: true, loop: false, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain", ...overrides };
+}
+
+function stillPrimitive(id: string, overrides: Record<string, unknown> = {}) {
+  return { id, primitive: "image", selector: { by: "id", media_id: "med_logo" }, rect: { x: 40, y: 40, width: 200, height: 200 }, layer: 1, content_fit: "contain", ...overrides };
+}
+
+function mediaEndPlaylist(primitives: unknown[], advance: unknown = { mode: "media_end" }) {
+  const value = playlistWithPrimitives(primitives);
+  return { ...value, pages: [{ ...value.pages[0]!, advance }] };
+}
+
+test("a media_end page advances on its one video and takes any number of images beside it", () => {
+  assert.deepEqual(validatePlaylistWrite(mediaEndPlaylist([videoPrimitive("clip")]), MEDIA_END_MEDIA), new Set(["med_clip"]));
+  assert.deepEqual(
+    validatePlaylistWrite(mediaEndPlaylist([videoPrimitive("clip"), stillPrimitive("logo"), stillPrimitive("badge", { selector: { by: "id", media_id: "med_badge" } })]), MEDIA_END_MEDIA),
+    new Set(["med_clip", "med_logo", "med_badge"]),
+  );
+  // A max_ms hint is the server's to resolve and stays optional.
+  assert.doesNotThrow(() => validatePlaylistWrite(mediaEndPlaylist([videoPrimitive("clip"), stillPrimitive("logo")], { mode: "media_end", max_ms: 60_000 }), MEDIA_END_MEDIA));
+  // The video plays a selector as a sequence, as it always did.
+  const sequence = videoPrimitive("clip", { selector: { by: "ids", media_ids: ["med_clip", "med_clip2"] } });
+  assert.doesNotThrow(() => validatePlaylistWrite(mediaEndPlaylist([sequence, stillPrimitive("logo")]), MEDIA_END_MEDIA));
+});
+
+test("a media_end page needs exactly one video: images never drive the advance", () => {
+  const refused = (primitives: unknown[], detail: RegExp) => assert.throws(
+    () => validatePlaylistWrite(mediaEndPlaylist(primitives), MEDIA_END_MEDIA),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && detail.test(error.problem.detail),
+    JSON.stringify(primitives.map((primitive) => (primitive as { id: string }).id)),
+  );
+  const oneVideo = /pages\[0\] media_end needs exactly one video primitive; images never drive advance/;
+  refused([stillPrimitive("logo")], oneVideo);
+  refused([stillPrimitive("logo"), stillPrimitive("badge", { selector: { by: "id", media_id: "med_badge" } })], oneVideo);
+  refused([videoPrimitive("clip"), videoPrimitive("clip_b", { selector: { by: "id", media_id: "med_clip2" } })], oneVideo);
+  refused([videoPrimitive("clip", { loop: true }), stillPrimitive("logo")], /media_end video must not loop/);
+  refused([videoPrimitive("clip"), iframePrimitive("web", "https://example.com/")], /media_end forbids iframe primitives/);
+});
+
+test("an image takes no dwell_ms on any page, and several images beside a video need one_at_a_time", () => {
+  const dwelling = stillPrimitive("logo", { dwell_ms: 3000 });
+  for (const value of [
+    mediaEndPlaylist([videoPrimitive("clip"), dwelling]),
+    mediaEndPlaylist([dwelling], { mode: "duration", after_ms: 5000 }),
+  ]) {
+    assert.throws(
+      () => validatePlaylistWrite(value, MEDIA_END_MEDIA),
+      (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /primitives\[\d\]\.dwell_ms is not accepted/.test(error.problem.detail),
+    );
+  }
+  const several = (extra: Record<string, unknown> = {}) => stillPrimitive("logo", { selector: { by: "ids", media_ids: ["med_logo", "med_badge"], ...extra } });
+  assert.doesNotThrow(() => validatePlaylistWrite(mediaEndPlaylist([videoPrimitive("clip"), several({ one_at_a_time: true })]), MEDIA_END_MEDIA));
+  assert.throws(
+    () => validatePlaylistWrite(mediaEndPlaylist([videoPrimitive("clip"), several()]), MEDIA_END_MEDIA),
+    (error: unknown) => error instanceof CliError && /multi-item selectors require one_at_a_time true/.test(error.problem.detail),
   );
 });
 
@@ -650,17 +711,24 @@ test("an image background takes exactly a catalog id and a canonical colour", ()
   }
 });
 
-test("a page with an image background holds at most 23 primitives; any other background holds 24", () => {
+test("a page holds 24 primitives whatever its background: an image background takes none of them", () => {
   const images = (count: number) => Array.from({ length: count }, (_, index) => ({
     id: `image_${index}`, primitive: "image", selector: { by: "id", media_id: `med_${index}` },
     rect: { x: 0, y: 0, width: 100, height: 100 }, layer: index, content_fit: "contain",
   }));
-  const known = new Map(Array.from({ length: 24 }, (_, index) => [`med_${index}`, "image" as const]));
+  const known = new Map(Array.from({ length: 25 }, (_, index) => [`med_${index}`, "image" as const]));
   const image = { type: "image", background_id: BACKGROUND, color: "#09111BFF" };
-  assert.equal(validatePlaylistWrite(playlistWithBackground(image, images(23)), known).size, 23);
+  assert.equal(validatePlaylistWrite(playlistWithBackground(image, images(24)), known).size, 24);
   assert.equal(validatePlaylistWrite(playlistWithBackground("#09111BFF", images(24)), known).size, 24);
   assert.throws(
-    () => validatePlaylistWrite(playlistWithBackground(image, images(24)), known),
-    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /at most 23 primitives on a page with an image background/.test(error.problem.detail),
+    () => validatePlaylistWrite(playlistWithBackground(image, images(25)), known),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /primitives must contain 1 to 24 primitives/.test(error.problem.detail),
   );
+});
+
+test("an image background sits beside any advance, media_end included", () => {
+  const image = { type: "image", background_id: BACKGROUND, color: "#09111BFF" };
+  const page = mediaEndPlaylist([videoPrimitive("clip")]);
+  page.pages[0]!.canvas.background = image as never;
+  assert.deepEqual(validatePlaylistWrite(page, MEDIA_END_MEDIA), new Set(["med_clip"]));
 });

@@ -170,7 +170,25 @@ test("media_end allows a card chip beside its one video, as the server does", ()
   assert.deepEqual(playlistIssues(withChip), []);
   const cardOnly = playlist(); cardOnly.pages[0]!.advance = { mode: "media_end" } as any;
   cardOnly.pages[0]!.primitives = [{ id: "chip", primitive: "card", card: "clock", major: 1, params: {}, layout: "full", content_fit: "fill" }] as any;
-  assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one image or video")));
+  // The vendored message names the rule: one image or video before the media_end sync, one video after it.
+  assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && /exactly one (image or )?video/.test(issue.message)));
+});
+// These two hold the offline semantics SPEC2 section 2 gives media_end (it advances on its one video; images beside it
+// take no dwell_ms), which `src/generated/playlist-write-semantics.ts` brings with the next contract sync. They stay
+// todo until then; once the sync makes them pass, drop `MEDIA_END_VIDEO_SYNC` and its options argument.
+const MEDIA_END_VIDEO_SYNC = { todo: "passes once the contract sync brings the video-only media_end rule" };
+test("media_end takes images beside its one video, with no dwell_ms", MEDIA_END_VIDEO_SYNC, () => {
+  const withLogo = playlist({ primitive: "video", loop: false });
+  withLogo.pages[0]!.advance = { mode: "media_end" } as any;
+  withLogo.pages[0]!.primitives = [...withLogo.pages[0]!.primitives as any[], { id: "logo", primitive: "image", selector: { by: "id", media_id: "med_logo" }, rect: { x: 40, y: 40, width: 200, height: 200 }, layer: 1, content_fit: "contain" }] as any;
+  assert.deepEqual(playlistIssues(withLogo), []);
+  (withLogo.pages[0]!.primitives[1] as Record<string, unknown>).dwell_ms = 3000;
+  assert.ok(playlistIssues(withLogo).some((issue) => issue.path === "/pages/0/primitives/1/dwell_ms"));
+});
+test("media_end without a video is refused, whatever images it holds", MEDIA_END_VIDEO_SYNC, () => {
+  const imageOnly = playlist();
+  imageOnly.pages[0]!.advance = { mode: "media_end" } as any;
+  assert.ok(playlistIssues(imageOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one video")));
 });
 test("a wide card validates without an anchor and shares the page's one full, center or wide slot", () => {
   const wide = (id: string, extra: Record<string, unknown> = {}) => ({ id, primitive: "card", card: "clock", major: 1, params: {}, layout: "wide", content_fit: "fill", ...extra });

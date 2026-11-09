@@ -16,8 +16,6 @@ export const BACKGROUND_ID_MAX = 160;
 export const BACKGROUND_COLOR_PATTERN = /^#[0-9A-F]{8}$/;
 export const DEFAULT_BACKGROUND_COLOR = "#000000FF";
 export const BACKGROUND_ORIENTATIONS = ["landscape", "portrait"] as const;
-/** The most primitives a page holds beside an image background (the Player's 24 less the image itself). */
-export const IMAGE_BACKGROUND_PRIMITIVES_MAX = 23;
 
 export interface BackgroundCategory { id: string; name: string; set_count: number; thumbnail_path: string }
 export interface BackgroundSet {

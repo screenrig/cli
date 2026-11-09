@@ -1,4 +1,4 @@
-import { BACKGROUND_ID_MAX, BACKGROUND_ID_PATTERN, IMAGE_BACKGROUND_PRIMITIVES_MAX, imageBackgroundOf } from "./backgrounds.js";
+import { BACKGROUND_ID_MAX, BACKGROUND_ID_PATTERN } from "./backgrounds.js";
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
@@ -500,9 +500,6 @@ export function validatePlaylistWrite(
     if (!Array.isArray(page.primitives) || page.primitives.length < 1 || page.primitives.length > 24) {
       throw usageError(`${pageName}.primitives must contain 1 to 24 primitives.`);
     }
-    if (page.primitives.length > IMAGE_BACKGROUND_PRIMITIVES_MAX && imageBackgroundOf(page)) {
-      throw usageError(`${pageName}.primitives must contain at most ${IMAGE_BACKGROUND_PRIMITIVES_MAX} primitives on a page with an image background.`);
-    }
     const primitiveIds = new Set<string>();
     const mediaPrimitivesOnPage: Array<{
       primitive: "image" | "video";
@@ -549,7 +546,8 @@ export function validatePlaylistWrite(
       const selector = validateSelector(primitive.selector, `${primitiveName}.selector`, category, mediaPrimitives, referenced);
       if (category === "image") {
         if (primitive.alt !== undefined && (typeof primitive.alt !== "string" || primitive.alt.length > 300)) throw usageError(`${primitiveName}.alt is invalid.`);
-        if (primitive.dwell_ms !== undefined) number(primitive, "dwell_ms", primitiveName, { integer: true, min: 1000, max: 86_400_000 });
+        // No page takes a dwell: the page's advance times it, and an image never drives the advance.
+        if (primitive.dwell_ms !== undefined) throw usageError(`${primitiveName}.dwell_ms is not accepted: an image takes its page's timing, and a media_end page advances on its video.`);
       } else {
         if (primitive.muted !== undefined && primitive.muted !== true) throw usageError(`${primitiveName}.muted must be true.`);
         optionalBoolean(primitive, "loop", primitiveName);
@@ -558,16 +556,17 @@ export function validatePlaylistWrite(
     }
     if (iframeCount > 2) throw usageError(`${pageName}.primitives must contain at most 2 iframe primitives.`);
     if (advance === "application") throw usageError(`${pageName} application advance is unsupported because bundles exclude applications.`);
+    // A media_end page advances when its one video (its whole selector sequence) ends and takes any number of images, which
+    // never drive the advance. Every other page, and every image, needs one_at_a_time for a selector of several files.
+    const videos = mediaPrimitivesOnPage.filter((media) => media.primitive === "video");
     if (advance === "media_end") {
-      if (page.primitives.length !== 1 || mediaPrimitivesOnPage.length !== 1 || iframeCount > 0) throw usageError(`${pageName} media_end requires exactly one image or video primitive.`);
-      const only = mediaPrimitivesOnPage[0]!;
-      if (only.primitive === "image" && only.value.dwell_ms === undefined) throw usageError(`${pageName} media_end image requires dwell_ms.`);
-      if (only.primitive === "video" && only.value.loop === true) throw usageError(`${pageName} media_end video must not loop.`);
-    } else {
-      for (const media of mediaPrimitivesOnPage) {
-        if (media.primitive === "image" && media.value.dwell_ms !== undefined) throw usageError(`${pageName} ${advance} pages forbid image dwell_ms.`);
-        if (media.selector.count > 1 && !media.selector.oneAtATime) throw usageError(`${pageName} multi-item selectors require one_at_a_time true.`);
-      }
+      if (iframeCount > 0) throw usageError(`${pageName} media_end forbids iframe primitives.`);
+      if (videos.length !== 1) throw usageError(`${pageName} media_end needs exactly one video primitive; images never drive advance.`);
+      if (videos[0]!.value.loop === true) throw usageError(`${pageName} media_end video must not loop.`);
+    }
+    for (const media of mediaPrimitivesOnPage) {
+      if (advance === "media_end" && media.primitive === "video") continue;
+      if (media.selector.count > 1 && !media.selector.oneAtATime) throw usageError(`${pageName} multi-item selectors require one_at_a_time true.`);
     }
   }
   if (unscheduled === 0) throw usageError("Every playlist must keep at least one page with no visibility field.");

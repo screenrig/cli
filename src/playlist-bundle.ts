@@ -492,7 +492,6 @@ export function normalizePlaylistForBundle(
           primitive: category,
           selector,
           ...(category === "image" && typeof primitive.alt === "string" ? { alt: primitive.alt } : {}),
-          ...(category === "image" && typeof primitive.dwell_ms === "number" ? { dwell_ms: primitive.dwell_ms } : {}),
           ...(category === "video" ? { muted: primitive.muted === true, loop: primitive.loop === true } : {}),
         };
       } else {
