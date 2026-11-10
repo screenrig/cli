@@ -49,6 +49,19 @@ test("list and catalogue narrowing preserves filters; no selection leaves the se
   assert.deepEqual(projectStreamQuery(id), { project: id });
 });
 
+test("the page background catalog is read under the selected project: list routes by path, a set and an image by query", () => {
+  for (const path of ["/api/backgrounds/categories", "/api/backgrounds/sets"]) {
+    const request = { method: "GET" as const, path, query: { category: "arts-culture-entertainment" } };
+    assert.deepEqual(projectRequest(request, id), { ...request, path: prefix + path.slice(4) });
+    assert.deepEqual(projectRequest(request), request);
+  }
+  for (const path of ["/api/backgrounds/sets/blockbuster-laser-rush", "/api/backgrounds/bg_blockbuster-laser-rush__landscape__bottom-banner-73d2f112"]) {
+    const request = { method: "GET" as const, path };
+    assert.deepEqual(projectRequest(request, id), { ...request, query: { project: id } });
+    assert.deepEqual(projectRequest(request), request);
+  }
+});
+
 test("subset clients route writes before recovery and never send an ambient project header", async () => {
   const token = fakeSessionJwt({ exp: 4102444800, projects: { [id]: ["content"] }, scope: "identity" });
   const transport = new FakeTransport().on("POST", `${prefix}/applications`, req => {
