@@ -1,11 +1,11 @@
 # screenRIG CLI
 
 Noninteractive control-plane CLI and deterministic web-application packer for
-[screenRIG](https://screenrig.ai). Full command reference:
-[screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md).
-[Digital signage for developers](https://screenrig.ai/developers) ·
-[Publish content to a TV](https://screenrig.ai/guides/publish-content-to-tv-programmatically) ·
-[Headless digital signage](https://screenrig.ai/headless-digital-signage)
+[screenRIG](https://screenrig.ai?utm_source=npm&utm_medium=package&utm_campaign=tof-libs). Full command reference:
+[screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md?utm_source=npm&utm_medium=package&utm_campaign=tof-libs).
+[Digital signage for developers](https://screenrig.ai/developers?utm_source=npm&utm_medium=package&utm_campaign=tof-libs) ·
+[Publish content to a TV](https://screenrig.ai/guides/publish-content-to-tv-programmatically?utm_source=npm&utm_medium=package&utm_campaign=tof-libs) ·
+[Headless digital signage](https://screenrig.ai/headless-digital-signage?utm_source=npm&utm_medium=package&utm_campaign=tof-libs)
 
 Agents use the CLI bundled by the
 [`screenrig/plugin`](https://github.com/screenrig/plugin) plugin through the
