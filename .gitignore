@@ -6,3 +6,4 @@ node_modules/
 # Agent working state. This repository is public; agent memory and session
 # notes must never be committed here.
 .claude/
+*.tsbuildinfo
