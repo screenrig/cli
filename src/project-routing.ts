@@ -9,6 +9,7 @@ const PROJECT_ROUTES = new Set([
   "advertising/creatives", "advertising/campaigns", "advertising/reviews", "advertising/reports/spend",
   "advertising/reports/delivery", "advertising/reports/fill", "advertising/direct-campaigns", "advertising/availability", "playback", "playback/plays", "playback/totals", "playback/completeness", "health/trend", "uptime/daily",
   "card-types", "card-data", "cards", "media", "media/generations", "media-folders", "media/move", "media/uploads",
+  "backgrounds/categories", "backgrounds/sets",
   "selectors/preview", "feedback/bugs", "feedback/features", "service-clients", "fleet-links", "webhooks", "notifications", "alerts", "alert-mutes",
   "notes", "support/status", "support/conversations", "reviews", "agents/self", "agents/self/disconnect",
 ]);
@@ -28,6 +29,8 @@ export function projectRequest<T extends Pick<TransportRequest, "method" | "path
   if (read && GLOBAL_LISTS.has(route)) return { ...request, query: { ...request.query, project: projectId } };
   // Catalogue details are public type IDs; instance IDs remain global.
   if (route === "card-types" || route.startsWith("card-types/")) return { ...request, query: { ...request.query, project: projectId } };
+  // A background set and an image have no project path form; the catalog is platform-owned, so only the selection travels.
+  if (/^backgrounds\/(?:sets\/[^/]+|bg_[^/]+)$/.test(route)) return { ...request, query: { ...request.query, project: projectId } };
   if (PROJECT_ROUTES.has(route) || route.startsWith("card-data/") || route.startsWith("feeds/")
     || /^advertising\/networks\/[^/]+\/inventory$/.test(route)) {
     return { ...request, path: `/api/projects/${encodeURIComponent(projectId)}/${route}` };

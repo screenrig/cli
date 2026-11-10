@@ -10,7 +10,7 @@ import {
 import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
 import { processRuntime } from "./runtime.js";
-import { FakeTransport } from "./transport/fake.js";
+import { fakeSessionJwt, FakeTransport } from "./transport/fake.js";
 
 const PLAYLIST = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
 const IMAGE = "med_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -99,12 +99,12 @@ test("a root-relative path resolves against the API origin", () => {
   assert.equal(backgroundUrl(undefined, "https://api.screenrig.ai"), "");
 });
 
-async function cli(t: TestContext, transport: FakeTransport) {
+async function cli(t: TestContext, transport: FakeTransport, stored: Record<string, unknown> = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "background-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const config = path.join(directory, "config.json");
   await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
-    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token" }), { mode: 0o600 });
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-token", ...stored }), { mode: 0o600 });
   return async (argv: string[]) => {
     let output = "";
     const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], cwd: () => directory, settings: {}, transport,
@@ -315,4 +315,77 @@ test("a background change under Propose access is a pending review, not a write 
   const envelope = JSON.parse(answer.output);
   assert.equal(envelope.data.review.id, "rvw_TEST");
   assert.equal(envelope.warnings[0].code, "pending_review");
+});
+
+const NORTH = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", SOUTH = "prj_BBBBBBBBBBBBBBBBBBBBBBBB";
+
+/**
+ * The catalog as the backend serves it to a token with two project grants: a request names its project in the path or in
+ * ?project=, else it is project_required. Only the list routes have a path form; a set and an image are read with the query.
+ */
+function twoProjectCatalog(selected: (string | undefined)[]) {
+  const problem = (status: number, code: string) => ({ status, headers: {}, body: { status, code, detail: code } });
+  const lists: Record<string, unknown> = {
+    "/api/backgrounds/categories": { categories: [{ id: "arts-culture-entertainment", name: "Arts, Culture & Entertainment", set_count: 12, thumbnail_path: "/static-resources/x.webp" }] },
+    "/api/backgrounds/sets": { sets: [set()] },
+  };
+  const details: Record<string, unknown> = {
+    [`/api/backgrounds/sets/${SET}`]: { ...set(), backgrounds: [image(BG, "landscape", "bottom-banner", "dark")] },
+    [`/api/backgrounds/${BG}`]: shown(),
+  };
+  return new FakeTransport().on("GET", /^\/api\/(?:projects\/[^/]+\/)?backgrounds\//, (request) => {
+    const inPath = /^\/api\/projects\/([^/]+)\//.exec(request.path)?.[1];
+    const project = inPath ?? request.query?.project;
+    selected.push(project);
+    if (!project) return problem(400, "project_required");
+    if (project !== NORTH && project !== SOUTH) return problem(404, "not_found");
+    const logical = request.path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
+    const body = lists[logical] ?? (inPath ? undefined : details[logical]);
+    return body ? { status: 200, headers: {}, body } : problem(404, "not_found");
+  });
+}
+
+test("the background commands select the project with a token that holds two", async (t) => {
+  const selected: (string | undefined)[] = [];
+  const writes: string[] = [];
+  const transport = twoProjectCatalog(selected)
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([storedPage()]) }))
+    .on("GET", `/api/projects/${SOUTH}/reviews`, () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null } }))
+    .on("PUT", `/api/playlists/${PLAYLIST}/pages/welcome`, (request) => {
+      writes.push(request.path);
+      return { status: 200, headers: { etag: '"8"' }, body: playlistBody([request.body], 8) };
+    });
+  const token = fakeSessionJwt({ sub: "agent:agt_EXAMPLE", sid: "grt_BACKGROUND", exp: 4102444800, scope: "identity", projects: {
+    [NORTH]: ["access:read", "content"], [SOUTH]: ["access:manage", "content"],
+  } });
+  const invoke = await cli(t, transport, { token, project_id: SOUTH, project_name: "South" });
+  const calls = () => transport.calls.splice(0).map((call) => `${call.method} ${call.path}${call.query?.project ? ` ?project=${call.query.project}` : ""}`);
+
+  for (const argv of [
+    ["background", "categories"], ["background", "sets", "--category", "arts-culture-entertainment"], ["background", "show", SET], ["background", "show", BG],
+  ]) {
+    const answer = await invoke(argv);
+    assert.equal(answer.code, ExitCode.Success, `${argv.join(" ")} ${answer.output}`);
+  }
+  assert.deepEqual(calls(), [
+    `GET /api/projects/${SOUTH}/backgrounds/categories`,
+    `GET /api/projects/${SOUTH}/backgrounds/sets`,
+    `GET /api/backgrounds/sets/${SET} ?project=${SOUTH}`,
+    `GET /api/backgrounds/${BG} ?project=${SOUTH}`,
+  ]);
+
+  const applied = await invoke(["background", "apply", BG, "--playlist-id", PLAYLIST, "--page-id", "welcome"]);
+  assert.equal(applied.code, ExitCode.Success, applied.output);
+  assert.deepEqual(calls(), [
+    `GET /api/backgrounds/${BG} ?project=${SOUTH}`,
+    `GET /api/playlists/${PLAYLIST} ?project=${SOUTH}`,
+    `GET /api/projects/${SOUTH}/reviews`,
+    `PUT /api/playlists/${PLAYLIST}/pages/welcome`,
+  ]);
+  assert.deepEqual(writes, [`/api/playlists/${PLAYLIST}/pages/welcome`]);
+
+  const north = await (await cli(t, transport, { token, project_id: NORTH, project_name: "North" }))(["background", "sets"]);
+  assert.equal(north.code, ExitCode.Success, north.output);
+  assert.deepEqual(calls(), [`GET /api/projects/${NORTH}/backgrounds/sets`]);
+  assert.ok(selected.length > 0 && selected.every((project) => project === SOUTH || project === NORTH), `every catalog request named its project: ${selected.join(", ")}`);
 });
