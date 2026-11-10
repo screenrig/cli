@@ -10,16 +10,16 @@ import { run } from "./main.js";
 import type { CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
 
-const PAGE = "https://screenrig.ai/docs/cli";
+const PAGE = "https://screenrig.ai/docs/cli/schedules";
 const SEARCH = {
   results: [
-    { url: `${PAGE}#schedule-set`, title: "CLI command reference", section: "schedule set", snippet: "Sets the playlist schedule\nof a screen from a schedule file.   Each entry names a playlist…", score: 14.2 },
+    { url: `${PAGE}#screen-schedule-set`, title: "Schedules CLI commands", section: "screen schedule set", snippet: "Sets the playlist schedule\nof a screen from a schedule file.   Each entry names a playlist…", score: 14.2 },
     { url: "https://screenrig.ai/docs/schedules", title: "Schedules", section: "", snippet: "", score: 9.5 },
   ],
   corpus_commit: "3f2a9c1",
 };
-const WHOLE_PAGE = { url: PAGE, title: "CLI command reference", markdown: "# CLI command reference\n\nIntroduction only.\n", truncated: true, sections: ["schedule set", "schedule import"], corpus_commit: "3f2a9c1" };
-const ONE_SECTION = { url: `${PAGE}#schedule-set`, title: "CLI command reference", markdown: "### `schedule set`\n\nSets the playlist schedule of a screen.\n", truncated: false, sections: ["Windows"], corpus_commit: "3f2a9c1" };
+const WHOLE_PAGE = { url: PAGE, title: "Schedules CLI commands", markdown: "# Schedules CLI commands\n\nIntroduction only.\n", truncated: true, sections: ["screen schedule set", "schedule import"], corpus_commit: "3f2a9c1" };
+const ONE_SECTION = { url: `${PAGE}#screen-schedule-set`, title: "Schedules CLI commands", markdown: "### `screen schedule set`\n\nSets the playlist schedule of a screen.\n", truncated: false, sections: ["Windows"], corpus_commit: "3f2a9c1" };
 const NOT_FOUND = { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "No documentation page matches that address.", request_id: "req_DOCSNOTFOUND000001" };
 
 interface Seen { path: string; query: Record<string, string>; headers: IncomingHttpHeaders }
@@ -74,8 +74,8 @@ test("docs search sends the words and limit to the public route and lists title 
   assert.equal(api.seen[0]!.path, "/api/docs/search");
   assert.deepEqual(api.seen[0]!.query, { q: "playlist schedule", limit: "2" });
   assert.equal(result.stdout, [
-    "CLI command reference — schedule set",
-    `${PAGE}#schedule-set`,
+    "Schedules CLI commands — screen schedule set",
+    `${PAGE}#screen-schedule-set`,
     "Sets the playlist schedule of a screen from a schedule file. Each entry names a playlist…",
     "",
     "Schedules",
@@ -109,14 +109,14 @@ test("docs show prints the Markdown, the truncated line and the sections to read
   assert.equal(api.seen[0]!.path, "/api/docs/page");
   assert.deepEqual(api.seen[0]!.query, { url: PAGE });
   assert.equal(result.stdout, [
-    "# CLI command reference",
+    "# Schedules CLI commands",
     "",
     "Introduction only.",
     "",
     `Truncated. Read a section with: screenrig docs show ${PAGE} --section NAME`,
     "",
     "Sections to read next:",
-    "- schedule set",
+    "- screen schedule set",
     "- schedule import",
     "",
   ].join("\n"));
@@ -125,20 +125,20 @@ test("docs show prints the Markdown, the truncated line and the sections to read
 test("docs show --section reads one section and lists only its own sub-headings", async (t) => {
   const api = await stubApi(t);
   const { fs } = await configDir();
-  const result = await cli(["--human", "--api-url", api.origin, "docs", "show", PAGE, "--section", "schedule set"], fs);
+  const result = await cli(["--human", "--api-url", api.origin, "docs", "show", PAGE, "--section", "screen schedule set"], fs);
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(api.seen[0]!.query, { url: PAGE, section: "schedule set" });
-  assert.equal(result.stdout, ["### `schedule set`", "", "Sets the playlist schedule of a screen.", "", "Sections to read next:", "- Windows", ""].join("\n"));
+  assert.deepEqual(api.seen[0]!.query, { url: PAGE, section: "screen schedule set" });
+  assert.equal(result.stdout, ["### `screen schedule set`", "", "Sets the playlist schedule of a screen.", "", "Sections to read next:", "- Windows", ""].join("\n"));
   assert.doesNotMatch(result.stdout, /Truncated/);
 });
 
 test("a truncated address with a fragment is quoted so the printed command runs as written", async (t) => {
   const api = await stubApi(t);
   const { fs } = await configDir();
-  const result = await cli(["--human", "--api-url", api.origin, "docs", "show", `${PAGE}#schedule-set`], fs);
+  const result = await cli(["--human", "--api-url", api.origin, "docs", "show", `${PAGE}#screen-schedule-set`], fs);
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(api.seen[0]!.query, { url: `${PAGE}#schedule-set` });
-  assert.match(result.stdout, /^Truncated\. Read a section with: screenrig docs show 'https:\/\/screenrig\.ai\/docs\/cli#schedule-set' --section NAME$/m);
+  assert.deepEqual(api.seen[0]!.query, { url: `${PAGE}#screen-schedule-set` });
+  assert.match(result.stdout, /^Truncated\. Read a section with: screenrig docs show 'https:\/\/screenrig\.ai\/docs\/cli\/schedules#screen-schedule-set' --section NAME$/m);
 });
 
 test("docs show --json prints the page response in the envelope", async (t) => {
@@ -149,7 +149,7 @@ test("docs show --json prints the page response in the envelope", async (t) => {
   const envelope = JSON.parse(result.stdout) as { ok: boolean; data: unknown };
   assert.equal(envelope.ok, true);
   assert.deepEqual(envelope.data, WHOLE_PAGE);
-  const section = await cli(["--json", "--api-url", api.origin, "docs", "show", PAGE, "--section", "schedule set"], fs);
+  const section = await cli(["--json", "--api-url", api.origin, "docs", "show", PAGE, "--section", "screen schedule set"], fs);
   assert.deepEqual((JSON.parse(section.stdout) as { data: unknown }).data, ONE_SECTION);
 });
 
@@ -175,7 +175,7 @@ test("a signed-in installation still sends no credential, uses its configured or
   }, fs);
   const human = await cli(["--human", "docs", "search", "schedule"], fs);
   assert.equal(human.code, 0, human.stderr);
-  assert.match(human.stdout, /^CLI command reference — schedule set\n/);
+  assert.match(human.stdout, /^Schedules CLI commands — screen schedule set\n/);
   assert.doesNotMatch(human.stdout, /organization:|project:/);
   const json = await cli(["docs", "show", PAGE], fs);
   assert.equal(json.code, 0, json.stderr);
