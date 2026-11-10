@@ -45,6 +45,8 @@ Players, backend services or the site.
   `npm run check`) is the offline gate and `rig contracts check cli` compares
   against backend origin/main.
 - Read `assets/` only through `src/assets.ts`.
+- A command that sends a new request field must not reach `main` before the backend that accepts it is in production:
+  the backend rejects unknown fields, and the plugin rebundles `main`.
 - Never PATH-swap a local checkout into an installed agent, and never
   `npm i -g screenrig` as the agent path.
 - The README must keep the exact `[security policy](SECURITY.md)`
