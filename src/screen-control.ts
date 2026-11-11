@@ -1,4 +1,5 @@
 import type {
+  Screen,
   LevelDate,
   LevelInteraction,
   LevelMembers,
@@ -411,6 +412,20 @@ export function effectivePlaylistText(effective: ScreenEffectivePlaylist | undef
   return `${effective.id} (default${until ? `, a campaign or schedule changes it${until}` : ""})`;
 }
 
+const ZONE_SOURCE_TEXT = { screen: "screen override", device: "device", default: "default: the device reports no zone" } as const;
+
+/** The zone every civil rule of the screen is read in, with where it comes from: the override, the device or the UTC default. */
+function timezoneText(screen: Partial<Pick<Screen, "effective_timezone" | "timezone_source">> | undefined): string | undefined {
+  if (!screen?.effective_timezone) return undefined;
+  const source = screen.timezone_source === undefined ? undefined : ZONE_SOURCE_TEXT[screen.timezone_source];
+  return source ? `${screen.effective_timezone} (${source})` : screen.effective_timezone;
+}
+
+export function timezoneLine(screen: Partial<Pick<Screen, "effective_timezone" | "timezone_source">> | undefined): string[] {
+  const text = timezoneText(screen);
+  return text ? [`Timezone: ${text}`] : [];
+}
+
 export function assignmentLine(effective: ScreenEffectivePlaylist | undefined, takeover?: ScreenTakeover, timezone?: string): string[] {
   const text = effectivePlaylistText(effective, takeover, timezone);
   return text ? [`Assigned: ${text}`] : [];
@@ -479,12 +494,12 @@ export function levelPlacementParts(level: LevelMembers): string[] {
   ];
 }
 
-export function scheduleTableLines(entries: ScreenScheduleEntry[] | undefined, timezone?: string | null): string[] {
+export function scheduleTableLines(entries: ScreenScheduleEntry[] | undefined, timezone?: string): string[] {
   if (!entries?.length) return ["No playlist schedule"];
   // A paused entry is a draft: stored, but on no stack until it is published.
   const rules = entries.map((item) => [...(item.paused ? ["draft (paused)"] : []), ...levelRuleParts(item), ...levelPlacementParts(item)].join("; "));
   const withRules = rules.some((text) => text !== "");
-  const zone = timezone === undefined ? [] : [`${withRules ? "Windows, FROM/UNTIL and the monthly and date rules" : "Windows and FROM/UNTIL"} are civil times (screen timezone ${timezone || "not set"}).`];
+  const zone = !timezone ? [] : [`${withRules ? "Windows, FROM/UNTIL and the monthly and date rules" : "Windows and FROM/UNTIL"} are civil times (screen timezone ${timezone}).`];
   const rows = entries.map((item, index) => [
     item.id ?? "", item.playlist_id ?? "", (item.windows ?? []).map(windowText).join("; "),
     item.from ?? "", item.until ?? "", ...(withRules ? [rules[index]!] : []),
@@ -506,16 +521,6 @@ export function screenControlProblem(error: unknown, id: string): unknown {
       next: {
         command: `screenrig screen assign ${id} --playlist-id PLAYLIST_ID`,
         reason: "A schedule or takeover falls back to the assigned default when it ends, so the screen needs one. Assign it, then rerun.",
-      },
-    }, error.exitCode, error.warnings);
-  }
-  if (problem.code === "invalid_request" && /^timezone: /.test(problem.detail)) {
-    return new CliError({
-      ...problem,
-      detail: `Set the screen timezone first: ${problem.detail}`,
-      next: {
-        command: `screenrig screen set-timezone ${id} --timezone ZONE`,
-        reason: "Schedules are civil times read in the screen timezone. Replace ZONE with the IANA name of where the screen is (for example Europe/London or America/New_York; ask the user if unsure), then rerun.",
       },
     }, error.exitCode, error.warnings);
   }

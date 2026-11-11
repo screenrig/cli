@@ -168,7 +168,7 @@ test("migrate scan --from screencloud needs --region and a token, and prints the
     assert.equal(report.importable.layouts, 4, JSON.stringify(report.not_imported));
     assert.ok(report.lossy.some((entry: { name: string; change: string }) => entry.name === "Banner.jpg" && /re-encoded copy/.test(entry.change)));
     assert.ok(report.lossy.some((entry: { name: string; change: string }) => entry.name === "Lobby channel" && /advances together with the main zone/.test(entry.change)));
-    assert.ok(report.notes.some((note: string) => /No time zone was known for 2 screens/.test(note)));
+    assert.ok(!report.notes.some((note: string) => /time zone/i.test(note)));
     assert.ok(!result.stdout.includes(TOKEN));
     assert.equal(project.transport.calls.length, 0);
     const noRegion = await h.invoke(["migrate", "scan", "--from", "screencloud", "--dir", "none"], { credentials: CREDENTIALS, vendorFetch: api.fetch });

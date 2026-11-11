@@ -705,16 +705,6 @@ export async function readFeedbackBody(args: ParsedArgs, runtime: CliRuntime): P
   }
 }
 
-export function scheduleZoneError(screenId: string): CliError {
-  return usageError(
-    `Screen ${screenId} has no timezone, and the playlist has civil-time visibility bounds. Set the screen's IANA timezone before assigning it.`,
-    {
-      command: `screenrig screen set-timezone ${screenId} --timezone America/Los_Angeles --expect-rev REVISION`,
-      reason: "Set the screen timezone first, then assign the playlist. Read the current revision from screen show.",
-    },
-  );
-}
-
 /**
  * `screen show` and `playlist show`: open notes about that resource, one extra
  * read. The envelope gains a notes_about_resource warning naming them, data

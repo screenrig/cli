@@ -468,6 +468,8 @@ export interface HostContext {
   host_version?: string;
   device?: HostDevice;
   capabilities?: string[];
+  /** The IANA zone the Player reports from its operating system; a screen follows it unless it has an override. */
+  timezone?: string;
 }
 
 /**
@@ -1088,11 +1090,17 @@ export interface Screen {
    * authorization.
    */
   tags?: ScreenTags;
-  /**
-   * IANA time zone identifier. Absent until it is set. Civil-time page visibility
-   * bounds are evaluated in this zone; data-only predicates need no zone.
-   */
+  /** The owner's time zone override (IANA). Absent when unset: the screen then follows its device's zone. */
   timezone?: string;
+  /**
+   * The IANA zone every civil rule of the screen is read in (page visibility, ad slots, schedules, campaigns, display and reboot
+   * schedules): the override, else the zone the Player reports from its operating system, else UTC. Read-only.
+   */
+  effective_timezone?: string;
+  /** Where effective_timezone comes from: screen (the override), device (the Player's zone) or default (UTC). Read-only. */
+  timezone_source?: "screen" | "device" | "default";
+  /** The ad slots nothing can fill on this screen; its manifest leaves their pages out. Absent when none. Read-only. */
+  ad_quiet_slots?: string[];
   updated_at: string;
   /** The video wall the screen's Player lays out. Absent when none. Set by ScreenPatch. */
   wall?: ScreenWall;
@@ -1109,7 +1117,8 @@ export interface Screen {
 export interface ScreenPatch {
   name?: string;
   playlist_id?: string | null;
-  timezone?: string;
+  /** The time zone override; null clears it and the screen follows its device's zone. */
+  timezone?: string | null;
   /** Replaces the whole tag set; an empty array clears it. Bumps the screen revision. */
   tags?: ScreenTags;
   /** An object sets the screen's video wall, null clears it. Needs a Player that declared display.wall (409 wall_unsupported otherwise). */
@@ -2563,8 +2572,8 @@ export interface CampaignStatus {
   screen_id: string;
   screen_name?: string;
   status: CampaignStanding;
-  /** Why a campaign is outranked (takeover, campaign), what a conditional one waits on (interaction, data), or why it is blocked (no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out: it is laid out on no display of the screen, stack_only: the screen's Player does not resolve its own stack, and only one that does honors it). */
-  reason?: "takeover" | "campaign" | "interaction" | "data" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
+  /** Why a campaign is outranked (takeover, campaign), what a conditional one waits on (interaction, data), or why it is blocked (no_default_playlist, playlist_unavailable, region_not_laid_out: it is laid out on no display of the screen, stack_only: the screen's Player does not resolve its own stack, and only one that does honors it). */
+  reason?: "takeover" | "campaign" | "interaction" | "data" | "no_default_playlist" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The campaign that outranks this one. */
   by?: string;
   next_start?: string;
@@ -2598,7 +2607,7 @@ export interface ScreenVerdict {
   playlist_id: string;
   verdict: ScreenVerdictName;
   /** What a conditional candidate waits on (interaction, data), or why an off candidate does not apply. stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition. */
-  reason?: "interaction" | "data" | "paused" | "not_in_audience" | "no_default_playlist" | "no_timezone" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
+  reason?: "interaction" | "data" | "paused" | "not_in_audience" | "no_default_playlist" | "playlist_unavailable" | "region_not_laid_out" | "stack_only";
   /** The candidate that won over an outranked one. */
   by?: { kind: "takeover" | "campaign" | "schedule"; id?: string };
   /** When a takeover ends. */

@@ -24,11 +24,10 @@ import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "../playlist-validate.js";
 import { assertWirePages } from "../playlist-write-validation.js";
-import { playlistNeedsTimezone } from "../generated/playlist-write-semantics.js";
 import { uploadMediaFile, type MediaUploadTiming } from "../media-upload.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "../playlist-bundle.js";
 import { validatePlaylistCards } from "../cards.js";
-import { clientFor, commandHandler, humanLines, jsonBody, libraryQuery, pendingReviewResult, playlistWriteResult, progressReporterFor, requireFlagValue, resolveProjectContext, resourceNotes, reviewNoteFrom, scheduleZoneError, simpleList, transcodeOptionsFromArgs, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
+import { clientFor, commandHandler, humanLines, jsonBody, libraryQuery, pendingReviewResult, playlistWriteResult, progressReporterFor, requireFlagValue, resolveProjectContext, resourceNotes, reviewNoteFrom, simpleList, transcodeOptionsFromArgs, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
 export const handlePlaylistValidate = commandHandler(async (args, runtime) => {
@@ -145,9 +144,6 @@ export const handlePlaylistImport = commandHandler(async (args, runtime, resolve
     timeoutMs: flagNumber(args.flags, "timeout"),
     pollMs: flagNumber(args.flags, "poll-ms"),
     note: flagString(args.flags, "note"),
-    beforePlaylistWrite: async (playlist, targetId) => {
-      if (targetId) await assertAssignedScreensHaveZone(client, targetId, playlist.pages);
-    },
   });
   const media: Array<[string, string]> = [
     ["source_playlist_id", result.source_playlist_id],
@@ -220,11 +216,6 @@ export async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliR
       reason: "Read the project's effective capabilities before authoring an ad-bearing playlist; only a screens-capable project can place adslot pages.",
     });
   }
-  // A create has no assigned screen yet, so there is nothing to check. An
-  // update can add a schedule to a playlist screens are already running.
-  if (action === "update" && id) {
-    await assertAssignedScreensHaveZone(client, id, pages);
-  }
   const note = reviewNoteFrom(args);
   const response = action === "create"
     ? await client.call({ method: "POST", path: "/api/playlists", idempotent: true, body, headers: note })
@@ -293,7 +284,6 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (Array.isArray(body.pages)) {
     await validatePlaylistCards(client, { pages: body.pages });
-    await assertAssignedScreensHaveZone(client, id, body.pages);
   }
   const expected = flagString(args.flags, "expect-rev");
   const response = await callPlaylist(client, { method: "PATCH", id, body,
@@ -346,26 +336,6 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   }
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
 }, true);
-
-/**
- * The same rule reached from the playlist side. Adding civil-time bounds to a
- * playlist that screens already run breaks their manifests, so check every screen
- * the playlist is assigned to rather than waiting for rematerialize to refuse.
- */
-export async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: string, pages: unknown): Promise<void> {
-  if (!playlistNeedsTimezone({ pages })) {
-    return;
-  }
-  const response = await client.listAll("/api/screens");
-  const items = (response.body as { items?: Screen[] } | undefined)?.items;
-  if (!Array.isArray(items)) {
-    return;
-  }
-  const unzoned = items.find((screen) => screen?.playlist_id === playlistId && !screen?.timezone);
-  if (unzoned) {
-    throw scheduleZoneError(unzoned.id);
-  }
-}
 
 export function sanitizedPreparationApiUrl(value: string): string {
   const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = "";

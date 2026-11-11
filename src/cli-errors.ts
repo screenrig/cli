@@ -25,7 +25,6 @@ export function commandError(error: CommanderError, command: Command): never {
       throw usageError("Invalid argument. See command help for supported values.");
     }
     case "commander.missingArgument":
-      if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone.");
       throw usageError(`${path} requires ${command.registeredArguments.filter((arg) => arg.required).map((arg) => `<${arg.name()}>`).join(" ")}.`);
     case "commander.excessArguments": {
       const word = command.commands.length && !command.registeredArguments.length && /^[a-z][a-z0-9-]{0,39}$/.test(command.args[0] ?? "") ? command.args[0] : undefined;
@@ -41,7 +40,6 @@ export function commandError(error: CommanderError, command: Command): never {
       throw usageError("Conflicting options. See command help.");
     }
     case "commander.missingMandatoryOptionValue": {
-      if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone.");
       const required = command.options.filter((option) => option.mandatory && command.getOptionValue(option.attributeName()) === undefined);
       const positional = command.registeredArguments.filter((arg, index) => arg.required && index >= command.args.length).map((arg) => `<${arg.name()}>`);
       // Fleet commands take `[id...]`, `--tag TAG` or `--folder ID`; name the missing target too.

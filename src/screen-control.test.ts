@@ -78,7 +78,7 @@ async function backend(env: Env): Promise<FakeTransport> {
   // The default playlist every assignment below names; an unknown id is a 404.
   await transport.request({ method: "PUT", path: "/api/playlists/pl_DEFAULT", body: { name: "Default", pages: [] } });
   // The memory PATCH creates screens it does not know. A and B have a zone and
-  // a default playlist, C has a default but no zone, D a zone but no default.
+  // a default playlist, C has a default and follows its device, D a zone but no default.
   for (const id of [A, B, D]) assert.equal((await cli(["--json", "screen", "set-timezone", id, "--timezone", "America/Los_Angeles"], transport, env)).code, 0);
   for (const id of [A, B]) assert.equal((await cli(["--json", "screen", "update", id, "--playlist-id", "pl_DEFAULT"], transport, env)).code, 0);
   assert.equal((await cli(["--json", "screen", "update", C, "--name", "Cafe", "--playlist-id", "pl_DEFAULT"], transport, env)).code, 0);
@@ -189,13 +189,13 @@ test("schedule and takeover rate limits keep the exit-7 convention", async () =>
   assert.equal(limited.envelope.error!.retry_after_seconds, 30);
 });
 
-test("screen schedule set with several ids or --tag uses set_playlist_schedule; a zoneless screen fails alone", async () => {
+test("screen schedule set with several ids or --tag uses set_playlist_schedule; a screen without a default playlist fails alone", async () => {
   const env = await enrolled();
   const transport = await backend(env);
-  const fleet = await cli(["--json", "screen", "schedule", "set", A, C, "--file", "dayparts.json"], transport, env);
+  const fleet = await cli(["--json", "screen", "schedule", "set", A, D, "--file", "dayparts.json"], transport, env);
   const call = last(transport);
   assert.equal(call.path, "/api/screens/actions");
-  assert.deepEqual(call.body, { selector: { by: "ids", screen_ids: [A, C] }, action: { type: "set_playlist_schedule", entries: DAYPARTS.entries } });
+  assert.deepEqual(call.body, { selector: { by: "ids", screen_ids: [A, D] }, action: { type: "set_playlist_schedule", entries: DAYPARTS.entries } });
   assert.equal(fleet.envelope.ok, true);
   assert.equal(fleet.envelope.data.action, "set_playlist_schedule");
   assert.deepEqual(fleet.envelope.data.results.map((item: any) => item.status), ["ok", "failed"]);
@@ -212,14 +212,14 @@ test("screen schedule set with several ids or --tag uses set_playlist_schedule; 
   assert.match(guarded.envelope.error!.detail, /does not take --expect-rev/);
 });
 
-test("schedule problems: missing timezone points at set-timezone, archived at unarchive", async () => {
+test("schedule problems: a missing default playlist points at screen assign, archived at unarchive", async () => {
   const env = await enrolled();
   const transport = await backend(env);
-  const zoneless = await cli(["--json", "screen", "schedule", "set", C, "--file", "dayparts.json"], transport, env);
-  assert.equal(zoneless.code, ExitCode.Client, zoneless.stdout);
-  assert.equal(zoneless.envelope.error!.code, "invalid_request");
-  assert.match(zoneless.envelope.error!.detail, /^Set the screen timezone first: timezone: is required/);
-  assert.equal(zoneless.envelope.error!.next!.command, `screenrig screen set-timezone ${C} --timezone ZONE`);
+  const unassigned = await cli(["--json", "screen", "schedule", "set", D, "--file", "dayparts.json"], transport, env);
+  assert.equal(unassigned.code, ExitCode.Client, unassigned.stdout);
+  assert.equal(unassigned.envelope.error!.code, "invalid_request");
+  assert.match(unassigned.envelope.error!.detail, /^Assign the screen a default playlist first: playlist_id: /);
+  assert.equal(unassigned.envelope.error!.next!.command, `screenrig screen assign ${D} --playlist-id PLAYLIST_ID`);
 
   const archived = new FakeTransport().on("PUT", `/api/screens/${A}/playlist-schedule`, () => ({
     status: 409, headers: { "content-type": "application/problem+json" },
@@ -460,19 +460,6 @@ test("takeover instants print in the screen timezone; server until refusals and 
   assert.match(fleet.envelope.error!.next!.command, /shorter --for/);
   const fine = await cli(["--json", "screen", "takeover", A, "--playlist-id", "pl_DRILL", "--for", "6d23h"], skewed, env);
   assert.equal(fine.code, 0, fine.stdout);
-});
-
-test("only the server's timezone path gets the set-timezone hint", async () => {
-  const env = await enrolled();
-  const transport = new FakeTransport().on("PUT", `/api/screens/${A}/playlist-schedule`, () => ({
-    status: 400, headers: { "content-type": "application/problem+json" },
-    body: { status: 400, code: "invalid_request", title: "Request is invalid", detail: "pages[0].visibility: needs a screen timezone" },
-  }));
-  await writeFile(path.join(env.cwd, "dayparts.json"), JSON.stringify(DAYPARTS));
-  const refused = await cli(["--json", "screen", "schedule", "set", A, "--file", "dayparts.json"], transport, env);
-  assert.equal(refused.code, ExitCode.Client);
-  assert.equal(refused.envelope.error!.next, undefined);
-  assert.equal(refused.envelope.error!.detail, "pages[0].visibility: needs a screen timezone");
 });
 
 test("screen takeover fleets use the takeover and takeover_clear actions", async () => {

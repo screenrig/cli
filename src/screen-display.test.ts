@@ -396,7 +396,7 @@ test("screen reboot-schedule set sends the windows from --window, one screen or 
   assert.equal(ids.envelope.data.action, "set_reboot_schedule");
 });
 
-test("screen reboot-schedule set refuses what needs a timezone or a reboot-capable Player, and bad input sends nothing", async () => {
+test("screen reboot-schedule set refuses a Player without reboot, takes a screen with no timezone override, and sends nothing for bad input", async () => {
   const env = await enrolled();
   const transport = fleet();
   const refused = await cli(["--json", "screen", "reboot-schedule", "set", PLAIN, "--window", "Mon-Sun 04:00-04:30"], transport, env);
@@ -406,9 +406,7 @@ test("screen reboot-schedule set refuses what needs a timezone or a reboot-capab
   assert.equal(refused.envelope.error?.next?.command, `screenrig screen show ${PLAIN}`);
   transport.putScreen!(screen("scr_NOZONEAAAAAAAAAAAAAAAAA", { timezone: undefined, host: { platform: "android", capabilities: ["reboot"] } as unknown as Screen["host"] }));
   const zone = await cli(["--json", "screen", "reboot-schedule", "set", "scr_NOZONEAAAAAAAAAAAAAAAAA", "--window", "Mon-Sun 04:00-04:30"], transport, env);
-  assert.equal(zone.code, ExitCode.Client, zone.stdout);
-  assert.equal(zone.envelope.error?.code, "invalid_request");
-  assert.equal(zone.envelope.error?.next?.command, "screenrig screen set-timezone scr_NOZONEAAAAAAAAAAAAAAAAA --timezone ZONE");
+  assert.equal(zone.code, ExitCode.Success, zone.stdout);
   const sent = transport.calls.filter((item) => item.path.includes("reboot-schedule") || item.path === "/api/screens/actions").length;
   for (const argv of [
     ["screen", "reboot-schedule", "set", LOBBY],

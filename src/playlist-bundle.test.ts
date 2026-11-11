@@ -1165,7 +1165,7 @@ test("import validates create/update flags and all local bytes before any networ
   await rm(dir, { recursive: true, force: true });
 });
 
-test("update target revision and timezone preflight finish before any media upload", async () => {
+test("update target revision and the before-write hook finish before any media upload", async () => {
   const dir = await testTemp("bundle-update-preflight-");
   await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2]) }]);
 
@@ -1179,16 +1179,16 @@ test("update target revision and timezone preflight finish before any media uplo
   }), /revision 8/);
   assert.deepEqual(revisionTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
 
-  const timezoneTransport = importTransport([]);
+  const hookTransport = importTransport([]);
   await assert.rejects(() => importPlaylistBundle({
     directory: dir,
-    client: new ApiClient({ transport: timezoneTransport, token: "token" }),
+    client: new ApiClient({ transport: hookTransport, token: "token" }),
     runtime: runtimeForImport([]),
     updateId: "pl_TARGET",
     ifMatch: "8",
-    beforePlaylistWrite: async () => { throw new Error("timezone preflight failed"); },
-  }), /timezone preflight failed/);
-  assert.deepEqual(timezoneTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
+    beforePlaylistWrite: async () => { throw new Error("preflight failed"); },
+  }), /preflight failed/);
+  assert.deepEqual(hookTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
   await rm(dir, { recursive: true, force: true });
 });
 

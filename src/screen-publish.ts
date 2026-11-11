@@ -1,5 +1,4 @@
 import { isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
-import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -16,7 +15,7 @@ import { playlistWarningItems, type PlaylistWarningItem } from "./playlist-warni
 import type { Review } from "./adapters/protocol.js";
 import type { CliRuntime } from "./runtime.js";
 
-type Resource = { id: string; revision: number; playlist_id?: string; timezone?: string };
+type Resource = { id: string; revision: number; playlist_id?: string };
 /** A review this publish opened: identity only, never the proposed content. */
 export interface PublishReview { id: string; kind: string; state: string; url: string }
 interface Journal {
@@ -244,7 +243,6 @@ export async function publishScreen(options: {
       const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
       if (expected !== undefined && screen.revision !== expected) staleRevision("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
-      if (playlistNeedsTimezone(document) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
       state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey(), cards: await readCards() };
       await save();
     }

@@ -240,7 +240,7 @@ test("migrate scan --from screenly prints what comes over and what does not, and
     assert.ok(!lossy.some((line: string) => line.startsWith("Holiday") && line.includes("alongside")), "a priority playlist replaces the others, as a campaign does: no note");
     assert.ok(lossy.includes("Either or (1): Its rule had several alternatives; each became its own campaign."));
     assert.ok(lossy.includes("Cafe loop + Lobby loop: Screenly plays every active playlist of a screen one after another, in an order it does not publish; this one plays Cafe loop, Lobby loop in that order."));
-    assert.ok(report.notes.some((note: string) => /No time zone was known for 1 screen/.test(note)));
+    assert.ok(!report.notes.some((note: string) => /time zone/i.test(note)));
     assert.ok(!result.stdout.includes(TOKEN), "the token is never printed");
     assert.equal(project.transport.calls.length, 0, "nothing reached screenRIG");
     const scan = JSON.parse(await readFile(path.join(cwd, "screenrig-migration-screenly", "scan.json"), "utf8"));

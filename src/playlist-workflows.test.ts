@@ -16,7 +16,7 @@ const media = [{ id: "med_IMAGE", primitive: "image", state: "ready" }, { id: "m
 const document = () => preparePlaylist({ name: "Lobby", content: media, width: 1080, height: 1920, durationMs: 8000, fit: "contain" });
 const response = (body: unknown) => ({ status: 200, headers: {}, body });
 
-test("publish accepts data-only visibility without a zone and refuses mixed civil bounds before writes", async t => {
+test("publish assigns data-only and civil-time visibility without a timezone override", async t => {
  for (const civil of [false, true]) {
   const dir = await mkdtemp(path.join(tmpdir(), "publish-data-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const authored = document();
@@ -28,13 +28,9 @@ test("publish accepts data-only visibility without a zone and refuses mixed civi
    .on("POST", "/api/playlists", req => { assert.deepEqual(req.body, authored); return response({ id: "pl_TEST", revision: 1 }); })
    .on("PATCH", "/api/screens/scr_TEST", () => { assigned = true; return response({ id: "scr_TEST", revision: 2, playlist_id: "pl_TEST" }); });
   const options = { client: new ApiClient({ transport, token: "test-token" }), runtime: processRuntime(), configPath: dir + "/config.json", apiUrl: "https://api.screenrig.ai", screenId: "scr_TEST", document: authored };
-  if (civil) {
-   await assert.rejects(() => publishScreen(options), /screen timezone/);
-   assert.equal(transport.calls.some(call => call.method === "POST" || call.method === "PATCH"), false);
-  } else {
-   assert.equal((await publishScreen(options)).assignment_verified, true);
-   assert.equal(assigned, true);
-  }
+  // Civil-time bounds read the screen's effective timezone, so no override is needed.
+  assert.equal((await publishScreen(options)).assignment_verified, true);
+  assert.equal(assigned, true);
  }
 });
 

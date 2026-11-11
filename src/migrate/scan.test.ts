@@ -74,7 +74,7 @@ test("scan reads a folder, prints the report and writes scan.json (0600) in a 07
     assert.deepEqual(report.importable, { media: 4, playlists: 2, layouts: 0, schedules: 0, groups: 2, screens: 3 });
     assert.deepEqual(report.not_imported.map((entry: { source_id: string }) => entry.source_id), ["docs/readme.txt", "playlists.csv row 7"]);
     assert.ok(report.lossy.some((entry: { kind: string; change: string }) => entry.kind === "group" && entry.change === "The group is now the tag GroundFloor."));
-    assert.ok(report.notes.some((note: string) => /No time zone was known for 2 screens/.test(note)));
+    assert.ok(!report.notes.some((note: string) => /time zone/i.test(note)), "a screen follows its device's zone, so no note asks for one");
     assert.ok(report.notes.some((note: string) => /1 screen has no default playlist/.test(note)));
     const dir = path.join(t.cwd, "screenrig-migration-files");
     assert.equal(report.dir, dir);
@@ -141,12 +141,11 @@ test("a flag the system does not take, or a required one that is missing, is a u
   }
 });
 
-test("--timezone is recorded and ends the no-time-zone note", async () => {
+test("--timezone is recorded", async () => {
   const t = await setup();
   try {
     const result = await t.h.invoke(["migrate", "scan", "--from", "files", "--files", SIGNAGE, "--timezone", "America/Vancouver"]);
     assert.equal(result.code, 0);
-    assert.ok(!result.json.data.notes.some((note: string) => /No time zone/.test(note)));
     const scan = JSON.parse(await readFile(path.join(t.cwd, "screenrig-migration-files", "scan.json"), "utf8"));
     assert.equal(scan.inputs.timezone, "America/Vancouver");
   } finally {

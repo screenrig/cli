@@ -703,8 +703,6 @@ export function campaignStandingDetail(status: CampaignStatus, screenId?: string
       switch (status.reason) {
         case "no_default_playlist":
           return `the screen has no default playlist: screenrig screen assign ${screenId ?? "SCREEN_ID"} --playlist-id PLAYLIST_ID`;
-        case "no_timezone":
-          return `the screen has no timezone: screenrig screen set-timezone ${screenId ?? "SCREEN_ID"} --timezone ZONE`;
         case "playlist_unavailable":
           return "the playlist is missing, unapproved or does not fit the screen";
         case "region_not_laid_out":
@@ -759,7 +757,6 @@ export function verdictDetail(verdict: ScreenVerdict, screenId: string, timezone
         case "paused": return verdict.kind === "schedule" ? "the schedule entry is paused (a draft)" : "the campaign is paused";
         case "not_in_audience": return "the screen is not in the audience";
         case "no_default_playlist": return `the screen has no default playlist: screenrig screen assign ${screenId} --playlist-id PLAYLIST_ID`;
-        case "no_timezone": return `the screen has no timezone: screenrig screen set-timezone ${screenId} --timezone ZONE`;
         case "playlist_unavailable": return "the playlist is missing, unapproved or not in the stack this screen's Player receives";
         case "region_not_laid_out": return REGION_DETAIL;
         case "stack_only": return STACK_ONLY_DETAIL;

@@ -221,12 +221,6 @@ export function rebootScheduleProblem(error: unknown, id: string): unknown {
       next: { command: `screenrig screen show ${id}`, reason: "Check the host capabilities. A schedule can be set once the Player declares reboot." },
     }, error.exitCode, error.warnings);
   }
-  if (error.problem.code === "invalid_request" && /timezone/i.test(error.problem.detail)) {
-    return new CliError({
-      ...error.problem,
-      next: { command: `screenrig screen set-timezone ${id} --timezone ZONE`, reason: "A reboot schedule reads its windows in the screen's timezone. Set it first, then rerun." },
-    }, error.exitCode, error.warnings);
-  }
   return rebootProblem(error, id);
 }
 

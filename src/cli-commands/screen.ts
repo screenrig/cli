@@ -58,7 +58,8 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--name <NAME>", "Set the screen name")
     .addOption(new Option("--playlist-id <ID>", "Select the playlist to assign").conflicts("clearPlaylist"))
     .addOption(new Option("--clear-playlist", "Clear this screen's default assignment; keep pairing and other content levels, showing idle when none applies").conflicts("playlistId"))
-    .option("--timezone <ZONE>", "Set an IANA timezone")
+    .addOption(new Option("--timezone <ZONE>", "Override the screen's time zone with an IANA name; without an override it follows its device").conflicts(["clearTimezone"]))
+    .addOption(new Option("--clear-timezone", "Remove the override: the screen follows its device's time zone").conflicts(["timezone"]))
     .addOption(new Option("--field <NAME=VALUE>", "Set a field: NAME is 1 to 32 lower case letters, digits or underscores, VALUE 1 to 200 characters (repeatable; at most 32 fields)").argParser(screenFieldSetOption).conflicts(["clearFields"]))
     .addOption(new Option("--unset-field <NAME>", "Remove a field (repeatable)").argParser(screenUnsetFieldOption).conflicts(["clearFields"]))
     .addOption(new Option("--clear-fields", "Remove every field").conflicts(["field", "unsetField"]))
@@ -119,11 +120,14 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenAssign));
 
-  addCommandNotes(screen.command("set-timezone").description("Set a screen's timezone")
+  const setTimezone = screen.command("set-timezone").description("Override a screen's time zone, or clear the override")
     .argument("<id>", "Screen identifier")
-    .requiredOption("--timezone <ZONE>", "Set an IANA timezone name, such as Europe/London (required)")
+    .addOption(new Option("--timezone <ZONE>", "Override the time zone with an IANA name, such as Europe/London").conflicts(["clear"]))
+    .addOption(new Option("--clear", "Remove the override: the screen follows its device's time zone").conflicts(["timezone"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
-    .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, takeovers and\n  display schedules read their civil times in this zone. Page visibility\n  needs it for from, until or windows; data-only visibility needs no zone.");
+    .action(bind(handleScreenSetTimezone));
+  requireOptionGroup(setTimezone, "exactlyOne", ["--timezone", "--clear"]);
+  addCommandNotes(setTimezone, "Timezone:\n  Every screen reads its civil times (playlist schedules, takeovers, display and\n  reboot schedules, campaigns, page visibility and ad slots) in its effective\n  timezone: this override, else the zone its Player reports from the device,\n  else UTC. screen show prints it as Timezone with its source. A screen needs\n  no override while its device reports the right zone; set one only to read\n  the screen's times in another. ZONE is an IANA timezone name: Area/City such\n  as America/New_York, Europe/London or Asia/Tokyo, or UTC. --clear removes\n  the override.");
 
   const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two to twelve displays as one canvas");
   subcommand(wall, "set").description("Set a screen's video wall")
@@ -479,7 +483,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(folderSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplayScheduleClear));
-  addCommandNotes(displaySchedule, "Display schedule:\n  The screen needs a timezone first (screen set-timezone ID --timezone ZONE).\n  1 to 16 windows when the display is ON, in the screen timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
+  addCommandNotes(displaySchedule, "Display schedule:\n  1 to 16 windows when the display is ON, in the screen's effective timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "show")!, "screenrig screen display-schedule show scr_LOBBY");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "set")!,
     "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");
@@ -505,7 +509,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(folderSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenRebootScheduleClear));
-  addCommandNotes(rebootSchedule, "Reboot schedule:\n  The screen needs a timezone first (screen set-timezone ID --timezone ZONE), and\n  its Player must declare the reboot capability (reboot_unsupported otherwise).\n  Each --window is DAYS HH:MM-HH:MM in the screen timezone, 5 minutes to 24 hours\n  long (end <= start crosses midnight); the backend sends the normal reboot at the\n  start of every window, so \"Mon-Sun 04:00-04:30\" reboots the screen at 04:00\n  local time every day. An offline screen keeps the reboot queued only until its\n  window ends, so a late reboot never lands in business hours. screen show lists\n  such a reboot under commands with source schedule, and a planned reboot raises\n  no offline alert for ten minutes. --disabled keeps the windows and reboots\n  nothing. show prints next_reboot_at.");
+  addCommandNotes(rebootSchedule, "Reboot schedule:\n  The screen's Player must declare the reboot capability (reboot_unsupported otherwise).\n  Each --window is DAYS HH:MM-HH:MM in the screen timezone, 5 minutes to 24 hours\n  long (end <= start crosses midnight); the backend sends the normal reboot at the\n  start of every window, so \"Mon-Sun 04:00-04:30\" reboots the screen at 04:00\n  local time every day. An offline screen keeps the reboot queued only until its\n  window ends, so a late reboot never lands in business hours. screen show lists\n  such a reboot under commands with source schedule, and a planned reboot raises\n  no offline alert for ten minutes. --disabled keeps the windows and reboots\n  nothing. show prints next_reboot_at.");
   addCommandExamples(rebootSchedule.commands.find((command) => command.name() === "show")!, "screenrig screen reboot-schedule show scr_LOBBY");
   addCommandExamples(rebootScheduleSet,
     'screenrig screen reboot-schedule set scr_LOBBY --window "Mon-Sun 04:00-04:30"',
@@ -529,5 +533,5 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);
   requireOptionGroup(update, "requires", ["--address", "--location"]);
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--clear-timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"]);
 }

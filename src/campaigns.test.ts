@@ -482,7 +482,7 @@ test("campaign screens reads the reach with counts, pages by cursor and prints e
   const transport = backend();
   transport.putScreen!(screen(A, { tags: ["Lobby"] }));
   transport.putScreen!(screen(B, { tags: ["Lobby"], playlist_id: undefined }));
-  transport.putScreen!(screen(C, { tags: ["Lobby", "Floor2"], timezone: undefined }));
+  transport.putScreen!(screen(C, { tags: ["Lobby", "Floor2"], playlist_id: undefined }));
   transport.putScreen!(screen("scr_DDDDDDDDDDDDDDDDDDDDDDDD", { tags: ["Cafe"] }));
   transport.putScreen!(screen("scr_EEEEEEEEEEEEEEEEEEEEEEEE", { tags: ["Lobby"], state: "archived" }));
   const campaign = await create(transport, env, "--tag", "Lobby", "--window", "mon-fri@09:00-17:00");
@@ -494,7 +494,7 @@ test("campaign screens reads the reach with counts, pages by cursor and prints e
   assert.deepEqual(lastCall(transport).query ?? {}, {});
   assert.deepEqual(reach.envelope.data.counts, { audience: 3, playing: 1, blocked: 2 });
   assert.deepEqual(reach.envelope.data.items.map((item: CampaignStatus) => [item.screen_id, item.status, item.reason]), [
-    [A, "playing", undefined], [B, "blocked", "no_default_playlist"], [C, "blocked", "no_timezone"],
+    [A, "playing", undefined], [B, "blocked", "no_default_playlist"], [C, "blocked", "no_default_playlist"],
   ]);
   assert.equal(reach.envelope.data.next_cursor, undefined);
 
@@ -504,7 +504,7 @@ test("campaign screens reads the reach with counts, pages by cursor and prints e
   assert.match(human.stdout, /^SCREEN\s+NAME\s+STATUS\s+DETAIL$/m);
   assert.match(human.stdout, new RegExp(`^${A}\\s+Screen A\\s+playing$`, "m"));
   assert.match(human.stdout, new RegExp(`^${B}\\s+Screen B\\s+blocked\\s+the screen has no default playlist: screenrig screen assign SCREEN_ID --playlist-id PLAYLIST_ID$`, "m"));
-  assert.match(human.stdout, new RegExp(`^${C}\\s+Screen C\\s+blocked\\s+the screen has no timezone: screenrig screen set-timezone SCREEN_ID --timezone ZONE$`, "m"));
+  assert.match(human.stdout, new RegExp(`^${C}\\s+Screen C\\s+blocked\\s+the screen has no default playlist: screenrig screen assign SCREEN_ID --playlist-id PLAYLIST_ID$`, "m"));
   assert.doesNotMatch(human.stdout, /^next:/m);
 
   const first = await cli(["--json", "campaign", "screens", campaign.id, "--limit", "2"], transport, env);
@@ -660,9 +660,11 @@ test("campaign explain --at asks about another time and shows a verdict per cand
   const reversed = await cli(["--json", "campaign", "explain", A, "--at", "2026-12-24T18:00", "--to", "2026-12-24T17:00"], transport, env);
   assert.equal(reversed.code, ExitCode.Client, reversed.stdout);
   assert.equal(reversed.envelope.error?.errors?.[0]?.field, "to");
-  const zoneless = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00"], transport, env);
-  assert.equal(zoneless.code, ExitCode.Client, "a screen with no timezone cannot read a time on its clock");
-  assert.equal(zoneless.envelope.error?.errors?.[0]?.field, "at");
+  // A screen without an override reads a time on its clock in the zone its device reports (UTC when it reports none).
+  const followsDevice = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00"], transport, env);
+  assert.equal(followsDevice.code, 0, followsDevice.stdout);
+  assert.equal(followsDevice.envelope.data.at.timezone, "UTC");
+  assert.equal(followsDevice.envelope.data.at.local, "2026-12-24T18:00");
   const exact = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00:00Z"], transport, env);
   assert.equal(exact.code, 0, exact.stdout);
   assert.equal(exact.envelope.data.at.local, undefined);
@@ -709,7 +711,6 @@ test("verdicts read as short details with the fix when the screen is known", () 
   assert.equal(verdictDetail(verdict({ verdict: "outside_hours" }), A, "UTC"), "outside its windows; no start within eight days");
   assert.equal(verdictDetail(verdict({ kind: "takeover", verdict: "ended", until: "2026-12-24T18:00:00Z" }), A, "America/Los_Angeles"), "ended 2026-12-24 10:00 America/Los_Angeles");
   assert.equal(verdictDetail(verdict({ verdict: "ended" }), A, "UTC"), "until has passed");
-  assert.equal(verdictDetail(verdict({ verdict: "off", reason: "no_timezone" }), A, "UTC"), `the screen has no timezone: screenrig screen set-timezone ${A} --timezone ZONE`);
   assert.equal(verdictDetail(verdict({ verdict: "off", reason: "playlist_unavailable" }), A, "UTC"), "the playlist is missing, unapproved or not in the stack this screen's Player receives");
 });
 
@@ -725,7 +726,6 @@ test("campaign standings read as short details with the fix when the screen is k
   assert.equal(campaignStandingDetail(status({ status: "outranked", reason: "takeover" })), "a screen takeover wins");
   assert.equal(campaignStandingDetail(status({ status: "outranked", reason: "campaign", by: "cmp_Y" })), "campaign cmp_Y wins");
   assert.equal(campaignStandingDetail(status({ status: "blocked", reason: "playlist_unavailable" })), "the playlist is missing, unapproved or does not fit the screen");
-  assert.equal(campaignStandingDetail(status({ status: "blocked", reason: "no_timezone" }), A), `the screen has no timezone: screenrig screen set-timezone ${A} --timezone ZONE`);
   assert.equal(campaignCountsText({ audience: 12, waiting: 2, playing: 8, blocked: 1, not_in_audience: 0, ended: 0 }), "8 playing, 2 waiting, 1 blocked");
   assert.equal(campaignCountsText({ audience: 0 }), "");
   assert.equal(campaignCountsText(undefined), "");

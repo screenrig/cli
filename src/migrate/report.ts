@@ -170,7 +170,6 @@ export function buildReport(input: {
     const tag = tags[`group:${group.id}`]!;
     if (tag !== group.name) addLossy("group", group.id, group.name, [`The group is now the tag ${tag}.`]);
   }
-  let noZone = 0;
   let noDefault = 0;
   for (const screen of catalog.screens) {
     const body = placeholderFor(screen, tags, classified);
@@ -180,7 +179,6 @@ export function buildReport(input: {
       changes.push("The playlist it showed could not be imported, so it has no default playlist.");
     }
     if (screenContent(screen, classified) === undefined) noDefault += 1;
-    if (screen.timezone === undefined && input.timezone === undefined) noZone += 1;
     addLossy("screen", screen.id, screen.name, changes);
   }
   const zoneOf = (screen: SourceScreen): string | undefined => screen.timezone ?? input.timezone;
@@ -200,7 +198,6 @@ export function buildReport(input: {
     addLossy("schedule", schedule.id, schedule.name, changes);
   }
   const notes = [...input.notes];
-  if (noZone > 0) notes.push(`No time zone was known for ${noZone} screen${noZone === 1 ? "" : "s"}; add --timezone or set ${noZone === 1 ? "it" : "them"} after pairing (screen set-timezone). Campaigns with dates or hours wait for one (no_timezone).`);
   if (noDefault > 0) notes.push(`${noDefault} screen${noDefault === 1 ? " has" : "s have"} no default playlist; campaigns need one (no_default_playlist), so set it after pairing (screen assign).`);
   return {
     schema: REPORT_SCHEMA,

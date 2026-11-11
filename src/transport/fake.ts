@@ -282,7 +282,15 @@ export function memoryBackend(options: {
   };
   const applications = new Map<string, Record<string, unknown>>();
   const playlists = new Map<string, Record<string, unknown>>();
-  const screens = new Map<string, Screen>();
+  // Every stored screen carries the server's effective zone: the override, else the zone its Player reports, else UTC.
+  const screens = new (class extends Map<string, Screen> {
+    override set(id: string, screen: Screen): this {
+      const zone = screen.timezone ? { zone: screen.timezone, source: "screen" as const }
+        : screen.host?.timezone ? { zone: screen.host.timezone, source: "device" as const }
+        : { zone: "UTC", source: "default" as const };
+      return super.set(id, { ...screen, effective_timezone: zone.zone, timezone_source: zone.source });
+    }
+  })();
   transport.putScreen = (screen: Screen) => { screens.set(screen.id, screen); };
   transport.putPlaylist = (playlist) => { playlists.set(playlist.id, playlist); };
   const media = new Map<string, Record<string, unknown>>();
@@ -1055,10 +1063,7 @@ export function memoryBackend(options: {
   };
   const applyControl = (screen: Screen, change: Control): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
     if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
-    // Server order: timezone (schedule only), then the default playlist, then until.
-    if (change.kind === "schedule" && !screen.timezone) {
-      return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a playlist schedule can be set") };
-    }
+    // Server order: the default playlist, then until.
     if ((change.kind === "schedule" || change.kind === "takeover") && !screen.playlist_id) {
       return { problem: controlProblem(400, "invalid_request", `playlist_id: assign the screen a default playlist before setting a ${change.kind === "schedule" ? "playlist schedule" : "takeover"}`) };
     }
@@ -1130,7 +1135,6 @@ export function memoryBackend(options: {
   const applyDisplay = (screen: Screen, change: DisplayChange): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
     if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
     if (change.kind === "reboot_schedule") {
-      if (!screen.timezone) return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a reboot schedule can be set") };
       if (!(screen.host?.capabilities ?? []).includes("reboot")) return { problem: controlProblem(409, "reboot_unsupported", "The screen's Player does not declare the reboot capability.") };
       const { next_reboot_at: _stale, ...held } = screen;
       return { screen: {
@@ -1156,7 +1160,6 @@ export function memoryBackend(options: {
       return { screen: { ...resolveDisplay(screen, current?.schedule, override), revision: screen.revision + 1 } };
     }
     if (change.kind === "display_schedule") {
-      if (!screen.timezone) return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a display schedule can be set") };
       const schedule = { enabled: change.enabled, windows: change.windows as unknown as NonNullable<NonNullable<Screen["display"]>["schedule"]>["windows"], updated_at: "2026-08-14T17:00:00.000Z" };
       return { screen: { ...resolveDisplay(screen, schedule, current?.override), revision: screen.revision + 1 } };
     }
@@ -1452,7 +1455,7 @@ export function memoryBackend(options: {
   });
   transport.on("PATCH", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const id = req.path.split("/").pop() ?? "";
-    const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[]; display?: ScreenPatch["display"]; kiosk?: ScreenPatch["kiosk"] };
+    const body = req.body as { name?: string; playlist_id?: string; timezone?: string | null; tags?: string[]; display?: ScreenPatch["display"]; kiosk?: ScreenPatch["kiosk"] };
     const ifMatch = req.headers?.["if-match"];
     const existing = screens.get(id);
     // Only tag writes model the revision guard; older fixtures reuse fixed revisions.
@@ -1473,7 +1476,6 @@ export function memoryBackend(options: {
       }),
       ...(body.name ? { label: body.name } : {}),
       ...(body.playlist_id ? { playlist_id: body.playlist_id } : {}),
-      // A screen has no timezone until one is set, and a patch never clears it.
       ...(body.timezone ? { timezone: body.timezone } : {}),
       ...(body.tags ? { tags: body.tags } : {}),
       // display and kiosk keep the backend's merge rules: a member sent replaces it, null clears it, a member left out stays.
@@ -1482,9 +1484,11 @@ export function memoryBackend(options: {
     };
     // Screen.kiosk is present only while the lock is on.
     const { kiosk: _kiosk, ...unlocked } = item as typeof item & Pick<Screen, "kiosk">;
-    const stored = body.kiosk === undefined ? item : body.kiosk?.lock === true ? { ...unlocked, kiosk: { lock: true } } : unlocked;
-    screens.set(id, stored as Screen);
-    return { status: 200, headers: {}, body: stored };
+    const kept = body.kiosk === undefined ? item : body.kiosk?.lock === true ? { ...unlocked, kiosk: { lock: true } } : unlocked;
+    // timezone null clears the override, and the screen follows its device again.
+    const { timezone: _override, ...followsDevice } = kept as typeof kept & Pick<Screen, "timezone">;
+    screens.set(id, (body.timezone === null ? followsDevice : kept) as Screen);
+    return { status: 200, headers: {}, body: screens.get(id) };
   });
   transport.on("POST", /^\/api\/screens\/[^/]+\/public-id\/rotate$/, (req) => {
     const id = req.path.split("/")[3] ?? "";
@@ -2844,12 +2848,10 @@ export function memoryBackend(options: {
     let winner: string | undefined;
     return campaignsInOrder().map((campaign) => {
       const standing = { campaign_id: campaign.id as string, screen_id: screen.id, screen_name: screen.label };
-      const bounded = ["from", "until", "windows", "monthly", "dates", "except"].some((key) => campaign[key] !== undefined);
       const playlistId = campaign.playlist_id as string;
       if (!inCampaignAudience(campaign.audience as Record<string, unknown>, screen)) return { ...standing, status: "not_in_audience" };
       if (campaign.paused) return { ...standing, status: "paused" };
       if (!screen.playlist_id) return { ...standing, status: "blocked", reason: "no_default_playlist" };
-      if (bounded && !screen.timezone) return { ...standing, status: "blocked", reason: "no_timezone" };
       if (!playlists.has(playlistId) || playlistId.startsWith("pl_UNAPPROVED")) return { ...standing, status: "blocked", reason: "playlist_unavailable" };
       // The server resolves one playlist; only a Player that resolves its own stack honors a region, a display lock, interaction or a data condition.
       if (["interaction", "data", "covers", "displays"].some((key) => campaign[key] !== undefined)) return { ...standing, status: "blocked", reason: "stack_only" };
@@ -2964,7 +2966,6 @@ export function memoryBackend(options: {
         const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
         const civil = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value) && Number.isFinite(Date.parse(`${value}Z`));
         if (!zoned && !civil) return campaignInvalid(field, "must be an RFC 3339 instant with a zone, or a time on the screen's clock");
-        if (civil && !screen.timezone) return campaignInvalid(field, "is a time on the screen's clock and the screen has no timezone; give an RFC 3339 instant with a zone");
         return zoned ? { instant: new Date(value).toISOString() } : { instant: new Date(`${value.slice(0, 16)}:00Z`).toISOString(), local: value.slice(0, 16) };
       };
       const start = instantOf("at", req.query?.at);
@@ -2983,7 +2984,7 @@ export function memoryBackend(options: {
       }
       body.at = {
         instant: start.instant,
-        ...(screen.timezone ? { timezone: screen.timezone } : {}),
+        timezone: screen.effective_timezone,
         ...(start.local ? { local: start.local } : {}),
         effective_playlist: effective,
         verdicts,

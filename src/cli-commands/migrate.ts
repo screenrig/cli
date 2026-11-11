@@ -34,7 +34,7 @@ export function registerMigrateCommands(root: Command, bind: CommandActionBinder
     .addOption(new Option("--from <VENDOR>", "The system to read").choices(sortedVendors().map((vendor) => vendor.id)).makeOptionMandatory())
     .option("--url <ADDRESS>", "The address of a self-hosted system")
     .option("--region <REGION>", "The region of a hosted account, where the system has regions")
-    .option("--timezone <ZONE>", "An IANA time zone for screens that have none, such as America/Toronto")
+    .option("--timezone <ZONE>", "An IANA time zone to set on screens that have none, such as America/Toronto (without one a screen follows its device)")
     .option("--files <PATH>", "A folder or .zip of the originals the system's API cannot hand out")
     .option("--credentials <FILE>", "NAME=VALUE lines holding the vendor's key")
     .option("--dir <DIR>", "The migration directory (default ./screenrig-migration-VENDOR)")

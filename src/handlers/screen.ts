@@ -7,7 +7,7 @@ import { canonicalPairingCode } from "../pairing-code.js";
 import { playlistWarnings, playlistAnswerWarnings, withoutAnswerWarnings, hasFramingRefusal } from "../playlist-warnings.js";
 import { shortApplicationPageWarning } from "../playlist-authoring.js";
 import { callPlaylist } from "../playlist-api.js";
-import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
+import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, timezoneLine, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
 import { kioskLines } from "../screen-device-settings.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
@@ -41,12 +41,11 @@ import { quotedRevision } from "../if-match.js";
 import { screenLinkSummaryLines } from "../screen-link-format.js";
 import { assertPlaylistValid } from "../playlist-validate.js";
 import { assertWirePages } from "../playlist-write-validation.js";
-import { playlistNeedsTimezone } from "../generated/playlist-write-semantics.js";
 import { clearProvisionRetryState, provisionRetryState } from "../provisioning-state.js";
 import { formatBytes } from "../media/progress.js";
 import { validateProvisioningUrls } from "../provisioning-url.js";
 import { aspectMismatchWarnings } from "../aspect-mismatch.js";
-import { clientFor, commandHandler, humanLines, isScreenId, jsonBody, pendingReviewResult, requireFlagValue, requirePrivateNoStore, resolveDownloadOutput, resourceNotes, reviewNoteFrom, scheduleZoneError, simpleGet, simpleList, uptimeDays, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
+import { clientFor, commandHandler, humanLines, isScreenId, jsonBody, pendingReviewResult, requireFlagValue, requirePrivateNoStore, resolveDownloadOutput, resourceNotes, reviewNoteFrom, simpleGet, simpleList, uptimeDays, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
 export function screenListQuery(args: ParsedArgs): { query: Record<string, string>; repeated?: Record<string, string[]> } {
@@ -178,22 +177,13 @@ export function toastLineCount(value: string): number {
   return value.split("\n").length;
 }
 
-/**
- * Refuse a scheduled playlist locally before the PATCH goes out. The server
- * rejects the same pair, but it answers about a body the operator did not
- * write; naming the screen and the fixing command here is the difference
- * between a clear message and an opaque rejection.
- */
-export async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<unknown> {
-  const playlist = await callPlaylist(client, { method: "GET", id: playlistId });
-  if (!playlistNeedsTimezone(playlist.body)) {
-    return playlist.body;
+/** The playlist a screen is about to show, read only for the advisory aspect warnings; a failed read adds no warning and never blocks the write. */
+async function playlistForWarnings(client: ApiClient, playlistId: string): Promise<unknown> {
+  try {
+    return (await callPlaylist(client, { method: "GET", id: playlistId })).body;
+  } catch {
+    return undefined;
   }
-  const screen = await client.call({ method: "GET", path: `/api/screens/${screenId}` });
-  if ((screen.body as Screen | undefined)?.timezone) {
-    return playlist.body;
-  }
-  throw scheduleZoneError(screenId);
 }
 
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
@@ -244,7 +234,7 @@ export function screenTableLines(items: Screen[], now: Date): string[] {
     ...(withFolder ? [screenFolderCell(screen)] : []),
     ...(withFields ? [screenFieldsCell(screen)] : []),
     ...(withLocation ? [screenLocationCell(screen)] : []),
-    ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
+    ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.effective_timezone) ?? ""] : []),
     ...(withHealth ? [screenHealthIssues(screen).join(", ") || (screen?.health ? "ok" : "")] : []),
     ...(withUpgrade ? [manifestUpgradeCell(screen, now) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
@@ -576,8 +566,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...screenFactsLines(screen),
       ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
       ...screenLinkSummaryLines(screen?.link),
-      ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
-      ...takeoverLine(screen?.takeover, screen?.timezone),
+      ...timezoneLine(screen),
+      ...(screen?.ad_quiet_slots?.length ? [`Quiet ad slots: ${screen.ad_quiet_slots.join(", ")} (nothing can fill them, so the manifest leaves them out)`] : []),
+      ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.effective_timezone),
+      ...takeoverLine(screen?.takeover, screen?.effective_timezone),
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"}${screen.playlist_schedule.entries.some((entry) => entry.paused) ? `, ${screen.playlist_schedule.entries.filter((entry) => entry.paused).length} draft` : ""} (screen schedule show ${screen.id})`] : []),
       ...suspensionLines(screen),
@@ -590,10 +582,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...warnings.map((warning) => `warning: ${warning.message}`),
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
-      ...displayLines(screen?.display, screen?.timezone),
+      ...displayLines(screen?.display, screen?.effective_timezone),
       ...volumeLines(screen?.volume),
       ...kioskLines(screen?.kiosk),
-      ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone),
+      ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.effective_timezone),
       ...healthLines(screen?.health),
       ...outageLines(screen),
       ...commandLines(screen),
@@ -650,30 +642,17 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const playlistId = flagString(args.flags, "playlist-id");
   const clearPlaylist = flagBool(args.flags, "clear-playlist");
   const timezone = flagString(args.flags, "timezone");
+  const clearTimezone = flagBool(args.flags, "clear-timezone");
   const facts = screenFactsPatch(args.flags);
   const changesFacts = facts.fields !== undefined || facts.location !== undefined;
-  if (!id || (!name && !playlistId && !clearPlaylist && !timezone && !changesFacts)) {
-    throw usageError("screen update requires <id>, and --name, --playlist-id, --clear-playlist, --timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
+  if (!id || (!name && !playlistId && !clearPlaylist && !timezone && !clearTimezone && !changesFacts)) {
+    throw usageError("screen update requires <id>, and --name, --playlist-id, --clear-playlist, --timezone, --clear-timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
   }
-  // A patch that sets both a playlist and a timezone satisfies the schedule
-  // rule in one request, so only check when the patch leaves the screen
-  // without one.
-  let playlist: unknown;
-  if (playlistId && !timezone) {
-    playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
-  } else if (playlistId) {
-    // This read exists only for advisory aspect warnings. A missing warning
-    // must not block a patch that supplies the required timezone itself.
-    try {
-      playlist = (await callPlaylist(client, { method: "GET", id: playlistId })).body;
-    } catch {
-      playlist = undefined;
-    }
-  }
+  const playlist = playlistId ? await playlistForWarnings(client, playlistId) : undefined;
   const body: ScreenPatch = {
     ...(name ? { name } : {}),
     ...(clearPlaylist ? { playlist_id: null } : playlistId ? { playlist_id: playlistId } : {}),
-    ...(timezone ? { timezone } : {}),
+    ...(clearTimezone ? { timezone: null } : timezone ? { timezone } : {}),
     ...facts,
   };
   const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: { ...reviewNoteFrom(args), ...(ifMatch ? { "if-match": quotedRevision(ifMatch) } : {}) }, body });
@@ -705,12 +684,11 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const target = screenTarget(args, "screen assign");
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen assign");
-    // Each screen runs the single-screen PATCH on the server, including its
-    // timezone rule for scheduled playlists; a refusal is that screen's result.
+    // Each screen runs the single-screen PATCH on the server; a refusal is that screen's result.
     return screenFleetAction(client, runtime, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
-  const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
+  const playlist = await playlistForWarnings(client, playlistId);
   const body: ScreenPatch = { playlist_id: playlistId };
   const response = await client.call({
     method: "PATCH",
@@ -740,11 +718,12 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
   const id = args.positionals[2];
   const timezone = flagString(args.flags, "timezone");
   const ifMatch = flagString(args.flags, "expect-rev");
-  if (!id || !timezone) throw usageError("screen set-timezone requires <id> --timezone.");
+  const clear = flagBool(args.flags, "clear");
+  if (!id || (!timezone && !clear)) throw usageError("screen set-timezone requires <id> and --timezone ZONE or --clear.");
   // The zone database belongs to the server, which validates the identifier
   // against it. Sending the value unchanged keeps one authority for what a
   // real zone is, so the CLI never carries a list that can go stale.
-  const body: ScreenPatch = { timezone };
+  const body: ScreenPatch = { timezone: clear ? null : timezone };
   const response = await client.call({
     method: "PATCH",
     path: `/api/screens/${id}`,
@@ -756,7 +735,7 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
   return {
     envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, client.requestId, undefined, lifted),
     exitCode: ExitCode.Success,
-    human: [`Set timezone ${timezone} on ${id}`, ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    human: [clear ? `Cleared the timezone override on ${id}; it follows its device` : `Set timezone ${timezone} on ${id}`, ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -1888,9 +1867,9 @@ export function screenControlHeaders(args: ParsedArgs, revision: string | undefi
 export function screenControlHuman(title: string, screen: Screen | undefined): string {
   return [
     title,
-    ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
-    ...takeoverLine(screen?.takeover, screen?.timezone),
-    ...(screen?.playlist_schedule ? scheduleTableLines(screen.playlist_schedule.entries, screen.timezone ?? null) : []),
+    ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.effective_timezone),
+    ...takeoverLine(screen?.takeover, screen?.effective_timezone),
+    ...(screen?.playlist_schedule ? scheduleTableLines(screen.playlist_schedule.entries, screen.effective_timezone) : []),
     ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : []),
   ].join("\n");
 }
@@ -1903,11 +1882,11 @@ export const handleScreenScheduleShow = commandHandler(async (args, runtime, res
   const view = response.body as ScreenPlaylistScheduleView | undefined;
   // The view carries no zone; human output reads it from the screen so civil
   // windows and instants are labelled. JSON output makes no extra request.
-  let timezone: string | null | undefined;
+  let timezone: string | undefined;
   if (flagBool(args.flags, "human")) {
     try {
       const screen = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` });
-      timezone = (screen.body as Screen | undefined)?.timezone ?? null;
+      timezone = (screen.body as Screen | undefined)?.effective_timezone;
     } catch {
       timezone = undefined;
     }
@@ -1917,9 +1896,9 @@ export const handleScreenScheduleShow = commandHandler(async (args, runtime, res
     exitCode: ExitCode.Success,
     human: [
       `Playlist schedule for ${id}`,
-      ...assignmentLine(view?.effective_playlist, undefined, timezone ?? undefined),
+      ...assignmentLine(view?.effective_playlist, undefined, timezone),
       ...(view?.updated_at ? [`updated_at: ${view.updated_at}`] : []),
-      ...scheduleTableLines(view?.entries, timezone === undefined ? "unknown" : timezone),
+      ...scheduleTableLines(view?.entries, timezone),
     ].join("\n"),
   };
 });
@@ -1933,7 +1912,7 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
     // Entries are normalized once on the server so every screen stores the
-    // same ids; a screen without a timezone fails alone with invalid_request.
+    // same ids.
     return screenFleetAction(client, runtime, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
@@ -2016,7 +1995,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: screenControlHuman(`Took over ${id} with ${playlistId} ${typeof until === "string" ? `until ${instantInZone(until, (response.body as Screen | undefined)?.timezone)}` : "until cleared"}`, response.body as Screen | undefined),
+    human: screenControlHuman(`Took over ${id} with ${playlistId} ${typeof until === "string" ? `until ${instantInZone(until, (response.body as Screen | undefined)?.effective_timezone)}` : "until cleared"}`, response.body as Screen | undefined),
   };
 });
 
@@ -2408,7 +2387,7 @@ export const handleScreenCommandCancel = commandHandler(async (args, runtime, re
 }, true);
 
 export function displayHuman(title: string, screen: Screen | undefined): string {
-  return [title, ...displayLines(screen?.display, screen?.timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
+  return [title, ...displayLines(screen?.display, screen?.effective_timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
 }
 
 export const handleScreenDisplay = commandHandler(async (args, runtime, resolved) => {
@@ -2442,7 +2421,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: [displayHuman(`Display override saved on ${id}: requested ${power} ${until ? `until ${instantInZone(until, screen?.timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    human: [displayHuman(`Display override saved on ${id}: requested ${power} ${until ? `until ${instantInZone(until, screen?.effective_timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -2486,7 +2465,7 @@ export const handleScreenDisplayScheduleShow = commandHandler(async (args, runti
   let timezone: string | undefined;
   if (flagBool(args.flags, "human")) {
     try {
-      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.effective_timezone;
     } catch {
       timezone = undefined;
     }
@@ -2539,7 +2518,7 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
 }, true);
 
 function rebootScheduleHuman(title: string, screen: Screen | undefined): string {
-  return [title, ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
+  return [title, ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.effective_timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
 }
 
 export const handleScreenRebootScheduleShow = commandHandler(async (args, runtime, resolved) => {
@@ -2551,7 +2530,7 @@ export const handleScreenRebootScheduleShow = commandHandler(async (args, runtim
   let timezone: string | undefined;
   if (flagBool(args.flags, "human")) {
     try {
-      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.effective_timezone;
     } catch {
       timezone = undefined;
     }

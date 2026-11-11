@@ -17,7 +17,7 @@ import { ExitCode } from "./exit-codes.js";
 import { CliError, makeProblem, networkError, timeoutError } from "./problems.js";
 import type { ConfigFs } from "./config.js";
 import { isWorldOrGroupReadable, writeConfigAtomic, readConfigFile } from "./config.js";
-import type { Operation } from "./adapters/protocol.js";
+import type { Operation, Screen } from "./adapters/protocol.js";
 import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
@@ -5014,10 +5014,10 @@ test("readConfigFile can repair permissions", async () => {
 });
 
 /**
- * Civil-time page visibility is meaningless without a zone. The
- * server refuses assignment, playlist update, and manifest resolution while a
- * scheduled playlist points at a screen with no timezone. These tests cover the
- * local refusal that turns that rejection into an actionable message.
+ * Civil-time page visibility reads the screen's effective timezone: the owner's
+ * override, else the zone its device reports, else UTC. A screen needs no
+ * override for a scheduled playlist; these tests cover set-timezone, which sets
+ * or clears one, and the writes that no longer ask for it.
  */
 async function scheduledPlaylistFixture(scheduled: boolean, dir: string, visibility: unknown = { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] }) {
   const configDir = await testTemp(dir);
@@ -5087,25 +5087,66 @@ test("screen set-timezone forwards the identifier unchanged and never carries a 
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("screen set-timezone rejects a missing id or zone", async () => {
+test("screen set-timezone --clear removes the override and the screen follows its device", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-clear-");
+  await withRuntime(["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--expect-rev", "1"], transport, { fs: fsLike });
+  transport.calls.length = 0;
+  const result = await withRuntime(["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--clear"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.deepEqual(transport.calls.find((call) => call.method === "PATCH")?.body, { timezone: null });
+  const envelope = JSON.parse(result.stdout) as { data: { timezone?: string; effective_timezone?: string; timezone_source?: string } };
+  assert.equal(envelope.data.timezone, undefined);
+  assert.equal(envelope.data.effective_timezone, "UTC");
+  assert.equal(envelope.data.timezone_source, "default");
+  const human = await withRuntime(["--human", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--clear"], transport, { fs: fsLike });
+  assert.match(human.stdout, /^Cleared the timezone override on scr_PAIRINGAAAAAAAAAAAAAAAA; it follows its device$/m);
+
+  const updated = await withRuntime(["--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "Europe/London"], transport, { fs: fsLike });
+  assert.equal(updated.code, ExitCode.Success, updated.stdout);
+  transport.calls.length = 0;
+  const cleared = await withRuntime(["--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--clear-timezone"], transport, { fs: fsLike });
+  assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
+  assert.deepEqual(transport.calls.find((call) => call.method === "PATCH")?.body, { timezone: null });
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show prints the effective timezone with its source and the quiet ad slots", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-show-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  const id = "scr_PAIRINGAAAAAAAAAAAAAAAA";
+  const show = async () => (await withRuntime(["--human", "screen", "show", id], transport, { fs: fsLike })).stdout;
+  assert.match(await show(), /^Timezone: UTC \(default: the device reports no zone\)$/m);
+  await withRuntime(["--json", "screen", "set-timezone", id, "--timezone", "Europe/London"], transport, { fs: fsLike });
+  assert.match(await show(), /^Timezone: Europe\/London \(screen override\)$/m);
+  transport.putScreen!({ ...(JSON.parse((await withRuntime(["--json", "screen", "show", id], transport, { fs: fsLike })).stdout) as { data: Screen }).data, timezone: undefined, host: { platform: "android", timezone: "Asia/Tokyo" }, ad_quiet_slots: ["lobby", "hall"] } as Screen);
+  const device = await show();
+  assert.match(device, /^Timezone: Asia\/Tokyo \(device\)$/m);
+  assert.match(device, /^Quiet ad slots: lobby, hall /m);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen set-timezone needs an id and exactly one of --timezone and --clear", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-usage-");
-  for (const argv of [
-    ["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--expect-rev", "1"],
-    ["screen", "set-timezone", "scr_1", "--expect-rev", "1"],
-  ]) {
+  for (const [argv, detail] of [
+    [["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--expect-rev", "1"], /requires <id>/],
+    [["screen", "set-timezone", "scr_1", "--expect-rev", "1"], /Provide exactly one of --timezone or --clear/],
+    [["screen", "set-timezone", "scr_1", "--timezone", "UTC", "--clear"], /--timezone cannot be used with --clear|--clear cannot be used with --timezone/],
+  ] as Array<[string[], RegExp]>) {
     const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
     const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
     assert.equal(envelope.error.code, "usage_error");
-    assert.match(envelope.error.detail, /requires <id> --timezone/);
+    assert.match(envelope.error.detail, detail);
   }
   // A rejected invocation never reaches the server.
   assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("assigning a scheduled playlist to a screen with no timezone is refused before the patch", async () => {
+test("a scheduled playlist assigns to a screen with no timezone override", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-assign-refuse-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -5117,20 +5158,12 @@ test("assigning a scheduled playlist to a screen with no timezone is refused bef
     transport,
     { fs: fsLike },
   );
-  assert.equal(result.code, ExitCode.Usage, result.stdout);
-  const envelope = JSON.parse(result.stdout) as {
-    ok: false;
-    error: { code: string; detail: string; next?: { command: string } };
-  };
-  assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /scr_PAIRINGAAAAAAAAAAAAAAAA has no timezone/);
-  assert.match(envelope.error.next?.command ?? "", /screen set-timezone scr_PAIRINGAAAAAAAAAAAAAAAA --timezone/);
-  // The refusal happens locally, so no write reaches the server.
-  assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.deepEqual(transport.calls.find((call) => call.method === "PATCH")?.body, { playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA" });
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("a page disabled outright assigns without a screen timezone", async () => {
+test("a page disabled outright assigns", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("tz-disabled-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
@@ -5172,7 +5205,7 @@ test("a page disabled outright assigns without a screen timezone", async () => {
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("data-only playlists create, assign and update on an unzoned screen", async t => {
+test("data-only playlists create, assign and update", async t => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "data-only-", { enabled: true, data: { key: "agenda", path: "/active", equals: true } });
   t.after(() => rm(configDir, { recursive: true, force: true }));
@@ -5190,7 +5223,7 @@ test("data-only playlists create, assign and update on an unzoned screen", async
   for (const write of writes) assert.deepEqual((write.body as any).pages[1].visibility.data, { key: "agenda", path: "/active", equals: true });
 });
 
-test("an unscheduled playlist assigns to a screen with no timezone", async () => {
+test("an unscheduled playlist assigns", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-assign-plain-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -5205,7 +5238,7 @@ test("an unscheduled playlist assigns to a screen with no timezone", async () =>
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("a scheduled playlist assigns once the screen carries a timezone", async () => {
+test("a scheduled playlist assigns to a screen with a timezone override", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-assign-ok-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -5225,7 +5258,7 @@ test("a scheduled playlist assigns once the screen carries a timezone", async ()
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("one screen update that sets both a playlist and a timezone skips the schedule screen lookup", async () => {
+test("one screen update that sets both a playlist and a timezone sends one patch and reads no screen", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-update-both-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -5245,8 +5278,7 @@ test("one screen update that sets both a playlist and a timezone skips the sched
   assert.equal(result.code, ExitCode.Success, result.stdout);
   const patch = transport.calls.find((call) => call.method === "PATCH");
   assert.deepEqual(patch?.body, { playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", timezone: "America/Los_Angeles" });
-  // The patch supplies the zone itself, so schedule validation does not need
-  // the current screen. The playlist is read once for advisory aspect checks.
+  // The playlist is read once for advisory aspect checks; the screen is not read.
   assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/playlists/")).length, 1);
   assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.startsWith("/api/screens/")), false);
   await rm(configDir, { recursive: true, force: true });
@@ -6376,7 +6408,7 @@ test("screen recover rejects a missing id before any request", async () => {
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("adding a schedule to a playlist an unzoned screen already runs is refused", async () => {
+test("adding a schedule to a playlist a screen already runs needs no timezone override", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-playlist-update-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -6394,9 +6426,8 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
     transport,
     { fs: fsLike },
   );
-  assert.equal(result.code, ExitCode.Usage, result.stdout);
-  assert.match(result.stdout, /has no timezone/);
-  assert.equal(transport.calls.some((call) => call.method === "PUT"), false);
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(transport.calls.some((call) => call.method === "PUT"), true);
   await rm(configDir, { recursive: true, force: true });
   await rm(scheduled.configDir, { recursive: true, force: true });
 });

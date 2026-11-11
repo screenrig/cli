@@ -209,34 +209,6 @@ test("screen screenshot --tag finds the tagged screens on later pages", async (t
   assert.deepEqual(lists.map((call) => call.query), [{ tag: "Lobby" }, { tag: "Lobby", after: "pg_2" }, { tag: "Lobby", after: "pg_4" }]);
 });
 
-test("playlist update sees an assigned screen without a timezone on a later page", async (t) => {
-  const env = await enrolled(t);
-  const transport = memoryBackend({ listPageSize: 2 });
-  const playlistId = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
-  for (const letter of ["A", "B"]) transport.putScreen!(screen(screenId(letter), { playlist_id: playlistId, timezone: "America/Los_Angeles" }));
-  transport.putScreen!(screen(screenId("C"), { playlist_id: playlistId }));
-  const page = (id: string, visibility?: unknown) => ({
-    id,
-    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
-    transition: { type: "crossfade", duration_ms: 200 },
-    advance: { mode: "duration", after_ms: 8000 },
-    ...(visibility ? { visibility } : {}),
-    primitives: [{
-      id: "poster", primitive: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
-      rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain",
-    }],
-  });
-  const file = path.join(env.cwd, "scheduled.json");
-  await writeFile(file, JSON.stringify({
-    name: "Lobby",
-    pages: [page("always"), page("evenings", { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] })],
-  }));
-  const result = await cli(["--json", "playlist", "update", playlistId, file, "--expect-rev", "1"], transport, env);
-  assert.equal(result.code, ExitCode.Usage, result.stdout);
-  assert.match(result.envelope.error!.detail, new RegExp(`${screenId("C")} has no timezone`));
-  assert.equal(transport.calls.some((call) => call.method === "PUT"), false, "the refusal comes before any write");
-});
-
 test("media upload reuses its earlier upload from a later page of the media list", async (t) => {
   const env = await enrolled(t);
   const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);

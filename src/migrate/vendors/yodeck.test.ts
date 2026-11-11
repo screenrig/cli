@@ -253,7 +253,7 @@ test("migrate scan --from yodeck: the token from --credentials, originals from -
     assert.ok(report.lossy.some((entry: { source_id: string; change: string }) => entry.source_id === "12" && /re-encoded copy/.test(entry.change)));
     assert.ok(report.not_imported.some((entry: { source_id: string; reason: string }) => entry.source_id === "51:5" && /by the month/.test(entry.reason)));
     assert.ok(report.not_imported.some((entry: { source_id: string; kind: string; reason: string }) => entry.kind === "playlist" && entry.source_id === "33" && /Nothing in it/.test(entry.reason)));
-    assert.ok(report.notes.some((note: string) => /No time zone was known for 2 screens/.test(note)));
+    assert.ok(!report.notes.some((note: string) => /time zone/i.test(note)));
     assert.ok(!lone.stdout.includes("fixture-token"), "the token is never printed");
     const dir = path.join(t.cwd, "screenrig-migration-yodeck");
     const scanFile = await readFile(path.join(dir, "scan.json"), "utf8");

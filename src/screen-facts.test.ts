@@ -266,7 +266,7 @@ test("screen update names the new flags when nothing is asked", async () => {
   const { transport } = screenBackend();
   const result = await cli(["--json", "screen", "update", SCREEN], transport, env);
   assert.equal(result.code, ExitCode.Usage);
-  assert.match(result.envelope.error!.detail, /--name or --playlist-id or --clear-playlist or --timezone or --field or --unset-field or --clear-fields or --location or --clear-location/);
+  assert.match(result.envelope.error!.detail, /--name or --playlist-id or --clear-playlist or --timezone or --clear-timezone or --field or --unset-field or --clear-fields or --location or --clear-location/);
   assert.equal(transport.calls.length, 0);
 });
 
@@ -558,7 +558,7 @@ test("help lists the new options, their relationships and the tokens a card read
   assert.deepEqual(update.relationships, [
     { kind: "requires", options: ["--location-name", "--location"] },
     { kind: "requires", options: ["--address", "--location"] },
-    { kind: "atLeastOne", options: ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"] },
+    { kind: "atLeastOne", options: ["--name", "--playlist-id", "--clear-playlist", "--timezone", "--clear-timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"] },
   ]);
   const note = update.notes.join("\n");
   for (const token of ["{screen.field.NAME}", "{screen.name}", "{screen.timezone}", '"location": "{screen.location}"', "menu-{screen.field.store_number}"]) assert.ok(note.includes(token), token);
