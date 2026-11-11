@@ -46,6 +46,12 @@ export interface Capabilities {
     "device.ble": boolean;
     /** `screenrig.device.print()` and `device.printers()`: print on the device's printers. */
     "device.print": boolean;
+    /** `screenrig.device.ir.send()` and `device.onIr()`: send infrared remote codes, and on a Player that receives them hear them. */
+    "device.ir": boolean;
+    /** `screenrig.device.udp`: open UDP sockets to send and receive datagrams on the screen's network. */
+    "device.udp": boolean;
+    /** `screenrig.device.hdmiInput.open()`: read the device's HDMI input as a video stream. */
+    "device.hdmi_input": boolean;
 }
 /** The screen this page is playing on. */
 export interface ContextScreen {
@@ -117,7 +123,9 @@ export interface LogPayload {
  * `port_not_found`, `port_busy`, `port_limit`, `invalid_handle`, `pin_not_found`,
  * `pin_busy`, `gpio_unavailable`, `ble_unavailable`, `device_not_found`,
  * `characteristic_not_found`, `subscription_limit`, `printer_not_found`,
- * `print_failed`, `payload_too_large` and `io_failed`.
+ * `print_failed`, `payload_too_large`, `io_failed`, `ir_unavailable` and
+ * `socket_limit`. `hdmiInput.open()` adds `hdmi_input_unavailable`, which the
+ * runtime raises itself.
  */
 export interface ScreenRigError extends Error {
     readonly code: string;
@@ -449,6 +457,132 @@ export interface ScreenRigDeviceGpio {
      */
     onChange(pin: number, handler: (value: boolean) => void, options?: GpioChangeOptions): () => void;
 }
+/** The infrared encodings `device.ir` speaks. */
+export type IrEncoding = "NEC";
+/** One received infrared code. */
+export interface IrCode {
+    /** The encoding the code was decoded with. */
+    encoding: IrEncoding;
+    /**
+     * The NEC code, an integer from 0 to 16777215 (0xFFFFFF): bits 0 to 7 are the
+     * command (the button) and bits 8 to 23 the 16-bit address (the manufacturer
+     * code), so a remote whose address is 0x00FF and whose button is 0x20 reads
+     * 0x00FF20. See `send` for the order the bytes travel in.
+     */
+    code: number;
+    /** True for the auto-repeat of a held key, as the receiver reports it; false for the first code of a press. */
+    repeat: boolean;
+}
+/** The options of `screenrig.device.ir.send`. */
+export interface IrSendOptions {
+    /** The encoding to send with. `"NEC"` is the only one and the default. */
+    encoding?: IrEncoding;
+    /** How many more times to send the whole code, about 110 ms apart: an integer from 0 to 10; the default is 0, one send. */
+    repeat?: number;
+}
+export interface ScreenRigDeviceIr {
+    /**
+     * Transmits one infrared code and resolves when the Player's emitter has it.
+     * `code` is an integer from 0 to 16777215 laid out as `IrCode.code` says:
+     * bits 0 to 7 the command, bits 8 to 23 the 16-bit address. The NEC frame
+     * carries the address low byte (bits 8 to 15), the address high byte (bits 16
+     * to 23), the command (bits 0 to 7) and the command's bitwise complement,
+     * each byte least significant bit first, so `0x00FF20` goes out as the bytes
+     * `0xFF 0x00 0x20 0xDF`. Needs the `device.ir` capability and a Player that
+     * can transmit: `supports("device.ir.send")` is true on a Player that only
+     * transmits (an Android device with an infrared emitter) and on one that also
+     * receives (a BrightSign player, which advertises `device.ir`). Rejects
+     * `not_supported` when the Player does not, `capability_denied` without the
+     * capability, `invalid_request` (before
+     * anything is sent) for a `code` or option out of range, and
+     * `ir_unavailable` from a Player with no usable emitter.
+     */
+    send(code: number, options?: IrSendOptions): Promise<void>;
+}
+/** The options of `screenrig.device.udp.open`. */
+export interface UdpOpenOptions {
+    /** Lets the socket send to broadcast addresses such as `255.255.255.255`. Default `false`. */
+    broadcast?: boolean;
+    /** An IPv4 group address from 239.0.0.0 to 239.255.255.255 the socket joins on its port. Needs a port. */
+    multicast?: string;
+}
+/** Why a UDP socket ended by itself. */
+export type UdpCloseReason = "error" | "context";
+/** One received UDP datagram. */
+export interface UdpMessage {
+    /** The sender's IPv4 address. */
+    fromHost: string;
+    /** The sender's port. */
+    fromPort: number;
+    /** The datagram's bytes, 1 to 8192 of them. */
+    data: Uint8Array;
+}
+/** An open UDP socket. Sockets close when the page's context ends. */
+export interface ScreenRigUdpSocket {
+    /** The port the socket was asked to bind: 0 for an ephemeral send-only socket. */
+    readonly port: number;
+    /**
+     * Sends one datagram of 1 to 8192 bytes (a string is UTF-8). `host` is an
+     * IPv4 address, a name ending in `.local` or a single-label name on the
+     * screen's network; a public domain name is refused. `port` is 1 to 65535.
+     * Rejects `invalid_request` for a bad argument (nothing is sent),
+     * `payload_too_large` for more than 8192 bytes, `invalid_handle` once the
+     * socket is closed and `io_failed` when the network refuses the datagram.
+     */
+    send(host: string, port: number, data: Uint8Array | string): Promise<void>;
+    /**
+     * Calls `handler` with each datagram that arrives on the socket's port.
+     * Datagrams that arrived before the first handler (at most the newest 32) are
+     * delivered to it first. A socket opened with port 0 receives nothing.
+     * Returns a function that removes the handler.
+     */
+    onMessage(handler: (message: UdpMessage) => void): () => void;
+    /**
+     * Calls `handler` once when the socket ends without `close()`: `"error"`
+     * when the Player's network socket failed, `"context"` when the page's context
+     * ended. Returns a function that removes the handler.
+     */
+    onClose(handler: (reason: UdpCloseReason) => void): () => void;
+    /** Closes the socket. Closing a closed socket does nothing. */
+    close(): Promise<void>;
+}
+export interface ScreenRigDeviceUdp {
+    /**
+     * Opens a UDP socket bound to `port` (1024 to 65535) and resolves it. Port 0,
+     * the default, opens an ephemeral send-only socket. At most 4 sockets are open
+     * at once. Needs the `device.udp` capability and a Player that advertises
+     * `device.udp` (`supports("device.udp")`). Rejects `not_supported` when the
+     * Player does not, `capability_denied` without the capability,
+     * `invalid_request` (before anything is sent) for a bad port or option,
+     * `socket_limit` past 4 open sockets, and `port_busy` from the Player when the
+     * port is taken or is 49817 or 49818, which the Player keeps for its own use.
+     */
+    open(port?: number, options?: UdpOpenOptions): Promise<ScreenRigUdpSocket>;
+}
+/** The options of `screenrig.device.hdmiInput.open`. */
+export interface HdmiInputOptions {
+    /** Also capture the HDMI input's audio. Default `false`. */
+    audio?: boolean;
+}
+export interface ScreenRigDeviceHdmiInput {
+    /**
+     * Opens the device's HDMI input as a `MediaStream` to attach to a `video`
+     * element. The runtime calls `navigator.mediaDevices` from this page, finds
+     * the HDMI input among the devices `enumerateDevices()` lists (the video
+     * input whose label says HDMI, else the only video input), and asks
+     * `getUserMedia()` for it; no message goes to the Player. That needs the
+     * Player to grant the page's frame `allow="camera; microphone"`, which it
+     * does on the frame that holds the `device.hdmi_input` capability. Needs that
+     * capability and a Player that advertises `device.hdmi_input`. Rejects
+     * `not_supported` when the Player does not, `capability_denied` without the
+     * capability, `invalid_request` for a bad option, and `hdmi_input_unavailable`
+     * when no HDMI input device is present (or, with `audio`, no audio of it), the
+     * stream cannot be opened (no signal, in use, permission refused) or the
+     * browser has no `mediaDevices`. The page owns the stream: stop its tracks to
+     * release the input.
+     */
+    open(options?: HdmiInputOptions): Promise<MediaStream>;
+}
 /** A Bluetooth LE characteristic. */
 export interface BleTarget {
     /** The service UUID: 4, 8 or 36 hexadecimal characters, the 36-character form with dashes. */
@@ -597,6 +731,21 @@ export interface ScreenRigDevice {
     print(job: PrintJob): Promise<void>;
     /** Lists the printers (at most 16) and which formats each prints. Needs the `device.print` capability; rejects as `print` does. */
     printers(): Promise<PrinterInfo[]>;
+    /** Infrared send. `device.onIr` hears received codes. */
+    readonly ir: ScreenRigDeviceIr;
+    /**
+     * Calls `handler` with each infrared code the device receives, laid out as
+     * `IrCode.code` says: a frame whose bytes are `0xFF 0x00 0x20 0xDF` arrives
+     * as `0x00FF20`. Needs the
+     * `device.ir` capability and a Player that advertises `device.ir` and
+     * `device.watch` (a Player that can only transmit does not); otherwise the
+     * handler never runs. Returns a function that removes the handler.
+     */
+    onIr(handler: (code: IrCode) => void): () => void;
+    /** UDP sockets on the screen's network. */
+    readonly udp: ScreenRigDeviceUdp;
+    /** The device's HDMI input, when it has one. */
+    readonly hdmiInput: ScreenRigDeviceHdmiInput;
 }
 /** The runtime screenRIG injects into an application as `window.screenrig`. */
 export interface ScreenRig {
@@ -683,8 +832,10 @@ export interface ScreenRig {
      * feature, such as `"page.skip"`, `"kv.watch"`, `"visibility.watch"`,
      * `"page.timing"`, `"device.display"`, `"device.watch"`, `"device.vibrate"`,
      * `"device.scan"`, `"device.camera"`, `"device.sound"`, `"device.serial"`,
-     * `"device.gpio"`, `"device.gpio.pull"`, `"device.gpio.idle"`, `"device.ble"` or
-     * `"device.print"`. `supports` says what the Player can
+     * `"device.gpio"`, `"device.gpio.pull"`, `"device.gpio.idle"`, `"device.ble"`,
+     * `"device.print"`, `"device.ir"`, `"device.ir.send"`, `"device.udp"` or
+     * `"device.hdmi_input"`; a Player that lists `"device.ir"` supports
+     * `"device.ir.send"` too. `supports` says what the Player can
      * do; `capabilities` says what this page may do. A request for a feature the
      * Player lacks rejects `not_supported` without being sent.
      */

@@ -11,7 +11,8 @@ import { run } from "./main.js";
 import { type CliRuntime } from "./runtime.js";
 import { displayLines } from "./screen-display.js";
 import {
-  brightnessPatch, displayIdleAfterOption, displayIdlePatch, displayIdleWakeOption, displaySettingsLines, kioskLines, kioskLockPatch,
+  brightnessPatch, displayCecPatch, displayIdleAfterOption, displayIdlePatch, displayIdleWakeOption, displayOutputModeOption, displayOutputObservationLines, displayOutputPatch,
+  displaySettingsLines, kioskLines, kioskLockPatch,
 } from "./screen-device-settings.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
@@ -169,6 +170,69 @@ test("screen kiosk-lock --on and --off send kiosk.lock true and false", async ()
   assert.match(human.stdout, new RegExp(`^Locked kiosk on ${LOBBY}: the Player pins itself to the screen$`, "m"));
 });
 
+test("--mode is auto or a video mode WIDTHxHEIGHTxFPS with an optional p or i", () => {
+  for (const value of ["auto", "3840x2160x60p", "1920x1080x59.94i", "1280x720x50", "1920x1080x60p"]) assert.equal(displayOutputModeOption(value), value);
+  for (const value of ["", "4k", "3840x2160", "3840x2160x60x", "0x1080x60p", "1920x1080x60.1234p", "AUTO", "1920x1080x60pp", "99999999x1080x60p"]) {
+    assert.throws(() => displayOutputModeOption(value), /--mode takes auto or a video mode/, JSON.stringify(value));
+  }
+  assert.deepEqual(displayOutputPatch("3840x2160x60p", false), { display: { output: { mode: "3840x2160x60p" } } });
+  assert.deepEqual(displayOutputPatch(undefined, true), { display: { output: null } });
+  assert.throws(() => displayOutputPatch(undefined, false), /--mode MODE or --clear/);
+  assert.throws(() => displayOutputPatch("auto", true), /--mode MODE or --clear/);
+  assert.deepEqual(displayCecPatch(true, false, false), { display: { cec: { take_input: true } } });
+  assert.deepEqual(displayCecPatch(false, true, false), { display: { cec: { take_input: false } } });
+  assert.deepEqual(displayCecPatch(false, false, true), { display: { cec: null } });
+  assert.throws(() => displayCecPatch(false, false, false), /exactly one of --on, --off or --clear/);
+  assert.throws(() => displayCecPatch(true, true, false), /exactly one of --on, --off or --clear/);
+});
+
+test("screen display-output and display-cec patch only their own member; the other settings stay", async () => {
+  const env = await enrolled();
+  const transport = seeded();
+  await cli(["--json", "screen", "brightness", LOBBY, "--mode", "auto"], transport, env);
+  const set = await cli(["--json", "screen", "display-output", LOBBY, "--mode", "3840x2160x60p", "--expect-rev", "4"], transport, env);
+  assert.equal(set.code, ExitCode.Success, set.stdout);
+  const call = patches(transport).at(-1)!;
+  assert.deepEqual(call.body, { display: { output: { mode: "3840x2160x60p" } } });
+  assert.equal(call.headers?.["if-match"], '"4"');
+  assert.deepEqual(set.envelope.data.display.output, { mode: "3840x2160x60p" });
+  assert.deepEqual(set.envelope.data.display.brightness, { mode: "auto" }, "a member left out stays");
+  const cec = await cli(["--json", "screen", "display-cec", LOBBY, "--on"], transport, env);
+  assert.equal(cec.code, ExitCode.Success, cec.stdout);
+  assert.deepEqual(patches(transport).at(-1)!.body, { display: { cec: { take_input: true } } });
+  assert.deepEqual(cec.envelope.data.display.cec, { take_input: true });
+  assert.deepEqual(cec.envelope.data.display.output, { mode: "3840x2160x60p" });
+  const off = await cli(["--json", "screen", "display-cec", LOBBY, "--off"], transport, env);
+  assert.deepEqual(off.envelope.data.display.cec, { take_input: false });
+  const cleared = await cli(["--json", "screen", "display-cec", LOBBY, "--clear"], transport, env);
+  assert.deepEqual(patches(transport).at(-1)!.body, { display: { cec: null } });
+  assert.equal(cleared.envelope.data.display.cec, undefined);
+  const clearedOutput = await cli(["--json", "screen", "display-output", LOBBY, "--clear"], transport, env);
+  assert.deepEqual(patches(transport).at(-1)!.body, { display: { output: null } });
+  assert.equal(clearedOutput.envelope.data.display.output, undefined);
+  assert.deepEqual(clearedOutput.envelope.data.display.brightness, { mode: "auto" });
+  const human = await cli(["--human", "screen", "display-output", LOBBY, "--mode", "auto"], transport, env);
+  assert.match(human.stdout, new RegExp(`^Set display output on ${LOBBY}: auto$`, "m"));
+});
+
+test("screen show lists the display output, CEC and the modes the Player reports", async () => {
+  const env = await enrolled();
+  const modes = ["1920x1080x60p", "3840x2160x30p", "3840x2160x60p"];
+  const transport = seeded({
+    display: { requested: "on", source: "default", output: { mode: "3840x2160x60p" }, cec: { take_input: true } },
+    observation: { observed_at: "2026-08-14T16:00:00Z", surfaces: [], display_output: { mode: "1920x1080x60p", modes } },
+  } as Partial<Screen>);
+  const json = await cli(["--json", "screen", "show", LOBBY], transport, env);
+  assert.deepEqual(json.envelope.data.observation.display_output, { mode: "1920x1080x60p", modes }, "the modes are in the envelope");
+  const human = await cli(["--human", "screen", "show", LOBBY], transport, env);
+  assert.match(human.stdout, /^Display output: 3840x2160x60p$/m);
+  assert.match(human.stdout, /^Display CEC: takes the TV's input/m);
+  assert.match(human.stdout, /^Output mode in force: 1920x1080x60p$/m);
+  assert.match(human.stdout, /^Output modes the Player can set \(3\): 1920x1080x60p, 3840x2160x30p, 3840x2160x60p$/m);
+  assert.deepEqual(displayOutputObservationLines(undefined), []);
+  assert.deepEqual(displayOutputObservationLines({}), []);
+});
+
 test("invalid input is refused before any request", async () => {
   const env = await enrolled();
   const transport = seeded();
@@ -185,6 +249,11 @@ test("invalid input is refused before any request", async () => {
     [["display-idle", LOBBY, "--off", "--wake", "touch"], /cannot be used with|Provide --after and --wake together/],
     [["brightness", LOBBY], /--mode/],
     [["brightness", LOBBY, "--mode", "dim"], /auto|fixed/],
+    [["display-output", LOBBY], /Provide exactly one of --mode or --clear/],
+    [["display-output", LOBBY, "--mode", "4k"], /--mode takes auto or a video mode/],
+    [["display-output", LOBBY, "--mode", "auto", "--clear"], /cannot be used with|Provide exactly one of --mode or --clear/],
+    [["display-cec", LOBBY], /Provide exactly one of --on or --off or --clear/],
+    [["display-cec", LOBBY, "--on", "--off"], /cannot be used with|Provide exactly one of --on or --off or --clear/],
     [["kiosk-lock", LOBBY], /Provide exactly one of --on or --off/],
     [["kiosk-lock", LOBBY, "--on", "--off"], /cannot be used with|Provide exactly one of --on or --off/],
   ];

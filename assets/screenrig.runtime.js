@@ -1479,6 +1479,10 @@
     "device.ble.unwatch",
     "device.print",
     "device.printers",
+    "device.ir.send",
+    "device.udp.open",
+    "device.udp.send",
+    "device.udp.close",
     "response.ack",
     "response.problem"
   ];
@@ -1509,7 +1513,13 @@
     "device.ble.watch": "device.ble",
     "device.ble.unwatch": "device.ble",
     "device.print": "device.print",
-    "device.printers": "device.print"
+    "device.printers": "device.print",
+    "device.udp.open": "device.udp",
+    "device.udp.send": "device.udp",
+    "device.udp.close": "device.udp"
+  };
+  var IMPLIED_FEATURES = {
+    "device.ir": ["device.ir.send"]
   };
   function featureOf(kind) {
     return Object.prototype.hasOwnProperty.call(KIND_FEATURES, kind) ? KIND_FEATURES[kind] : kind;
@@ -1519,7 +1529,7 @@
   var MAX_SKIP_REASON_CODE_POINTS = 64;
   var DEVICE_VIBRATE_MAX_MS = 200;
   var DEVICE_VIBRATE_DEFAULT_MS = 12;
-  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys", "light", "network", "scan", "people", "sound", "serial", "gpio", "ble"];
+  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys", "light", "network", "scan", "people", "sound", "serial", "gpio", "ble", "ir", "udp"];
   var DEVICE_WATCH_NEEDS = {
     display: { capability: "device.display" },
     presence: { capability: "device.presence" },
@@ -1531,7 +1541,9 @@
     sound: { capability: "device.sound", feature: "device.sound" },
     serial: { capability: "device.serial", feature: "device.serial" },
     gpio: { capability: "device.gpio", feature: "device.gpio" },
-    ble: { capability: "device.ble", feature: "device.ble" }
+    ble: { capability: "device.ble", feature: "device.ble" },
+    ir: { capability: "device.ir", feature: "device.ir" },
+    udp: { capability: "device.udp", feature: "device.udp" }
   };
   var DEVICE_KEYS = ["volume_up", "volume_down"];
   var DEVICE_CHUNK_BYTES = 32768;
@@ -1555,6 +1567,14 @@
   var GPIO_PIN_MAX = 255;
   var GPIO_PULLS = ["up", "down", "none"];
   var MAX_GPIO_WATCH_PINS = 16;
+  var IR_ENCODINGS = ["NEC"];
+  var IR_CODE_MAX = 16777215;
+  var IR_REPEAT_MAX = 10;
+  var UDP_PORT_MIN = 1024;
+  var UDP_PORT_MAX = 65535;
+  var MAX_UDP_SOCKETS = 4;
+  var MAX_UDP_DATAGRAM_BYTES = 8192;
+  var UDP_MULTICAST_RE = /^239\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
   var MAX_BLE_VALUE_BYTES = 512;
   var MAX_BLE_SUBSCRIPTIONS = 8;
   var BLE_UUID_RE = /^(?:[0-9a-f]{4}|[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
@@ -1581,7 +1601,10 @@
     "device.serial": false,
     "device.gpio": false,
     "device.ble": false,
-    "device.print": false
+    "device.print": false,
+    "device.ir": false,
+    "device.udp": false,
+    "device.hdmi_input": false
   };
 
   // src/capture.ts
@@ -2419,6 +2442,27 @@
       if (typeof value !== "string" || decodeBase64(value, MAX_BLE_VALUE_BYTES) === void 0) throw invalidEvent("ble value");
       return { type, generation, nonce, subscription, value_base64: value };
     }
+    if (type === "ir") {
+      const { encoding, code, repeat } = payload;
+      if (typeof encoding !== "string") throw invalidEvent("ir encoding");
+      if (!IR_ENCODINGS.includes(encoding)) return void 0;
+      if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > IR_CODE_MAX) throw invalidEvent("ir code");
+      if (typeof repeat !== "boolean") throw invalidEvent("ir repeat");
+      return { type, generation, nonce, encoding, code, repeat };
+    }
+    if (type === "udp") {
+      const { socket, from_host: fromHost, from_port: fromPort, data_base64: data, closed } = payload;
+      if (typeof socket !== "string" || !HANDLE_RE.test(socket)) throw invalidEvent("udp socket");
+      if (closed !== void 0) {
+        if (closed !== true || data !== void 0) throw invalidEvent("udp close");
+        return { type, generation, nonce, socket, closed: true, ...payload.reason === "error" ? { reason: "error" } : {} };
+      }
+      if (typeof fromHost !== "string" || fromHost.length === 0 || fromHost.length > 64 || CONTROL_RE.test(fromHost)) throw invalidEvent("udp sender");
+      if (typeof fromPort !== "number" || !Number.isInteger(fromPort) || fromPort < 0 || fromPort > UDP_PORT_MAX) throw invalidEvent("udp sender port");
+      const bytes = typeof data === "string" ? decodeBase64(data, MAX_UDP_DATAGRAM_BYTES) : void 0;
+      if (bytes === void 0 || bytes.length === 0) throw invalidEvent("udp data");
+      return { type, generation, nonce, socket, from_host: fromHost, from_port: fromPort, data_base64: data };
+    }
     return void 0;
   }
   function parseVisibilityChangedPayload(payload) {
@@ -2518,6 +2562,82 @@
     const handle = isRecord(value) ? value[member] : void 0;
     if (typeof handle !== "string" || !HANDLE_RE.test(handle)) throw new SdkValidationError("invalid_response", `Invalid ${member}`);
     return handle;
+  }
+  function parseIrSend(code, options) {
+    if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > IR_CODE_MAX) throw invalidRequest(`code is an integer from 0 to ${IR_CODE_MAX}`);
+    let encoding = "NEC";
+    let repeat;
+    if (options !== void 0) {
+      if (!isRecord(options)) throw invalidRequest("IR options are an object with encoding and repeat");
+      onlyMembers(options, ["encoding", "repeat"], "IR");
+      const asked = ownMember(options, "encoding");
+      if (asked !== void 0) {
+        if (typeof asked !== "string" || !IR_ENCODINGS.includes(asked)) throw invalidRequest(`encoding is one of ${IR_ENCODINGS.join(", ")}`);
+        encoding = asked;
+      }
+      const extra = ownMember(options, "repeat");
+      if (extra !== void 0) {
+        if (typeof extra !== "number" || !Number.isInteger(extra) || extra < 0 || extra > IR_REPEAT_MAX) throw invalidRequest(`repeat is an integer from 0 to ${IR_REPEAT_MAX}`);
+        repeat = extra;
+      }
+    }
+    return { encoding, code, ...repeat === void 0 ? {} : { repeat } };
+  }
+  function parseUdpOpen(port, options) {
+    const bound = port === void 0 ? 0 : port;
+    if (typeof bound !== "number" || !Number.isInteger(bound) || !(bound === 0 || bound >= UDP_PORT_MIN && bound <= UDP_PORT_MAX)) {
+      throw invalidRequest(`port is 0 or an integer from ${UDP_PORT_MIN} to ${UDP_PORT_MAX}`);
+    }
+    let broadcast;
+    let multicast;
+    if (options !== void 0) {
+      if (!isRecord(options)) throw invalidRequest("UDP options are an object with broadcast and multicast");
+      onlyMembers(options, ["broadcast", "multicast"], "UDP");
+      const wide = ownMember(options, "broadcast");
+      if (wide !== void 0) {
+        if (typeof wide !== "boolean") throw invalidRequest("broadcast is a boolean");
+        broadcast = wide;
+      }
+      const group = ownMember(options, "multicast");
+      if (group !== void 0) {
+        if (typeof group !== "string" || !UDP_MULTICAST_RE.test(group)) throw invalidRequest("multicast is an IPv4 group address in 239.0.0.0/8");
+        if (bound === 0) throw invalidRequest("multicast needs a port to listen on");
+        multicast = group;
+      }
+    }
+    return { port: bound, ...broadcast === void 0 ? {} : { broadcast }, ...multicast === void 0 ? {} : { multicast } };
+  }
+  var IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+  var DNS_LABEL_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+  function parseUdpHost(host) {
+    const bad = () => invalidRequest("host is an IPv4 address, a .local name or a single-label LAN name");
+    if (typeof host !== "string" || host.length === 0 || host.length > 253) throw bad();
+    if (/^[0-9.]+$/.test(host)) {
+      if (!IPV4_RE.test(host)) throw bad();
+      return host;
+    }
+    const labels = host.split(".");
+    if (!labels.every((label) => DNS_LABEL_RE.test(label))) throw bad();
+    if (labels.length === 1 || labels.length >= 2 && labels[labels.length - 1].toLowerCase() === "local") return host;
+    throw bad();
+  }
+  function parseUdpPort(port) {
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > UDP_PORT_MAX) throw invalidRequest(`port is an integer from 1 to ${UDP_PORT_MAX}`);
+    return port;
+  }
+  function parseUdpData(data) {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data instanceof Uint8Array ? data : void 0;
+    if (bytes === void 0 || bytes.length === 0) throw invalidRequest("A datagram is a Uint8Array or a string of 1 to " + MAX_UDP_DATAGRAM_BYTES + " bytes");
+    if (bytes.length > MAX_UDP_DATAGRAM_BYTES) throw new SdkValidationError("payload_too_large", `A datagram is at most ${MAX_UDP_DATAGRAM_BYTES} bytes`);
+    return bytes;
+  }
+  function parseHdmiInputOptions(options) {
+    if (options === void 0) return { audio: false };
+    if (!isRecord(options)) throw invalidRequest("HDMI input options are an object with audio");
+    onlyMembers(options, ["audio"], "HDMI input");
+    const audio = ownMember(options, "audio");
+    if (audio !== void 0 && typeof audio !== "boolean") throw invalidRequest("audio is a boolean");
+    return { audio: audio === true };
   }
   function parseGpioPin(pin) {
     if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > GPIO_PIN_MAX) throw invalidRequest(`pin is an integer from 0 to ${GPIO_PIN_MAX}`);
@@ -2644,6 +2764,11 @@
   var SERIAL = { features: ["device.serial"], capabilities: ["device.serial"] };
   var GPIO = { features: ["device.gpio"], capabilities: ["device.gpio"] };
   var GPIO_IDLE = { features: ["device.gpio", "device.gpio.idle"], capabilities: ["device.gpio"] };
+  var IR_SEND = { features: ["device.ir.send"], capabilities: ["device.ir"] };
+  var UDP = { features: ["device.udp"], capabilities: ["device.udp"] };
+  var HDMI_INPUT = { features: ["device.hdmi_input"], capabilities: ["device.hdmi_input"] };
+  var UDP_BUFFERED_MESSAGES = 32;
+  var HDMI_LABEL_RE = /hdmi/i;
   var BLE = { features: ["device.ble"], capabilities: ["device.ble"] };
   var PRINT = { features: ["device.print"], capabilities: ["device.print"] };
   function enqueue(queue, run) {
@@ -2682,6 +2807,9 @@
     gpioPullWarned = null;
     bleSubscriptions = /* @__PURE__ */ new Map();
     pendingBle = 0;
+    irHandlers = /* @__PURE__ */ new Set();
+    sockets = /* @__PURE__ */ new Map();
+    pendingSockets = 0;
     printing = { tail: null, active: 0 };
     scanner = {
       start: (options) => this.scannerStart(options),
@@ -2695,6 +2823,15 @@
       write: (pin, value, options) => this.gpioWrite(pin, value, options),
       onChange: (pin, handler, options) => this.gpioOnChange(pin, handler, options)
     };
+    ir = {
+      send: (code, options) => this.irSend(code, options)
+    };
+    udp = {
+      open: (port, options) => this.udpOpen(port, options)
+    };
+    hdmiInput = {
+      open: (options) => this.hdmiOpen(options)
+    };
     ble = {
       read: (target) => this.bleRead(target),
       watch: (target, handler) => this.bleWatch(target, handler)
@@ -2707,6 +2844,9 @@
     }
     onSoundLevel(handler) {
       return this.bridge.on("onSoundLevel", this.soundHandlers, handler);
+    }
+    onIr(handler) {
+      return this.bridge.on("onIr", this.irHandlers, handler);
     }
     /** Whether a hardware event type has a reason to be watched now. */
     wants(event) {
@@ -2723,6 +2863,155 @@
           return this.gpioHandlers.size > 0;
         case "ble":
           return this.bleSubscriptions.size + this.pendingBle > 0;
+        case "ir":
+          return this.irHandlers.size > 0;
+        case "udp":
+          return this.sockets.size + this.pendingSockets > 0;
+      }
+    }
+    // ---- infrared -------------------------------------------------------------
+    async irSend(code, options) {
+      this.bridge.check(IR_SEND);
+      const members = parseIrSend(code, options);
+      await this.bridge.send("device.ir.send", members);
+    }
+    // ---- UDP ------------------------------------------------------------------
+    async udpOpen(port, options) {
+      this.bridge.check(UDP);
+      const members = parseUdpOpen(port, options);
+      if (this.sockets.size + this.pendingSockets >= MAX_UDP_SOCKETS) {
+        throw new SdkValidationError("socket_limit", `At most ${MAX_UDP_SOCKETS} UDP sockets are open at once`);
+      }
+      this.pendingSockets += 1;
+      this.bridge.watchChanged();
+      let handle;
+      try {
+        handle = parseHandleResult(await this.bridge.send("device.udp.open", members), "socket");
+      } catch (err) {
+        this.pendingSockets -= 1;
+        this.bridge.watchChanged();
+        throw err;
+      }
+      this.pendingSockets -= 1;
+      const state = { handle, open: true, messages: /* @__PURE__ */ new Set(), close: /* @__PURE__ */ new Set(), buffered: [] };
+      this.sockets.set(handle, state);
+      this.bridge.watchChanged();
+      return this.socketApi(state, members.port);
+    }
+    socketApi(state, port) {
+      const api = {
+        port,
+        send: async (host, port2, data) => {
+          this.bridge.check(UDP);
+          const members = { socket: state.handle, host: parseUdpHost(host), port: parseUdpPort(port2), data_base64: encodeBase64(parseUdpData(data)) };
+          if (!state.open) throw new SdkValidationError("invalid_handle", "The UDP socket is closed");
+          await this.bridge.send("device.udp.send", members);
+        },
+        onMessage: (handler) => {
+          if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "socket.onMessage needs a function");
+          state.messages.add(handler);
+          const held = state.buffered;
+          state.buffered = [];
+          for (const message of held) this.callSocket(() => handler({ ...message, data: message.data.slice() }));
+          return () => {
+            state.messages.delete(handler);
+          };
+        },
+        onClose: (handler) => {
+          if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "socket.onClose needs a function");
+          state.close.add(handler);
+          return () => {
+            state.close.delete(handler);
+          };
+        },
+        close: () => this.udpClose(state)
+      };
+      return Object.freeze(api);
+    }
+    async udpClose(state) {
+      if (!state.open) return;
+      state.open = false;
+      state.messages.clear();
+      state.close.clear();
+      this.sockets.delete(state.handle);
+      try {
+        await this.bridge.send("device.udp.close", { socket: state.handle });
+      } finally {
+        this.bridge.watchChanged();
+      }
+    }
+    callSocket(invoke) {
+      try {
+        invoke();
+      } catch {
+        this.bridge.report("warn", "device_handler", "A screenrig.device UDP handler threw");
+      }
+    }
+    udpClosed(handle) {
+      const state = this.sockets.get(handle);
+      if (state === void 0) return;
+      state.open = false;
+      this.sockets.delete(handle);
+      const handlers = [...state.close];
+      state.messages.clear();
+      state.close.clear();
+      for (const handler of handlers) this.callSocket(() => handler("error"));
+      this.bridge.watchChanged();
+    }
+    udpMessage(handle, message) {
+      const state = this.sockets.get(handle);
+      if (state === void 0) return;
+      if (state.messages.size === 0) {
+        state.buffered.push(message);
+        if (state.buffered.length > UDP_BUFFERED_MESSAGES) state.buffered.shift();
+        return;
+      }
+      for (const handler of [...state.messages]) this.callSocket(() => handler({ ...message, data: message.data.slice() }));
+    }
+    // ---- HDMI input -----------------------------------------------------------
+    /**
+     * Opens the HDMI input through the page's own `navigator.mediaDevices`: no
+     * message goes to the Player, whose frame permission (allow="camera;
+     * microphone") is what makes the call work.
+     */
+    async hdmiOpen(options) {
+      this.bridge.check(HDMI_INPUT);
+      const { audio } = parseHdmiInputOptions(options);
+      const media = this.bridge.mediaDevices();
+      const unavailable = (why) => new SdkValidationError("hdmi_input_unavailable", `The HDMI input is not available: ${why}`);
+      if (media === void 0) throw unavailable("this page has no media devices");
+      const named = (err) => err instanceof Error && err.name !== "Error" ? err.name : "failed";
+      const list = async () => {
+        try {
+          return await media.enumerateDevices();
+        } catch (err) {
+          throw unavailable(`the devices cannot be listed (${named(err)})`);
+        }
+      };
+      let devices = await list();
+      if (!devices.some((device) => device.kind === "videoinput" && device.label !== "")) {
+        try {
+          const probe = await media.getUserMedia({ video: true });
+          for (const track of probe.getTracks()) track.stop();
+        } catch (err) {
+          throw unavailable(`the media permission was refused or no input opened (${named(err)})`);
+        }
+        devices = await list();
+      }
+      const videos = devices.filter((device) => device.kind === "videoinput");
+      const video = videos.find((device) => HDMI_LABEL_RE.test(device.label)) ?? (videos.length === 1 ? videos[0] : void 0);
+      if (video === void 0) throw unavailable("no HDMI video input is listed");
+      const constraints = { video: { deviceId: { exact: video.deviceId } }, audio: false };
+      if (audio) {
+        const audios = devices.filter((device) => device.kind === "audioinput");
+        const sound = audios.find((device) => video.groupId !== "" && device.groupId === video.groupId) ?? audios.find((device) => HDMI_LABEL_RE.test(device.label)) ?? (audios.length === 1 ? audios[0] : void 0);
+        if (sound === void 0) throw unavailable("no HDMI audio input is listed");
+        constraints.audio = { deviceId: { exact: sound.deviceId } };
+      }
+      try {
+        return await media.getUserMedia(constraints);
+      } catch (err) {
+        throw unavailable(`the input did not open (${named(err)})`);
       }
     }
     // ---- camera ---------------------------------------------------------------
@@ -3000,6 +3289,18 @@
         case "gpio":
           for (const handler of [...((_a2 = this.gpioHandlers.get(event.pin)) == null ? void 0 : _a2.keys()) ?? []]) call(() => handler(event.value));
           return;
+        case "ir":
+          for (const handler of [...this.irHandlers]) call(() => handler({ encoding: event.encoding, code: event.code, repeat: event.repeat }));
+          return;
+        case "udp": {
+          if ("closed" in event) {
+            this.udpClosed(event.socket);
+            return;
+          }
+          const bytes = decodeBase64(event.data_base64, MAX_UDP_DATAGRAM_BYTES);
+          if (bytes !== void 0) this.udpMessage(event.socket, { fromHost: event.from_host, fromPort: event.from_port, data: bytes });
+          return;
+        }
         case "ble": {
           const handler = this.bleSubscriptions.get(event.subscription);
           const bytes = handler === void 0 ? void 0 : decodeBase64(event.value_base64, 512);
@@ -3027,6 +3328,14 @@
         if (notify) for (const handler of handlers) this.callPort(() => handler("context"));
       }
       this.bleSubscriptions.clear();
+      for (const state of this.sockets.values()) {
+        state.open = false;
+        const handlers = [...state.close];
+        state.messages.clear();
+        state.close.clear();
+        if (notify) for (const handler of handlers) this.callSocket(() => handler("context"));
+      }
+      this.sockets.clear();
       this.gpioSent = null;
       this.gpioPullWarned = null;
     }
@@ -3037,6 +3346,7 @@
       this.peopleHandlers.clear();
       this.soundHandlers.clear();
       this.gpioHandlers.clear();
+      this.irHandlers.clear();
     }
   };
 
@@ -3066,6 +3376,7 @@
       }
       this.idFactory = options.idFactory ?? randomId;
       this.ackTimeoutMs = options.ackTimeoutMs ?? 1e4;
+      this.mediaDevices = options.mediaDevices;
       this.allowOpaqueNativeParent = allowOpaqueNativeParent;
       this.unsubscribe = this.host.addMessageListener((event) => this.onMessage(event));
       this.unsubscribeErrors = (_b = (_a2 = this.host).addErrorListener) == null ? void 0 : _b.call(_a2, (error) => this.forwardError(error));
@@ -3077,6 +3388,7 @@
     trustedPlayerOrigins;
     idFactory;
     ackTimeoutMs;
+    mediaDevices;
     allowOpaqueNativeParent;
     destroyed = false;
     activeWaiters = /* @__PURE__ */ new Set();
@@ -3133,7 +3445,8 @@
       supports: (feature) => this.supports(feature),
       watchChanged: () => this.watchDevice(),
       report: (level, code, message) => this.report(level, code, message),
-      newId: () => this.idFactory()
+      newId: () => this.idFactory(),
+      mediaDevices: () => this.mediaDevices ?? (typeof navigator === "undefined" ? void 0 : navigator.mediaDevices)
     });
     device = {
       display: {
@@ -3154,7 +3467,11 @@
       gpio: this.hardware.gpio,
       ble: this.hardware.ble,
       print: (job) => this.hardware.print(job),
-      printers: () => this.hardware.printers()
+      printers: () => this.hardware.printers(),
+      ir: this.hardware.ir,
+      onIr: (handler) => this.hardware.onIr(handler),
+      udp: this.hardware.udp,
+      hdmiInput: this.hardware.hdmiInput
     };
     destroy() {
       var _a2;
@@ -3366,7 +3683,7 @@
     supports(kind) {
       var _a2;
       const features = ((_a2 = this.context) == null ? void 0 : _a2.features) ?? BASELINE_FEATURES;
-      return features.includes(kind);
+      return features.includes(kind) || features.some((feature) => Object.prototype.hasOwnProperty.call(IMPLIED_FEATURES, feature) && IMPLIED_FEATURES[feature].includes(kind));
     }
     post(message, wait) {
       if (this.targetOrigin === null || this.handshakeChallenge === null) {

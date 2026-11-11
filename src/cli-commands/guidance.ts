@@ -215,6 +215,8 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "screen wall clear": ["scr_SCREEN", "scr_SCREEN --expect-rev 5"],
     "screen display-idle": ["scr_SCREEN --after 300 --wake touch", "scr_SCREEN --after 600 --wake touch,presence --expect-rev 4", "scr_SCREEN --off"],
     "screen brightness": ["scr_SCREEN --mode auto", "scr_SCREEN --mode fixed --expect-rev 4"],
+    "screen display-output": ["scr_SCREEN --mode 3840x2160x60p", "scr_SCREEN --mode auto --expect-rev 4", "scr_SCREEN --clear"],
+    "screen display-cec": ["scr_SCREEN --on", "scr_SCREEN --off --expect-rev 4", "scr_SCREEN --clear"],
     "screen kiosk-lock": ["scr_SCREEN --on", "scr_SCREEN --off --expect-rev 4"],
     "screen move": ["scr_AAA scr_BBB --folder sfd_NORTH", "sfd_CAFES --folder sfd_NORTH", "scr_AAA sfd_CAFES --root", 'scr_AAA --folder sfd_NORTH --note "Lobby refit"'],
     "screen folder list": [""], "screen folder show": ["sfd_NORTH"],

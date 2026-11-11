@@ -67,7 +67,8 @@ export interface Hardware {
   camera: { available: boolean; formats: string[] };
   serial: { ports: SerialPortSpec[] };
   gpio: { pins: PinSpec[]; chip: boolean };
-  ir: { available: boolean };
+  /** The infrared emitter sends, the receiver hears. */
+  ir: { emitter: boolean; receiver: boolean };
   ble: { adapter: boolean; peripherals: PeripheralSpec[] };
   printers: PrinterSpec[];
 }
@@ -85,7 +86,7 @@ export function defaultHardware(): Hardware {
       ],
     },
     gpio: { chip: true, pins: [{ pin: 17, value: false, floating: true }, { pin: 27, value: true, floating: true }, { pin: 22, value: false, busy: true }] },
-    ir: { available: true },
+    ir: { emitter: true, receiver: true },
     ble: {
       adapter: true,
       peripherals: [{ name: "HRM-Strap", address: "aa:bb:cc:dd:ee:ff", services: [{ service: "180d", characteristics: [{ characteristic: "2a37", value_base64: "ABg=" }] }] }],

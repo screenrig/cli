@@ -1,0 +1,222 @@
+{
+  "fixtureVersion": 2,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.udp.open-not-granted",
+  "kind": "device.udp.open",
+  "requires": [
+    "device.udp"
+  ],
+  "requiresSources": [],
+  "purpose": "device.udp.open from a frame without the device.udp capability is refused with forbidden (403), before the members are read.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": false,
+      "device.hdmi_input": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": true,
+        "formats": [
+          "qr",
+          "ean13",
+          "upca",
+          "code128"
+        ],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [
+          {
+            "id": "ttyUSB0",
+            "name": "FT232R USB UART",
+            "vendor_id": 1027,
+            "product_id": 24577
+          },
+          {
+            "id": "ttyACM0",
+            "name": "Arduino Uno",
+            "vendor_id": 9025,
+            "product_id": 67,
+            "busy": true
+          }
+        ],
+        "open": []
+      },
+      "gpio": {
+        "pins": [
+          {
+            "pin": 17,
+            "value": false
+          },
+          {
+            "pin": 27,
+            "value": true
+          },
+          {
+            "pin": 22,
+            "value": false,
+            "busy": true
+          }
+        ],
+        "watched": []
+      },
+      "ble": {
+        "adapter": true,
+        "peripherals": [
+          {
+            "name": "HRM-Strap",
+            "address": "aa:bb:cc:dd:ee:ff",
+            "services": [
+              {
+                "service": "180d",
+                "characteristics": [
+                  {
+                    "characteristic": "2a37",
+                    "value_base64": "ABg="
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "subscriptions": []
+      },
+      "printers": [
+        {
+          "id": "usb:epson-tm-t20",
+          "name": "Epson TM-T20",
+          "formats": [
+            "escpos"
+          ],
+          "default": true
+        },
+        {
+          "id": "office",
+          "name": "Office laser",
+          "formats": [
+            "pdf"
+          ]
+        },
+        {
+          "id": "jammed",
+          "name": "Jammed receipt printer",
+          "formats": [
+            "escpos"
+          ],
+          "failing": true
+        }
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_udpopen_0009",
+    "kind": "device.udp.open",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "port": 80
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.problem",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_udpopen_0009",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "problem": {
+          "code": "forbidden",
+          "status": 403,
+          "detail": "",
+          "request_id": ""
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id",
+      "/payload/problem/detail",
+      "/payload/problem/request_id"
+    ]
+  }
+}

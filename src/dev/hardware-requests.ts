@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
-  DEVICE_CHUNK_BYTES, MAX_BLE_SUBSCRIPTIONS, MAX_GPIO_PINS, MAX_IR_CODE, MAX_IR_REPEAT, MAX_PRINT_BYTES, MAX_SERIAL_PORTS, MAX_UDP_BYTES, MAX_UDP_SOCKETS, PRINT_IDLE_MS, SYNC_BEACON_PORT,
+  DEVICE_CHUNK_BYTES, MAX_BLE_SUBSCRIPTIONS, MAX_GPIO_PINS, MAX_IR_CODE, MAX_IR_REPEAT, MAX_PRINT_BYTES, MAX_SERIAL_PORTS, MAX_UDP_BYTES, MAX_UDP_SOCKETS, PLAYER_UDP_PORTS, PRINT_IDLE_MS,
   isRecord,
 } from "./bridge-protocol.js";
 import { BLE_UUID, HANDLE, SCAN_FORMATS, base64Length, pinLevel, unknownMembers, validDeviceId, type GpioPull, type Hardware, type PrintFormat, type PrinterSpec } from "./hardware.js";
@@ -84,7 +84,28 @@ export interface IrSent {
   encoding: "NEC";
   code: number;
   repeat: number;
+  /** The frames handed to the emitter: the whole code `repeat` + 1 times, each as the four bytes that travel. */
+  frames: number[][];
   at: number;
+}
+
+/**
+ * The four bytes of a NEC frame as they travel. A code is the command in bits
+ * 0 to 7 and the address in bits 8 to 23; the wire carries address bits 8 to
+ * 15, address bits 16 to 23, the command and the command's complement, each
+ * byte least significant bit first.
+ */
+export function necWire(code: number): number[] {
+  const command = code & 0xff;
+  return [(code >> 8) & 0xff, (code >> 16) & 0xff, command, command ^ 0xff];
+}
+
+/** The code of four wire bytes in hexadecimal, or the reason they are not a NEC frame. */
+export function necFromWire(wire: string): number | string {
+  if (!/^[0-9a-f]{8}$/i.test(wire)) return "wire is four bytes in hexadecimal";
+  const [low, high, command, complement] = [0, 2, 4, 6].map((at) => parseInt(wire.slice(at, at + 2), 16)) as [number, number, number, number];
+  if ((command ^ complement) !== 0xff) return "the last byte is not the complement of the command";
+  return command | (low << 8) | (high << 16);
 }
 
 /** A line the page wrote that the Player lets go of: the level it drives and why. */
@@ -384,11 +405,12 @@ export class FrameDevice {
     if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > MAX_IR_CODE) return invalid("code is a whole number from 0 to 16777215 (0xFFFFFF).");
     const repeat = payload.repeat;
     if (repeat !== undefined && (typeof repeat !== "number" || !Number.isInteger(repeat) || repeat < 0 || repeat > MAX_IR_REPEAT)) return invalid("repeat is a whole number from 0 to 10.");
-    if (!this.hardware.ir.available) return refuse("ir_unavailable", 503, "The device has no infrared emitter the page may use.");
-    const sent: IrSent = { encoding: "NEC", code, repeat: repeat ?? 0, at: this.clock() };
+    if (!this.hardware.ir.emitter) return refuse("ir_unavailable", 503, "The device has no infrared emitter the page may use.");
+    const frames = Array.from({ length: (repeat ?? 0) + 1 }, () => necWire(code));
+    const sent: IrSent = { encoding: "NEC", code, repeat: repeat ?? 0, frames, at: this.clock() };
     this.irSent.push(sent);
     if (this.irSent.length > 20) this.irSent.shift();
-    this.activity({ type: "device.ir.send", detail: { encoding: sent.encoding, code, hex: `0x${code.toString(16).toUpperCase().padStart(6, "0")}`, repeat: sent.repeat } });
+    this.activity({ type: "device.ir.send", detail: { encoding: sent.encoding, code, hex: `0x${code.toString(16).toUpperCase().padStart(6, "0")}`, repeat: sent.repeat, wire: frames[0]!.map((byte) => byte.toString(16).padStart(2, "0")).join(""), frames: frames.length } });
     return ok();
   }
 
@@ -401,7 +423,8 @@ export class FrameDevice {
     if (typeof port !== "number" || !Number.isInteger(port) || (port !== 0 && !validPort(port, 1024))) return invalid("port is 0 or a whole number from 1024 to 65535.");
     if (payload.broadcast !== undefined && typeof payload.broadcast !== "boolean") return invalid("broadcast must be true or false.");
     if (payload.multicast !== undefined && !validMulticast(payload.multicast)) return invalid("multicast is an address of the form 239.x.x.x.");
-    if (port === SYNC_BEACON_PORT) return refuse("port_busy", 409, `Port ${SYNC_BEACON_PORT} is the Player's own.`);
+    if (port === 0 && payload.multicast !== undefined) return invalid("multicast needs a port to bind.");
+    if (PLAYER_UDP_PORTS.includes(port)) return refuse("port_busy", 409, `Port ${port} is the Player's own.`);
     if (port !== 0 && [...this.sockets.values()].some((open) => open.port === port)) return refuse("port_busy", 409, `This frame holds port ${port} already.`);
     if (this.sockets.size + this.opening >= MAX_UDP_SOCKETS) return refuse("socket_limit", 409, "A frame holds at most 4 UDP sockets.");
     const epoch = this.epoch;
@@ -439,8 +462,23 @@ export class FrameDevice {
     if (!binding || !socket) return refuse("invalid_handle", 404, "This frame holds no open socket with that handle.");
     const bytes = Buffer.from(payload.data_base64 as string, "base64");
     const result = await binding.send(payload.host, payload.port, bytes);
+    if (result.failed) return refuse("io_failed", 502, "The network refused the datagram.");
     this.noteDatagram({ direction: "sent", socket: socket.handle, host: payload.host, port: payload.port, bytes, delivered: result.delivered });
     return ok();
+  }
+
+  /** The operating system closed a socket on its own: it is gone. */
+  udpEnded(handle: string): void {
+    this.sockets.delete(handle);
+    this.bindings.get(handle)?.close();
+    this.bindings.delete(handle);
+    this.activity({ type: "device.udp.closed", detail: { socket: handle, reason: "error" } });
+  }
+
+  /** For the conformance fixtures: a socket the frame already holds, which may fail its sends. */
+  restoreSocket(state: UdpSocketState, failing: boolean): void {
+    this.sockets.set(state.handle, state);
+    this.bindings.set(state.handle, { port: state.port, send: async () => (failing ? { delivered: false, failed: true } : { delivered: false }), close: () => undefined });
   }
 
   udpClose(payload: Record<string, unknown>): Outcome {

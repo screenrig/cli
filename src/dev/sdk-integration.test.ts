@@ -114,7 +114,7 @@ test("the pinned runtime handshakes with the harness, reads its context and repo
     assert.match(context.application_id, /^app_dev_/);
     same([context.viewport.width, context.viewport.height], [1920, 1080]);
     assert.equal(context.player_origin, "http://play.screenrig.localhost:18890");
-    assert.ok(Object.values(sdk.capabilities).every((granted) => granted === true) && Object.keys(sdk.capabilities).length === 17);
+    assert.ok(Object.values(sdk.capabilities).every((granted) => granted === true) && Object.keys(sdk.capabilities).length === 20);
     for (const feature of ["kv.watch", "device.serial", "device.gpio", "device.ble", "device.print", "visibility.watch", "page.timing", "page.skip"]) assert.ok(sdk.supports(feature), feature);
     same(context.params, {});
     assert.equal(context.screen, undefined);
@@ -396,5 +396,62 @@ test("launch params and the screen reach the context of the next activation, and
     close();
     await assert.rejects(command(handle, { command: "launch", timezone: "Mars/Olympus" }), /not an IANA time zone/);
     await assert.rejects(command(handle, { command: "viewport", width: 0, height: 10 }), /whole-number/);
+  } finally { await handle.close(); }
+});
+
+test("the pinned runtime drives GPIO pull and idle, infrared and UDP through the harness", async () => {
+  const { handle } = await start();
+  try {
+    const { sdk, bytes, close } = await frame(handle);
+    const { device } = sdk;
+    for (const feature of ["device.gpio.pull", "device.gpio.idle", "device.ir", "device.ir.send", "device.udp", "device.hdmi_input"]) assert.ok(sdk.supports(feature), feature);
+
+    // A pull-up reads a floating line high; a press from outside reads low; let go and it floats back up.
+    const levels: boolean[] = [];
+    device.gpio.onChange(17, (value: boolean) => levels.push(value), { pull: "up" });
+    await until(() => levels.length === 1, "the pulled line's level");
+    await trigger(handle, { device: "gpio", pin: 17, value: false });
+    await trigger(handle, { device: "gpio", pin: 17, value: null });
+    await until(() => levels.length === 3, "the press and its release");
+    same(levels, [true, false, true]);
+    same(handle.session.host.frame.state().pull, { "17": "up" });
+
+    // An output the page wrote goes to its idle level when the page leaves.
+    await device.gpio.write(27, false, { idle: true });
+    same(handle.session.host.frame.state().idle, { "27": true });
+    const left = (await trigger(handle, { page: "leaving" })) as { drives: unknown };
+    same(left.drives, [{ pin: 27, value: true }]);
+
+    // Infrared: the NEC wire bytes, and a received code.
+    await device.ir.send(0x00ff20, { repeat: 1 });
+    same(handle.session.host.frame.irSent.flatMap((sent) => sent.frames), [[255, 0, 32, 223], [255, 0, 32, 223]]);
+    const codes: unknown[] = [];
+    device.onIr((code: unknown) => codes.push(code));
+    await until(() => handle.session.host.watching.has("ir"), "the ir watch");
+    await trigger(handle, { device: "ir", wire: "ff0020df", repeat: false });
+    await until(() => codes.length === 1, "the received code");
+    same(codes[0], { encoding: "NEC", code: 0x00ff20, repeat: false });
+
+    // UDP: send-only and bound sockets, datagrams in and out, and the OS closing a socket.
+    const sender = await device.udp.open();
+    await sender.send("192.168.1.50", 7000, "PING");
+    await sender.send("projector.local", 7000, bytes([1, 2, 3]));
+    same(handle.session.host.frame.state().datagrams.map((item) => [item.direction, item.host, item.bytes]), [["sent", "192.168.1.50", 4], ["sent", "projector.local", 3]]);
+    assert.equal(await rejection(sender.send("example.com", 7000, "x")), "invalid_request");
+    const bound = await device.udp.open(47001);
+    const heard: Array<{ fromHost: string; data: number[] }> = [];
+    bound.onMessage((message: { fromHost: string; data: Uint8Array }) => heard.push({ fromHost: message.fromHost, data: [...message.data] }));
+    await until(() => handle.session.host.watching.has("udp"), "the udp watch");
+    await command(handle, { command: "udp-inject", socket: handle.session.host.frame.state().sockets.find((socket) => socket.port === 47001)!.handle, text: "hi", host: "192.168.1.20", port: 4000 });
+    await until(() => heard.length === 1, "the datagram");
+    same(heard[0], { fromHost: "192.168.1.20", data: [104, 105] });
+    const reasons: string[] = [];
+    bound.onClose((reason: string) => reasons.push(reason));
+    await trigger(handle, { device: "udp", socket: "$opened", closed: true });
+    await until(() => reasons.length === 1, "the socket closing");
+    same(reasons, ["error"]);
+    assert.equal(await rejection(bound.send("192.168.1.1", 7000, "x")), "invalid_handle");
+    for (const port of [49817, 49818]) assert.equal(await rejection(device.udp.open(port)), "port_busy");
+    close();
   } finally { await handle.close(); }
 });

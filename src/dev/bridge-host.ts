@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
-  BASELINE_FEATURES, DEVICE_CHUNK_BYTES, ID_RE, KIND_RE, MAX_IR_CODE, MAX_MESSAGE_BYTES, MAX_UDP_BYTES, PARENT_HANDSHAKE_PROTOCOL, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
+  BASELINE_FEATURES, DEVICE_CHUNK_BYTES, advertises, ID_RE, KIND_RE, MAX_IR_CODE, MAX_MESSAGE_BYTES, MAX_UDP_BYTES, PARENT_HANDSHAKE_PROTOCOL, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
   featureOf, isRecord, type BridgeMessage, type Capabilities, type CapabilityName, type Posted, type Size,
 } from "./bridge-protocol.js";
 import { FrameDevice, type DeviceActivity, type Outcome } from "./hardware-requests.js";
 import { base64Length, unknownMembers, type Hardware } from "./hardware.js";
 import { SimulatedUdp, type UdpTransport } from "./udp.js";
+import { necFromWire } from "./hardware-requests.js";
 import { validKvKey, type KvResult, type KvStore } from "./kv.js";
 
 /** One thing the application or the device did that the harness shows and the terminal prints. */
@@ -70,8 +71,9 @@ export type Trigger =
   /** `value` null lets go of a line the outside was driving (a button released): it floats to its bias again. */
   | { device: "gpio"; pin: number; value: boolean | null }
   | { device: "ble"; subscription: string; value_base64: string }
-  | { device: "ir"; code: number; repeat?: boolean; encoding?: string }
-  | { device: "udp"; socket: string; from_host: string; from_port: number; data_base64: string }
+  /** A received NEC frame: the `code`, or the four bytes as they travel (`wire`, hex: address bits 8-15, address bits 16-23, command, command complement). */
+  | { device: "ir"; code?: number; wire?: string; repeat?: boolean; encoding?: string }
+  | { device: "udp"; socket: string; from_host?: string; from_port?: number; data_base64?: string; closed?: boolean; reason?: string }
   | { page: "display"; on: boolean }
   | { page: "pause"; paused: boolean }
   | { page: "leaving" }
@@ -168,6 +170,7 @@ export class BridgeHost {
   private limits: Limits = { codes: new Map() };
   private sequence = 0;
   private lastOpened: string | undefined;
+  private lastUdp: string | undefined;
   private unsubscribeKv: (() => void) | undefined;
   readonly frame: FrameDevice;
   onPageEnd: ((end: PageEnd, detail?: string) => void) | undefined;
@@ -292,9 +295,8 @@ export class BridgeHost {
 
   supports(kind: string): boolean {
     const feature = featureOf(kind);
-    const advertised = this.options.features === null ? BASELINE_FEATURES : this.options.features;
-    // A host that receives infrared advertises device.ir; one that only sends advertises device.ir.send.
-    return advertised.includes(feature) || (feature === "device.ir.send" && advertised.includes("device.ir"));
+    // A host that receives and sends infrared advertises device.ir, which implies device.ir.send; one that only sends advertises device.ir.send.
+    return advertises(this.options.features === null ? BASELINE_FEATURES : this.options.features, feature);
   }
 
   // Inbound messages.
@@ -393,7 +395,7 @@ export class BridgeHost {
     "device.gpio.write": { capability: "device.gpio", run: this.gpioWrite },
     "device.gpio.watch": { capability: "device.gpio", run: this.gpioWatch },
     "device.ir.send": { capability: "device.ir", run: (payload) => this.frame.irSend(payload) },
-    "device.udp.open": { capability: "device.udp", run: (payload) => this.frame.udpOpen(payload) },
+    "device.udp.open": { capability: "device.udp", run: async (payload) => { const outcome = await this.frame.udpOpen(payload); if (outcome.ok) this.lastUdp = (outcome.result as { socket: string }).socket; return outcome; } },
     "device.udp.send": { capability: "device.udp", run: (payload) => this.frame.udpSend(payload) },
     "device.udp.close": { capability: "device.udp", run: (payload) => this.frame.udpClose(payload) },
     "device.ble.read": { capability: "device.ble", run: (payload) => this.frame.bleRead(payload) },
@@ -726,8 +728,8 @@ export class BridgeHost {
       case "serial": return this.serial(trigger);
       case "gpio": return this.gpio(trigger.pin, trigger.value);
       case "ble": return this.ble(trigger.subscription, trigger.value_base64);
-      case "ir": return this.ir(trigger.code, trigger.repeat === true, trigger.encoding ?? "NEC");
-      case "udp": return this.udpReceived(trigger.socket, trigger.from_host, trigger.from_port, trigger.data_base64);
+      case "ir": return this.ir(trigger);
+      case "udp": return this.udp(trigger);
     }
   }
 
@@ -850,23 +852,42 @@ export class BridgeHost {
     return { posted: true };
   }
 
-  private ir(code: number, repeat: boolean, encoding: string): TriggerResult {
+  private ir(trigger: Extract<Trigger, { device: "ir" }>): TriggerResult {
+    const repeat = trigger.repeat === true;
     if (!this.watching.has("ir")) return { posted: false, dropped: "the frame does not watch ir" };
-    if (!this.options.hardware.ir.available) return { posted: false, dropped: "the device has no infrared receiver" };
-    if (encoding !== "NEC") return { posted: false, dropped: "encoding is NEC" };
-    if (!Number.isInteger(code) || code < 0 || code > MAX_IR_CODE) return { posted: false, dropped: "code is a whole number from 0 to 16777215" };
+    if (!this.options.hardware.ir.receiver) return { posted: false, dropped: "the device has no infrared receiver" };
+    if ((trigger.encoding ?? "NEC") !== "NEC") return { posted: false, dropped: "encoding is NEC" };
+    let code = trigger.code;
+    if (trigger.wire !== undefined) {
+      const decoded = necFromWire(trigger.wire);
+      if (typeof decoded === "string") return { posted: false, dropped: decoded };
+      code = decoded;
+    }
+    if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > MAX_IR_CODE) return { posted: false, dropped: "code is a whole number from 0 to 16777215" };
     this.options.log({ type: "device.ir.receive", level: "debug", detail: { code, repeat } });
     this.deviceEvent({ type: "ir", encoding: "NEC", code, repeat });
     return { posted: true };
   }
 
-  private udpReceived(handle: string, fromHost: string, fromPort: number, dataBase64: string): TriggerResult {
-    if (!this.frame.sockets.has(handle)) return { posted: false, dropped: "the frame holds no such socket" };
-    const length = base64Length(dataBase64);
+  private udp(trigger: Extract<Trigger, { device: "udp" }>): TriggerResult {
+    const handle = trigger.socket === "$opened" ? this.lastUdp : trigger.socket;
+    const socket = handle === undefined ? undefined : this.frame.sockets.get(handle);
+    if (handle === undefined || !socket) return { posted: false, dropped: "the frame holds no such socket" };
+    if (trigger.closed === true) {
+      // The operating system closed the socket: a frame that watches udp is told once, and the socket is gone.
+      this.frame.udpEnded(handle);
+      if (!this.watching.has("udp")) return { posted: false, dropped: "the frame does not watch udp" };
+      this.deviceEvent({ type: "udp", socket: handle, closed: true, reason: "error" });
+      return { posted: true };
+    }
+    if (socket.port === 0) return { posted: false, dropped: "a send-only socket (port 0) receives nothing" };
+    const length = base64Length(trigger.data_base64);
     if (length === undefined || length < 1 || length > MAX_UDP_BYTES) return { posted: false, dropped: "a datagram is 1 to 8192 bytes of base64" };
-    this.frame.noteHeard(handle, fromHost, fromPort, Buffer.from(dataBase64, "base64"));
+    const fromHost = trigger.from_host ?? "127.0.0.1";
+    const fromPort = trigger.from_port ?? 40000;
+    this.frame.noteHeard(handle, fromHost, fromPort, Buffer.from(trigger.data_base64!, "base64"));
     if (!this.watching.has("udp")) return { posted: false, dropped: "the frame does not watch udp" };
-    this.deviceEvent({ type: "udp", socket: handle, from_host: fromHost, from_port: fromPort, data_base64: dataBase64 });
+    this.deviceEvent({ type: "udp", socket: handle, from_host: fromHost, from_port: fromPort, data_base64: trigger.data_base64 });
     return { posted: true };
   }
 

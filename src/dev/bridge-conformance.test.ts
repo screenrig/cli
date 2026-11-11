@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { DEVICE_SOURCES, FEATURE_NAMES, allCapabilities, isRecord, type BridgeMessage, type Capabilities, type Posted } from "./bridge-protocol.js";
+import { DEVICE_SOURCES, FEATURE_NAMES, advertises, allCapabilities, isRecord, type BridgeMessage, type Capabilities, type Posted } from "./bridge-protocol.js";
 import { BridgeHost, contextMembers, type EventSink, type HostEvent, type Trigger, type TriggerResult } from "./bridge-host.js";
 import { HANDLE, defaultHardware, type Hardware } from "./hardware.js";
+import { SimulatedUdp } from "./udp.js";
 import { type KvDelete, type KvEntry, type KvResult, type KvStore, type KvSummary, type KvWrite } from "./kv.js";
 
 // The host half of the SDK bridge conformance corpora (contract section 10):
@@ -38,6 +39,8 @@ interface Fixture {
   expect: {
     reply?: Json | null; hostChosen?: string[]; backendRequests?: string; context?: Json | null;
     deliveries?: Array<{ trigger: Json; message: Json | null; consumed?: boolean; drives?: Array<{ pin: number; value: boolean }> }>;
+    /** The frames a send hands to the infrared emitter. */
+    emits?: number[][];
   };
 }
 
@@ -46,6 +49,8 @@ interface FixtureHardware {
   serial: { ports: Hardware["serial"]["ports"]; open: Array<{ handle: string; port: string; failing?: boolean }> };
   gpio: { pins: Hardware["gpio"]["pins"]; watched: number[]; pull?: Record<string, "up" | "down" | "none">; chip?: boolean };
   ble: { adapter: boolean; peripherals: Hardware["ble"]["peripherals"]; subscriptions: Array<{ subscription: string; service: string; characteristic: string }> };
+  ir?: Hardware["ir"];
+  udp?: { open: Array<{ socket: string; port: number; failing?: boolean }>; busy: number[] };
   printers: Hardware["printers"];
 }
 
@@ -71,7 +76,7 @@ function applicable(entry: IndexEntry, fixture: Fixture): boolean {
   const requires = entry.requires ?? fixture.requires ?? [];
   const sources = entry.requiresSources ?? fixture.requiresSources ?? [];
   const runs = entry.runs ?? fixture.runs ?? ["host", "sdk"];
-  return runs.includes("host") && requires.every((feature) => ALL_FEATURES.includes(feature)) && sources.every((source) => DEVICE_SOURCES.includes(source));
+  return runs.includes("host") && requires.every((feature) => advertises(ALL_FEATURES, feature)) && sources.every((source) => DEVICE_SOURCES.includes(source));
 }
 
 /** A fixture's own backend response, as the store or the report sink answers it. */
@@ -142,7 +147,7 @@ function hardwareOf(fixture: Fixture): Hardware {
     camera: { available: given.camera.available, formats: given.camera.formats },
     serial: { ports: given.serial.ports },
     gpio: { pins: given.gpio.pins, chip: given.gpio.chip !== false },
-    ir: { available: true },
+    ir: given.ir ?? { emitter: true, receiver: true },
     ble: { adapter: given.ble.adapter, peripherals: given.ble.peripherals },
     printers: given.printers,
   };
@@ -158,7 +163,7 @@ function build(fixture: Fixture): { host: BridgeHost; posted: Posted[]; logs: Ho
     applicationId: fixture.host.applicationId ?? "app_bridge", releaseId: fixture.host.releaseId ?? "rel_bridge", primitiveId: fixture.host.primitiveId,
     playerOrigin: "http://play.screenrig.localhost:18890", appOrigin: "http://r-0000000000000000000000000000000000000000.apps.screenrig.localhost:18890",
     capabilities, features: fixture.host.features ?? [...ALL_FEATURES], viewport: { width: 1920, height: 1080 },
-    hardware: hardwareOf(fixture), kv: backend, events: backend, clock: () => clock.now,
+    hardware: hardwareOf(fixture), udp: new SimulatedUdp(fixture.host.hardware?.udp?.busy ?? []), kv: backend, events: backend, clock: () => clock.now,
     post: (message) => { posted.push(message); }, log: (event) => { logs.push(event); },
   });
   host.activateAs(fixture.host.generation, fixture.host.nonce);
@@ -175,6 +180,7 @@ function build(fixture: Fixture): { host: BridgeHost; posted: Posted[]; logs: Ho
     host.frame.watchedPins = [...given.gpio.watched];
     for (const [pin, pull] of Object.entries(given.gpio.pull ?? {})) host.frame.pulls.set(Number(pin), pull);
     for (const subscription of given.ble.subscriptions) host.frame.subscriptions.set(subscription.subscription, { ...subscription });
+    for (const open of given.udp?.open ?? []) host.frame.restoreSocket({ handle: open.socket, port: open.port, broadcast: false }, open.failing === true);
   }
   if (fixture.host.page) host.restorePage(fixture.host.page);
   return { host, posted, logs, backend, clock };
@@ -200,7 +206,7 @@ function assertSame(actual: unknown, expected: Json | null, chosen: string[], la
     if (!a || !e || !(a.key in a.parent)) continue;
     const value = a.parent[a.key];
     if (path === "/message_id") assert.equal(typeof value, "string", `${label}: ${path}`);
-    else if (path.endsWith("/handle") || path.endsWith("/subscription")) assert.match(String(value), HANDLE, `${label}: ${path}`);
+    else if (path.endsWith("/handle") || path.endsWith("/subscription") || path.endsWith("/socket")) assert.match(String(value), HANDLE, `${label}: ${path}`);
     else assert.equal(typeof value, typeof e.parent[e.key], `${label}: ${path}`);
     a.parent[a.key] = null;
     e.parent[e.key] = null;
@@ -224,6 +230,7 @@ async function runFixture(fixture: Fixture): Promise<void> {
       assert.equal(replies.length, 1, `${fixture.name}: expected one reply`);
       assertSame(replies[0], expected, chosen, `${fixture.name}: reply`);
     }
+    if (fixture.expect.emits !== undefined) assert.deepEqual(host.frame.irSent.flatMap((sent) => sent.frames), fixture.expect.emits, `${fixture.name}: the frames handed to the emitter`);
     const expectedBackend = fixture.expect.backendRequests;
     if (expectedBackend === "one") assert.equal(backend.requests, 1, `${fixture.name}: backend requests`);
     else if (expectedBackend === "none") assert.equal(backend.requests, 0, `${fixture.name}: backend requests`);

@@ -56,7 +56,7 @@ Player plays it, so applications are tried before upload.
   floating; the page's written lines are driven to their `idle` level on leaving, a new context and destroy.
   UDP sockets bind through `LoopbackUdp` (127.0.0.1 only; a datagram for any other host is recorded, never sent) and
   tests use `SimulatedUdp`. `device.hdmi_input` is a frame `allow="camera; microphone"`, set when the frame loads, so a
-  change of that capability restarts the activation; there is no bridge message.
+  change of that capability restarts the activation; there is no bridge message. The runtime picks the input whose label says HDMI, else the only video input.
 - The page (`src/dev/page.ts`) is plain script and style in raw strings, without a backtick or a
   dollar-brace and with no remote URL; `server.test.ts` checks both.
 

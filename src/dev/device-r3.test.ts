@@ -130,14 +130,15 @@ test("device.ir.send validates and logs the code; a received code reaches an app
     assert.equal(problem(await h.send("device.ir.send", { encoding: "NEC", code: 1, repeat: 11 })), "invalid_request");
     assert.equal(problem(await h.send("device.ir.send", { encoding: "NEC", code: 1, extra: 1 })), "invalid_request");
     assert.equal((await h.send("device.ir.send", { encoding: "NEC", code: 0xffffff })).kind, "response.ack");
-    assert.deepEqual(h.session.host.frame.irSent.map((sent) => [sent.code, sent.repeat]), [[0x20df10, 2], [0xffffff, 0]]);
+    assert.deepEqual(h.session.host.frame.irSent.map((sent) => [sent.code, sent.repeat, sent.frames.length]), [[0x20df10, 2, 3], [0xffffff, 0, 1]]);
+    assert.deepEqual(h.session.host.frame.irSent[0]!.frames[0], [0xdf, 0x20, 0x10, 0xef], "address low byte, address high byte, command, complement");
     assert.equal((await h.trigger({ device: "ir", code: 0xabcdef })).posted, false, "an application that does not watch ir hears nothing");
     await h.watch("ir");
     assert.equal((await h.trigger({ device: "ir", code: 0xabcdef, repeat: false })).posted, true);
     assert.equal((await h.trigger({ device: "ir", code: 0xabcdef, repeat: true })).posted, true);
     assert.deepEqual(h.events("ir").map((event) => [event.payload.encoding, event.payload.code, event.payload.repeat]), [["NEC", 0xabcdef, false], ["NEC", 0xabcdef, true]]);
     // Without the capability the request is forbidden, and without an emitter it is ir_unavailable.
-    await h.session.command({ command: "hardware", change: "ir.available", value: false });
+    await h.session.command({ command: "hardware", change: "ir.emitter", value: false });
     assert.equal(problem(await h.send("device.ir.send", { encoding: "NEC", code: 1 })), "ir_unavailable");
     await h.session.command({ command: "capability", name: "device.ir", value: false });
     assert.equal(problem(await h.send("device.ir.send", { encoding: "NEC", code: 1 })), "forbidden");
@@ -162,6 +163,8 @@ test("simulated UDP sockets: limits, refusals, the log of sent datagrams and the
   const h = await harness();
   try {
     assert.equal(problem(await h.send("device.udp.open", { port: 49817 })), "port_busy");
+    assert.equal(problem(await h.send("device.udp.open", { port: 49818 })), "port_busy");
+    assert.equal(problem(await h.send("device.udp.open", { port: 0, multicast: "239.255.0.1" })), "invalid_request");
     assert.equal(problem(await h.send("device.udp.open", { port: 80 })), "invalid_request");
     assert.equal(problem(await h.send("device.udp.open", { port: 6000, multicast: "224.0.0.1" })), "invalid_request");
     const opened = await h.send("device.udp.open", { port: 6000, broadcast: true });

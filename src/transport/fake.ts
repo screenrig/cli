@@ -45,12 +45,14 @@ export interface FakeDownloadRoute {
   handler: (req: TransportRequest) => TransportDownloadResponse | Promise<TransportDownloadResponse>;
 }
 
-/** The Screen.display a ScreenPatch display leaves: a member sent replaces it, null clears it, a member left out stays, and a null display clears idle and brightness. */
+/** The Screen.display a ScreenPatch display leaves: a member sent replaces it, null clears it, a member left out stays, and a null display clears all four. */
 function patchedDisplay(current: Screen["display"], patch: ScreenPatch["display"]): NonNullable<Screen["display"]> {
-  const { idle: _idle, brightness: _brightness, ...kept } = current ?? { requested: "on" as const, source: "default" as const };
+  const { idle: _idle, brightness: _brightness, output: _output, cec: _cec, ...kept } = current ?? { requested: "on" as const, source: "default" as const };
   const idle = patch === null ? undefined : patch?.idle === undefined ? current?.idle : patch.idle ?? undefined;
   const brightness = patch === null ? undefined : patch?.brightness === undefined ? current?.brightness : patch.brightness ?? undefined;
-  return { ...kept, ...(idle ? { idle } : {}), ...(brightness ? { brightness } : {}) };
+  const output = patch === null ? undefined : patch?.output === undefined ? current?.output : patch.output ?? undefined;
+  const cec = patch === null ? undefined : patch?.cec === undefined ? current?.cec : patch.cec ?? undefined;
+  return { ...kept, ...(idle ? { idle } : {}), ...(brightness ? { brightness } : {}), ...(output ? { output } : {}), ...(cec ? { cec } : {}) };
 }
 
 function matchPath(route: string | RegExp, path: string): boolean {

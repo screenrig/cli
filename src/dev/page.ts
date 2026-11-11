@@ -441,7 +441,8 @@ const SCRIPT = String.raw`(function () {
   addPanel('ir-udp', 'IR and UDP', function () {
     var irCode = el('input', { type: 'text', value: '0x20DF10', 'aria-label': 'NEC code' });
     var irRepeat = el('input', { type: 'checkbox' });
-    var irEmitter = control('hw-ir', el('input', { type: 'checkbox', id: 'hw-ir' }));
+    var irEmitter = control('hw-ir-emitter', el('input', { type: 'checkbox', id: 'hw-ir-emitter' }));
+    var irReceiver = control('hw-ir-receiver', el('input', { type: 'checkbox', id: 'hw-ir-receiver' }));
     var udpSocket = control('udp-socket', el('select', { id: 'udp-socket', 'aria-label': 'Socket' }));
     var udpHost = el('input', { type: 'text', value: '127.0.0.1', size: 12, 'aria-label': 'Sender address' });
     var udpPort = el('input', { type: 'number', value: '40000', min: 1, max: 65535 });
@@ -457,12 +458,15 @@ const SCRIPT = String.raw`(function () {
         var code = Number(irCode.value);
         fire({ device: 'ir', code: code, repeat: irRepeat.checked }, 'ir-status');
       } })), statusLine('ir-status'),
-        el('div', { class: 'muted', text: 'A received code reaches an application that watches ir. The code is 0 to 0xFFFFFF; a repeat frame is the auto-repeat of a held button.' }),
-        el('label', { class: 'row' }, irEmitter, 'Infrared emitter and receiver present')),
+        el('div', { class: 'muted', text: 'A received code reaches an application that watches ir. The code is 0 to 0xFFFFFF: the command in bits 0 to 7 and the address in bits 8 to 23. A repeat frame is the auto-repeat of a held button. A send of repeat n hands the emitter n + 1 frames.' }),
+        el('div', { class: 'row' }, el('label', {}, irEmitter, 'Infrared emitter (send)'), el('label', {}, irReceiver, 'Infrared receiver (receive)'))),
       group('Codes the application sent', el('div', { class: 'list', id: 'ir-sent' })),
       group('UDP sockets', el('div', { class: 'mono', id: 'udp-where' }), el('div', { class: 'list', id: 'udp-sockets' })),
       group('Send a datagram to a socket', el('div', { class: 'row' }, udpSocket), el('div', { class: 'row' }, field('From', udpHost), udpPort),
-        el('div', { class: 'row' }, udpData, el('label', {}, udpHex, 'hex'), el('button', { type: 'button', text: 'Send', onclick: injectUdp })), statusLine('udp-status')),
+        el('div', { class: 'row' }, udpData, el('label', {}, udpHex, 'hex'), el('button', { type: 'button', text: 'Send', onclick: injectUdp }),
+          el('button', { type: 'button', text: 'Close socket (network fault)', title: 'The operating system closes the socket: the application hears closed with reason error', onclick: function () {
+            if (udpSocket.value) fire({ device: 'udp', socket: udpSocket.value, closed: true }, 'udp-status');
+          } })), statusLine('udp-status')),
       group('Datagrams', el('div', { class: 'list', id: 'udp-log' }), el('div', { class: 'muted', text: 'A datagram the application sends to a loopback address reaches the socket bound there; one sent anywhere else is recorded here and never transmitted.' })),
     ];
   });
@@ -544,7 +548,8 @@ const SCRIPT = String.raw`(function () {
     wire('hw-camera', hardware.camera.available, function (v) { command({ command: 'hardware', change: 'camera.available', value: v }); });
     wire('hw-ble', hardware.ble.adapter, function (v) { command({ command: 'hardware', change: 'ble.adapter', value: v }); });
     wire('hw-gpio', hardware.gpio.chip, function (v) { command({ command: 'hardware', change: 'gpio.chip', value: v }); });
-    wire('hw-ir', hardware.ir.available, function (v) { command({ command: 'hardware', change: 'ir.available', value: v }); });
+    wire('hw-ir-emitter', hardware.ir.emitter, function (v) { command({ command: 'hardware', change: 'ir.emitter', value: v }); });
+    wire('hw-ir-receiver', hardware.ir.receiver, function (v) { command({ command: 'hardware', change: 'ir.receiver', value: v }); });
     $('hdmi').textContent = 'device.hdmi_input ' + (host.capabilities['device.hdmi_input'] ? 'granted: the frame allows camera and microphone' : 'not granted: the frame has no camera or microphone') + '\nframe allow: ' + state.frame_allow;
     $('hdmi').style.whiteSpace = 'pre-wrap';
     $('scanner').textContent = 'scanner ' + (host.frame.scanning ? 'running' : 'stopped') + '   camera reads: ' + hardware.camera.formats.join(', ');
@@ -648,7 +653,7 @@ const SCRIPT = String.raw`(function () {
     var sent = $('ir-sent');
     sent.textContent = '';
     frameState.ir_sent.slice().reverse().forEach(function (item) {
-      sent.appendChild(el('div', { class: 'item' }, el('span', { class: 'mono', text: item.encoding + ' ' + hex(item.code) + (item.repeat ? ', repeat ' + item.repeat : '') })));
+      sent.appendChild(el('div', { class: 'item' }, el('span', { class: 'mono', text: item.encoding + ' ' + hex(item.code) + (item.repeat ? ', sent ' + (item.repeat + 1) + ' times' : '') + '  wire ' + item.frames[0].map(function (b) { return ('0' + b.toString(16)).slice(-2); }).join('') })));
     });
     if (!frameState.ir_sent.length) sent.appendChild(el('div', { class: 'muted', text: 'None yet.' }));
     $('udp-where').textContent = frameState.udp_transport === 'loopback' ? 'Sockets bind on 127.0.0.1 only: a tool on this machine can send them datagrams.' : 'Sockets are simulated: nothing is bound.';

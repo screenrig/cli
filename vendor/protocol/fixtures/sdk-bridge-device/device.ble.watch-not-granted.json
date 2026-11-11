@@ -35,7 +35,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": false,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -59,7 +62,11 @@
       "device.ble",
       "device.print",
       "device.gpio.pull",
-      "device.gpio.idle"
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -164,7 +171,17 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {

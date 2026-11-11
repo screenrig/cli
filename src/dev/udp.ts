@@ -19,7 +19,7 @@ export interface UdpBound {
   /** The port the socket holds: the one asked for, or the one the system chose for port 0. */
   readonly port: number;
   /** Sends one datagram; `delivered` says whether it left (loopback) or was only recorded. */
-  send(host: string, port: number, data: Buffer): Promise<{ delivered: boolean }>;
+  send(host: string, port: number, data: Buffer): Promise<{ delivered: boolean; failed?: boolean }>;
   close(): void;
 }
 
@@ -73,7 +73,7 @@ export class LoopbackUdp implements UdpTransport {
             port: socket.address().port,
             send: (host, port, data) => new Promise((done) => {
               if (!isLoopbackHost(host)) { done({ delivered: false }); return; }
-              socket.send(data, port, "127.0.0.1", (error) => done({ delivered: error === null }));
+              socket.send(data, port, "127.0.0.1", (error) => done(error === null ? { delivered: true } : { delivered: false, failed: true }));
             }),
             close: () => { try { socket.close(); } catch { /* already closed */ } },
           },

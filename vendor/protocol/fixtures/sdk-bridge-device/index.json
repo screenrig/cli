@@ -26,7 +26,11 @@
     "device.ble",
     "device.print",
     "device.gpio.pull",
-    "device.gpio.idle"
+    "device.gpio.idle",
+    "device.ir",
+    "device.ir.send",
+    "device.udp",
+    "device.hdmi_input"
   ],
   "deviceSources": [
     "display",
@@ -38,6 +42,11 @@
     "scan.nfc",
     "scan.camera"
   ],
+  "impliedFeatures": {
+    "device.ir": [
+      "device.ir.send"
+    ]
+  },
   "files": [
     {
       "path": "device.ble.read-characteristic-not-found.json",
@@ -46,8 +55,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4668,
-      "sha256": "a22b9835f7ef9495a02e43c41c13e628efbc1bb8a4baf84d04e89203c906ea7f"
+      "bytes": 5002,
+      "sha256": "5b59eea4264f780b0d9e93f8920c2fc391f70c10644d30dcc1720f66d99ec4f3"
     },
     {
       "path": "device.ble.read-device-not-found.json",
@@ -56,8 +65,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4727,
-      "sha256": "0d8db9fb3e5037cd0afa539607212d767aedcab0969d0629b591042f4591f7cf"
+      "bytes": 5061,
+      "sha256": "bb29ec2048facd1d718040191ac1d6eec74ad5da700a7c81162e1b22a02ce624"
     },
     {
       "path": "device.ble.read-malformed.json",
@@ -66,8 +75,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4668,
-      "sha256": "1105d631d800e8659734101d9466c4c454db949af4b34c390dabaa6642130ea9"
+      "bytes": 5002,
+      "sha256": "e4f501ca5f7a5aad72e0cbd10394d44c8b30233a79d070cd4ecaeddc3a16ec0e"
     },
     {
       "path": "device.ble.read-not-granted.json",
@@ -76,8 +85,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4660,
-      "sha256": "5b2a3ce11315b7900940f9c99824fbecaf4d64ee8e4110b8067a467d759582d3"
+      "bytes": 4994,
+      "sha256": "9f5a397c57e2677f08ff6174c424a128aa7276418c164c82d836db79ff7b8c5f"
     },
     {
       "path": "device.ble.read-unavailable.json",
@@ -86,8 +95,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4653,
-      "sha256": "077f265e36e51852e1b926f4e16ac3552be9fdb3f12fbe1852de30c0b22b1cb0"
+      "bytes": 4987,
+      "sha256": "423a9d44c4d6ebc4c869b94e8151088f2ea55e6fd8c4b9e6174e337ca4e8a309"
     },
     {
       "path": "device.ble.read-unknown-member.json",
@@ -96,8 +105,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4663,
-      "sha256": "15e3bb7ca3564b90f6c9506ce25794a7614e540fb69c39db668d52a919e4484a"
+      "bytes": 4997,
+      "sha256": "c3901f5ecba7ede732009870c4ecc38453c010a2e50f6b493174941d0fe3c7d3"
     },
     {
       "path": "device.ble.read.json",
@@ -106,8 +115,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 5074,
-      "sha256": "2b820bcda388dc409f9f982afa6e6d83ea942a9d0bbe77d9878459ddb9a8a385"
+      "bytes": 5408,
+      "sha256": "0643f2832ad0aa6bd7c2b5f4314ff01fb09a5a39208922dc53fb73cbf0d4c4b1"
     },
     {
       "path": "device.ble.unwatch-not-granted.json",
@@ -116,8 +125,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4783,
-      "sha256": "60d2019d0fbfbde1eb375cbe42dae6c07730503deefb7537d4603443097278fd"
+      "bytes": 5117,
+      "sha256": "4e87f14d5e9d51cc168745973d22336c2a2addcd271bd8592c96cd24b98dfbe1"
     },
     {
       "path": "device.ble.unwatch-unknown-subscription.json",
@@ -126,8 +135,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4561,
-      "sha256": "a5c1e2e2ce345300d06e4dfd93a3c346cae45a8e90046c093bbdf75f2a0787b0"
+      "bytes": 4895,
+      "sha256": "1824d60fc1c1fc2f75fdca31e5583642c24e311fefdb87d932b8447da9edee87"
     },
     {
       "path": "device.ble.unwatch.json",
@@ -136,8 +145,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4533,
-      "sha256": "aa4da7ae85ea9b18f4e9f8e584f5cbb6dd7fe21b26903e983436c96acd10b1fe"
+      "bytes": 4867,
+      "sha256": "3b99918b37b2a628158543fa2f760830cc14f22c98974527adfa3eb55d0ef559"
     },
     {
       "path": "device.ble.watch-device-not-found.json",
@@ -146,8 +155,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4703,
-      "sha256": "66fdbefc7e476b752e32857769fc745c00a33765c1e06dc58d2a72ce68c501f4"
+      "bytes": 5037,
+      "sha256": "e783b3f8ba0fadc232b6e36c73de188415db6c3d4a46af0ad25c6aae5f542dd6"
     },
     {
       "path": "device.ble.watch-limit.json",
@@ -156,8 +165,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 5752,
-      "sha256": "8f22390cf23087c626762eb67694715298d4e4fa44d4aacd1ad2f30eb5eee16f"
+      "bytes": 6086,
+      "sha256": "3ccfe7ea416e10d4c28863dfbd5a2a90fb094b9f80eb4f54d561663f3bba2b07"
     },
     {
       "path": "device.ble.watch-malformed.json",
@@ -166,8 +175,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4642,
-      "sha256": "3ef2139d53c72ba696ff36ae14027919f0a60c5b0b6ebe7d77ad099a501a1e93"
+      "bytes": 4976,
+      "sha256": "4aa2ea116714e1688ace80fc9af02bb5b73904080ede921b61a7e74ea5ef7696"
     },
     {
       "path": "device.ble.watch-not-granted.json",
@@ -176,8 +185,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4656,
-      "sha256": "7d8f0c087c2889692499b14275627a2c913d112597859c2fb7a2a13ec983a4b2"
+      "bytes": 4990,
+      "sha256": "fb45552612992599c14f53029172f2380c8e8ec7390e1edddefb11e0a8f7d0ee"
     },
     {
       "path": "device.ble.watch-not-watched.json",
@@ -186,8 +195,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4653,
-      "sha256": "53bad597c118f6c04b54b65035e2386eda5fb125d0089b86b3b374181691a636"
+      "bytes": 4987,
+      "sha256": "6946f2c58f79769c6ae09bab49cf3ef6129dabbe2139f34b66f4ec4df95114f8"
     },
     {
       "path": "device.ble.watch.json",
@@ -196,8 +205,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 5045,
-      "sha256": "e221af99c7d483c18054c8a0937daf58854f7d3d0ffba07e361715826512fb95"
+      "bytes": 5379,
+      "sha256": "370b67f46389db98c61bf3b73487845b17b475ddd69e8eb807d8a9fbb3fd3731"
     },
     {
       "path": "device.display-held-dark.json",
@@ -206,8 +215,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3172,
-      "sha256": "0290ae9b09ea4e2ca8d1cb2f81a4a512e1da3de0e36fd28370a82be0ecbfdef8"
+      "bytes": 3484,
+      "sha256": "f68950eba114b7f918c1e9e1ea11eefbc92b7c4f771e54f718881154bf638699"
     },
     {
       "path": "device.display-malformed.json",
@@ -216,8 +225,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3142,
-      "sha256": "c6abdf34ddd4e390499009fc5ad639e7a50fd0114fc10ffd235f6be63d705ef6"
+      "bytes": 3454,
+      "sha256": "92e9d805287b691eed04988b0f26e72928a25a462f84c73e7d1e31ba1471d649"
     },
     {
       "path": "device.display-not-granted.json",
@@ -226,8 +235,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3140,
-      "sha256": "8500c32be6b935815489366c60c5ca9aca6b12ceecf80f48bf5d4b4c5a15dea8"
+      "bytes": 3452,
+      "sha256": "6d0eca05ed4a0a7da276394a7482c130da13b2827af97207d6e081d8c571a84b"
     },
     {
       "path": "device.display-out-of-range.json",
@@ -236,8 +245,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3041,
-      "sha256": "e04e56395a45c8c3775039e99f466d8ca501b986a41d2dbc39b52c8b894d42a5"
+      "bytes": 3353,
+      "sha256": "b8a006b3464b455877b97eac1215602fea83623be97597e9cfee21757f927488"
     },
     {
       "path": "device.display-read-unreported.json",
@@ -246,8 +255,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3010,
-      "sha256": "917fb9633dc3034a563afdefd5a5f17775f071bc213a3f7cf93811cf39a30acd"
+      "bytes": 3322,
+      "sha256": "c74b9123dcedd60fad1560f07eabc8a540db56ed616c77afc45f20f6ffec1954"
     },
     {
       "path": "device.display-read.json",
@@ -256,8 +265,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 2985,
-      "sha256": "93f1d32030a3ad9ca3f56ca86dbb42d9f0cba3379744d3a3e51e9dcce750155f"
+      "bytes": 3297,
+      "sha256": "7783db3334cfb4b8744ea95d1371b83201c25bdbcc0c93db847cefe9156fd160"
     },
     {
       "path": "device.display-set-partial.json",
@@ -266,8 +275,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3082,
-      "sha256": "813de2394ac64d9db355198432f610cd9ea10e9eb743231b2933f1f6bcb704a9"
+      "bytes": 3394,
+      "sha256": "360ea8a1bbecd0461269da2a2702ee4ac75e0a20d962a8ecfe2d7fbb14e143a7"
     },
     {
       "path": "device.display-set.json",
@@ -276,8 +285,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3254,
-      "sha256": "ce384389a4a4335141bfce5410dc827c9fe5553ad18b03923397a10269361ae2"
+      "bytes": 3566,
+      "sha256": "ce994726646095899a9b40ce7cce4abccf2614602c2d4def95c3c43dae5a894d"
     },
     {
       "path": "device.display-unknown-member.json",
@@ -286,8 +295,8 @@
         "device.display"
       ],
       "requiresSources": [],
-      "bytes": 3105,
-      "sha256": "cf681dbbc4814e721523d2be1e20680898a26d87a75f1b5b2a9157bf6774f6eb"
+      "bytes": 3417,
+      "sha256": "90f48e6b4be8ed4a48678424a00b6cc4ee74694d02835702a3f6da0fb017587d"
     },
     {
       "path": "device.gpio.release-context.json",
@@ -297,8 +306,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4809,
-      "sha256": "94c5bd98af69034ce82462de05c0bd21564af469e948c4225623c3c4bf340409"
+      "bytes": 5143,
+      "sha256": "47c6678ff468a13ba79021320e14f006a2975e6962b37f19dc922a047d97334b"
     },
     {
       "path": "device.gpio.release-default.json",
@@ -308,8 +317,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4702,
-      "sha256": "4c2d9f617ca7423fc48d5bc90adb5d43ad09490da882a417ef78576907168bfd"
+      "bytes": 5036,
+      "sha256": "ab5621a18011532e96ac3ecfc4836ff208db01507336107c3d8653c4c6880fde"
     },
     {
       "path": "device.gpio.release-latest.json",
@@ -319,8 +328,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 5455,
-      "sha256": "7a75ce879abd9a108be6cd6c17d322efccd18b1b677efad9568004884c1b457d"
+      "bytes": 5789,
+      "sha256": "2e8cf37e961c1e619e82811dce8c6d1f37cabc2aeee614398df59f6b5afcf5ae"
     },
     {
       "path": "device.gpio.release.json",
@@ -330,8 +339,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4871,
-      "sha256": "7c0c3b2a5a99a8f396c6af96f8d7a57a1375af7dee3805c3c8027b0de6d66b5b"
+      "bytes": 5205,
+      "sha256": "553101261d6d998e557ab7c1b7fc68ac0895a10bea556a95839c958b65c5f92f"
     },
     {
       "path": "device.gpio.watch-clear.json",
@@ -340,8 +349,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4592,
-      "sha256": "98719149855c27511f1151376a1f521f2f5632620d41cf924f53746bf571edd4"
+      "bytes": 4926,
+      "sha256": "b5d5c4b4fd598fb0512b01780434423c61ad6ef0d7dce6029a08f7fe4b7e9522"
     },
     {
       "path": "device.gpio.watch-malformed.json",
@@ -350,8 +359,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4705,
-      "sha256": "c36c26d65d3529f4da9c195a598c971394c41ef0239aac3e7c3cc33f2674731a"
+      "bytes": 5039,
+      "sha256": "752115444c791584bbf4e18f728bd0372ce2644e5108f3614f02f8b4c4785606"
     },
     {
       "path": "device.gpio.watch-not-granted.json",
@@ -360,8 +369,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4644,
-      "sha256": "9e05bfbd24e26c13f9c1d95d46c2e03b498fe6992e4a5afd380ee207dcd38210"
+      "bytes": 4978,
+      "sha256": "5afe7936faa44cde483dfa7ed785173e201552e7684eb6a466d36ba7f32fd6dc"
     },
     {
       "path": "device.gpio.watch-not-watched.json",
@@ -370,8 +379,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4665,
-      "sha256": "0816120cd387a09ef1d04fea552b78af0b23a3e623760b01a55f7f72028bad0f"
+      "bytes": 4999,
+      "sha256": "a421051f6d9fd8961676ad514df847822b804beb34f3b97a789882808cc98044"
     },
     {
       "path": "device.gpio.watch-pin-not-found.json",
@@ -380,8 +389,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4654,
-      "sha256": "1e4be71f19c29db1c80dbf5dd5e11e449eb5e9f8d53a7467838274e97379db27"
+      "bytes": 4988,
+      "sha256": "81bcc02850350ca26e9b6c421d52bc91a79eaa703c3d2d614454c36edd870347"
     },
     {
       "path": "device.gpio.watch-pull-change.json",
@@ -391,8 +400,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 5221,
-      "sha256": "b0a809c5f4cb88eaca0674cecf80349928997ad44351acc6572e3c4b9c853f38"
+      "bytes": 5555,
+      "sha256": "694d9c47380dddc5154d3d910bf6d52201cb520309bbe0d4439038a4f59f5d3b"
     },
     {
       "path": "device.gpio.watch-pull-down.json",
@@ -402,8 +411,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 5012,
-      "sha256": "3ec93c87f214b9104e251698d63182f61b41cbff92c2197c42ab6741edf94978"
+      "bytes": 5346,
+      "sha256": "36079ea478373cddba335e3b31cdfe7ec2cb55d2ee35a407f54fc9c2e4de719b"
     },
     {
       "path": "device.gpio.watch-pull-dropped.json",
@@ -413,8 +422,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 5107,
-      "sha256": "3d6629f59182a3451223c1219014c2059d341f14b3f4470615ff31afb162f7c5"
+      "bytes": 5441,
+      "sha256": "dbfada33f7f7c754e9550314c5fafba6f89a52a7a768059b1edb5496b46859c8"
     },
     {
       "path": "device.gpio.watch-pull-malformed.json",
@@ -424,8 +433,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 4701,
-      "sha256": "ea7a7f6e0c5699644a0a620671fced5844aedec2bd94cc02f1d20245f50347a8"
+      "bytes": 5035,
+      "sha256": "9965f82db43ee1a4e933e6e3061e2ba8e61130f698005ff1295463e56d939fe5"
     },
     {
       "path": "device.gpio.watch-pull-none.json",
@@ -435,8 +444,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 5044,
-      "sha256": "7fe485c2e6b89551c74310824d5c269f428b9cb287d7233777c9e48e1ac212d7"
+      "bytes": 5378,
+      "sha256": "e64cc24aba31ddc83da59c02c4364483469f1f2073e85d384cddcf823701b476"
     },
     {
       "path": "device.gpio.watch-pull-partial.json",
@@ -446,8 +455,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 5170,
-      "sha256": "d1ff5bc107b13fff931e03afca80704f134dba3e8d601ba2e6d20d93a04b3e5f"
+      "bytes": 5504,
+      "sha256": "112cf9236fc51506e26532ba47861ef7e9e42e2ebe4c95293affe5be254c3256"
     },
     {
       "path": "device.gpio.watch-pull-unknown-pin.json",
@@ -457,8 +466,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 4723,
-      "sha256": "c22b47b94d8a1f2f130cfd486fb125934f092dfb649a4c6052651e70d833da20"
+      "bytes": 5057,
+      "sha256": "2b233afeaa2d04c0abcbde831364598e877225e64595474ef6feff5260935df5"
     },
     {
       "path": "device.gpio.watch-pull-unknown-value.json",
@@ -468,8 +477,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 4713,
-      "sha256": "92ee9346d16472adbcd58f49f66fc4cd03139b78ae848a4b2c956ffb49152470"
+      "bytes": 5047,
+      "sha256": "977517f8ba3d17e9d4b86ef0cdf1e918519d94bbea5379697f092659cee4b3ff"
     },
     {
       "path": "device.gpio.watch-pull-unsupported.json",
@@ -478,8 +487,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4862,
-      "sha256": "96f68867708a2eb45db5c3a5a127f32fc96e88373cf4af8ce8c3aa39575b642b"
+      "bytes": 5196,
+      "sha256": "fe9ff49ad0586e7e57fb15105a509c371b30e5b272d74ab7b5c7bcb02332e83a"
     },
     {
       "path": "device.gpio.watch-pull.json",
@@ -489,8 +498,8 @@
         "device.gpio.pull"
       ],
       "requiresSources": [],
-      "bytes": 6087,
-      "sha256": "4d78d5b3e975afe27149aea0aeb4e33cc7e0ec97b9610daa90a277eb254ece46"
+      "bytes": 6421,
+      "sha256": "9dc1cc72e11793c0303f8685a4c1be053ea6abdf3b2db41917821766975242e6"
     },
     {
       "path": "device.gpio.watch-replace.json",
@@ -499,8 +508,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 5496,
-      "sha256": "c74a256bee21db66f305c371968b24a06096c740c01470f0f64c289715a2561a"
+      "bytes": 5830,
+      "sha256": "0124955d19447b56584e916e15a0ad4ffcec35e7ed04f4986091fee2a304031f"
     },
     {
       "path": "device.gpio.watch-unknown-member.json",
@@ -509,8 +518,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4704,
-      "sha256": "48aec1c4f4d06db08c01b024eec0ce5fddffad7a1bb5864a3d841091626504c1"
+      "bytes": 5038,
+      "sha256": "47eb8c79353ed8c1581b87364c55e3c2e696ce9c06916c629c6e605fb151e721"
     },
     {
       "path": "device.gpio.watch.json",
@@ -519,8 +528,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 6585,
-      "sha256": "6345d1485b1a5f0365a3bea9215d661843e9ba8afe6c52f2f2115c475f4775aa"
+      "bytes": 6919,
+      "sha256": "c340e5607f33fb202a45443f9874559d6e0711688f3b1030680b6e8e0eb7ba1f"
     },
     {
       "path": "device.gpio.write-idle-low.json",
@@ -530,8 +539,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4601,
-      "sha256": "5953caf44196b4c5a4820ef3f5630b5dab27c6642dc3d19e65cd546e593ef472"
+      "bytes": 4935,
+      "sha256": "03eda23ae47dfa2daeec21c7ec384ba0deadb9bb87f7b9653f99a07f8d1b5b43"
     },
     {
       "path": "device.gpio.write-idle-malformed.json",
@@ -541,8 +550,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4679,
-      "sha256": "c68b366b70390fd33c9122b07d639e4e4ce6e4b099d14acb492b27f94b498cbb"
+      "bytes": 5013,
+      "sha256": "476f12869dc27b66c9ecd42be5f9d9d2c41052dc65b59d246e4439c82052105e"
     },
     {
       "path": "device.gpio.write-idle-not-granted.json",
@@ -552,8 +561,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4714,
-      "sha256": "1b3bdef58f0e2edc328bf24aa1b8bfd120a69dac52a3f83f7fcdd577dda1b687"
+      "bytes": 5048,
+      "sha256": "6ebd3b51ad95466142750652b56aa9f589f3a2d32f73e79a846e5d7cb270fae1"
     },
     {
       "path": "device.gpio.write-idle-unsupported.json",
@@ -562,8 +571,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4825,
-      "sha256": "188119a72038449002f6cd98e116ba3d13e904bbcfb27ad7aa482d477007e864"
+      "bytes": 5159,
+      "sha256": "59dd1dab641c0e07fd6bb4f10dc69703585a48ffa8762a9530e14e4ff708479e"
     },
     {
       "path": "device.gpio.write-idle.json",
@@ -573,8 +582,8 @@
         "device.gpio.idle"
       ],
       "requiresSources": [],
-      "bytes": 4887,
-      "sha256": "91140275f9d0eb3bb1943bb1fb40f6c6d46e885ceed4ff218c48a4cf758d1900"
+      "bytes": 5221,
+      "sha256": "d579953d11f16c94491b154d236783c49acd78aaec60c5162a6f7fb3ce6dca11"
     },
     {
       "path": "device.gpio.write-low.json",
@@ -583,8 +592,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4452,
-      "sha256": "ecb0e0bdcf1211d44aed0eec851f40ad9ddd0353530f67bc7c20112452522daf"
+      "bytes": 4786,
+      "sha256": "9d1c5ca05ac70511f67a81b7c0e9952b90275080904aef6b6b6fc83f312b6ccc"
     },
     {
       "path": "device.gpio.write-malformed.json",
@@ -593,8 +602,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4625,
-      "sha256": "64ef37042326032a3a867213805f4f620bdc0d6e6bfe544672b82437b71987ca"
+      "bytes": 4959,
+      "sha256": "e28d4aaeb8d7a9164e867a3b9c2264e9e7c616531326ea173d3331f31b02c892"
     },
     {
       "path": "device.gpio.write-not-granted.json",
@@ -603,8 +612,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4660,
-      "sha256": "05629ae388550d780000689678136889aac57fbd5e40ec16fadb2a5574b26feb"
+      "bytes": 4994,
+      "sha256": "fa8102df0a4075b307fa557c3158c46b2bbafb0297e9ffd9a8049518eabed207"
     },
     {
       "path": "device.gpio.write-out-of-range.json",
@@ -613,8 +622,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4618,
-      "sha256": "f86ce3ebe543f294e66196163dfcfc92d31ef029d709873d47d8be49137d08f4"
+      "bytes": 4952,
+      "sha256": "2551487f8b7eabd81b93ead37a1895659e22a1942f4b90cc4711dc9222f4bee2"
     },
     {
       "path": "device.gpio.write-pin-busy.json",
@@ -623,8 +632,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4585,
-      "sha256": "f6e24aab17d72a162cae6ff4726cbfc1ecf99ca7b08a8818cd69df17da8a1d15"
+      "bytes": 4919,
+      "sha256": "23354bce561e07c6ad2581f91b64a898d57cc8a805de3e77114dc4697b2b56a3"
     },
     {
       "path": "device.gpio.write-pin-not-found.json",
@@ -633,8 +642,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4601,
-      "sha256": "b44fe4a155f0d77bd26211e1e98d6fc3802906b4f9ccf0d60b1195275229aa3f"
+      "bytes": 4935,
+      "sha256": "76361e19c6f5c97b86bdadda2dbce5087ed5f4e29ade9f4ccc873230ca44d7fb"
     },
     {
       "path": "device.gpio.write-unavailable.json",
@@ -643,8 +652,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4379,
-      "sha256": "a2722eb5c25ed5f5c01ee292e424987d7b409a2a143ddb5b2440f4cd17830604"
+      "bytes": 4713,
+      "sha256": "9efa5ac251335db537df9aa000624fa7130e7d99647582f29575646e3bd2c3e7"
     },
     {
       "path": "device.gpio.write-unknown-member.json",
@@ -653,8 +662,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4622,
-      "sha256": "93c2111605c217ce8ef5eacd4e29991e0cf3537bb3c81287724eecbece5b738c"
+      "bytes": 4956,
+      "sha256": "30edd1b6882f299d4f17ecd5ee875ab05a2f13c59a2857824b86571b929d227c"
     },
     {
       "path": "device.gpio.write.json",
@@ -663,8 +672,178 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4633,
-      "sha256": "cad1d751e61589b4270700cf204065af758843f8157ae2eabf008a0e48e3cc46"
+      "bytes": 4967,
+      "sha256": "57b9f4240cf0b4ebb226be213cad55f0af75093b2c52c3ae1dc502cc41557e02"
+    },
+    {
+      "path": "device.ir.send-fractional.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4930,
+      "sha256": "d96f2112adf365ce2e9389dde2de026967f0e04701e05b0fc1675c7d7a01534f"
+    },
+    {
+      "path": "device.ir.send-implied.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir"
+      ],
+      "requiresSources": [],
+      "bytes": 4971,
+      "sha256": "a65b065a3e4d3824a2bc907b6291521ee83d6eb619afbd85cbc40906caf528d9"
+    },
+    {
+      "path": "device.ir.send-layout.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 5329,
+      "sha256": "fd4ba7bd55c1a1b1f2ce01890387ca037a51fa9dad127dac8f7b20131e0dab9d"
+    },
+    {
+      "path": "device.ir.send-malformed.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4991,
+      "sha256": "a67404ffc42fba65300b1fe3debaf3ca085522c3429bceb0ecec1aa8fa8175f3"
+    },
+    {
+      "path": "device.ir.send-max.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4729,
+      "sha256": "964911cd0d69b41b304b33b162feb7a973cf50d67e74f75a78cecde7aab7a55f"
+    },
+    {
+      "path": "device.ir.send-missing-encoding.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4958,
+      "sha256": "def332c6b4893739ab1973898f88e4f6e373477128efa7084579e21580fac1e8"
+    },
+    {
+      "path": "device.ir.send-negative.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4913,
+      "sha256": "1709dbc13456efaf7543a901d5a80b612325cac19db548a6811864a8818481d0"
+    },
+    {
+      "path": "device.ir.send-not-granted.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4979,
+      "sha256": "c81b3729da53c19c593570c95aaa3bff604867b5f19c4917cf81f6c4f16ea760"
+    },
+    {
+      "path": "device.ir.send-out-of-range.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4928,
+      "sha256": "6309767eeeb91e7a6f29f92d68444aeb9666d30b2a90bd8295c77099da3e5e0e"
+    },
+    {
+      "path": "device.ir.send-repeat-fractional.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4958,
+      "sha256": "4c48ca963310507b38ae7187b7cb7c66a444b2ca0706a0c228b250890a4e133d"
+    },
+    {
+      "path": "device.ir.send-repeat-out-of-range.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4950,
+      "sha256": "5ed28d49d492775e9660b1443264562429e6d4e2e0ab7923ba62e069750ed70c"
+    },
+    {
+      "path": "device.ir.send-repeat.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 5251,
+      "sha256": "61f6c47d7b18cd397d4d44fa3e23153c33a522baf7884d9a7ea6878cf168b223"
+    },
+    {
+      "path": "device.ir.send-unavailable.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4982,
+      "sha256": "6537d0269fc15969f41b38808887c1cd71381c3df58d6847f64ff4d875cd1f5b"
+    },
+    {
+      "path": "device.ir.send-unknown-encoding.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4990,
+      "sha256": "fe1d8830432d402625a7693aa8fcd5889af41a78a98cab083c720597f77bfb6e"
+    },
+    {
+      "path": "device.ir.send-unknown-member.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 5014,
+      "sha256": "a1feb779e89107769bd462da43803c3430d7c8f7638e8900ac509ac5cbee74e9"
+    },
+    {
+      "path": "device.ir.send-zero.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4715,
+      "sha256": "0088dfa39435b11cd17918c189f80f54029c1d2b402d99745cf79400523aba45"
+    },
+    {
+      "path": "device.ir.send.json",
+      "kind": "device.ir.send",
+      "requires": [
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 5558,
+      "sha256": "337425567f39dc7ed864d94b81e1e515d71678c64e696ece236765793f4ebf6e"
     },
     {
       "path": "device.print-chunk-too-large.json",
@@ -673,8 +852,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 48393,
-      "sha256": "6986ee3e395a9d979a7f78a243519d371a6b45b3829f0ced40e7bf03d367b59c"
+      "bytes": 48727,
+      "sha256": "c90cd464faaf37c04c6c6e9cfee72677a46aefb0811ba07ea92c3956d8546f45"
     },
     {
       "path": "device.print-failed.json",
@@ -683,8 +862,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4784,
-      "sha256": "0787a23beaf63e9e4ae3572d5078605a520b88eee7f038feab0e2bc9dcc1d1b3"
+      "bytes": 5118,
+      "sha256": "39f645d3f5736f5ee0836a7ebe225b75663fabe99adc7812d60bed07b729fbb5"
     },
     {
       "path": "device.print-malformed.json",
@@ -693,8 +872,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4690,
-      "sha256": "73c7a786ea68878fff683f016ff15ca1b2f4bb36a03942379c928704686691df"
+      "bytes": 5024,
+      "sha256": "80b81b5f1e1574583cb921a6d33cb1ce1a30893b13abed80a1de110b0a71dec4"
     },
     {
       "path": "device.print-missing-format.json",
@@ -703,8 +882,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4652,
-      "sha256": "893962067c69860e27a6dd4724dd57b5be273ffde4ea1e9ee3cb1027ba826564"
+      "bytes": 4986,
+      "sha256": "092089d0a41c3cf36d78f30dd52de2d1df5e770ecbd921d3c46e8ee350284e42"
     },
     {
       "path": "device.print-multi-chunk.json",
@@ -713,8 +892,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 6571,
-      "sha256": "8a6143fa0ee4953edbdbf5c56e2eed5b896bb6446631474a4131f3bea36347e8"
+      "bytes": 6905,
+      "sha256": "21fb77fa2b7e9db8c4606fc89b23c9fdd2e1d8f600d3b93af1582be50fbfc0f2"
     },
     {
       "path": "device.print-not-granted.json",
@@ -723,8 +902,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4672,
-      "sha256": "9278d852f73ea41303f9c3d6d9b84287cb72a6bfbeeb666b383ffa21f16ce539"
+      "bytes": 5006,
+      "sha256": "cbaf5561ad2b5f6af50e6eee112fe9c79ccce29780bf898d01ecc564641758d8"
     },
     {
       "path": "device.print-out-of-order.json",
@@ -733,8 +912,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4729,
-      "sha256": "efb29533f837d99dddef1aee3b8fda175949221634a9ed8d1d6b2f45aa276d91"
+      "bytes": 5063,
+      "sha256": "e92fc34142bfc10453d1ce3f18a61d650878623f8299e5d49c6876b80950cb74"
     },
     {
       "path": "device.print-pdf.json",
@@ -743,8 +922,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4719,
-      "sha256": "ba5289cc8025089cff9b9a321f019c6989d02c737e6fe9a2e2fc1201ecae2fd9"
+      "bytes": 5053,
+      "sha256": "757119a923024e401fa47f810cfbeefc43fcd48b39427f8a7fa88ec6c0e31937"
     },
     {
       "path": "device.print-printer-not-found.json",
@@ -753,8 +932,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4736,
-      "sha256": "33fd898629f08b2eebe5180f9e5da41437eb8c9009e3d4df2eb3c1081228a0b9"
+      "bytes": 5070,
+      "sha256": "5b61871e54ac415cea4d0a9217d9d5211bbb9b4eb68c08a075b462dc7fd8b5ad"
     },
     {
       "path": "device.print-too-large.json",
@@ -763,8 +942,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4741,
-      "sha256": "a8b5197daf6fbfb284b03f26aeffbf07cf1103bccf7edd90e1dbd093db5f46d4"
+      "bytes": 5075,
+      "sha256": "b0b63e6410d3ebfcce758927fd799f8f4432e35965968216eaf3c0a2ad367609"
     },
     {
       "path": "device.print-total-mismatch.json",
@@ -773,8 +952,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4743,
-      "sha256": "0ea52d575448e34caea31bfeedfc0c6d63fa7aa9ef7a5f1a05d1a183f4dcc6df"
+      "bytes": 5077,
+      "sha256": "76f3fbc16215ecbd05b19023a7e7dc11e0c06b4d108a3ba61f526b3bc092b862"
     },
     {
       "path": "device.print-unknown-member.json",
@@ -783,8 +962,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4708,
-      "sha256": "92439bc3b757b0d9ee4d4398a574da81b417b74fbd58a991b02344316bfea6a3"
+      "bytes": 5042,
+      "sha256": "5998bf205bd6a128ee993834fe77a018e3f79fdc8499974fd93f3561c40b3e63"
     },
     {
       "path": "device.print-wrong-format.json",
@@ -793,8 +972,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4784,
-      "sha256": "f54434dfade66243653913fb138a578e0a889742285ff4e7d593d87e127a4f79"
+      "bytes": 5118,
+      "sha256": "68030ea6860090a2c0594b86fa1a457979aef7339e7c299852d0841b6f11d834"
     },
     {
       "path": "device.print.json",
@@ -803,8 +982,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 5101,
-      "sha256": "fe4ea8f63a09c1fb7c59a5d031439805348f67ab5d789ccccc77bb25511cb868"
+      "bytes": 5435,
+      "sha256": "1e74020aa427a8d7539d5de4a8831177ca8e64d9853e3495cece955da4b573ee"
     },
     {
       "path": "device.printers-not-granted.json",
@@ -813,8 +992,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 4582,
-      "sha256": "40212cbea89d771f30122061e5871da9d55604c4ad1a608b196ccab6ce767a84"
+      "bytes": 4916,
+      "sha256": "f816c8605eeb017c94be425bd4348dbca3a7ce5963e6e893cff5a0877c631d24"
     },
     {
       "path": "device.printers.json",
@@ -823,8 +1002,8 @@
         "device.print"
       ],
       "requiresSources": [],
-      "bytes": 5635,
-      "sha256": "2523f047d14d5602f7d285f643e20a15136f0f96d5f0c49cc23352eec10f74f8"
+      "bytes": 5969,
+      "sha256": "286e996c8b35ecfd31d67b1811e74bef6373a6a5acee470894538c7c72c41535"
     },
     {
       "path": "device.scanner.start-camera-unavailable.json",
@@ -834,8 +1013,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4663,
-      "sha256": "9db5e43d801cf869292a69d2cd0e60d9d49654453f40cede831bb16f9a262011"
+      "bytes": 4997,
+      "sha256": "63cc441f0c452cc7807ceb978e83dae2ccd2cd14b7cb4c9c8f295790ad25b0d5"
     },
     {
       "path": "device.scanner.start-default.json",
@@ -845,8 +1024,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4745,
-      "sha256": "5c811c7802f353e560798557557c35d86e83b99e1b4b6e3b6960e34a079bd66c"
+      "bytes": 5079,
+      "sha256": "4c67aa6d5979d29655426e5c8c5311a1d772c7671ee68d1fca50b61e972c1ee6"
     },
     {
       "path": "device.scanner.start-duplicate.json",
@@ -856,8 +1035,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4643,
-      "sha256": "530c4bb1328026229e383786cf2c5dffd0301fc92c2ff33b07aa0f0911a5c9ae"
+      "bytes": 4977,
+      "sha256": "8042fd7dc08288950d82c620f5d9e66ccd4678277808c2bdd0f36b3cd289c6c7"
     },
     {
       "path": "device.scanner.start-malformed.json",
@@ -867,8 +1046,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4734,
-      "sha256": "dfbf9abd0ac05fa170342e600f28abba01b786aa542df1098400a4766ebada5f"
+      "bytes": 5068,
+      "sha256": "68edc035a87909faf0f94664a8d94cd3ef77c74cf8e0cc5dec36fdefa0cbdc45"
     },
     {
       "path": "device.scanner.start-no-scan-capability.json",
@@ -878,8 +1057,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4664,
-      "sha256": "c7400ef9628e58090769fe83cc86d765e9c045492df804e000ca61e4870d82d4"
+      "bytes": 4998,
+      "sha256": "b45f4e5e8d65486e545871259917018a629e6ae2c1a69e1bfdb3fa93d5bc9f9b"
     },
     {
       "path": "device.scanner.start-none-decodable.json",
@@ -889,8 +1068,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4508,
-      "sha256": "e64b13a6bcf30fd3b29fcdee0786e0668efb05adc64e1995a32cd9b97acfb990"
+      "bytes": 4842,
+      "sha256": "bb691b69e31b831372508ed75664e7f0200abf9d495edf52377d925d19617a4a"
     },
     {
       "path": "device.scanner.start-not-granted.json",
@@ -900,8 +1079,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4779,
-      "sha256": "07512e63fb9bffff28a54aa5321381b3fa0672a9f2edfb00d9c9d297e6272260"
+      "bytes": 5113,
+      "sha256": "a566b24dd87b19776a359b447f776292133a5c734213a4336ba73e3afb99a2c6"
     },
     {
       "path": "device.scanner.start-unknown-member.json",
@@ -911,8 +1090,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4678,
-      "sha256": "7e7d2f32c9dd21864f2ba9e6d36828250b5f6bb366d059d309f4efdfea01a78e"
+      "bytes": 5012,
+      "sha256": "07d024d43f85f378f8c1ab4b6e047bd1d2bbadc95d09cf4b17aafff8d2b679f9"
     },
     {
       "path": "device.scanner.start.json",
@@ -922,8 +1101,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 5079,
-      "sha256": "7bbcbb89617c351bd18a77379ebf112d8a6f2b143392b6518f8a886099737b34"
+      "bytes": 5413,
+      "sha256": "24198ad225a873982cea0b2d11427793bed7fcf0740d391349d1492de29dbd37"
     },
     {
       "path": "device.scanner.stop-not-granted.json",
@@ -932,8 +1111,8 @@
         "device.camera"
       ],
       "requiresSources": [],
-      "bytes": 4600,
-      "sha256": "a54c160284314e45ef1db214c7be4a622c7deddc88da748ee3cb8254724ea29b"
+      "bytes": 4934,
+      "sha256": "1fe5d267b6c898a03a4fdb98bc9a891b9095acaa5408195fe63e217390d4fba0"
     },
     {
       "path": "device.scanner.stop.json",
@@ -942,8 +1121,8 @@
         "device.camera"
       ],
       "requiresSources": [],
-      "bytes": 4501,
-      "sha256": "7adb5015a89b5173eaf30a21814b153ba63d50e4b0b1f3939294e2f2deb55362"
+      "bytes": 4835,
+      "sha256": "e30c5ea763d49756ba8d9a4d8e2a906247e7786f8d7f17cfd650595c617dc5a5"
     },
     {
       "path": "device.serial.close-not-granted.json",
@@ -952,8 +1131,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4739,
-      "sha256": "691f50d1d9132d188944a67840a49fabf5cc84a40817a0cc120ce31fc9d37011"
+      "bytes": 5073,
+      "sha256": "3861f17c52acd5795f37b2d76f945b1f630cb3efeb13aa8a0f3c1f50a74f948f"
     },
     {
       "path": "device.serial.close-unknown-handle.json",
@@ -962,8 +1141,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4577,
-      "sha256": "9d35021afb33dc583ffeec2bb52393e62760c2a68a3a72ca11bee96f76f8d5c4"
+      "bytes": 4911,
+      "sha256": "a524daddd0c406f0f092dbae79f6ebbaa95278b66af81cfcb84a6bab6a282198"
     },
     {
       "path": "device.serial.close.json",
@@ -972,8 +1151,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4520,
-      "sha256": "bba94dd3767bcfdc5a891561b0ccbef5dfb77d2156e3ee68728a6a56c7106b52"
+      "bytes": 4854,
+      "sha256": "7f0845c144a3a51a71fff1a13a67d67a6883cda443a4e4fad600a6030aba9836"
     },
     {
       "path": "device.serial.list-not-granted.json",
@@ -982,8 +1161,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4594,
-      "sha256": "8fb344846382c07e787195906df8638c3fe6cacf94bbe7e6be2fe677fc1bbb73"
+      "bytes": 4928,
+      "sha256": "84b007eff77c0dc4404211120c6d8a66750de8154aec91006bbaffb9de394934"
     },
     {
       "path": "device.serial.list.json",
@@ -992,8 +1171,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 5262,
-      "sha256": "a26c8a888034a7e8409368ed3a7a5f1706fee5b4828c24c9dd6e5a9f44daedfc"
+      "bytes": 5596,
+      "sha256": "24fa356dbd43bd142e2d5a4c14fa1c9403761087db42a3fbba4b86bea5782f9f"
     },
     {
       "path": "device.serial.open-bad-line.json",
@@ -1002,8 +1181,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4684,
-      "sha256": "cc43e2f7948c7648f0f962ad2f3db88e0ae2eb1ccd3ebbaddd388f9f4d49696c"
+      "bytes": 5018,
+      "sha256": "d213bbeb5a300df48a46069ce689d0356e3958eb42b60f6357ec0bc4b052bbad"
     },
     {
       "path": "device.serial.open-busy.json",
@@ -1012,8 +1191,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4596,
-      "sha256": "a6ac8b07d16a3225a6c185a5939b6e50852b00c7bb35b4f88e3f53deea9dd272"
+      "bytes": 4930,
+      "sha256": "39887c699697a1182757dbd08e3092b0e5877b141c2f9f9cdfa3fed2353fcf32"
     },
     {
       "path": "device.serial.open-defaults.json",
@@ -1022,8 +1201,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4747,
-      "sha256": "85dc0dc481f886d2d98efed54ffaf1c813a212a5dc95c61fdc78ff1ede1ac490"
+      "bytes": 5081,
+      "sha256": "ed6ed34a123d71e4b9afbbfda51dfc44ad52f42ea2a58968fbe5e9d8ca541fd3"
     },
     {
       "path": "device.serial.open-limit.json",
@@ -1032,8 +1211,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 5006,
-      "sha256": "758009dae6041c8101dc233a78534a0a18605925e13d4d2461afafbd55eaf487"
+      "bytes": 5340,
+      "sha256": "f7fab2039e3839a6ce548379290838efda320c132690b879c1623181869b6d62"
     },
     {
       "path": "device.serial.open-malformed.json",
@@ -1042,8 +1221,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4654,
-      "sha256": "780dbb2781dc92ccf76e07f80496d053afe8f57f060eb6f9e68cc69bd16a1c3a"
+      "bytes": 4988,
+      "sha256": "17d5a91156b58d31fe1364cca085447dd41c3bf03c036ea4eed0ef8bc906de82"
     },
     {
       "path": "device.serial.open-no-push.json",
@@ -1052,8 +1231,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4807,
-      "sha256": "8c97d062b43cdb44ac7eb1194091b72fffa36fa901c16037c1a55f9b9a86ce64"
+      "bytes": 5141,
+      "sha256": "7e32b71a3a915d5b4a85b18d05f162e6ccd6583ef4d74fc0843591cd6131d513"
     },
     {
       "path": "device.serial.open-not-granted.json",
@@ -1062,8 +1241,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4663,
-      "sha256": "5eee701e0b325c3de32bd222d961f997c7787c3971f9768773feb147223154e2"
+      "bytes": 4997,
+      "sha256": "ca10088493fc5a6d519104600f0a4f5cc9b6e911ca4eb7b2798f370e86cb02c4"
     },
     {
       "path": "device.serial.open-unknown-member.json",
@@ -1072,8 +1251,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4696,
-      "sha256": "8934efdbe869896fd3fca635cbcaa99fbc9dec7eba3c06a0b78480a9345f3eaf"
+      "bytes": 5030,
+      "sha256": "fb07eb6e1b1b0b6e46f21274fd04beace1c7a1a6a280af9dcd8ae82da56850ca"
     },
     {
       "path": "device.serial.open-unknown-port.json",
@@ -1082,8 +1261,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4615,
-      "sha256": "be1fd943aed4cb733b56e7fc733a200de9e0712962617c1103632a6019ab1177"
+      "bytes": 4949,
+      "sha256": "063a3d4088a830f519945d905f62a171d90958f9450499aac439b6b4e3a5d487"
     },
     {
       "path": "device.serial.open.json",
@@ -1092,8 +1271,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 5315,
-      "sha256": "64d3cfe95e83275b61de74277db29918b2ec44f200e20882ea9e5cfdaddfabbe"
+      "bytes": 5649,
+      "sha256": "52520c80fd6b5d92ee826d499c9f4bcc1a454181bb43a5a572a115e11a1f30cf"
     },
     {
       "path": "device.serial.write-empty.json",
@@ -1102,8 +1281,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4719,
-      "sha256": "aa60447c6cf2032cc16c6bd5ca11f0b7877d5a25dc0c6fb0033c701674f5af85"
+      "bytes": 5053,
+      "sha256": "4f161cca67ed5e3746675549121bf6502784c6412f606307a771eeba0c2bcd3a"
     },
     {
       "path": "device.serial.write-invalid-handle.json",
@@ -1112,8 +1291,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4791,
-      "sha256": "1b00b1e10a92ac35f5a462d1b1be95f0632a139afcb47abe760b9b84097be269"
+      "bytes": 5125,
+      "sha256": "fa467a6c14b3066dbffe7659090241cad7c1d4c215830d2ef015b72f47aaa50b"
     },
     {
       "path": "device.serial.write-io-failed.json",
@@ -1122,8 +1301,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4801,
-      "sha256": "7b4c22360634e950ef742d4df790ba17d55d0a4f03355eec46f44cd3f7ef1741"
+      "bytes": 5135,
+      "sha256": "8e539701d358682ab08ed34a9623e46904820b88ebb0ac2b72a30447c54c2e9f"
     },
     {
       "path": "device.serial.write-malformed.json",
@@ -1132,8 +1311,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4761,
-      "sha256": "54781ab05e4ec69c22c9c392381e5941d2c177555abb2bc4ba4e4a69f393a007"
+      "bytes": 5095,
+      "sha256": "5e8110f31223e2da8af4150696bf2c5f0073fe6de5d5a17eae850cba1d57db8e"
     },
     {
       "path": "device.serial.write-not-granted.json",
@@ -1142,8 +1321,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4768,
-      "sha256": "05b63e746892d1a88572e7ecdfe2aa99400e220b4e51fc37f318a3746512dd39"
+      "bytes": 5102,
+      "sha256": "ea710bcb28cf17d852132880987ef565401f23d97986013f3101aaf21ae411d5"
     },
     {
       "path": "device.serial.write-too-large.json",
@@ -1152,8 +1331,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 48495,
-      "sha256": "74673543f5d2e90da4eab84347a30801e4bc7219d2e7c40ed9217d08dc4cd998"
+      "bytes": 48829,
+      "sha256": "65d6b83a9ac7c23b11a3196a5d5a3bb855d6b3b15485b893520e7b60d1420ccd"
     },
     {
       "path": "device.serial.write-unknown-member.json",
@@ -1162,8 +1341,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4759,
-      "sha256": "e36041587d9f144962f251a3eaa323a5a07ef37c90590d3180bb804b53b4950f"
+      "bytes": 5093,
+      "sha256": "5f5fc9581d7ba29fe1ed4d1572d7214d38ec34aa8030a4a82f263d3e9e939f62"
     },
     {
       "path": "device.serial.write.json",
@@ -1172,8 +1351,358 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4641,
-      "sha256": "f3edbd8f7c8f489f6e4ca0e5cbd05e1f9c7ef28b01a7085264f8a6844050411e"
+      "bytes": 4975,
+      "sha256": "a2bac693cd4ffbcdb5fcd2f4edc47062580d062527526d9b352532a787fe9d86"
+    },
+    {
+      "path": "device.udp.close-not-granted.json",
+      "kind": "device.udp.close",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5050,
+      "sha256": "33807018e1eaa60d92625ec3099149b661f488cbeb05a987e06559331123f365"
+    },
+    {
+      "path": "device.udp.close-unknown-socket.json",
+      "kind": "device.udp.close",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4825,
+      "sha256": "464439f50c262fb2d210be6f933d1e62b6a274935d4155d154b2cf27064d8953"
+    },
+    {
+      "path": "device.udp.close.json",
+      "kind": "device.udp.close",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4836,
+      "sha256": "bf596f8206434a6e4c78dddc2ec9f55d54ae55ef81b2ab5b2dbfc4525c0fa345"
+    },
+    {
+      "path": "device.udp.open-bad-broadcast.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4940,
+      "sha256": "b5f3be28b5648d9bc11c97209e27f7621944099560ef0fd67b73e16fc1692c91"
+    },
+    {
+      "path": "device.udp.open-bad-multicast.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4969,
+      "sha256": "5d3297d80433350bcf771c13514132516d3b20477a1c8202cfae6224c51c3a24"
+    },
+    {
+      "path": "device.udp.open-beacon-port.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4966,
+      "sha256": "0a8c6ef5cc0d33c87a23d4cd6879e0002cb5f8b6efafd17496d4e050e555af67"
+    },
+    {
+      "path": "device.udp.open-busy.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4922,
+      "sha256": "79e334cce3eb2b865c44fb751d7b23dd8ca675fb1e44b44c776ea6bf318e2b89"
+    },
+    {
+      "path": "device.udp.open-ephemeral.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5057,
+      "sha256": "d7bb71b37e03a389d938b1ec1909fb356cb1c918a0a536b380d7e4148e874141"
+    },
+    {
+      "path": "device.udp.open-limit.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5279,
+      "sha256": "375aab2aba7568a858a27ce99513f8523b6a656f43cc71d611022254a77b65ad"
+    },
+    {
+      "path": "device.udp.open-missing-port.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4926,
+      "sha256": "157e2ce4750a5376675c2128dfe1ff615ca941d4cf92b08a9507cb49e5f07841"
+    },
+    {
+      "path": "device.udp.open-multicast-ephemeral.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4977,
+      "sha256": "7ac453a14475236f4a46df9f96f2d2fb0fa1beca8f8dd27821113116ff909170"
+    },
+    {
+      "path": "device.udp.open-multicast.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5168,
+      "sha256": "658b574def9b892a7b2248e699da5b0a220a5e220c4b3458f39bbbf902a4d0d7"
+    },
+    {
+      "path": "device.udp.open-no-push.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5154,
+      "sha256": "527d6bc581b96630af4c0ea5083fec6bb0601372a9203e4c80071dfa22b65054"
+    },
+    {
+      "path": "device.udp.open-not-granted.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4957,
+      "sha256": "5c6e48aee1cab1a92813918fbfc7dc8aa59b8ed3dc69989989953e18b1edfc20"
+    },
+    {
+      "path": "device.udp.open-port-too-high.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4899,
+      "sha256": "97994ee26b15e89fa6f7e7d4bb5d697055189ff337d4230e391aa7968244ca27"
+    },
+    {
+      "path": "device.udp.open-privileged-port.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4939,
+      "sha256": "12c0ad8d77d6c4a6ad6d8161d71d55b5e379449964234b87222e0b76a177bf37"
+    },
+    {
+      "path": "device.udp.open-roster-port.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5035,
+      "sha256": "cc8ba2378e97cf8d035df32eb5b4d57848c7faa174e1687edb3a25c2f57926c0"
+    },
+    {
+      "path": "device.udp.open-unknown-member.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4980,
+      "sha256": "704aadc1ee4434c74e4baa448d6086ccc8628eb23374bd3683d2d34954bc547d"
+    },
+    {
+      "path": "device.udp.open.json",
+      "kind": "device.udp.open",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5337,
+      "sha256": "6142450afe1da88626439abc5e1ceaa680f0cee2dbb64169c243455c9396d74a"
+    },
+    {
+      "path": "device.udp.send-bad-address.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5145,
+      "sha256": "d436d0ef30872b07ed2f048702966779e0dac9e6b8d75702757c0a9724647027"
+    },
+    {
+      "path": "device.udp.send-bad-port.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5111,
+      "sha256": "6bb78a7d4c84f7d86cd195d8d7c9f3651b66e3e170e609f5cff273a28fe185a0"
+    },
+    {
+      "path": "device.udp.send-broadcast.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5119,
+      "sha256": "c0ed2e54837359224e2948d4a8080ddaa39e5c0f3d5c530e7584df1dccc52ba2"
+    },
+    {
+      "path": "device.udp.send-empty.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5084,
+      "sha256": "8873d6a1cc2d6e074cab8f3f319e0f196453495fd3cfb8b5f36d222cb344087f"
+    },
+    {
+      "path": "device.udp.send-invalid-handle.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5148,
+      "sha256": "4667d092fac56acac466096c7b9bd8291530f785901858e53751c5428c3c0262"
+    },
+    {
+      "path": "device.udp.send-invalid-host.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5176,
+      "sha256": "5f52f1f80e1ce2af62ee000fc0eba502acb2354b73bf7f8950c3efc2d5052674"
+    },
+    {
+      "path": "device.udp.send-io-failed.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5144,
+      "sha256": "a074df77b0952dd93523c70c5f6cf2e9401b145dd7a23b317c88bceda5dd3673"
+    },
+    {
+      "path": "device.udp.send-ipv6.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5160,
+      "sha256": "957fc76091f4983225a2ed8dae2fbfab87de1745eb41f9f5687aca2d45027fc5"
+    },
+    {
+      "path": "device.udp.send-lan-name.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4863,
+      "sha256": "63e4be0ba210c62edeb67fde693e16589528d872e8958a6403f9b0075d626957"
+    },
+    {
+      "path": "device.udp.send-local-name.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4904,
+      "sha256": "278ff3232a1d0afc33e0b64d9f7cde0fd59fbf2bd3fb593d4c41d92cd3fb1bb3"
+    },
+    {
+      "path": "device.udp.send-malformed.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5120,
+      "sha256": "534584e5094741915806fe477b4c055be5ea4aff1d71074380abcec5191561ce"
+    },
+    {
+      "path": "device.udp.send-max.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 15790,
+      "sha256": "5aae48edaef283efa612348b9526dbe6cf2548cfd488d1053d2da25870c08f4c"
+    },
+    {
+      "path": "device.udp.send-not-granted.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5123,
+      "sha256": "2a22f73f0fe16e779f5478e709ccbd514dc6059e2dd1cd45839e34d8949425fa"
+    },
+    {
+      "path": "device.udp.send-too-large.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 16034,
+      "sha256": "58c508cd658b4fd78659c3cbb8a13b438de5d88510d89a0cb5a53c0b5104006d"
+    },
+    {
+      "path": "device.udp.send-unknown-member.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5116,
+      "sha256": "80e72519e8b4398ef73f3c19b5367ff02fe8af77475de7e09fe635415e7ad006"
+    },
+    {
+      "path": "device.udp.send.json",
+      "kind": "device.udp.send",
+      "requires": [
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5180,
+      "sha256": "eeef81172c0382367f50073515b5c2b3aad425b34f9e2de078bc5529dc10129f"
     },
     {
       "path": "device.vibrate-default.json",
@@ -1182,8 +1711,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 2881,
-      "sha256": "a371d50c5f4795edb999944d9ca3c77d68502056b91840bbafad293200315e22"
+      "bytes": 3193,
+      "sha256": "cc7683cc5cde3e683a3bb3c77e6f806189bd7577fef6e32129a3c76992b210a8"
     },
     {
       "path": "device.vibrate-fractional.json",
@@ -1192,8 +1721,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3005,
-      "sha256": "4fdbc0e4aa21c81601b388d55ab18ed5a926d79ffc777944c41d39196d431bdb"
+      "bytes": 3317,
+      "sha256": "a056eacaef5718bcc5e704ba9da7daf35ddba1f51734b0ef438fda67223a1956"
     },
     {
       "path": "device.vibrate-malformed.json",
@@ -1202,8 +1731,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3036,
-      "sha256": "0d32bc8279dc9ea62120cd7e9b474738fbf454d04d9becc3af77fe135350493c"
+      "bytes": 3348,
+      "sha256": "4e160354c351ed5a1c6b69d358b9d8b3b4162d9a98c2f79b3d7b758ec3311473"
     },
     {
       "path": "device.vibrate-max.json",
@@ -1212,8 +1741,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 2856,
-      "sha256": "9fea9fb533e5290ab5da5318b00beb7b88a3bd06fdd6e46ab0dacbf66126ee47"
+      "bytes": 3168,
+      "sha256": "e00613c89d7aa4995593c786d14f9dbc97f93257c49a090a7aef6184a344ff89"
     },
     {
       "path": "device.vibrate-min.json",
@@ -1222,8 +1751,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 2851,
-      "sha256": "cc447d0e2f28ae924f39dbaf6f173c68f3a93b9fc19f3fc5e6673319f2424cbd"
+      "bytes": 3163,
+      "sha256": "c24e98dbaf8774045c3dce2238acd680225e9435803f7688c37f88b06f1e1399"
     },
     {
       "path": "device.vibrate-missing.json",
@@ -1232,8 +1761,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3024,
-      "sha256": "405f8a5497fcd073984d6222a7ac4c3fe87e4260c7c1ddc4cb1096263b9d205d"
+      "bytes": 3336,
+      "sha256": "601d19710a10376401d719361e77e1d60c416c6609ba80fabd75e59f32bbbaff"
     },
     {
       "path": "device.vibrate-not-granted.json",
@@ -1242,8 +1771,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3150,
-      "sha256": "e7f2d6f9f9895c3d335330ad4006f64aa73d6718c41a3f2dfa3424111313e3da"
+      "bytes": 3462,
+      "sha256": "35de269cc45641ad7c2e67aaf7c475b8107972c3ac9651343a276680b63ecdc0"
     },
     {
       "path": "device.vibrate-out-of-range.json",
@@ -1252,8 +1781,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3016,
-      "sha256": "3585091f14d534daea798fac26a2646449b94da735f48eb7e5ca42304ea7b041"
+      "bytes": 3328,
+      "sha256": "0bc3f0782e8adaa6666f9fe52c94f52ef40fece74ee9440f4074f14893e838ce"
     },
     {
       "path": "device.vibrate-unknown-member.json",
@@ -1262,8 +1791,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3129,
-      "sha256": "1ef500e48abc97268c97a877017885f3f9f5393f2d2c43173ffa77c077711f5e"
+      "bytes": 3441,
+      "sha256": "14c0d5062588e70a48978153053e499e451241e6d8097419d1e92798e4eb778c"
     },
     {
       "path": "device.vibrate-zero.json",
@@ -1272,8 +1801,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 3004,
-      "sha256": "6722b0ba9a30ad849c323c31d474a2d5a9a4b7333a0b6af16094552593be54da"
+      "bytes": 3316,
+      "sha256": "22a702ad38d5f8ef3786bff876cddf4d378268c2d2f4e7e60f574c3284167243"
     },
     {
       "path": "device.vibrate.json",
@@ -1282,8 +1811,8 @@
         "device.vibrate"
       ],
       "requiresSources": [],
-      "bytes": 2920,
-      "sha256": "a78e947ed2ca341427738d3a7e10f4d7236ed688c624a0d8553405be4889ed02"
+      "bytes": 3232,
+      "sha256": "f6c2d8061f69fe235a69dc8091eecc3e020d3f0dd07326dab4ca21e029f71df5"
     },
     {
       "path": "device.watch-ble-dropped.json",
@@ -1293,8 +1822,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 4497,
-      "sha256": "9d5521a13b777cf0b321ec34cfc4c1e78759450ec78206cc8dd96485a3bfcca8"
+      "bytes": 4831,
+      "sha256": "7724a7c3ae06f3be124720d8eb5c88cced6a69f42a43a84e49845b10d54633c5"
     },
     {
       "path": "device.watch-ble.json",
@@ -1304,8 +1833,8 @@
         "device.ble"
       ],
       "requiresSources": [],
-      "bytes": 5699,
-      "sha256": "0dd933a7d94e7f30137b09271749b03f80dc3fc02e83948c71b13ffed78dddac"
+      "bytes": 6033,
+      "sha256": "caa2cbc609410a51bd5ae1fce21ff94792adbc39affa642366511cd9604f1d51"
     },
     {
       "path": "device.watch-display.json",
@@ -1317,8 +1846,8 @@
       "requiresSources": [
         "display"
       ],
-      "bytes": 4150,
-      "sha256": "bba99b28d2398665c76149106f7874718b16b691a423f94920f292d4fbecd5b5"
+      "bytes": 4462,
+      "sha256": "e783fff22820e7f3ec6282cab75ba61575c4aaabcc37300dabb6254eff1879e4"
     },
     {
       "path": "device.watch-gpio-dropped.json",
@@ -1328,8 +1857,8 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4382,
-      "sha256": "854f6fe97ef9bc52344a1a1d3e4ae64a447d3afe053ce65fee42285f03c55d10"
+      "bytes": 4716,
+      "sha256": "eb8812a8dc051fa0ec21f8b40f7e78b0300e3570b6e801ebe2218584c1f1c69b"
     },
     {
       "path": "device.watch-gpio.json",
@@ -1339,8 +1868,63 @@
         "device.gpio"
       ],
       "requiresSources": [],
-      "bytes": 4388,
-      "sha256": "b6eceecbb491ba7302001a9e52aca995516f3c3b0da2052c6c9fcdd98fdeb81f"
+      "bytes": 4722,
+      "sha256": "826ab782c498d6006cb9a4db00487962ae59185c845e5e9ab3e6af0cc9009590"
+    },
+    {
+      "path": "device.watch-ir-layout.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ir"
+      ],
+      "requiresSources": [],
+      "bytes": 6623,
+      "sha256": "ebb3a94f943ea4f21553dd99f5145c14dad4f5c4ba4d963dc9f22afee63935a6"
+    },
+    {
+      "path": "device.watch-ir-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ir"
+      ],
+      "requiresSources": [],
+      "bytes": 4645,
+      "sha256": "d8b65d47a3ff761e4fd00b5c8e96e1d06f05c537a4c13381349a0458298d4c16"
+    },
+    {
+      "path": "device.watch-ir-send-only.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ir.send"
+      ],
+      "requiresSources": [],
+      "bytes": 4862,
+      "sha256": "32b560a3cab64f74b52f1f3eaf0f6b317a501f3b575917d3561e8071222f5be7"
+    },
+    {
+      "path": "device.watch-ir-stop.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ir"
+      ],
+      "requiresSources": [],
+      "bytes": 4620,
+      "sha256": "dfe1850c6eabb7b1ade477553210be88542f5ffd9d34cd735965ca5e58093b98"
+    },
+    {
+      "path": "device.watch-ir.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ir"
+      ],
+      "requiresSources": [],
+      "bytes": 8242,
+      "sha256": "2e0666d12a0828255c93c4c3f71e63325d1bb6bda8d9cc91f998c89afcff49b9"
     },
     {
       "path": "device.watch-keys.json",
@@ -1351,8 +1935,8 @@
       "requiresSources": [
         "keys"
       ],
-      "bytes": 4275,
-      "sha256": "b3ac9ae920ad7f6d9d2ca892a154a3c6bb88673cba6fa06bac503241696e3b12"
+      "bytes": 4587,
+      "sha256": "ed254b74aa26d9079ca57dc6ad762a1899400130513851ab884488a656a1cb89"
     },
     {
       "path": "device.watch-light.json",
@@ -1363,8 +1947,8 @@
       "requiresSources": [
         "light"
       ],
-      "bytes": 6902,
-      "sha256": "422adcebf6d4555ed83ca676bcc55e858474785c08f2de7adb54913b53598241"
+      "bytes": 7214,
+      "sha256": "7bd5db9ab34bc075f3dcd86c49a8f88f1ab77ebe71b5d8f22673b7443a3eb2d9"
     },
     {
       "path": "device.watch-network-kept.json",
@@ -1377,8 +1961,8 @@
         "display",
         "network"
       ],
-      "bytes": 3323,
-      "sha256": "69bd911cec1f9d15d62ea9b6eecd5afa30658bbbda51c182383ebbd9ecf47f93"
+      "bytes": 3635,
+      "sha256": "802a0365d821219ae00198a7990033b07600505152168bcea0e32d97338cd3d6"
     },
     {
       "path": "device.watch-network-offline.json",
@@ -1389,8 +1973,8 @@
       "requiresSources": [
         "network"
       ],
-      "bytes": 3516,
-      "sha256": "65c3d96f5c80bb6c0cc96592b5d7cddc8f6acee4b1acb4fe216606473498aaca"
+      "bytes": 3828,
+      "sha256": "6d535a19ed44fc8add1d8a58335e507d5565142658526cf630181a02413e0d83"
     },
     {
       "path": "device.watch-network.json",
@@ -1401,8 +1985,8 @@
       "requiresSources": [
         "network"
       ],
-      "bytes": 4584,
-      "sha256": "1cbf6aff0c781aab186b125bb7ffe22bb36505ad4550db0efc5cfcb9e370bcd0"
+      "bytes": 4896,
+      "sha256": "3f173054bfabd67a3298e5489e2c7fad54cb93b2edf63ff02c169011e64c3ab5"
     },
     {
       "path": "device.watch-partial-grant.json",
@@ -1414,8 +1998,8 @@
       "requiresSources": [
         "display"
       ],
-      "bytes": 4009,
-      "sha256": "262026f1ea1d86cd1b392ba087a33352df79cdab7beb8c29a5d389e7c6855ecd"
+      "bytes": 4321,
+      "sha256": "e4849758fbba2770246a601e9513c200b1d2bbc48444c915f618e46b470eb567"
     },
     {
       "path": "device.watch-people-not-granted.json",
@@ -1425,8 +2009,8 @@
         "device.camera"
       ],
       "requiresSources": [],
-      "bytes": 4295,
-      "sha256": "bd651dc03a134b0cdf4aa0f6daaca0a3fbf45a6d5fc7e352380ecbbf7445c370"
+      "bytes": 4629,
+      "sha256": "1572657f2750500578ca4c4c4f1cd87111c0c6b6d79bbb55545a3fff3ae1d1e1"
     },
     {
       "path": "device.watch-people.json",
@@ -1436,8 +2020,8 @@
         "device.camera"
       ],
       "requiresSources": [],
-      "bytes": 6876,
-      "sha256": "089ef7573ccdc046b0a41a51d02c341da2b760412f9a78d137c310e3b21c8870"
+      "bytes": 7210,
+      "sha256": "d3fd2977f90fe9c6f34620ef88f9def428b7b18188baa9f89b5cd08141c4235e"
     },
     {
       "path": "device.watch-presence.json",
@@ -1448,8 +2032,8 @@
       "requiresSources": [
         "presence"
       ],
-      "bytes": 3960,
-      "sha256": "11b4c8013e11851472b967b386edaacb9e66c14075d35509010ad3c770fb4963"
+      "bytes": 4272,
+      "sha256": "193703066b8769d778038a85b03f11024acbf9a5acaf881898e96482e570a765"
     },
     {
       "path": "device.watch-replace.json",
@@ -1463,8 +2047,8 @@
         "keys",
         "presence"
       ],
-      "bytes": 3512,
-      "sha256": "8746ccf3886aa0fb659fa0dd0f50440eadbab6d3b8b26fa8c6e39f75c794af5d"
+      "bytes": 3824,
+      "sha256": "9fd93cef0112f28b494fce8aeef44b0a8ad0ea7ef7fac9123482670bbe67ad95"
     },
     {
       "path": "device.watch-scan-camera.json",
@@ -1477,8 +2061,8 @@
       "requiresSources": [
         "scan.camera"
       ],
-      "bytes": 7440,
-      "sha256": "dd1c4166efef6af88f213282c1dbc79079607069de5f568a93ce509820bb0dc6"
+      "bytes": 7774,
+      "sha256": "3d31ce88a486201cf664089bb66f5e2d472a27e35998e55aa35d5feb00593980"
     },
     {
       "path": "device.watch-scan-nfc.json",
@@ -1490,8 +2074,8 @@
       "requiresSources": [
         "scan.nfc"
       ],
-      "bytes": 8333,
-      "sha256": "d621a01e273bb0293a5c56b2fa93ba7037bfb911dd72144fedba0b7346a34ff1"
+      "bytes": 8667,
+      "sha256": "43256283254164603ec594267a8db3271281a02a5191d20db827a94b741e3d17"
     },
     {
       "path": "device.watch-scan-not-granted.json",
@@ -1501,8 +2085,8 @@
         "device.scan"
       ],
       "requiresSources": [],
-      "bytes": 4895,
-      "sha256": "f30e10bf601c092a259d4ace2b4dd9ede950fe5f02352431ac44febf9b677431"
+      "bytes": 5229,
+      "sha256": "5d3c3a43d975021f90d5955b857e626e22fae7763b5983d38ef41c66b0762eda"
     },
     {
       "path": "device.watch-scan.json",
@@ -1514,8 +2098,8 @@
       "requiresSources": [
         "scan.scanner"
       ],
-      "bytes": 8376,
-      "sha256": "ac81208e2ea6fc759d324a77ad67fcd3318bf386f10bba92204be34cf2f0a668"
+      "bytes": 8710,
+      "sha256": "aa9f8b06f19d66c34be1f476a314f827606bc14fa722af99f4f20b4f53a070d6"
     },
     {
       "path": "device.watch-serial-error.json",
@@ -1525,8 +2109,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4835,
-      "sha256": "08f5a937f52a8216ee5f9b3e845a5da44feb3ca45958e16c8d366c18cb3abcc2"
+      "bytes": 5169,
+      "sha256": "a075104f7cbf650c5134f04c121391488c0d7ba328816af6afe6750e070d589a"
     },
     {
       "path": "device.watch-serial-not-granted.json",
@@ -1536,8 +2120,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4428,
-      "sha256": "38ca6818bbd9e1b511d56a8232bda6c42b6026ae923441851ed3b6345df97f8d"
+      "bytes": 4762,
+      "sha256": "ec4aec3cf06733f7e5afc63933d6e91728d718742ed884988ccac023f61f1817"
     },
     {
       "path": "device.watch-serial-stop.json",
@@ -1547,8 +2131,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 4460,
-      "sha256": "209272c31d9edbc858947e522f6e397c341090062f18db387af3823019240934"
+      "bytes": 4794,
+      "sha256": "0ef31f2112798713cdd78907a596e2d3c912f916f5e5321b74a479d9f1512b16"
     },
     {
       "path": "device.watch-serial.json",
@@ -1558,8 +2142,8 @@
         "device.serial"
       ],
       "requiresSources": [],
-      "bytes": 6605,
-      "sha256": "fc8b1611e3a495697e5a4cf07862fc007678d8016013310ae52f3a8d9293561f"
+      "bytes": 6939,
+      "sha256": "dae9f1dc21a8d079cf136383fce2b0b13b9e52606f129c08c3c255922894ab5c"
     },
     {
       "path": "device.watch-sound-not-granted.json",
@@ -1569,8 +2153,8 @@
         "device.sound"
       ],
       "requiresSources": [],
-      "bytes": 4292,
-      "sha256": "dd2306f1f26188e846824101801442db9eb2c6b131489dd9819fbf6868f479a3"
+      "bytes": 4626,
+      "sha256": "8ccc4f1d51812ea3fe7b6f9b30636984a61b507a0d216585f535db1f3b5246ac"
     },
     {
       "path": "device.watch-sound.json",
@@ -1580,8 +2164,8 @@
         "device.sound"
       ],
       "requiresSources": [],
-      "bytes": 6842,
-      "sha256": "24fdd9c0fd4af64940babdee4bb3545961eed0cf271c79129d54281de472f0ce"
+      "bytes": 7176,
+      "sha256": "d444151fa2b4314b60da6adc76ca3a9253bc295710548c3c2eedfa2e7a907f76"
     },
     {
       "path": "device.watch-stop.json",
@@ -1597,8 +2181,63 @@
         "network",
         "presence"
       ],
-      "bytes": 3481,
-      "sha256": "0df01ed30b31404f952d9aa244db74c5ea0f72d86f0589b4b68b2503757c11a5"
+      "bytes": 3793,
+      "sha256": "a638cffe48bb6bbadcf2b48effb087562bd863147b538066fc8a4d454ab01432"
+    },
+    {
+      "path": "device.watch-udp-closed.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 5829,
+      "sha256": "63676a24e8c3b221c70d5a220e854dbbb77205b96012c7a3d025883a9b7f7bbe"
+    },
+    {
+      "path": "device.watch-udp-ephemeral.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4860,
+      "sha256": "4228271c05949ba70ad67b6eb4aed94e06c9bc0b73e60ceaab154e398f000a0e"
+    },
+    {
+      "path": "device.watch-udp-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4807,
+      "sha256": "cce6b7653abbd5f069ac17db485cd8e3d767188eee0a26f49d6f0dba67461876"
+    },
+    {
+      "path": "device.watch-udp-stop.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 4841,
+      "sha256": "51c02e1554a2e7bd67cbaf251d10122f139ead1125cb468235d70e1996d65d55"
+    },
+    {
+      "path": "device.watch-udp.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.udp"
+      ],
+      "requiresSources": [],
+      "bytes": 17982,
+      "sha256": "9ee8aa38d1fba779b291cba0dba7e0d1c7c40f56e84f191bafe83b6b7a2796f9"
     },
     {
       "path": "device.watch-unknown-event.json",
@@ -1610,8 +2249,8 @@
       "requiresSources": [
         "display"
       ],
-      "bytes": 3248,
-      "sha256": "cd2630a7b2095ae0d2f243bdbe2d84e7a0be817addc6cc1b56fa6f8b3f148441"
+      "bytes": 3560,
+      "sha256": "37cc771e146916c30f6b4c70a04dc67de8d1f69f2abc7bf1b2290ec52310dd81"
     },
     {
       "path": "device.watch.json",
@@ -1627,8 +2266,8 @@
         "network",
         "presence"
       ],
-      "bytes": 7331,
-      "sha256": "de405cee42327e9bbc79661e56b29a3c504ede9226fb4cbd0b03a8b94309fadb"
+      "bytes": 7643,
+      "sha256": "c632d0a790435346816d018fa7cd86c70e9f2867be9e1cb03b6b0b3bb9e91c07"
     }
   ]
 }

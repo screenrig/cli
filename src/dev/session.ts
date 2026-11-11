@@ -469,7 +469,8 @@ export class DevSession {
       case "serial.busy": this.port(id).busy = value; break;
       case "printer.failing": { const printer = hardware.printers.find((candidate) => candidate.id === id); if (!printer) throw new CommandError("No such printer."); printer.failing = value; break; }
       case "pin.floating": { const pin = hardware.gpio.pins.find((candidate) => String(candidate.pin) === id); if (!pin) throw new CommandError("No such line."); pin.floating = value; pin.driven = undefined; break; }
-      case "ir.available": hardware.ir.available = value; break;
+      case "ir.emitter": hardware.ir.emitter = value; break;
+      case "ir.receiver": hardware.ir.receiver = value; break;
       case "pin.busy": { const pin = hardware.gpio.pins.find((candidate) => String(candidate.pin) === id); if (!pin) throw new CommandError("No such line."); pin.busy = value; break; }
       case "gpio.chip": hardware.gpio.chip = value; break;
       case "ble.adapter": hardware.ble.adapter = value; break;
