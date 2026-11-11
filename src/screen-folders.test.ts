@@ -119,7 +119,7 @@ test("screen folder and move commands are in help, with the folder selector on e
   assert.ok(commandHelp(["screen", "list"]).options.some((option) => option.name === "--folder"));
   for (const words of [
     ["assign"], ["reload"], ["toast"], ["screenshot"], ["tag"], ["schedule", "set"], ["schedule", "clear"], ["takeover", "set"], ["takeover", "clear"],
-    ["reboot"], ["display", "set"], ["display", "clear"], ["display-schedule", "set"], ["display-schedule", "clear"], ["reboot-schedule", "set"], ["reboot-schedule", "clear"],
+    ["reboot"], ["display", "set"], ["display", "clear"], ["display-schedule", "set"], ["display-schedule", "clear"], ["reboot-schedule", "set"], ["reboot-schedule", "clear"], ["volume"],
   ]) {
     const option = commandHelp(["screen", ...words]).options.find((item) => item.name === "--folder");
     assert.ok(option, `screen ${words.join(" ")} takes --folder`);
@@ -414,6 +414,7 @@ test("--folder selects a fleet like --tag and is refused with ids, a tag or a ma
       [["screen", "takeover", "clear", "--folder", NORTH], { type: "takeover_clear" }],
       [["screen", "display", "--folder", NORTH, "--power", "off"], { type: "display", power: "off" }],
       [["screen", "display", "clear", "--folder", NORTH], { type: "display_clear" }],
+      [["screen", "volume", "--folder", NORTH, "--level", "30", "--mute"], { type: "volume", level: 30, muted: true }],
       [["screen", "reboot", "--folder", NORTH, "--yes"], { type: "reboot" }],
     ] as Array<[string[], Record<string, unknown>]>) {
       const result = await cli(["--json", ...argv], transport, configDir);

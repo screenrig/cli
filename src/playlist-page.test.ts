@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { HostSettings } from "./host-settings.js";
 import type { ReviewProposer } from "./adapters/protocol.js";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { Readable, Writable } from "node:stream";
@@ -49,6 +49,46 @@ test("a media page is one full-canvas primitive on the playlist's canvas, dated 
   assert.deepEqual(video.advance, { mode: "media_end" });
   assert.deepEqual(video.primitives, [{ id: "media", primitive: "video", selector: { by: "id", media_id: VIDEO }, rect: { x: 0, y: 0, width: 3840, height: 2160 }, layer: 0, content_fit: "cover", muted: true }]);
   assert.equal("visibility" in video, false, "no dates, always shown");
+});
+
+const storedVideoPage = (primitive: Record<string, unknown> = {}, extra: Record<string, unknown> = {}): Record<string, unknown> => storedImagePage({
+  advance: { mode: "media_end" },
+  primitives: [{
+    id: "media", primitive: "video", selector: { by: "id", media_id: VIDEO, one_at_a_time: false }, controller: false, muted: true, loop: false,
+    rect: { x: 0, y: 0, width: 3840, height: 2160 }, layer: 0, content_fit: "contain",
+    resolved_media: [{ media_id: VIDEO, intrinsic_size: { width: 1920, height: 1080 } }], ...primitive,
+  }],
+  ...extra,
+});
+const firstPrimitive = (page: Record<string, unknown>) => (page.primitives as Record<string, unknown>[])[0]!;
+
+test("a video page is silent unless it is built with sound; an image has no sound to give", () => {
+  const playlist = playlistBody();
+  const loud = buildMediaPage({ id: "up-dddddddd", mediaId: VIDEO, kind: "video", fit: "contain", seconds: 10, playlist, sound: true });
+  assert.deepEqual(loud.primitives, [{ id: "media", primitive: "video", selector: { by: "id", media_id: VIDEO }, rect: { x: 0, y: 0, width: 3840, height: 2160 }, layer: 0, content_fit: "contain", muted: false }]);
+  assert.equal(firstPrimitive(buildMediaPage({ id: "up-eeeeeeee", mediaId: VIDEO, kind: "video", fit: "contain", seconds: 10, playlist, sound: false })).muted, true);
+  assert.throws(() => buildMediaPage({ id: "up-ffffffff", mediaId: IMAGE, kind: "image", fit: "contain", seconds: 10, playlist, sound: true }), /plays a video's audio; this media is an image/);
+});
+
+test("replacing with sound unmutes the stored video, keeps a stored unmuted video, and refuses an image or a cued page", () => {
+  const playlist = playlistBody();
+  const alone = replaceMedia({ stored: storedVideoPage(), sound: true, playlist, always: false });
+  assert.equal(firstPrimitive(alone).muted, false);
+  assert.equal(firstPrimitive(alone).loop, false, "the rest of the stored primitive stays");
+  assert.deepEqual(alone.advance, { mode: "media_end" });
+  assert.equal(firstPrimitive(replaceMedia({ stored: storedVideoPage(), mediaId: "med_CCCCCCCCCCCCCCCCCCCCCCCC", kind: "video", sound: true, playlist, always: false })).muted, false, "a swapped video gets the sound");
+  // Without --sound a swap keeps what the page had, and a page that was rebuilt from an image is silent.
+  const kept = replaceMedia({ stored: storedVideoPage({ muted: false }), mediaId: "med_CCCCCCCCCCCCCCCCCCCCCCCC", kind: "video", playlist, always: false });
+  assert.equal(firstPrimitive(kept).muted, false);
+  assert.equal(firstPrimitive(replaceMedia({ stored: storedImagePage(), mediaId: VIDEO, kind: "video", playlist, always: false })).muted, true);
+  assert.equal(firstPrimitive(replaceMedia({ stored: storedImagePage(), mediaId: VIDEO, kind: "video", sound: true, playlist, always: false })).muted, false);
+  assert.throws(() => replaceMedia({ stored: storedImagePage(), sound: true, playlist, always: false }), /plays a video's audio; page up-ab12cd34 shows an image/);
+  assert.throws(() => replaceMedia({ stored: storedImagePage(), mediaId: IMAGE, kind: "image", sound: true, playlist, always: false }), /plays a video's audio; page up-ab12cd34 shows an image/);
+  assert.throws(
+    () => replaceMedia({ stored: storedVideoPage({}, { audio_cue: { track: "intro" } }), sound: true, playlist, always: false }),
+    (error: { problem?: { code?: string; detail?: string } }) => error.problem?.code === "usage_error" && /a page with sound cannot cue the soundtrack/.test(error.problem.detail ?? ""),
+  );
+  assert.equal(firstPrimitive(replaceMedia({ stored: storedVideoPage({}, { audio_cue: { track: "intro" } }), until: "2027-01-01T00:00", playlist, always: false })).muted, true, "a cued silent page changes as before");
 });
 
 test("the canvas is the format's, else the first ordinary page's, else 1920 x 1080 on black", () => {
@@ -164,6 +204,45 @@ test("playlist page add --media builds the page, dates it, and sends it with the
   assert.equal(headers["screenrig-review-note"], "Winter%20menu");
   assert.ok(headers["idempotency-key"]);
   assert.equal(JSON.parse(answer.output).data.revision, 8);
+});
+
+test("playlist page add --media --sound builds a video with sound; an image or a page file refuses it before any write", async (t) => {
+  const writes: { page: Record<string, unknown> }[] = [];
+  const transport = new FakeTransport()
+    .on("GET", `/api/media/${VIDEO}`, () => ({ status: 200, headers: {}, body: { id: VIDEO, primitive: "video" } }))
+    .on("GET", `/api/media/${IMAGE}`, () => media("image"))
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([]) }))
+    .on("POST", `/api/playlists/${PLAYLIST}/pages`, (request) => { writes.push(request.body as never); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+  const loud = await invoke(["playlist", "page", "add", PLAYLIST, "--media", VIDEO, "--sound"]);
+  assert.equal(loud.code, ExitCode.Success, loud.output);
+  assert.equal(firstPrimitive(writes[0]!.page).muted, false);
+  const silent = await invoke(["playlist", "page", "add", PLAYLIST, "--media", VIDEO]);
+  assert.equal(silent.code, ExitCode.Success, silent.output);
+  assert.equal(firstPrimitive(writes[1]!.page).muted, true);
+  const image = await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE, "--sound"]);
+  assert.equal(image.code, ExitCode.Usage, image.output);
+  assert.match(JSON.parse(image.output).error.detail, /plays a video's audio; this media is an image/);
+  const file = await invoke(["playlist", "page", "add", PLAYLIST, "--file", "-", "--sound"], "{}");
+  assert.equal(file.code, ExitCode.Usage, file.output);
+  assert.match(JSON.parse(file.output).error.detail, /--seconds, --fit and --sound shape a page built from --media/);
+  assert.equal(writes.length, 2);
+});
+
+test("playlist page replace --sound alone gives the stored video page its audio and holds the write to the revision it read", async (t) => {
+  const writes: { body: Record<string, unknown>; headers: Record<string, string | undefined> }[] = [];
+  const stored = storedVideoPage();
+  const transport = new FakeTransport()
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([stored, storedImagePage({ id: "picture" })]) }))
+    .on("PUT", /^\/api\/playlists\/pl_[A-Za-z]+\/pages\/[^/]+$/, (request) => { writes.push({ body: request.body as never, headers: request.headers ?? {} }); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+  const loud = await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--sound"]);
+  assert.equal(loud.code, ExitCode.Success, loud.output);
+  assert.equal(firstPrimitive(writes[0]!.body).muted, false);
+  assert.equal(writes[0]!.headers["if-match"], '"7"');
+  const image = await invoke(["playlist", "page", "replace", PLAYLIST, "picture", "--sound"]);
+  assert.equal(image.code, ExitCode.Usage, image.output);
+  assert.equal(writes.length, 1, "a refused change sends nothing");
 });
 
 test("playlist page add --media without options takes a generated id, the end of the loop and no dates", async (t) => {
@@ -619,4 +698,18 @@ test("playlist page add --media copies the first page's stinger when its logo ca
   logoRead = () => problem("internal_error", 500);
   assert.notEqual((await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE])).code, ExitCode.Success);
   assert.equal(writes.length, 4);
+});
+
+test("playlist init --sound writes video pages with sound and plain init keeps them silent", async (t) => {
+  const record = { id: VIDEO, primitive: "video", state: "ready" };
+  const transport = new FakeTransport().on("GET", `/api/media/${VIDEO}`, () => ({ status: 200, headers: {}, body: record }));
+  const invoke = await cli(t, transport);
+  const base = ["playlist", "init", VIDEO, "--name", "Lobby", "--target-width", "1920", "--target-height", "1080"];
+  const loud = await invoke([...base, "--output", "loud.json", "--sound"]);
+  assert.equal(loud.code, ExitCode.Success, loud.output);
+  const quiet = await invoke([...base, "--output", "quiet.json"]);
+  assert.equal(quiet.code, ExitCode.Success, quiet.output);
+  const muted = async (file: string) => JSON.parse(await readFile(path.join(invoke.directory, file), "utf8")).pages[0].primitives[0].muted;
+  assert.equal(await muted("loud.json"), false);
+  assert.equal(await muted("quiet.json"), true);
 });

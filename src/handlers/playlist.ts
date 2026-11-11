@@ -429,7 +429,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       content.push({ primitive: audioFile ? "audio" : "image", state: "ready", id: "med_PENDING" });
     }
   }
-  const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms"), fit: flagString(args.flags, "fit") ?? "contain" };
+  const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms"), fit: flagString(args.flags, "fit") ?? "contain", sound: flagBool(args.flags, "sound") };
   // Validate the entire authoring shape and check the output before uploading.
   const validated = preparePlaylist(options);
   const shortApplication = shortApplicationPageWarning(validated);

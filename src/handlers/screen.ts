@@ -11,6 +11,7 @@ import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, scr
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
 import { kioskLines } from "../screen-device-settings.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
+import { volumeLines, volumeProblem, volumeText, volumeWrite } from "../screen-volume.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, displayWarnings, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "../screen-commands.js";
 import { flatFrameNote, frameRow, glassLines } from "../screen-glass.js";
@@ -590,6 +591,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
+      ...volumeLines(screen?.volume),
       ...kioskLines(screen?.kiosk),
       ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.timezone),
       ...healthLines(screen?.health),
@@ -2042,7 +2044,7 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
 
 // Reboot and display power. One screen id uses the single-screen routes
 // (revision guard allowed); several ids or --tag use the fleet actions route
-// (reboot, display, set_display_schedule, clear_display_schedule).
+// (reboot, display, set_display_schedule, clear_display_schedule, volume).
 export const handleScreenReboot = commandHandler(async (args, runtime, resolved) => {
   const target = screenTarget(args, "screen reboot");
   if (target.kind === "fleet") {
@@ -2441,6 +2443,37 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
     human: [displayHuman(`Display override saved on ${id}: requested ${power} ${until ? `until ${instantInZone(until, screen?.timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
+}, true);
+
+// Screen volume: the same single-screen route and fleet action shape as display.
+export const handleScreenVolume = commandHandler(async (args, runtime, resolved) => {
+  const write = volumeWrite(flagString(args.flags, "level"), flagBool(args.flags, "mute"), flagBool(args.flags, "unmute"));
+  const target = screenTarget(args, "screen volume");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen volume");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, `Fleet volume ${volumeText(write)}`, target.selector, { type: "volume", ...write });
+  const id = target.id;
+  const revision = flagString(args.flags, "expect-rev");
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/volume`, idempotent: true, body: write,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw volumeProblem(error, id);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      `Set volume on ${id}: ${volumeText(write)}`,
+      ...(screen?.online === false ? ["The screen is offline; its Player applies the request from its next manifest."] : []),
+      ...volumeLines(screen?.volume),
+      ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : []),
+    ].join("\n"),
   };
 }, true);
 

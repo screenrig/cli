@@ -732,3 +732,50 @@ test("an image background sits beside any advance, media_end included", () => {
   page.pages[0]!.canvas.background = image as never;
   assert.deepEqual(validatePlaylistWrite(page, MEDIA_END_MEDIA), new Set(["med_clip"]));
 });
+
+function soundVideo(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "clip",
+    primitive: "video",
+    selector: { by: "id", media_id: "med_CLIP" },
+    rect: { x: 0, y: 0, width: 1920, height: 1080 },
+    layer: 0,
+    content_fit: "contain",
+    loop: false,
+    ...overrides,
+  };
+}
+
+const SOUND_MEDIA = new Map([["med_CLIP", "video"], ["med_SONG", "audio"]] as const);
+
+function soundPlaylist(primitive: Record<string, unknown>, cue?: unknown) {
+  const base = playlistWithPrimitives([primitive]) as Record<string, any>;
+  if (cue !== undefined) base.pages[0].audio_cue = cue;
+  return { ...base, audio: { tracks: [{ id: "intro", media_id: "med_SONG" }] } };
+}
+
+test("a video plays silent by default and with sound when muted is false; muted must be a boolean", () => {
+  for (const muted of [undefined, true, false]) {
+    const video = soundVideo(muted === undefined ? {} : { muted });
+    assert.deepEqual(validatePlaylistWrite(soundPlaylist(video), SOUND_MEDIA), new Set(["med_CLIP", "med_SONG"]), String(muted));
+    assert.deepEqual(playlistIssues(soundPlaylist(video)), [], `${String(muted)}: the generated validator agrees`);
+  }
+  assert.throws(
+    () => validatePlaylistWrite(soundPlaylist(soundVideo({ muted: "no" })), SOUND_MEDIA),
+    (error: unknown) => error instanceof CliError && /primitives\[0\]\.muted must be boolean/.test(error.problem.detail),
+  );
+});
+
+test("a page with sound cannot cue the soundtrack, in both local validators", () => {
+  const cue = { track: "intro" };
+  assert.doesNotThrow(() => validatePlaylistWrite(soundPlaylist(soundVideo({ muted: true }), cue), SOUND_MEDIA), "a silent video may cue");
+  assert.throws(
+    () => validatePlaylistWrite(soundPlaylist(soundVideo({ muted: false }), cue), SOUND_MEDIA),
+    (error: unknown) => error instanceof CliError && /pages\[0\]\.audio_cue: a page with sound cannot cue the soundtrack\./.test(error.problem.detail),
+  );
+  assert.deepEqual(playlistIssues(soundPlaylist(soundVideo({ muted: true }), cue)), []);
+  assert.deepEqual(playlistIssues(soundPlaylist(soundVideo({ muted: false }), cue)), [{ path: "/pages/0/audio_cue", message: "a page with sound cannot cue the soundtrack" }]);
+  // A stream with sound carries the same rule in the generated validator.
+  const stream = { id: "live", primitive: "stream", sources: [{ protocol: "hls", url: "https://example.com/live.m3u8" }], fallback_media_id: "med_CLIP", muted: false, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" };
+  assert.deepEqual(playlistIssues(soundPlaylist(stream, cue)).map((issue) => issue.message), ["a page with sound cannot cue the soundtrack"]);
+});

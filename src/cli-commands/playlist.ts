@@ -13,6 +13,8 @@ const ORIENTATIONS = ["landscape", "portrait"];
 const REGION_HELP = "Make a strip: a playlist drawn over the page along the top (header), bottom (footer) or right edge (side) of a display, replacing a format in the file; give --format-orientation too";
 const ORIENTATION_HELP = "With --format-region: the orientation of the display the strip is made for, as the viewer sees it";
 
+const SOUND_HELP = "Play a video's audio (default: silent)";
+
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, and manage playlists");
 
@@ -25,13 +27,14 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
     .addOption(new Option("--duration-ms <MS>", "Non-video page duration (default 8000; 86400000 for application pages)").argParser(positiveInteger("duration-ms")))
     .addOption(new Option("--fit <FIT>", "Content fit").choices(["contain", "cover", "fill"]).default("contain"))
+    .option("--sound", "Play the audio of video pages (default: silent)")
     .option("--no-transcode", "Upload accepted file bytes unchanged")
     .option("--no-progress", "Suppress upload progress on stderr")
     .option("--poll-ms <MS>", "Upload polling interval", positiveInteger("poll-ms"))
     .option("--screen-id <ID>", "Use this screen’s identity, revision, and reported dimensions (a video wall’s canvas and format when it has one)")
     .action(bind(handlePlaylistInit));
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; server validation checks availability, and data.release_ids and data.media_ids report what the document holds. An existing non-empty --output file fails with usage_error (exit 2) and is left untouched; choose a new path or add --overwrite to rebuild it from these inputs, never publish the old file. Application pages hold for 24 hours (86400000 ms, the contract maximum) unless --duration-ms is given, because an app that rotates internally restarts each time its page advances; an application page set under 60 seconds earns an application_page_short warning here, in playlist validate and in screen publish. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. A screen with a video wall (screen wall set) uses the wall's canvas and the document carries the matching format {displays, arrangement, orientation, columns for a grid}: each tile is 1920x1080, or 1080x1920 for rotation 90 and 270, a row is that many tiles wide, a column that many tiles high and a grid its columns wide (data.format reports it). Explicit --target-width and --target-height instead make an ordinary playlist that every display mirrors. Inspect the document before publishing. An iframe address may carry screen tokens such as {screen.field.kiosk_id} in its path, query or fragment: it is kept as written and each screen\'s manifest fills in its own. A pasted <iframe> embed code (from Google's Publish to web or Microsoft's Embed dialog) is read for its src and becomes an iframe page; Google Slides, Docs and Sheets and Microsoft 365 Embed links are rebuilt for the screen when the playlist is written, and a Slides deck advances on its link's delay held to --duration-ms (give the page the time of the whole deck).");
+  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; server validation checks availability, and data.release_ids and data.media_ids report what the document holds. An existing non-empty --output file fails with usage_error (exit 2) and is left untouched; choose a new path or add --overwrite to rebuild it from these inputs, never publish the old file. Application pages hold for 24 hours (86400000 ms, the contract maximum) unless --duration-ms is given, because an app that rotates internally restarts each time its page advances; an application page set under 60 seconds earns an application_page_short warning here, in playlist validate and in screen publish. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Video pages are silent unless --sound; a page with sound pauses the soundtrack while it shows. A screen with a video wall (screen wall set) uses the wall's canvas and the document carries the matching format {displays, arrangement, orientation, columns for a grid}: each tile is 1920x1080, or 1080x1920 for rotation 90 and 270, a row is that many tiles wide, a column that many tiles high and a grid its columns wide (data.format reports it). Explicit --target-width and --target-height instead make an ordinary playlist that every display mirrors. Inspect the document before publishing. An iframe address may carry screen tokens such as {screen.field.kiosk_id} in its path, query or fragment: it is kept as written and each screen\'s manifest fills in its own. A pasted <iframe> embed code (from Google's Publish to web or Microsoft's Embed dialog) is read for its src and becomes an iframe page; Google Slides, Docs and Sheets and Microsoft 365 Embed links are rebuilt for the screen when the playlist is written, and a Slides deck advances on its link's delay held to --duration-ms (give the page the time of the whole deck).");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen-id scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 
@@ -170,6 +173,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--media <MED_ID>", "Show this image or video full-canvas, built on the playlist's canvas")
     .option("--seconds <N>", "How long an image shows (default 10); a video plays to its end", positiveInteger("seconds"))
     .addOption(new Option("--fit <FIT>", "How the media fits the canvas (default contain)").choices(["contain", "cover"]))
+    .option("--sound", SOUND_HELP)
     .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
     .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
     .option("--before <PAGE_ID>", "Put the page in front of this page (default: at the end)")
@@ -182,9 +186,10 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .argument("<playlist-id>", "Playlist identifier")
     .argument("<page-id>", "The page to replace")
     .option("--file <PAGE.json>", "The complete new page, or - for stdin")
-    .option("--media <MED_ID>", "Swap the page's media; everything else, dates included, stays as stored. Without --file or --media, only the dates (and --seconds, --fit) change")
+    .option("--media <MED_ID>", "Swap the page's media; everything else, dates included, stays as stored. Without --file or --media, only the dates (and --seconds, --fit, --sound) change")
     .option("--seconds <N>", "How long an image shows", positiveInteger("seconds"))
     .addOption(new Option("--fit <FIT>", "How the media fits the canvas").choices(["contain", "cover"]))
+    .option("--sound", SOUND_HELP)
     .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
     .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
     .option("--always", "Remove the page's dates (from and until); a switch-off or weekly windows the project set stay")
@@ -192,7 +197,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistPageReplace));
   requireOptionGroup(pageReplace, "atMostOne", ["--file", "--media"]);
-  requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always"]);
+  requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always", "--sound"]);
   page.command("remove").description("Remove one page")
     .argument("<playlist-id>", "Playlist identifier")
     .argument("<page-id>", "The page to remove")

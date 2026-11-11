@@ -427,7 +427,7 @@ async function main(): Promise<void> {
     backend.putScreen!({
       id: "scr_DISPLAYAAAAAAAAAAAAAAAA", public_id: "pub_display", label: "Display", state: "active", online: true, revision: 1,
       manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", tags: ["Hall"],
-      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec"] },
+      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec", "volume"] },
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
     const bothScreens = await run("screen", "list");
@@ -446,6 +446,12 @@ async function main(): Promise<void> {
     assert.equal((undone.data as { display?: unknown }).display, undefined);
     await run("screen", "display", "--tag", "Hall", "--power", "off");
     await run("screen", "display", "clear", "--tag", "Hall");
+    const quiet = await run("screen", "volume", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--level", "35", "--mute");
+    assert.equal((quiet.data as { volume?: { requested?: { muted?: boolean } } }).volume?.requested?.muted, true);
+    assert.equal((quiet.data as { volume?: { requested?: { level?: number } } }).volume?.requested?.level, 35);
+    const fleetVolume = await run("screen", "volume", "--tag", "Hall", "--unmute");
+    assert.equal((fleetVolume.data as { action?: string; succeeded?: number }).action, "volume");
+    assert.equal((fleetVolume.data as { succeeded?: number }).succeeded, 1);
     const hours = path.join(temp, "hours.json");
     await writeFile(hours, JSON.stringify({ enabled: true, windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "07:00", end: "19:00" }] }));
     await run("screen", "display-schedule", "set", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--file", hours);

@@ -115,6 +115,8 @@ export function shortApplicationPageWarning(document: unknown): Warning | undefi
 /** Build the backend-owned write document; target metadata stays outside it. */
 export function preparePlaylist(options: {
   name: string; content: RecordValue[]; width: number; height: number; format?: PlaylistFormat; durationMs?: number; fit: string;
+  /** Video pages play their audio (muted false); every other page is unaffected. */
+  sound?: boolean;
 }): RecordValue {
   // Ready audio inputs become the soundtrack in input order; every other input
   // is one page.
@@ -141,7 +143,7 @@ export function preparePlaylist(options: {
           : media.primitive === "application" ? { release_id: media.release_id }
           : { selector: { by: "id", media_id: media.id } }),
         rect: { x: 0, y: 0, width: options.width, height: options.height }, layer: 0, content_fit: live ? "fill" : options.fit,
-        ...(video ? { muted: true, loop: false } : {}),
+        ...(video ? { muted: options.sound !== true, loop: false } : {}),
       }],
     };
   }) };

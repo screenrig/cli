@@ -492,7 +492,7 @@ export function normalizePlaylistForBundle(
           primitive: category,
           selector,
           ...(category === "image" && typeof primitive.alt === "string" ? { alt: primitive.alt } : {}),
-          ...(category === "video" ? { muted: primitive.muted === true, loop: primitive.loop === true } : {}),
+          ...(category === "video" ? { muted: primitive.muted !== false, loop: primitive.loop === true } : {}),
         };
       } else {
         throw usageError("Playlist export encountered an unsupported primitive.");

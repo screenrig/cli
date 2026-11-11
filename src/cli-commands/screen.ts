@@ -4,7 +4,7 @@ import type { CommandActionBinder } from "./types.js";
 import type { CommandHandler } from "../commands.js";
 import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
 import { calendarInstantOption } from "../change-control.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenVolume, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
 import { handleScreenBrightness, handleScreenDisplayIdle, handleScreenKioskLock } from "../handlers/screen-device-settings.js";
 import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption } from "../screen-device-settings.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
@@ -12,6 +12,7 @@ import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOpt
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
 import { liveFrameIntervalOption } from "../screen-live-frame.js";
 import { rebootWindowOption, untilOption } from "../screen-display.js";
+import { volumeLevelOption } from "../screen-volume.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
 import { handleScreenLinkCreate, handleScreenLinkDelete, handleScreenLinkShow } from "../screen-link.js";
@@ -512,6 +513,18 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen reboot-schedule set scr_LOBBY --file reboots.json --expect-rev 4");
   addCommandExamples(rebootSchedule.commands.find((command) => command.name() === "clear")!,
     "screenrig screen reboot-schedule clear scr_LOBBY", "screenrig screen reboot-schedule clear --tag Cafe");
+  const volume = screen.command("volume").description("Set a screen's volume or mute it now, or a fleet's volumes")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .addOption(folderSelector())
+    .addOption(new Option("--level <PERCENT>", "Volume from 0 to 100 (omitted: the screen keeps its level)").argParser(volumeLevelOption))
+    .addOption(new Option("--mute", "Silence the screen; its level is kept").conflicts(["unmute"]))
+    .addOption(new Option("--unmute", "Restore the sound at the screen's level").conflicts(["mute"]))
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenVolume));
+  requireOptionGroup(volume, "atLeastOne", ["--level", "--mute", "--unmute"]);
+  addCommandNotes(volume, "Volume:\n  Sets the screen's level (0 to 100), its mute, or both. --mute keeps the\n  level, so --unmute restores it. Only a Player that declares the volume\n  capability applies it; any other screen is refused with volume_unsupported\n  (exit 5) and nothing is recorded. A screen in a protected screen folder is\n  refused with protected_target (exit 5); one protected screen in a fleet\n  selection refuses the whole fleet request. An offline screen applies the\n  request from its next manifest. A change made later in the Player's settings\n  menu wins until the next request. screen show: Volume reported is what the\n  Player reached (device volume, or the Player's own gain). A video plays its\n  audio, at this volume, only when its page sets sound (playlist page add\n  --sound). At most 10 volume changes per screen per minute.");
+  addCommandExamples(volume, "screenrig screen volume scr_LOBBY --level 40", "screenrig screen volume scr_LOBBY --mute", "screenrig screen volume --tag Lobby --level 25 --unmute");
   const update = screen.commands.find(command => command.name() === "update")!;
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);

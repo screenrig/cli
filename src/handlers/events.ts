@@ -47,6 +47,7 @@ export const CANNED_EVENT_MESSAGES = new Set([
   "Screen reboot schedule updated",
   "Screen reboot schedule cleared",
   "Scheduled reboot skipped",
+  "Screen volume requested",
 ]);
 
 /**

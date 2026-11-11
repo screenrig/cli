@@ -942,7 +942,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: createDashboardSignup
-      description: Creates a self-serve account and signs this browser in. One transaction creates the person with an unverified email address and a verification deadline 72 hours out, registers the passkey from the ceremony POST /api/signups/passkey-options started, creates the person's organization and project as agent enrollment creates them, makes the person the project owner, stores the marketing email choice, and queues the verification mail (purpose account_email). The website visitor that opened the page is linked to the account and the signup is counted as signed_up. The response sets the dashboard session cookie. The refusals are those of POST /api/signups/passkey-options; a used, expired or mismatched ceremony returns 400 invalid_request. Limited per client address and per email address.
+      description: Creates a self-serve account and signs this browser in. One transaction creates the person with an unverified email address and a verification deadline 72 hours out, registers the passkey from POST /api/signups/passkey-options or stores a policy-valid fallback password, creates the person's organization and project as agent enrollment creates them, makes the person the project owner, stores the marketing email choice, and queues the verification mail (purpose account_email). The website visitor that opened the page is linked to the account and the signup is counted as signed_up. The response sets the dashboard session cookie. The refusals are those of POST /api/signups/passkey-options; a used, expired or mismatched ceremony returns 400 invalid_request. Password sign-in requires email verification; the verification link requires this person's signup session. Limited per client address and per email address.
       security: []
       requestBody:
         required: true
@@ -3677,7 +3677,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule and clear_display_schedule on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule and volume on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -3751,7 +3751,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: "playlist_format_mismatch and the other conflicts of the action, or protected_target when set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule or clear_display_schedule reaches a screen in a protected screen folder."
+          description: "playlist_format_mismatch and the other conflicts of the action, or protected_target when set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule or volume reaches a screen in a protected screen folder."
           content:
             application/problem+json:
               schema:
@@ -5788,6 +5788,77 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           description: "protected_target when the screen is in a protected screen folder (docs/screen-scope.md; clear the folder's protection through a review, make the change, protect it again), or the other conflicts of the operation."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/volume:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: setScreenVolume
+      x-rate-limit-policies:
+        - name: volume-org
+          quota: 600
+          windowSeconds: 60
+        - name: volume-screen
+          quota: 10
+          windowSeconds: 60
+        - name: volume-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Sets the screen''s volume now (docs/player-compatibility.md §6.5). level (0 to 100) and muted (true or false) are each optional but at least one is required, else invalid_request. Mute keeps the level, so unmuting restores it. Stores the request (Screen.volume.requested) under a new volume_id, replacing any earlier one (it never expires), re-mints the manifest (its volume member carries the request so an offline Player applies it from its next manifest), appends the project-only screen.volume_requested (details volume_id, level, muted), and bumps the screen revision (If-Match guards it). A screen that is online is also sent the runtime command player.volume (details volume_id, level, muted, at, expires_at a minute later); the Player applies each present member once per volume_id. A change made later in the Player''s own settings menu wins until the next request. What the Player reached is reported back in its health volume (Screen.volume.reported). The screen must be active (an archived screen answers screen_archived, a pairing_pending one resource_conflict) and its host hint must declare the volume capability, else 409 volume_unsupported and nothing is recorded. A refused or failed request, and an exact Idempotency-Key replay, spend no budget. A screen in a protected screen folder is protected_target (409).'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenVolumeWrite'
+      responses:
+        '200':
+          description: Screen with its volume state.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: "volume_unsupported when the screen's host did not declare the volume capability, protected_target when the screen is in a protected screen folder (docs/screen-scope.md; clear the folder's protection through a review, make the change, protect it again), or the other conflicts of the operation."
           content:
             application/problem+json:
               schema:
@@ -12009,8 +12080,10 @@ paths:
     put:
       operationId: putInstanceData
       x-screenrig-access: write
+      description: Replaces the card's data document. A dashboard session may write it too; the document is live on screens at once, so only the project owner or a member who can approve may (approver_required otherwise).
       security:
         - projectBearer: []
+        - dashboardSession: []
       responses:
         '200':
           description: Card resource
@@ -12453,9 +12526,10 @@ paths:
       x-screenrig-access: write
       operationId: putCardData
       description: >-
-        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. Agent and webhook writes are also rate limited, per organization by plan (Standard and Plus 60 a minute, Education and Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct media per document, or the write is refused with card_media_invalid naming the property path and media_id. Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions and idempotency are the application K/V store's. A dashboard session may write it too; the document is live on screens at once, so only the project owner or a member who can approve may (approver_required otherwise). Agent and webhook writes are also rate limited, per organization by plan (Standard and Plus 60 a minute, Education and Premium 600, Enterprise 3,000) and to 60 a minute per key on every plan; a write over a limit is refused with rate_limited and Retry-After, and is not metered.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/OptionalIfMatch'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -17418,7 +17492,7 @@ paths:
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
-          description: 'Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Served by the stream sidecar from Valkey (stream-valkey/v1); the stream carries no stream.cursor frames, and a cursor advances only with delivered events. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), player.play_page (§6.3.1) and player.identify (§6.3.2), never delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so that streams dropped together do not reconnect together; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.'
+          description: 'Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Served by the stream sidecar from Valkey (stream-valkey/v1); the stream carries no stream.cursor frames, and a cursor advances only with delivered events. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, the per-screen commands player.reboot, player.display and player.volume (docs/player-compatibility.md §6.5), player.play_page (§6.3.1) and player.identify (§6.3.2), never delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so that streams dropped together do not reconnect together; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.'
           headers:
             X-Accel-Buffering:
               schema:
@@ -17691,7 +17765,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports device health for the paired session''s screen. Send one on session start and every fifteen minutes, and one at once when the display connection or power changes. Every member is optional and the body is read tolerantly (docs/player-compatibility.md §1.1): unknown members are ignored, a value out of range is dropped, and an unknown display.power or network.kind reads as unknown; only a member of the wrong JSON type is 400 (a number beyond float64 range is out of range: that member is dropped). The stored value is the sanitized ScreenHealth plus server reported_at, replacing the previous report. At most one report per screen per minute (runtime-health): a 429 means drop this report and send the next one on schedule, never retry sooner than Retry-After (at least 1 second). A 400 or a server error does not spend the minute; all sessions of one screen share it. Requires a paired session holding health.write (a paired session minted before health.write existed is admitted by runtime.report); unpaired and anonymous sessions are forbidden and an archived screen answers 409 screen_archived. A report from a session older than the screen''s current content access generation is refused 401. Archive and screen recovery clear Screen.health. A backend without this route answers 404: keep playing and stop reporting health for that session. Transitions append the project-only screen.health_changed (never on GET /screen/events). Health is never authorization.'
+      description: 'Reports device health for the paired session''s screen. Send one on session start and every fifteen minutes, and one at once when the display connection, display power or volume changes. Every member is optional and the body is read tolerantly (docs/player-compatibility.md §1.1): unknown members are ignored, a value out of range is dropped, and an unknown display.power or network.kind reads as unknown; only a member of the wrong JSON type is 400 (a number beyond float64 range is out of range: that member is dropped). The stored value is the sanitized ScreenHealth plus server reported_at, replacing the previous report. At most one report per screen per minute (runtime-health): a 429 means drop this report and send the next one on schedule, never retry sooner than Retry-After (at least 1 second). A 400 or a server error does not spend the minute; all sessions of one screen share it. Requires a paired session holding health.write (a paired session minted before health.write existed is admitted by runtime.report); unpaired and anonymous sessions are forbidden and an archived screen answers 409 screen_archived. A report from a session older than the screen''s current content access generation is refused 401. Archive and screen recovery clear Screen.health. A backend without this route answers 404: keep playing and stop reporting health for that session. Transitions append the project-only screen.health_changed (never on GET /screen/events). Health is never authorization.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -21029,6 +21103,8 @@ paths:
       - url: https://api.screenrig.ai
     get:
       operationId: getDashboardOrganization
+      servers:
+        - url: https://screenrig.ai
       description: One organization as an item of GET /api/organizations shows it to the caller, with admin, home and reseller. A signed-in person reads it when they administer it, administer the reseller it is delegated to, are staff, or would see it in that listing (a member of one of its live projects, or it is their home organization). Anyone else, and an organization that does not exist, gets 404 not_found. Grants no project membership. Cookie sessions only; an agent credential is refused.
       security:
         - dashboardSession: []
@@ -24259,7 +24335,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display and display schedules; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -24342,7 +24418,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: "playlist_format_mismatch and the other conflicts of the action, or protected_target when set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule or clear_display_schedule reaches a screen in a protected screen folder."
+          description: "playlist_format_mismatch and the other conflicts of the action, or protected_target when set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule or volume reaches a screen in a protected screen folder."
           content:
             application/problem+json:
               schema:
@@ -31176,7 +31252,7 @@ components:
           pattern: ^\S+$
           writeOnly: true
           x-maxBytes: 128
-          description: 12–128 UTF-8 bytes, without whitespace. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
+          description: 12–128 UTF-8 bytes, including at least one punctuation or symbol character (Unicode categories P or S), without Unicode whitespace or control characters (Unicode category Cc). Existing passwords containing spaces remain usable for login. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
     InvitationBuyer:
       oneOf:
         - type: object
@@ -31292,7 +31368,7 @@ components:
       type: object
       additionalProperties: false
       required: [email, display_name, marketing_email, credential]
-      description: The email address and display name are those the ceremony was started with.
+      description: Prefer a passkey; a password is the signup fallback when passkey setup is unavailable or fails. For passkeys the email address and display name match the ceremony. The account starts unverified; password sign-in requires email verification.
       properties:
         email:
           type: string
@@ -31305,7 +31381,9 @@ components:
           type: boolean
           description: The person chose to receive product news by email. Stored as consent with the person.
         credential:
-          $ref: '#/components/schemas/DashboardPasskeyProof'
+          oneOf:
+            - $ref: '#/components/schemas/DashboardPasskeyProof'
+            - $ref: '#/components/schemas/InvitationPasswordCredential'
     SignupCreated:
       type: object
       additionalProperties: false
@@ -33119,7 +33197,7 @@ components:
         report_before: {type: string, format: date-time}
         creative_revision: {type: integer}
         media: {$ref: "#/components/schemas/RuntimeAdslotMedia"}
-        hint_until: {type: string, format: date-time, description: "No-fill hint expiry on the server clock, at most 60 seconds after server_time and no later than an earlier known eligibility boundary. Scoped to this screen, manifest, page, slot and eligibility context."}
+        hint_until: {type: string, format: date-time, description: "No-fill hint expiry on the server clock, 60 seconds after server_time, or up to 10 minutes when nothing can fill the slot (no direct campaign targets it, no invited supply, no usable VAST tag), and no later than an earlier known eligibility boundary or targeting direct campaign flight start. Scoped to this screen, manifest, page, slot and eligibility context."}
     RuntimeAdslotResolveResponse:
       type: object
       additionalProperties: true
@@ -33266,7 +33344,7 @@ components:
       additionalProperties: false
       required: [tracks]
       description: >-
-        Optional playlist soundtrack: ordered ready audio (MP3) media that plays continuously while pages change (docs/playlist-audio.md). Page changes never stop or restart it. PUT replaces the whole playlist, so omitting audio removes the soundtrack.
+        Optional playlist soundtrack: ordered ready audio (MP3) media that plays continuously while pages change (docs/playlist-audio.md). Page changes never stop or restart it, except that it pauses while a page that plays video or stream sound (muted false) is current and resumes after. PUT replaces the whole playlist, so omitting audio removes the soundtrack.
       properties:
         tracks: {type: array, minItems: 1, maxItems: 128, items: {$ref: "#/components/schemas/PlaylistAudioTrack"}, description: "Play order. Track ids are unique within the playlist; the same media may appear under two ids."}
         loop: {type: boolean, default: true, description: "After the last track, start again at the first. false stops after the last track. Ignored when cued is true."}
@@ -33294,7 +33372,7 @@ components:
       additionalProperties: false
       required: [track]
       description: >-
-        Optional soundtrack hint on an ordinary page. When the page becomes current, the Player switches to the named track from its start unless it is already playing; restart true restarts it even then. The sequence continues from that track. Players may ignore a hint. track must name a track id in the playlist audio; a cue without a playlist audio is invalid_request. Not allowed on adslot pages. A page with advance mode audio_end ends when the cued track ends; it requires this cue.
+        Optional soundtrack hint on an ordinary page. When the page becomes current, the Player switches to the named track from its start unless it is already playing; restart true restarts it even then. The sequence continues from that track. Players may ignore a hint. track must name a track id in the playlist audio; a cue without a playlist audio is invalid_request. Not allowed on adslot pages. A page with advance mode audio_end ends when the cued track ends; it requires this cue. Not allowed on a page that plays video or stream sound (a primitive with muted false): the soundtrack pauses while that page is current, so it cannot cue it (invalid_request at audio_cue).
       properties:
         track: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
         restart: {type: boolean, default: false}
@@ -33524,11 +33602,11 @@ components:
       discriminator: {propertyName: primitive}
     PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, params: {type: object, maxProperties: 16, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, maxLength: 512}, description: "Launch parameters, up to 16: the launch URL carries each as a query parameter after ticket, so the application reads them from location.search. Launch params reach applications on the web Player and the Players that run it (Samsung Tizen, BrightSign, webOS and Vega); the Qt, Android, Apple and Windows Players load the application from their local package, which has no launch URL, and do not receive them. Names are 1 to 32 lower case letters, digits or underscores; ticket and policy are reserved. A value may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}), filled for the launching screen and percent-encoded; a filled value is at most 512 characters, and the encoded params together at most 4096 characters in the launch URL. A screen that lacks a value, or whose values fill into more than that, is not shown the application, on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid), and the write answers with a screen_fact_missing warning (PlaylistWarning). The launch route is keyed by release, so every primitive that pins a release carries the same params. Params are hints, not credentials: whoever holds the release host's cookie can open the page with any query, so an application reads the screen's identity from context.screen_id and treats params as untrusted input."}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: "Refused: an image has no dwell of its own; its page's advance sets how long it shows."}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, default: true, description: "true plays the video silent. false plays its audio at the screen volume while its page is current and pauses the playlist soundtrack for that page (docs/playlist-audio.md); such a page cannot carry an audio_cue."}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials, or a pasted iframe embed code, read for its src. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen; a file that asks viewers to sign in is refused (document_not_shared). The path, query and fragment may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}): the template is stored as written and each screen's manifest carries its own address, every value percent-encoded for its place in the URL. A token in the scheme, credentials, host or port, or in a YouTube, Google or Microsoft document or BI view address, is invalid_request at src. A screen that lacks a value, or whose values fill into an address over 2048 characters or one with a path segment of . or .., gets no iframe on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid) and the write answers with a screen_fact_missing warning (PlaylistWarning)."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 0, maximum: 86400, description: "Seconds between reloads of the page while it is on glass: 0 (no reload, the default) or 60 to 86400. Each reload loads src again, so a recovered src replaces the fallback. A write of 0 stores nothing."}, fallback_src: {type: string, pattern: "^(https?://|\\s*<iframe\\b)", description: "The page a screen shows in src's place when src does not load: a network, DNS, TLS or connection error, an HTTP status of 400 or above, or no completed load within 30 seconds. Takes the forms and rules of src (a pasted iframe embed code, a YouTube link stored as its canonical embed, a Google or Microsoft document link stored rebuilt for the screen, with the document_not_shared refusal). Omit it for none; an empty string is refused."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as 1 to 64 entries. Each entry is [scheme://]host[:port][path], a CSP host-source: the scheme is http or https (an http entry also matches https; no scheme matches both); host is a name, an IPv4 address, an IPv6 address in brackets, *.name (any subdomain of name, not name itself) or *, with no other wildcard; port is a number or * (absent: the scheme's default port); a path ending in / or /* covers everything under it, any other path only itself. No credentials, query, fragment, spaces or ; , ' \" characters. With a list, the page's own links, scripted navigations, forms and redirects reach only src, fallback_src and addresses an entry matches; a refused navigation leaves the page where it was. Query and fragment never count, and a redirect is matched without its path. Frames inside the page and YouTube embeds are not restricted. Entries are stored with the scheme and host lowercased and /* written as /, repeats removed. An empty array is refused: omit the key for no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, params: {type: object, maxProperties: 16, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, maxLength: 512}, description: "Launch parameters, up to 16: the launch URL carries each as a query parameter after ticket, so the application reads them from location.search. Launch params reach applications on the web Player and the Players that run it (Samsung Tizen, BrightSign, webOS and Vega); the Qt, Android, Apple and Windows Players load the application from their local package, which has no launch URL, and do not receive them. Names are 1 to 32 lower case letters, digits or underscores; ticket and policy are reserved. A value may carry screen tokens ({screen.id}, {screen.name}, {screen.timezone}, {screen.field.NAME}, {screen.location.lat}, {screen.location.lon}, {screen.location.name}, {screen.location.address}), filled for the launching screen and percent-encoded; a filled value is at most 512 characters, and the encoded params together at most 4096 characters in the launch URL. A screen that lacks a value, or whose values fill into more than that, is not shown the application, on any Player (manifest diagnostic screen_fact_missing or screen_fact_invalid), and the write answers with a screen_fact_missing warning (PlaylistWarning). The launch route is keyed by release, so every primitive that pins a release carries the same params. Params are hints, not credentials: whoever holds the release host's cookie can open the page with any query, so an application reads the screen's identity from context.screen_id and treats params as untrusted input."}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: "Only on a page stored when an image could end a media_end page; Players receive that page as a duration page without it. A write refuses it."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, description: "false plays the video's audio at the screen volume while its page is current and pauses the playlist soundtrack for that page."}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src. A template with screen tokens ({screen.field.NAME} and the others of the write schema) is returned as written, braces included; each screen's manifest carries its own filled address."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between reloads of the page while it is on glass. Present only when above 0; absent means the page never reloads."}, fallback_src: {type: string, pattern: "^https?://", description: "The page a screen shows in src's place when src does not load, stored by the rules of src, screen tokens included (returned as written). Absent means no fallback."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as stored entries ([scheme://]host[:port][path], CSP host-sources; the write schema has the rules). Absent means no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}}}
     MediaSelectorWeights:
@@ -34383,6 +34461,7 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
+        volume: {$ref: "#/components/schemas/ScreenVolume"}
         kiosk: {$ref: "#/components/schemas/ScreenKiosk"}
         reboot_schedule: {$ref: "#/components/schemas/ScreenRebootSchedule"}
         next_reboot_at: {type: string, format: date-time, description: "The start of the next window the backend reboots the screen at (PUT /api/screens/{id}/reboot-schedule); on a day a spring-forward gap swallows a whole window it is the minute the gap ends, and that occurrence is skipped (screen.reboot_skipped, window_missed). Absent while the screen has no enabled reboot schedule, and while it is archived. Read-only."}
@@ -34480,7 +34559,7 @@ components:
         host_version: {type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form."}
         timezone: {type: string, maxLength: 64, description: "Device IANA timezone hint. Used for effective card clock diagnostics when the screen has no explicit timezone."}
         device: {$ref: "#/components/schemas/HostDevice"}
-        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
+        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8), volume (the Player applies a remote volume from the manifest volume member and player.volume, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
     HostDevice:
       type: object
       additionalProperties: false
@@ -34504,7 +34583,7 @@ components:
         platform: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign, vega."}
         host_version: {type: string, minLength: 1, maxLength: 40}
         device: {$ref: "#/components/schemas/RuntimeHostHintDevice"}
-        capabilities: {type: array, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Declare reboot and each display_power.* method the device supports (docs/player-compatibility.md §6.5). A backend before dotted values drops a dotted entry on its own; it never refuses the request."}
+        capabilities: {type: array, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Declare reboot, volume and each display_power.* method the device supports (docs/player-compatibility.md §6.5). A backend before dotted values drops a dotted entry on its own; it never refuses the request."}
     RuntimeHostHintDevice:
       type: object
       additionalProperties: true
@@ -34575,6 +34654,7 @@ components:
         - {$ref: "#/components/schemas/ScreenActionSetRebootSchedule"}
         - {$ref: "#/components/schemas/ScreenActionClearRebootSchedule"}
         - {$ref: "#/components/schemas/ScreenActionMaintenance"}
+        - {$ref: "#/components/schemas/ScreenActionVolume"}
       discriminator: {propertyName: type}
       description: >-
         One fleet action, discriminated by type. Each member carries only its own parameters; a member of another type is an unknown field and invalid_request.
@@ -34730,12 +34810,21 @@ components:
       properties:
         type: {type: string, enum: [clear_cache, restart_app, update]}
         expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
+    ScreenActionVolume:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Same rules as ScreenVolumeWrite (at least one of level and muted); a screen whose host did not declare volume fails alone with volume_unsupported.
+      properties:
+        type: {type: string, enum: [volume]}
+        level: {type: integer, minimum: 0, maximum: 100}
+        muted: {type: boolean}
     ScreenActionResult:
       type: object
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: {type: string, enum: [assign, clear_playlist, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, set_reboot_schedule, clear_reboot_schedule, clear_cache, restart_app, update]}
+        action: {type: string, enum: [assign, clear_playlist, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule, set_reboot_schedule, clear_reboot_schedule, clear_cache, restart_app, update, volume]}
         matched: {type: integer, minimum: 0}
         succeeded: {type: integer, minimum: 0}
         failed: {type: integer, minimum: 0}
@@ -36484,6 +36573,8 @@ components:
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
         destination: {$ref: "#/components/schemas/NotificationDestination"}
         telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        headers: {$ref: "#/components/schemas/NotificationHeadersWrite"}
+        body_template: {$ref: "#/components/schemas/NotificationBodyTemplate"}
         enabled: {type: boolean, default: true}
     NotificationDestination:
       type: string
@@ -36492,6 +36583,45 @@ components:
       writeOnly: true
       description: >-
         Slack, Teams, PagerDuty and Telegram only; required for them. The credential in the shape the service issues it: slack, the incoming webhook URL (hooks.slack.com); teams, the Workflows webhook URL (logic.azure.com or powerplatform.com; Office 365 connector URLs are retired); pagerduty, the 32-character Events API v2 routing key; telegram, the bot token. Another shape is notification_destination_rejected. It is sealed, never returned, and appears on reads only as destination_hint.
+    NotificationHeadersWrite:
+      type: array
+      maxItems: 8
+      items: {$ref: "#/components/schemas/NotificationHeaderWrite"}
+      description: >-
+        Webhook only. Custom request headers added to every delivery of the notification, a test included, so an endpoint that needs authentication can be called directly: Authorization with a bearer token, or a version header. Names are unique in any letter case. Host, Content-Length, Content-Type, Transfer-Encoding, Connection and the other hop-by-hop headers (Keep-Alive, Proxy-Authenticate, Proxy-Authorization, Proxy-Connection, TE, Trailer, Upgrade), User-Agent and any name starting ScreenRig- are screenRIG's and invalid_request. The values are sealed and never returned; a read shows each header as name, set and a hint.
+    NotificationHeaderWrite:
+      type: object
+      additionalProperties: false
+      required: [name, value]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$", description: An HTTP header name.}
+        value: {type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: "The header value, without control characters. Sealed and never returned."}
+    NotificationHeadersPatch:
+      type: array
+      maxItems: 8
+      items: {$ref: "#/components/schemas/NotificationHeaderPatch"}
+      description: As NotificationHeadersWrite. The list replaces the headers.
+    NotificationHeaderPatch:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$", description: An HTTP header name.}
+        value: {type: string, maxLength: 4096, writeOnly: true, description: "The new value, sealed. Omit it to keep the value the header has now (invalid_request when the notification has no header of that name)."}
+    NotificationHeader:
+      type: object
+      additionalProperties: false
+      required: [name, set, hint]
+      description: A custom header as a read shows it. The value is never returned.
+      properties:
+        name: {type: string}
+        set: {type: boolean, description: Always true.}
+        hint: {type: string, description: "The value masked to its last four characters, as …a1b2; empty when the value is shorter than 12 characters."}
+    NotificationBodyTemplate:
+      type: object
+      additionalProperties: true
+      description: >-
+        Webhook only. A JSON object sent as the body of every delivery in place of the normal one (a test included), at most 16384 bytes. Placeholders in its string values (not its member names) are replaced and the result is encoded, so the body is always valid JSON: {{summary}}, one plain-text line that says what happened (a screen notice reads as its chat message does; an event as its type, message, resource and time); {{event_type}}, the event type, or alert.opened or alert.resolved for a screen notice; {{event_id}}, the ScreenRig-Event-Id of the delivery; {{webhook_id}}, the notification id; {{project_id}}; {{occurred_at}}, RFC 3339 UTC; and {{payload}}, the body the delivery carries without a template, as a string. Any other {{name}} is invalid_request. A string longer than 65536 characters after substitution is cut and the delivery shows body_cut; a rendered body over 262144 bytes is not sent and the delivery fails as body_too_large. ScreenRig-Signature is computed over the body as sent. Example, for Claude Code's cloud routine trigger: {"text": "Update the lobby board.\n{{summary}}"}.
     NotificationTelegramChat:
       type: string
       pattern: "^(-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$"
@@ -36525,6 +36655,12 @@ components:
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
         destination: {$ref: "#/components/schemas/NotificationDestination"}
         telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        headers:
+          oneOf: [{$ref: "#/components/schemas/NotificationHeadersPatch"}, {type: "null"}]
+          description: Webhook only. Replaces the custom headers. An entry with a name and no value keeps the value that header has, a header not listed is removed, and null or an empty list removes them all. Absent leaves them.
+        body_template:
+          oneOf: [{$ref: "#/components/schemas/NotificationBodyTemplate"}, {type: "null"}]
+          description: Webhook only. Replaces the body template; null removes it, so deliveries carry the normal body again. Absent leaves it.
         enabled: {type: boolean}
         snoozed_until:
           oneOf: [{type: string, format: date-time}, {type: "null"}]
@@ -36534,7 +36670,7 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        An organization's notification, as a project or the organization reads it. It covers every project of the organization or the chosen ones (project_ids), and acts on each covered project's screens, sources, campaigns and cards. A project reads (and, when the notification covers it alone, changes) the notifications that cover it by the same id, with its own status and failure times; the organization reads the whole of it. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification. A campaign's notice also carries reach {published, current} (reach_dropped: the screens the campaign reached when it was published and reaches when the notice is sent) or audience_group {kind: tag or folder, value: the tag or the folder id} (group_empty); email and chat say the same in words. A notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        An organization's notification, as a project or the organization reads it. It covers every project of the organization or the chosen ones (project_ids), and acts on each covered project's screens, sources, campaigns and cards. A project reads (and, when the notification covers it alone, changes) the notifications that cover it by the same id, with its own status and failure times; the organization reads the whole of it. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id, severity}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), event_id is the cursor of the event behind it, and severity (info, warning or error) is the condition's severity for alert.opened and info for alert.resolved, on every webhook notification. A campaign's notice also carries reach {published, current} (reach_dropped: the screens the campaign reached when it was published and reaches when the notice is sent) or audience_group {kind: tag or folder, value: the tag or the folder id} (group_empty); email and chat say the same in words. A notification that sets min_severity or severity also says it in its email, Slack, Telegram and Teams text. Teams and PagerDuty always show the effective severity. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. A restart is decided at once; a network or platform cause needs a health report received after the screen is back, which a Player may send up to 15 minutes later, so a notice that went out before then carries null and the cause shows in ScreenOutage.likely_cause and screen.outage_classified. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>, the body being the one sent: body_template renders a body of your own and headers adds request headers (an Authorization bearer token), so an endpoint that wants both is called directly. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string, description: "The project the notification is read through; absent on the organization routes."}
         organization_id: {type: string, description: The organization the notification belongs to.}
@@ -36555,6 +36691,8 @@ components:
         url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential."}
         event_types: {type: array, items: {type: string}, description: Webhook only.}
         destination_hint: {type: string, description: "Slack, Teams, PagerDuty and Telegram only. The destination masked to its host and last four characters, as https://hooks.slack.com/…/x9Zq or …a1b2."}
+        headers: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/NotificationHeader"}, description: "Webhook only, present while any is set. The custom headers as name, set and hint; the values are never returned."}
+        body_template: {$ref: "#/components/schemas/NotificationBodyTemplate", description: Webhook only. Present while a body template is set.}
         telegram_chat_id: {type: string, description: Telegram only. The chat messages go to.}
         enabled: {type: boolean}
         snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
@@ -36693,6 +36831,8 @@ components:
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
         destination: {$ref: "#/components/schemas/NotificationDestination"}
         telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        headers: {$ref: "#/components/schemas/NotificationHeadersWrite"}
+        body_template: {$ref: "#/components/schemas/NotificationBodyTemplate"}
         enabled: {type: boolean, default: true}
         project_ids:
           oneOf: [{$ref: "#/components/schemas/NotificationProjectIDs"}, {type: "null"}]
@@ -36727,6 +36867,12 @@ components:
         event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
         destination: {$ref: "#/components/schemas/NotificationDestination"}
         telegram_chat_id: {$ref: "#/components/schemas/NotificationTelegramChat"}
+        headers:
+          oneOf: [{$ref: "#/components/schemas/NotificationHeadersPatch"}, {type: "null"}]
+          description: Webhook only. Replaces the custom headers. An entry with a name and no value keeps the value that header has, a header not listed is removed, and null or an empty list removes them all. Absent leaves them.
+        body_template:
+          oneOf: [{$ref: "#/components/schemas/NotificationBodyTemplate"}, {type: "null"}]
+          description: Webhook only. Replaces the body template; null removes it, so deliveries carry the normal body again. Absent leaves it.
         enabled: {type: boolean}
         snoozed_until:
           oneOf: [{type: string, format: date-time}, {type: "null"}]
@@ -36751,6 +36897,7 @@ components:
         event_id: {type: string, description: The cursor of the event behind the delivery.}
         event_type: {type: string}
         test: {type: boolean, description: Present and true for a POST .../test delivery.}
+        body_cut: {type: boolean, description: "Present and true when a string of the body the notification's body_template rendered was longer than 65536 characters and was cut."}
         condition: {type: string, description: "A screen notice's NotificationCondition; absent for an event delivery."}
         phase: {type: string, enum: [opened, resolved], description: A screen notice's phase.}
         screen_id: {type: string, description: "The screen a notice is about; a data source's, campaign's or card's id for their conditions."}
@@ -36769,7 +36916,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, a group_empty one because a publish removed the tag or folder from the campaign's audience, or a card_data_stale one because the card's data was deleted, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable (the signing secret or the custom headers cannot be opened; send the headers again), body_too_large (the body a template rendered is over 262144 bytes), email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, a group_empty one because a publish removed the tag or folder from the campaign's audience, or a card_data_stale one because the card's data was deleted, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -38306,6 +38453,7 @@ components:
         pages: {type: array, items: {oneOf: [{$ref: "#/components/schemas/RuntimePage"}, {$ref: "#/components/schemas/RuntimeAdslotPage"}]}}
         audio: {$ref: "#/components/schemas/RuntimeAudio"}
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
+        volume: {$ref: "#/components/schemas/RuntimeVolume"}
         verbosity: {$ref: "#/components/schemas/RuntimeVerbosity"}
         kiosk: {$ref: "#/components/schemas/RuntimeKiosk"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
@@ -38837,7 +38985,7 @@ components:
           pattern: ^\S+$
           writeOnly: true
           x-maxBytes: 128
-          description: 12–128 UTF-8 bytes, without whitespace. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
+          description: 12–128 UTF-8 bytes, including at least one punctuation or symbol character (Unicode categories P or S), without Unicode whitespace or control characters (Unicode category Cc). Existing passwords containing spaces remain usable for login. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
         proof:
           $ref: '#/components/schemas/DashboardProof'
     DashboardSession:
@@ -39038,6 +39186,14 @@ components:
           properties:
             connected: {type: boolean, description: Whether a display is attached (HDMI hot-plug or equivalent).}
             power: {type: string, enum: [on, off, standby, unknown], description: "Display power as the Player can observe it (CEC, DDC/CI, backlight). A value this backend does not know reads as unknown."}
+        volume:
+          type: object
+          additionalProperties: true
+          description: "The volume the Player reached. level and muted are both needed; a level out of range drops the member."
+          properties:
+            level: {type: integer, minimum: 0, maximum: 100}
+            muted: {type: boolean}
+            hardware: {type: boolean, description: "true when the level reaches the device or panel output, false (the default) when it is the Player's own gain."}
         network:
           type: object
           additionalProperties: true
@@ -39070,6 +39226,7 @@ components:
         cpu: {type: object, additionalProperties: false, properties: {load_1m: {type: number, minimum: 0}, cores: {type: integer, minimum: 1}, utilization_percent: {type: number, minimum: 0, maximum: 100}, app_percent: {type: number, minimum: 0, maximum: 100}}}
         temperature_c: {type: number}
         display: {type: object, additionalProperties: false, properties: {connected: {type: boolean}, power: {type: string, enum: [on, off, standby, unknown]}}}
+        volume: {type: object, additionalProperties: false, required: [level, muted, hardware], properties: {level: {type: integer, minimum: 0, maximum: 100}, muted: {type: boolean}, hardware: {type: boolean}}}
         network: {type: object, additionalProperties: false, properties: {kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}, wifi_rssi_dbm: {type: integer}}}
         battery: {type: object, additionalProperties: false, properties: {level_percent: {type: number, minimum: 0, maximum: 100}, charging: {type: boolean}, source: {type: string, enum: [ac, usb, wireless, dock, none]}, temperature_c: {type: number}}}
         crashes_24h: {type: integer, minimum: 0}
@@ -39409,6 +39566,39 @@ components:
       properties:
         display_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenDisplaySchedule"}, {type: "null"}]}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
+    ScreenVolumeWrite:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        level: {type: integer, minimum: 0, maximum: 100, description: "The volume, 0 to 100. Absent keeps the Player's level."}
+        muted: {type: boolean, description: "true silences the output and keeps the level, so false restores it. Absent keeps the Player's mute."}
+    ScreenVolumeRequest:
+      type: object
+      additionalProperties: false
+      required: [volume_id, set_at]
+      properties:
+        volume_id: {type: string, pattern: "^vol_[A-Za-z0-9_-]{8,64}$", description: "A Player applies each volume_id at most once, from player.volume or the manifest's volume member."}
+        level: {type: integer, minimum: 0, maximum: 100, description: "Present when the request set the level."}
+        muted: {type: boolean, description: "Present when the request set the mute."}
+        set_at: {type: string, format: date-time}
+    ScreenVolume:
+      type: object
+      additionalProperties: false
+      description: >-
+        Screen volume state. requested is the latest remote request, which never expires; a later change in the Player's settings menu wins over it until the next request. reported is the Player's latest health volume (level, muted, hardware, reported_at, stale after 35 minutes). Absent when the screen has no request and no reported volume.
+      properties:
+        requested: {$ref: "#/components/schemas/ScreenVolumeRequest"}
+        reported:
+          type: object
+          additionalProperties: false
+          required: [level, muted, hardware, reported_at, stale]
+          properties:
+            level: {type: integer, minimum: 0, maximum: 100}
+            muted: {type: boolean}
+            hardware: {type: boolean, description: "true when the level reaches the device or panel output, false when it is the Player's own gain."}
+            reported_at: {type: string, format: date-time}
+            stale: {type: boolean}
     RuntimeWall:
       type: object
       additionalProperties: true
@@ -39475,6 +39665,16 @@ components:
             overrideId: {type: string}
             power: {type: string, enum: [on, off]}
             until: {type: string, format: date-time}
+    RuntimeVolume:
+      type: object
+      additionalProperties: true
+      required: [volumeId]
+      description: >-
+        The screen's latest remote volume request (docs/player-compatibility.md §6.5). Emitted only when a request exists and the Player declared the volume host capability. The Player applies each present member once per volumeId, then remembers the volumeId; a malformed member is ignored. Unknown members are ignored.
+      properties:
+        volumeId: {type: string}
+        level: {type: integer, minimum: 0, maximum: 100, description: Present when the request set the level; absent keeps the Player's level.}
+        muted: {type: boolean, description: Present when the request set the mute; absent keeps the Player's mute.}
     DashboardProject:
       type: object
       additionalProperties: false
@@ -39909,6 +40109,7 @@ x-problem-codes:
   - command_unsupported
   - play_page_unsupported
   - identify_unsupported
+  - volume_unsupported
   - page_not_on_screen
   - live_unsupported
   - live_unavailable

@@ -547,6 +547,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (object(page.advance).mode === "audio_end") fail(`/pages/${index}/advance`, "audio_end requires an audio_cue on the same page");
       continue;
     }
+    if (array(page.primitives).map(object).some((primitive) => (primitive.primitive === "video" || primitive.primitive === "stream") && primitive.muted === false)) fail(`/pages/${index}/audio_cue`, "a page with sound cannot cue the soundtrack");
     if (!Object.hasOwn(playlist, "audio")) fail(`/pages/${index}/audio_cue`, "requires a playlist audio soundtrack");
     else if (!trackIds.has(object(page.audio_cue).track)) fail(`/pages/${index}/audio_cue/track`, "must name a track id in audio.tracks");
   }

@@ -549,12 +549,16 @@ export function validatePlaylistWrite(
         // No page takes a dwell: the page's advance times it, and an image never drives the advance.
         if (primitive.dwell_ms !== undefined) throw usageError(`${primitiveName}.dwell_ms is not accepted: an image takes its page's timing, and a media_end page advances on its video.`);
       } else {
-        if (primitive.muted !== undefined && primitive.muted !== true) throw usageError(`${primitiveName}.muted must be true.`);
+        optionalBoolean(primitive, "muted", primitiveName);
         optionalBoolean(primitive, "loop", primitiveName);
       }
       mediaPrimitivesOnPage.push({ primitive: category, value: primitive, selector });
     }
     if (iframeCount > 2) throw usageError(`${pageName}.primitives must contain at most 2 iframe primitives.`);
+    // A page with sound pauses the soundtrack, so it cannot also cue it (the server's rule and message).
+    if (page.audio_cue !== undefined && mediaPrimitivesOnPage.some((media) => media.primitive === "video" && media.value.muted === false)) {
+      throw usageError(`${pageName}.audio_cue: a page with sound cannot cue the soundtrack.`);
+    }
     if (advance === "application") throw usageError(`${pageName} application advance is unsupported because bundles exclude applications.`);
     // A media_end page advances when its one video (its whole selector sequence) ends and takes any number of images, which
     // never drive the advance. Every other page, and every image, needs one_at_a_time for a selector of several files.

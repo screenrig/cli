@@ -136,14 +136,19 @@ export interface MediaPageInput {
   transition?: unknown;
   from?: string;
   until?: string;
+  /** A video plays its audio (muted false) instead of silent; refused for an image. */
+  sound?: boolean;
 }
+
+/** The server's rule: a page that plays sound pauses the soundtrack, so it cannot also cue it. */
+export const SOUND_CUE_MESSAGE = "a page with sound cannot cue the soundtrack";
 
 /**
  * The page an upload becomes: one full-canvas image or video primitive named by
  * id, contained or covered. An image advances after `seconds`; a video at its
- * own end. `from` and `until` are the page's visibility, civil times in each
- * screen's timezone with `until` exclusive; neither means the page is always
- * shown.
+ * own end, muted unless `sound`. `from` and `until` are the page's visibility,
+ * civil times in each screen's timezone with `until` exclusive; neither means
+ * the page is always shown.
  */
 export function buildMediaPage(input: MediaPageInput): JSONObject {
   const canvas = pageCanvas(input.playlist);
@@ -151,7 +156,8 @@ export function buildMediaPage(input: MediaPageInput): JSONObject {
     id: "media", primitive: input.kind, selector: { by: "id", media_id: input.mediaId },
     rect: { x: 0, y: 0, width: canvas.width, height: canvas.height }, layer: 0, content_fit: input.fit,
   };
-  if (input.kind === "video") primitive.muted = true;
+  if (input.sound === true && input.kind !== "video") throw usageError("--sound plays a video's audio; this media is an image.");
+  if (input.kind === "video") primitive.muted = input.sound !== true;
   const page: JSONObject = {
     id: input.id, canvas, transition: input.transition ?? pageTransition(input.playlist),
     advance: input.kind === "image" ? { mode: "duration", after_ms: Math.round(input.seconds * 1000) } : { mode: "media_end" },
@@ -210,6 +216,8 @@ export interface ReplaceMediaInput {
   from?: string;
   until?: string;
   always: boolean;
+  /** The video plays its audio (muted false). Without it a kept video keeps the stored muted and a rebuilt one is silent. */
+  sound?: boolean;
 }
 
 /**
@@ -217,12 +225,13 @@ export interface ReplaceMediaInput {
  * keeps every other member, dates included. A different kind is rebuilt as
  * a media page on the playlist's canvas, keeping the stored dates and id. A
  * date flag changes only its bound; `always` removes the dates and keeps the
- * rest of the visibility the project set.
+ * rest of the visibility the project set. `sound` gives the page's video its
+ * audio, which a page that cues the soundtrack cannot have.
  */
 export function replaceMedia(input: ReplaceMediaInput): JSONObject {
   const page = authoringPage(input.stored);
   let result = page;
-  if (input.mediaId !== undefined || input.fit !== undefined || input.seconds !== undefined) {
+  if (input.mediaId !== undefined || input.fit !== undefined || input.seconds !== undefined || input.sound === true) {
     const primitives = Array.isArray(page.primitives) ? page.primitives : [];
     const only = primitives.length === 1 && isObject(primitives[0]) ? primitives[0] : undefined;
     if (!only) {
@@ -232,12 +241,19 @@ export function replaceMedia(input: ReplaceMediaInput): JSONObject {
       const primitive: JSONObject = { ...only };
       if (input.mediaId !== undefined) primitive.selector = { by: "id", media_id: input.mediaId };
       if (input.fit) primitive.content_fit = input.fit;
+      if (input.sound === true) {
+        if (only.primitive !== "video") throw usageError(`--sound plays a video's audio; page ${String(input.stored.id)} shows ${only.primitive === "image" ? "an image" : `a ${String(only.primitive)}`}.`);
+        primitive.muted = false;
+      }
       result = { ...page, primitives: [primitive] };
       if (only.primitive === "image" && input.seconds !== undefined) result.advance = { mode: "duration", after_ms: Math.round(input.seconds * 1000) };
     } else {
-      const rebuilt = buildMediaPage({ id: String(input.stored.id), mediaId: input.mediaId, kind: input.kind, fit: input.fit ?? "contain", seconds: input.seconds ?? DEFAULT_SECONDS, playlist: input.playlist });
+      const rebuilt = buildMediaPage({ id: String(input.stored.id), mediaId: input.mediaId, kind: input.kind, fit: input.fit ?? "contain", seconds: input.seconds ?? DEFAULT_SECONDS, playlist: input.playlist, ...(input.sound ? { sound: true } : {}) });
       result = { ...page, canvas: rebuilt.canvas, advance: rebuilt.advance, primitives: rebuilt.primitives };
     }
+  }
+  if (input.sound === true && result.audio_cue !== undefined) {
+    throw usageError(`Page ${String(input.stored.id)} has an audio_cue, and ${SOUND_CUE_MESSAGE}. Replace it with --file, without the cue, to give it sound.`);
   }
   if (input.always) {
     const visibility = withoutDates(page.visibility);
@@ -274,6 +290,11 @@ function fit(args: ParsedArgs): "contain" | "cover" | undefined {
   if (value === undefined) return undefined;
   if (value !== "contain" && value !== "cover") throw usageError("--fit takes contain or cover.");
   return value;
+}
+
+/** --sound: the video plays its audio. Page files carry their own muted. */
+function sound(args: ParsedArgs): boolean {
+  return flagBool(args.flags, "sound");
 }
 
 function dates(args: ParsedArgs): { from?: string; until?: string; always: boolean } {
@@ -383,7 +404,7 @@ export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolv
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let page: JSONObject;
   if (file !== undefined) {
-    if (seconds(args) !== undefined || fit(args) !== undefined) throw usageError("--seconds and --fit shape a page built from --media; a --file page is sent as written.");
+    if (seconds(args) !== undefined || fit(args) !== undefined || sound(args)) throw usageError("--seconds, --fit and --sound shape a page built from --media; a --file page is sent as written.");
     page = await pageFromFile(file, runtime);
     if (requestedId !== undefined) page.id = requestedId;
     const visibility = visibilityOf(page.visibility, when.from, when.until);
@@ -392,7 +413,7 @@ export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolv
     const kind = await mediaOf(client, media!);
     const { playlist } = await playlistOf(client, id);
     const transition = await transitionFor(client, playlist);
-    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, transition, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}) });
+    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, transition, ...(sound(args) ? { sound: true } : {}), ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}) });
   }
   const response = await pageWrite(client, args, { method: "POST", path: pagesPath(id), body: { page, ...(before !== undefined ? { before } : {}) } });
   return pageResult(response, client.requestId, `Page ${String(page.id)} added to ${id}.`);
@@ -404,14 +425,14 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
   const file = flagString(args.flags, "file"), media = flagString(args.flags, "media");
   if (file !== undefined && media !== undefined) throw usageError("playlist page replace takes --file PAGE.json or --media MED_ID, not both.");
   const when = dates(args);
-  if (file === undefined && media === undefined && when.from === undefined && when.until === undefined && !when.always) {
-    throw usageError("playlist page replace requires --file PAGE.json, --media MED_ID, or a date change (--from, --until or --always).");
+  if (file === undefined && media === undefined && when.from === undefined && when.until === undefined && !when.always && !sound(args)) {
+    throw usageError("playlist page replace requires --file PAGE.json, --media MED_ID, a date change (--from, --until or --always), or --sound.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let page: JSONObject;
   let revision: string | undefined;
   if (file !== undefined) {
-    if (seconds(args) !== undefined || fit(args) !== undefined) throw usageError("--seconds and --fit shape a page built from --media; a --file page is sent as written.");
+    if (seconds(args) !== undefined || fit(args) !== undefined || sound(args)) throw usageError("--seconds, --fit and --sound shape a page built from --media; a --file page is sent as written.");
     page = await pageFromFile(file, runtime);
     if (page.id !== undefined && page.id !== pageId) throw usageError(`The page file's id ${String(page.id)} is not ${pageId}; a replace keeps the page's id.`);
     page.id = pageId;
@@ -426,7 +447,7 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
   } else {
     const { stored, playlist, revision: current } = await storedPageOf(client, id, pageId, resolved.token);
     const kind = media !== undefined ? await mediaOf(client, media) : undefined;
-    page = replaceMedia({ stored, ...(media !== undefined ? { mediaId: media, kind: kind! } : {}), ...(fit(args) ? { fit: fit(args)! } : {}), ...(seconds(args) !== undefined ? { seconds: seconds(args)! } : {}), playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), always: when.always });
+    page = replaceMedia({ stored, ...(media !== undefined ? { mediaId: media, kind: kind! } : {}), ...(fit(args) ? { fit: fit(args)! } : {}), ...(seconds(args) !== undefined ? { seconds: seconds(args)! } : {}), ...(sound(args) ? { sound: true } : {}), playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), always: when.always });
     // The page was derived from the stored one, so the write is held to the revision it was read at.
     revision = current;
   }

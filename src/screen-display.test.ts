@@ -11,6 +11,7 @@ import { run } from "./main.js";
 import { type CliRuntime } from "./runtime.js";
 import { commandLines } from "./screen-commands.js";
 import { displayLines, displayScheduleWrite, displayUntil, displayWarnings, rebootScheduleLines, rebootScheduleWrite, rebootWindowList, rebootWindowOption } from "./screen-display.js";
+import { volumeLines, volumeWrite } from "./screen-volume.js";
 import { testTemp } from "./test-temp.js";
 import { memoryBackend, type FakeTransport } from "./transport/fake.js";
 
@@ -483,4 +484,193 @@ test("scheduled reboot events render as logfmt without repeating their canned me
     `at=2026-08-14T17:00:00Z type=screen.reboot_schedule_changed severity=info resource_type=screen resource_id=${LOBBY} enabled=true windows=1`);
   assert.equal(formatEventLine({ ...base, type: "screen.reboot_skipped", message: "Scheduled reboot skipped", details: { reason: "reboot_pending" } } as never),
     `at=2026-08-14T17:00:00Z type=screen.reboot_skipped severity=info resource_type=screen resource_id=${LOBBY} reason=reboot_pending`);
+});
+
+// ---- screen volume ----------------------------------------------------------------------------
+
+/** LOBBY declares the volume capability; PLAIN (also tagged Lobby) does not. */
+function volumeFleet(): FakeTransport {
+  const transport = memoryBackend({ now: () => NOW });
+  transport.putScreen!(screen(LOBBY, { host: { platform: "android", capabilities: ["reboot", "volume"] } as unknown as Screen["host"] }));
+  transport.putScreen!(screen(PLAIN, { host: { platform: "web", capabilities: ["display_power.scrim"] } as unknown as Screen["host"] }));
+  return transport;
+}
+
+test("screen volume: level, mute and unmute send the closed body with the revision guard and an idempotency key", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  const posts = () => transport.calls.filter((item) => item.method === "POST" && item.path === `/api/screens/${LOBBY}/volume`);
+
+  const level = await cli(["--json", "screen", "volume", LOBBY, "--level", "40"], transport, env);
+  assert.equal(level.code, ExitCode.Success, level.stdout);
+  assert.deepEqual(posts().at(-1)?.body, { level: 40 });
+  assert.ok(posts().at(-1)?.headers?.["idempotency-key"]);
+  assert.equal(posts().at(-1)?.headers?.["if-match"], undefined);
+  assert.equal(level.envelope.data.revision, 4);
+  assert.deepEqual(level.envelope.data.volume.requested.level, 40);
+  assert.equal("muted" in level.envelope.data.volume.requested, false, "a request that left the mute out does not carry one");
+  assert.match(level.envelope.data.volume.requested.volume_id, /^vol_/);
+
+  const both = await cli(["--human", "screen", "volume", LOBBY, "--level", "25", "--mute"], transport, env);
+  assert.equal(both.code, ExitCode.Success, both.stdout);
+  assert.deepEqual(posts().at(-1)?.body, { level: 25, muted: true });
+  assert.match(both.stdout, /^Set volume on scr_LOBBYAAAAAAAAAAAAAAAAAA: level 25, muted\nVolume requested: level 25, muted \(set 2026-08-14T17:00:00\.000Z\)\nrevision: 5$/m);
+
+  const unmute = await cli(["--json", "screen", "volume", LOBBY, "--unmute", "--expect-rev", "5"], transport, env);
+  assert.equal(unmute.code, ExitCode.Success, unmute.stdout);
+  assert.deepEqual(posts().at(-1)?.body, { muted: false });
+  assert.equal(posts().at(-1)?.headers?.["if-match"], '"5"');
+
+  const stale = await cli(["--json", "screen", "volume", LOBBY, "--mute", "--expect-rev", "2"], transport, env);
+  assert.equal(stale.code, ExitCode.Precondition, stale.stdout);
+  assert.equal(stale.envelope.error?.code, "revision_conflict");
+
+  // The same key replays the answer without a second request being recorded.
+  const first = await cli(["--json", "screen", "volume", LOBBY, "--level", "10", "--idempotency-key", "volume-retry-key"], transport, env);
+  const replay = await cli(["--json", "screen", "volume", LOBBY, "--level", "10", "--idempotency-key", "volume-retry-key"], transport, env);
+  assert.equal(replay.code, ExitCode.Success, replay.stdout);
+  assert.equal(replay.envelope.data.revision, first.envelope.data.revision);
+  assert.equal(replay.envelope.data.volume.requested.volume_id, first.envelope.data.volume.requested.volume_id);
+});
+
+test("screen volume: usage errors reach no server", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  for (const [argv, pattern] of [
+    [["screen", "volume", LOBBY], /--level 0-100, --mute or --unmute|at least one of --level or --mute or --unmute/i],
+    [["screen", "volume", "--level", "40"], /requires <id>, --tag TAG or --folder ID/],
+    [["screen", "volume", LOBBY, "--level", "101"], /whole number from 0 to 100/],
+    [["screen", "volume", LOBBY, "--level", "-1"], /requires a value|whole number from 0 to 100/],
+    [["screen", "volume", LOBBY, "--level", "40.5"], /whole number from 0 to 100/],
+    [["screen", "volume", LOBBY, "--level", "loud"], /whole number from 0 to 100/],
+    [["screen", "volume", LOBBY, "--mute", "--unmute"], /cannot be used with|not both/],
+    [["screen", "volume", LOBBY, PLAIN, "--mute", "--expect-rev", "3"], /does not take --expect-rev/],
+    [["screen", "volume", "--tag", "Lobby", LOBBY, "--mute"], /give only one/],
+  ] as const) {
+    const result = await cli(["--json", ...argv], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+    assert.match(`${result.envelope.error?.detail ?? ""}`, pattern, argv.join(" "));
+  }
+  assert.equal(transport.calls.some((item) => item.path.endsWith("/volume") || item.path === "/api/screens/actions"), false, "nothing was sent");
+});
+
+test("screen volume: volume_unsupported is explained and records nothing; pending and archived screens say why", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  const refused = await cli(["--json", "screen", "volume", PLAIN, "--mute"], transport, env);
+  assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+  assert.equal(refused.envelope.error?.code, "volume_unsupported");
+  assert.match(refused.envelope.error!.detail, /Nothing was sent: only a Player that declares the volume capability/);
+  assert.equal(refused.envelope.error?.next?.command, `screenrig screen show ${PLAIN}`);
+  assert.match(refused.envelope.error!.next!.reason, /settings menu/);
+  const shown = await cli(["--json", "screen", "show", PLAIN], transport, env);
+  assert.equal(shown.envelope.data.volume, undefined, "the refused request left no volume state");
+  assert.equal(shown.envelope.data.revision, 3);
+
+  transport.putScreen!(screen("scr_PENDINGAAAAAAAAAAAAAAAA", { state: "pairing_pending", online: false }));
+  const pending = await cli(["--json", "screen", "volume", "scr_PENDINGAAAAAAAAAAAAAAAA", "--mute"], transport, env);
+  assert.equal(pending.code, ExitCode.Conflict, pending.stdout);
+  assert.match(pending.envelope.error!.next!.reason, /no paired Player yet/);
+
+  transport.putScreen!(screen("scr_ARCHIVEDAAAAAAAAAAAAAA", { state: "archived" }));
+  const archived = await cli(["--json", "screen", "volume", "scr_ARCHIVEDAAAAAAAAAAAAAA", "--mute"], transport, env);
+  assert.equal(archived.code, ExitCode.Conflict, archived.stdout);
+  assert.equal(archived.envelope.error?.code, "screen_archived");
+  assert.equal(archived.envelope.error?.next?.command, "screenrig screen unarchive scr_ARCHIVEDAAAAAAAAAAAAAA");
+
+  transport.putScreen!(screen("scr_OFFLINEAAAAAAAAAAAAAAAA", { online: false, host: { platform: "android", capabilities: ["volume"] } as unknown as Screen["host"] }));
+  const offline = await cli(["--human", "screen", "volume", "scr_OFFLINEAAAAAAAAAAAAAAAA", "--level", "30"], transport, env);
+  assert.equal(offline.code, ExitCode.Success, offline.stdout);
+  assert.match(offline.stdout, /The screen is offline; its Player applies the request from its next manifest\./);
+});
+
+test("screen volume: protected_target refuses the screen, and a fleet request that holds one, with nothing changed", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  const answer = transport.request.bind(transport);
+  transport.request = async (req) => req.method === "POST" && (req.path === `/api/screens/${LOBBY}/volume` || req.path === "/api/screens/actions") ? {
+    status: 409, headers: { "content-type": "application/problem+json" },
+    body: { type: "https://screenrig.ai/problems/protected-target", title: "Protected target", status: 409, code: "protected_target", detail: "A screen is in a protected screen folder." },
+  } : answer(req);
+
+  const single = await cli(["--json", "screen", "volume", LOBBY, "--level", "20"], transport, env);
+  assert.equal(single.code, ExitCode.Conflict, single.stdout);
+  assert.equal(single.envelope.error?.code, "protected_target");
+
+  const fleetRefused = await cli(["--json", "screen", "volume", "--tag", "Lobby", "--mute"], transport, env);
+  assert.equal(fleetRefused.code, ExitCode.Conflict, fleetRefused.stdout);
+  assert.equal(fleetRefused.envelope.error?.code, "protected_target");
+  assert.equal(fleetRefused.envelope.data, undefined, "the whole action is refused, so there are no per-screen results");
+
+  const shown = await cli(["--json", "screen", "show", LOBBY], transport, env);
+  assert.equal(shown.envelope.data.volume, undefined, "a refused request left no volume state");
+  assert.equal(shown.envelope.data.revision, 3);
+});
+
+test("screen volume: several ids, --tag and --folder use the volume fleet action and fail per screen", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  const actions = () => transport.calls.filter((item) => item.path === "/api/screens/actions");
+
+  const tag = await cli(["--json", "screen", "volume", "--tag", "Lobby", "--level", "30", "--mute"], transport, env);
+  assert.deepEqual(actions().at(-1)?.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: "volume", level: 30, muted: true } });
+  assert.equal(tag.envelope.data.action, "volume");
+  assert.equal(tag.envelope.data.succeeded, 1);
+  assert.equal(tag.envelope.data.failed, 1);
+  assert.notEqual(tag.code, ExitCode.Success, "a partial fleet change follows the fleet exit rule");
+  const failed = tag.envelope.data.results.find((item: { screen_id: string }) => item.screen_id === PLAIN);
+  assert.equal(failed.problem.code, "volume_unsupported");
+  assert.equal(tag.envelope.data.results.find((item: { screen_id: string }) => item.screen_id === LOBBY).status, "ok");
+
+  const ids = await cli(["--json", "screen", "volume", LOBBY, "scr_OTHERAAAAAAAAAAAAAAAAA", "--unmute"], transport, env);
+  assert.deepEqual(actions().at(-1)?.body, { selector: { by: "ids", screen_ids: [LOBBY, "scr_OTHERAAAAAAAAAAAAAAAAA"] }, action: { type: "volume", muted: false } });
+  assert.equal(ids.envelope.data.matched, 2);
+
+  transport.putScreen!(screen("scr_FOLDEREDAAAAAAAAAAAAAA", { folder_id: "sfd_NORTHAAAAAAAAAAAAAAAA", host: { platform: "android", capabilities: ["volume"] } as unknown as Screen["host"] }));
+  const folder = await cli(["--human", "screen", "volume", "--folder", "sfd_NORTHAAAAAAAAAAAAAAAA", "--level", "55"], transport, env);
+  assert.deepEqual(actions().at(-1)?.body, { selector: { by: "folder", folder_id: "sfd_NORTHAAAAAAAAAAAAAAAA" }, action: { type: "volume", level: 55 } });
+  assert.match(folder.stdout, /^Fleet volume level 55: matched 1, succeeded 1, failed 0\nscr_FOLDEREDAAAAAAAAAAAAAA  ok  revision 4$/m);
+});
+
+test("screen show prints the volume view: requested, reported, device or Player volume, stale", async () => {
+  const env = await enrolled();
+  const transport = volumeFleet();
+  transport.putScreen!(screen(LOBBY, {
+    host: { platform: "android", capabilities: ["volume"] } as unknown as Screen["host"],
+    volume: {
+      requested: { volume_id: "vol_ABCDEFGH12", level: 40, muted: false, set_at: "2026-08-14T16:00:00Z" },
+      reported: { level: 40, muted: false, hardware: true, reported_at: "2026-08-14T16:00:05Z", stale: false },
+    },
+  }));
+  const shown = await cli(["--human", "screen", "show", LOBBY], transport, env);
+  assert.equal(shown.code, ExitCode.Success, shown.stdout);
+  assert.match(shown.stdout, /^Volume requested: level 40, unmuted \(set 2026-08-14T16:00:00Z\)\nVolume reported: level 40, unmuted, device volume at 2026-08-14T16:00:05Z$/m);
+  const json = await cli(["--json", "screen", "show", LOBBY], transport, env);
+  assert.equal(json.envelope.data.volume.reported.hardware, true);
+  assert.equal(json.envelope.data.volume.requested.volume_id, "vol_ABCDEFGH12");
+
+  transport.putScreen!(screen(PLAIN, {
+    volume: { reported: { level: 0, muted: true, hardware: false, reported_at: "2026-08-14T10:00:00Z", stale: true } },
+  }));
+  const quiet = await cli(["--human", "screen", "show", PLAIN], transport, env);
+  assert.match(quiet.stdout, /^Volume reported: level 0, muted, Player volume at 2026-08-14T10:00:00Z \(stale: no report for over 35 minutes\)$/m);
+  assert.doesNotMatch(quiet.stdout, /Volume requested/);
+});
+
+test("volume flags build the closed write, and Volume lines read only what the screen holds", () => {
+  assert.deepEqual(volumeWrite("0", false, false), { level: 0 });
+  assert.deepEqual(volumeWrite("100", true, false), { level: 100, muted: true });
+  assert.deepEqual(volumeWrite(undefined, false, true), { muted: false });
+  assert.throws(() => volumeWrite(undefined, false, false), /requires --level 0-100, --mute or --unmute/);
+  assert.throws(() => volumeWrite(undefined, true, true), /not both/);
+  for (const bad of ["101", "-5", "1e2", "50%", "", " ", "4 0"]) assert.throws(() => volumeWrite(bad, false, false), /whole number from 0 to 100/, JSON.stringify(bad));
+  assert.deepEqual(volumeLines(undefined), []);
+  assert.deepEqual(volumeLines({}), []);
+  assert.deepEqual(volumeLines({ requested: { volume_id: "vol_ABCDEFGH12", muted: true, set_at: "2026-08-14T16:00:00Z" } }), ["Volume requested: muted (set 2026-08-14T16:00:00Z)"]);
+});
+
+test("screen.volume_requested renders as logfmt", () => {
+  const base = { cursor: "ev1_1", at: "2026-08-14T17:00:00Z", severity: "info", resource: { type: "screen", id: LOBBY } };
+  assert.equal(formatEventLine({ ...base, type: "screen.volume_requested", message: "Screen volume requested", details: { volume_id: "vol_ABCDEFGH12", level: 40, muted: false } } as never),
+    `at=2026-08-14T17:00:00Z type=screen.volume_requested severity=info resource_type=screen resource_id=${LOBBY} level=40 muted=false volume_id=vol_ABCDEFGH12`);
 });

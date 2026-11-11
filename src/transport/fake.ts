@@ -1167,6 +1167,30 @@ export function memoryBackend(options: {
     if (!current?.schedule) return { screen };
     return { screen: { ...resolveDisplay(screen, undefined, current.override), revision: screen.revision + 1 } };
   };
+  // Screen volume (docs/player-compatibility.md §6.5): the Player must declare
+  // the volume capability; the request replaces any earlier one and the
+  // reported volume stays whatever a test seeded.
+  type VolumeBody = { level?: unknown; muted?: unknown };
+  let volumeSequence = 0;
+  const applyVolume = (screen: Screen, body: VolumeBody): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
+    if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
+    if (body.level === undefined && body.muted === undefined) return { problem: controlProblem(400, "invalid_request", "level: at least one of level and muted is required") };
+    if (body.level !== undefined && (typeof body.level !== "number" || !Number.isInteger(body.level) || body.level < 0 || body.level > 100)) {
+      return { problem: controlProblem(400, "invalid_request", "level: must be a whole number from 0 to 100") };
+    }
+    if (body.muted !== undefined && typeof body.muted !== "boolean") return { problem: controlProblem(400, "invalid_request", "muted: must be true or false") };
+    if (!(screen.host?.capabilities ?? []).includes("volume")) {
+      return { problem: controlProblem(409, "volume_unsupported", "The screen's Player does not declare the volume capability.") };
+    }
+    const requested = {
+      volume_id: `vol_FAKE${String(++volumeSequence).padStart(8, "0")}`,
+      ...(body.level !== undefined ? { level: body.level as number } : {}),
+      ...(body.muted !== undefined ? { muted: body.muted as boolean } : {}),
+      set_at: clock().toISOString(),
+    };
+    return { screen: { ...screen, volume: { ...screen.volume, requested }, revision: screen.revision + 1 } };
+  };
   // Queued commands (docs/player-compatibility.md §6.3, §6.5): an online screen
   // is sent a reboot or reload at once; an offline one holds it queued. The
   // commands live on the screen record, newest last, at most ten, and a newer
@@ -1313,6 +1337,23 @@ export function memoryBackend(options: {
   });
   transport.on("DELETE", /^\/api\/screens\/[^/]+\/reboot-schedule$/, (req) => displayRoute(req, { kind: "reboot_schedule_clear" }));
 
+  const commandReplaysByKey = new Map<string, TransportResponse>();
+  transport.on("POST", /^\/api\/screens\/[^/]+\/volume$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "Resource was not found.");
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    // An exact Idempotency-Key retry returns the original answer and records nothing again.
+    const key = req.headers?.["idempotency-key"] ? `volume:${screen.id}:${req.headers["idempotency-key"]}` : undefined;
+    if (key && commandReplaysByKey.has(key)) return commandReplaysByKey.get(key)!;
+    const outcome = applyVolume(screen, (req.body ?? {}) as VolumeBody);
+    if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    screens.set(screen.id, outcome.screen);
+    const answer = screenAnswer(outcome.screen);
+    if (key) commandReplaysByKey.set(key, answer);
+    return answer;
+  });
+
   // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
   transport.on("POST", "/api/screens/actions", (req): TransportResponse => {
@@ -1359,6 +1400,12 @@ export function memoryBackend(options: {
           : control.type === "clear_reboot_schedule" ? { kind: "reboot_schedule_clear" }
           : control.type === "display_clear" ? { kind: "display_clear" } : { kind: "display_schedule", enabled: control.enabled, windows: control.windows ?? [] };
         const outcome = applyDisplay(screen, change);
+        if ("problem" in outcome) return { screen_id: id, status: "failed", problem: outcome.problem };
+        screens.set(id, outcome.screen);
+        return { screen_id: id, status: "ok", revision: outcome.screen.revision };
+      }
+      if (action.type === "volume") {
+        const outcome = applyVolume(screen, action as unknown as VolumeBody);
         if ("problem" in outcome) return { screen_id: id, status: "failed", problem: outcome.problem };
         screens.set(id, outcome.screen);
         return { screen_id: id, status: "ok", revision: outcome.screen.revision };

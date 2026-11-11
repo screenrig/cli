@@ -53,6 +53,13 @@ production availability from the independent monitor without credentials
 - Live video or an existing web page: playlist primitives.
 - A backdrop behind cards and primitives: a catalog image (`screenrig background sets`, then `background apply`).
 
+Videos play silent by default. A video plays its audio when its page sets sound
+(`playlist page add --media ID --sound`, `playlist init --sound`, or `muted: false`
+in a playlist file); that page pauses the playlist soundtrack while it shows and
+cannot cue it. `screenrig screen volume ID --level 40` sets a screen's volume and
+`--mute` / `--unmute` silences or restores it, on a Player that supports remote
+volume.
+
 ## Configuration
 
 The default profile is `config.json` in the user's screenRIG config folder

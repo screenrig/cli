@@ -434,6 +434,17 @@ async function replacePlaylist(root: string, mutate: (playlist: any) => void): P
   await writeFile(filename, JSON.stringify(playlist));
 }
 
+test("a bundle keeps a video's sound: muted false stays false and a missing muted is the silent default", () => {
+  const video = (muted?: boolean) => ({
+    id: "clip", primitive: "video", selector: { by: "id", media_id: "med_SOURCE" }, ...(muted === undefined ? {} : { muted }), loop: false,
+    rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain", controller: false,
+  });
+  const muted = (value?: boolean) => (normalizePlaylistForBundle(playlist(video(value))).playlist.pages as Array<{ primitives: Array<Record<string, unknown>> }>)[0]!.primitives[0]!.muted;
+  assert.equal(muted(false), false);
+  assert.equal(muted(true), true);
+  assert.equal(muted(undefined), true);
+});
+
 test("preflight verifies exact files and ignores unlisted file contents", async () => {
   const dir = await testTemp("bundle-preflight-");
   const source = { id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2, 3]) };

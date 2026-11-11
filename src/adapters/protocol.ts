@@ -615,6 +615,7 @@ export interface ScreenHealth {
   cpu?: { load_1m?: number; cores?: number; utilization_percent?: number; app_percent?: number };
   temperature_c?: number;
   display?: { connected?: boolean; power?: "on" | "off" | "standby" | "unknown" };
+  volume?: { level?: number; muted?: boolean; hardware?: boolean };
   network?: { kind?: "ethernet" | "wifi" | "cellular" | "unknown"; wifi_rssi_dbm?: number };
   /** Present only when the device reports a battery. source none means it runs on the battery (unplugged). */
   battery?: ScreenBattery;
@@ -708,6 +709,37 @@ export interface ScreenDisplay {
   control?: "hardware" | "scrim" | "unknown";
   /** Observation comparison for an active override, never command acknowledgement. */
   override_status?: "pending" | "matches" | "mismatch" | "stale" | "unknown";
+}
+
+/** Screen.volume.requested: the latest remote volume request. level and muted are present only when that request set them. */
+export interface ScreenVolumeRequest {
+  volume_id: string;
+  level?: number;
+  muted?: boolean;
+  set_at: string;
+}
+
+/** Screen.volume.reported: what the Player reached. hardware is true when the level reaches the device or panel output, false when it is the Player's own gain. */
+export interface ScreenVolumeReported {
+  level: number;
+  muted: boolean;
+  hardware: boolean;
+  reported_at: string;
+  stale: boolean;
+}
+
+/** Screen.volume: the latest request and the Player's reported volume; absent when the screen has neither. */
+export interface ScreenVolume {
+  requested?: ScreenVolumeRequest;
+  reported?: ScreenVolumeReported;
+}
+
+/** The body of POST /api/screens/{id}/volume: at least one member. */
+export interface ScreenVolumeWrite {
+  /** 0 to 100. Absent keeps the Player's level. */
+  level?: number;
+  /** true silences the output and keeps the level. Absent keeps the Player's mute. */
+  muted?: boolean;
 }
 
 export interface ScreenDisplayScheduleView {
@@ -1030,6 +1062,7 @@ export interface Screen {
   storage?: ScreenStorage;
   health?: ScreenHealth;
   display?: ScreenDisplay;
+  volume?: ScreenVolume;
   /** The kiosk lock; present only while it is on. Set by ScreenPatch. */
   kiosk?: ScreenKiosk;
   /** The windows in which the backend reboots the screen. Present while one is set. Read-only: screen reboot-schedule set and clear change it. */
@@ -1134,7 +1167,8 @@ export type ScreenAction =
   | { type: "set_display_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
   | { type: "clear_display_schedule" }
   | { type: "set_reboot_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
-  | { type: "clear_reboot_schedule" };
+  | { type: "clear_reboot_schedule" }
+  | ({ type: "volume" } & ScreenVolumeWrite);
 
 export type ScreenActionType = ScreenAction["type"];
 

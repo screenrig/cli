@@ -49,6 +49,15 @@ test("init preserves media order, portrait geometry and video completion", () =>
  assert.throws(() => targetDimensions(undefined, 1920));
 });
 
+test("init gives video pages sound only when asked", () => {
+ const silent = document();
+ assert.equal(silent.pages[1].primitives[0].muted, true);
+ const loud = preparePlaylist({ name: "Lobby", content: media, width: 1080, height: 1920, durationMs: 8000, fit: "contain", sound: true });
+ assert.equal(loud.pages[1].primitives[0].muted, false);
+ assert.deepEqual(loud.pages[1].advance, { mode: "media_end" });
+ assert.equal("muted" in loud.pages[0].primitives[0], false, "an image page has no muted");
+});
+
 test("editable projection preserves dynamic selectors, schedules, motion and application pins", () => {
  const authored = document();
  authored.pages[0].primitives[0].selector = { by: "tag", tag: "lobby", one_at_a_time: true };
