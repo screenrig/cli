@@ -59,8 +59,21 @@ function listen(server: Server, port: number): Promise<void> {
   });
 }
 
-export async function startDevServer(options: DevOptions): Promise<DevHandle> {
-  if (!options.allowAnyPort) assertDevPort(options.port);
+export interface CreatedSession {
+  session: DevSession;
+  releaseHost: string;
+  kv: { mode: "file" | "remote"; location: string };
+  /** The K/V file when the store is one, so the watcher can leave it alone. */
+  kvFile: string | undefined;
+  warn(message: string): void;
+}
+
+/**
+ * Everything but the sockets: the K/V store, the session and its first build.
+ * The server and the watcher are `startDevServer`'s; tests that drive the
+ * bridge directly use this.
+ */
+export async function createDevSession(options: DevOptions): Promise<CreatedSession> {
   const releaseHost = releaseHostFor(options.directory);
   const tag = createHash("sha1").update(options.directory).digest("hex").slice(0, 12);
   const applicationId = options.kvFrom?.applicationId ?? `app_dev_${tag}`;
@@ -89,6 +102,12 @@ export async function startDevServer(options: DevOptions): Promise<DevHandle> {
       warn(`The K/V file ${fileKv} is inside the application directory, so app pack would ship it. Keep it in a dot directory such as .screenrig-dev.`);
     }
   }
+  return { session, releaseHost, kv: { mode: options.kvFrom ? "remote" : "file", location: kvLocation }, kvFile: fileKv, warn };
+}
+
+export async function startDevServer(options: DevOptions): Promise<DevHandle> {
+  if (!options.allowAnyPort) assertDevPort(options.port);
+  const { session, releaseHost, kv, kvFile, warn } = await createDevSession(options);
   const server = createDevServer(session);
   try {
     await listen(server, options.port);
@@ -96,16 +115,15 @@ export async function startDevServer(options: DevOptions): Promise<DevHandle> {
     await session.stop();
     throw error;
   }
-  const watcher: WatchHandle = watchDirectory(options.directory, () => { void session!.rebuild(); }, {
-    ignore: (absolute) => fileKv !== undefined && absolute === fileKv,
+  const watcher: WatchHandle = watchDirectory(options.directory, () => { void session.rebuild(); }, {
+    ignore: (absolute) => kvFile !== undefined && absolute === kvFile,
     onWarning: warn,
   });
   return {
-    session, server, url: `${playerOrigin(options.port)}/`, appUrl: session.frameSrc(), releaseHost,
-    kv: { mode: options.kvFrom ? "remote" : "file", location: kvLocation }, watching: watcher.mode,
+    session, server, url: `${playerOrigin(options.port)}/`, appUrl: session.frameSrc(), releaseHost, kv, watching: watcher.mode,
     async close() {
       watcher.close();
-      await session!.stop();
+      await session.stop();
       server.closeAllConnections();
       await new Promise<void>((resolve) => { server.close(() => resolve()); });
     },
