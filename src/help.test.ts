@@ -130,6 +130,7 @@ test("root help is compact and every command is discoverable through immediate c
     "dashboard open",
     "dashboard reset-sign-in",
     "app pack",
+    "app dev",
     "app types",
     "app upload",
     "app update",

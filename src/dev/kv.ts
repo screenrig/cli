@@ -82,7 +82,9 @@ export function normalizeContentType(value: string): string | undefined {
   const text = value.trim();
   const match = /^([A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*)\/([A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*)((?:\s*;\s*[A-Za-z0-9!#$&^_.+-]+=(?:[A-Za-z0-9!#$&^_.+-]+|"[^"\r\n]*"))*)$/.exec(text);
   if (!match) return undefined;
-  const normalized = `${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}${match[3]!.replace(/\s*;\s*/g, "; ")}`;
+  // Parameter names are lower-cased with the type, as the real store's media type parser does; values keep their case.
+  const parameters = match[3]!.replace(/\s*;\s*([^=;\s]+)=/g, (_whole, name: string) => `; ${name.toLowerCase()}=`);
+  const normalized = `${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}${parameters}`;
   return normalized.length <= 127 ? normalized : undefined;
 }
 

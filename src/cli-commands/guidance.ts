@@ -141,6 +141,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "dashboard": [""],
     "dashboard open": [""],
     "app pack": ["./lobby-app --output lobby-app.tar.gz"],
+    "app dev": ["./lobby-app", "./lobby-app --open --no-reload", "./lobby-app --kv ./lobby-kv.json --human", "./lobby-app --kv-from app_APP"],
     "app types": ["", "./lobby-app-src"],
     "app upload": ['./lobby-app --name "Lobby app"'],
     "app update": ["app_APP ./lobby-app"],
