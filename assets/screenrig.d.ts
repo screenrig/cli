@@ -198,8 +198,8 @@ export interface ScreenRigKv {
     set(key: string, value: string | Uint8Array, options?: KvSetOptions): Promise<KvEntry>;
     /**
      * Writes `JSON.stringify(value)` with the content type `application/json` and
-     * resolves as `set` does. Rejects `invalid_value` for a value JSON cannot
-     * represent (`undefined`, a function, a symbol); otherwise as `set`.
+     * resolves with the stored entry, like `kv.set`. Rejects `invalid_value` for a value JSON cannot
+     * represent (`undefined`, a function, a symbol); otherwise it rejects like `kv.set`.
      */
     setJSON(key: string, value: unknown, options?: KvSetOptions): Promise<KvEntry>;
     /**
