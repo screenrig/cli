@@ -443,9 +443,9 @@ export interface PrinterInfo {
 export type PrintFormat = "escpos" | "pdf";
 /** One job for `screenrig.device.print`: exactly one of `escpos` and `pdf`. */
 export interface PrintJob {
-    /** Raw ESC/POS commands for a receipt printer on USB or the network. */
+    /** Raw ESC/POS commands for a receipt printer. */
     escpos?: Uint8Array;
-    /** A PDF document, printed through the device's print service. */
+    /** A PDF document, for a printer that lists `pdf` in its `formats`. */
     pdf?: Uint8Array;
     /** A printer id from `printers()`; the device's default printer when absent. */
     printer?: string;
