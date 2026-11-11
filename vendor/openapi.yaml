@@ -12080,7 +12080,7 @@ paths:
     put:
       operationId: putInstanceData
       x-screenrig-access: write
-      description: Replaces the card's data document. A dashboard session may write it too; the document is live on screens at once, so only the project owner or a member who can approve may (approver_required otherwise).
+      description: Replaces the card's data document. The body is the same as PUT /api/card-data/{key}; expires_at and ttl_seconds are mutually exclusive, and omitting both clears the expiry. A dashboard session may write it too; the document is live on screens at once, so only the project owner or a member who can approve may (approver_required otherwise).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -12100,14 +12100,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - document
-              additionalProperties: false
-              properties:
-                document:
-                  type: object
-                  additionalProperties: true
+              $ref: '#/components/schemas/CardDataWrite'
       parameters:
         - name: If-Match
           in: header
