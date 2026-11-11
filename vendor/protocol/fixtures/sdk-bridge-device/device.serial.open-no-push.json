@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.open-no-push",
   "kind": "device.serial.open",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "Opening a port starts no data events: a frame that has not watched serial receives nothing for the port, whatever it reads. (Data is posted only to a frame whose device.watch names serial.)",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

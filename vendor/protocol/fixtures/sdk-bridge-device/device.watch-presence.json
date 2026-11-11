@@ -1,10 +1,13 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-presence",
   "kind": "device.watch",
   "requires": [
     "device.watch"
+  ],
+  "requiresSources": [
+    "presence"
   ],
   "purpose": "A frame that watches presence receives device.event {type: presence} when the device sees movement, at most once per second: a sighting less than 1000 ms (atMs, on the host's monotonic clock) after the last posted one posts nothing.",
   "host": {
@@ -56,7 +59,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

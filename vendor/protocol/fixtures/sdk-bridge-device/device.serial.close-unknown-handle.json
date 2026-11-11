@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.close-unknown-handle",
   "kind": "device.serial.close",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "Closing a handle the frame does not hold is acknowledged too: close is idempotent, so a port the device already closed (unplugged) can be closed again.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

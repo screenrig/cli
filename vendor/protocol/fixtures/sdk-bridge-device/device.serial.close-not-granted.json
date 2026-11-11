@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.close-not-granted",
   "kind": "device.serial.close",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "device.serial.close from a frame without the device.serial capability is refused with forbidden (403).",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

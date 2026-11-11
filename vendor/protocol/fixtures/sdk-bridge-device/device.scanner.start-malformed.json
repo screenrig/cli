@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.scanner.start-malformed",
   "kind": "device.scanner.start",
@@ -7,6 +7,7 @@
     "device.camera",
     "device.scan"
   ],
+  "requiresSources": [],
   "purpose": "A formats list that is not a list of 1 to 13 distinct symbologies from the contract's list is refused with invalid_request (400) and starts nothing.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.open-defaults",
   "kind": "device.serial.open",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "Only port and baud_rate are required; the line is 8 data bits, 1 stop bit, no parity and no flow control.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

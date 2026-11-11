@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.write-too-large",
   "kind": "device.serial.write",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "A write of more than 32768 bytes is refused with payload_too_large (413) and nothing is written; the SDK splits larger data into chunks.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

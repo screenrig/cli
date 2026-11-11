@@ -181,13 +181,14 @@ const SCRIPT = String.raw`(function () {
 
   // The frame.
 
-  function mountFrame(src) {
+  function mountFrame(src, allow) {
     frameSrc = src;
     var box = $('frame-box');
     if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
     frame = document.createElement('iframe');
     frame.title = 'Application';
-    frame.setAttribute('allow', 'autoplay; fullscreen; clipboard-read; clipboard-write');
+    // The permissions of a frame are fixed when it loads: camera and microphone only while device.hdmi_input is granted.
+    frame.setAttribute('allow', allow || (state && state.frame_allow) || 'autoplay; fullscreen; clipboard-read; clipboard-write');
     frame.addEventListener('load', function () { command({ command: 'frame-loaded' }); });
     frame.src = src;
     box.appendChild(frame);
@@ -228,7 +229,7 @@ const SCRIPT = String.raw`(function () {
   function connect() {
     var source = new EventSource('/_dev/events');
     source.addEventListener('open', function () {
-      if (connectedBefore && state) mountFrame(state.frame_src);
+      if (connectedBefore && state) mountFrame(state.frame_src, state.frame_allow);
       connectedBefore = true;
     });
     source.addEventListener('state', function (event) {
@@ -236,7 +237,7 @@ const SCRIPT = String.raw`(function () {
       if (next.log) { logEntries = next.log; delete next.log; }
       var first = state === null;
       state = next;
-      if (first) mountFrame(state.frame_src);
+      if (first) mountFrame(state.frame_src, state.frame_allow);
       render();
     });
     source.addEventListener('bridge', function (event) { toFrame(JSON.parse(event.data)); });
@@ -247,8 +248,8 @@ const SCRIPT = String.raw`(function () {
     });
     source.addEventListener('frame', function (event) {
       var message = JSON.parse(event.data);
-      if (state) state.frame_src = message.src;
-      mountFrame(message.src);
+      if (state) { state.frame_src = message.src; state.frame_allow = message.allow; }
+      mountFrame(message.src, message.allow);
     });
   }
 
@@ -428,9 +429,41 @@ const SCRIPT = String.raw`(function () {
         el('label', {}, control('hw-ble', el('input', { type: 'checkbox', id: 'hw-ble' })), 'Bluetooth adapter'),
         el('label', {}, control('hw-gpio', el('input', { type: 'checkbox', id: 'hw-gpio' })), 'GPIO chip')), el('div', { class: 'mono', id: 'scanner' })),
       group('Serial ports', el('div', { class: 'list', id: 'serial' }), statusLine('serial-status')),
-      group('GPIO lines', el('div', { class: 'list', id: 'gpio' }), el('div', { class: 'muted', text: 'Click a level to change the line. The application hears it when it watches the line.' })),
+      group('GPIO lines', el('div', { class: 'list', id: 'gpio' }), statusLine('gpio-status'),
+        el('div', { class: 'muted', text: 'Click a level to drive the line from outside (a button pressed). A floating line has nothing connected: it reads its pull (up is high, down is low) and its own level with none. The application hears a line it watches.' }),
+        el('div', { class: 'list', id: 'gpio-released' })),
+      group('HDMI input', el('div', { class: 'mono', id: 'hdmi' }), el('div', { class: 'muted', text: 'While device.hdmi_input is granted the application frame may use the camera and microphone, so hdmiInput.open() gets this browser capture device. Switching it loads the frame again.' })),
       group('Bluetooth LE', el('div', { class: 'list', id: 'ble' }), statusLine('ble-status')),
       group('Printers', el('div', { class: 'list', id: 'printers' }), el('div', { class: 'list', id: 'jobs' })),
+    ];
+  });
+
+  addPanel('ir-udp', 'IR and UDP', function () {
+    var irCode = el('input', { type: 'text', value: '0x20DF10', 'aria-label': 'NEC code' });
+    var irRepeat = el('input', { type: 'checkbox' });
+    var irEmitter = control('hw-ir', el('input', { type: 'checkbox', id: 'hw-ir' }));
+    var udpSocket = control('udp-socket', el('select', { id: 'udp-socket', 'aria-label': 'Socket' }));
+    var udpHost = el('input', { type: 'text', value: '127.0.0.1', size: 12, 'aria-label': 'Sender address' });
+    var udpPort = el('input', { type: 'number', value: '40000', min: 1, max: 65535 });
+    var udpData = el('input', { type: 'text', value: 'hello', 'aria-label': 'Datagram' });
+    var udpHex = el('input', { type: 'checkbox' });
+    function injectUdp() {
+      var body = { command: 'udp-inject', socket: udpSocket.value || undefined, host: udpHost.value, port: Number(udpPort.value) };
+      if (udpHex.checked) body.hex = udpData.value; else body.text = udpData.value;
+      command(body, 'udp-status');
+    }
+    return [
+      group('Infrared receiver', el('div', { class: 'row' }, field('NEC code', irCode), el('label', {}, irRepeat, 'repeat frame'), el('button', { type: 'button', text: 'Receive', onclick: function () {
+        var code = Number(irCode.value);
+        fire({ device: 'ir', code: code, repeat: irRepeat.checked }, 'ir-status');
+      } })), statusLine('ir-status'),
+        el('div', { class: 'muted', text: 'A received code reaches an application that watches ir. The code is 0 to 0xFFFFFF; a repeat frame is the auto-repeat of a held button.' }),
+        el('label', { class: 'row' }, irEmitter, 'Infrared emitter and receiver present')),
+      group('Codes the application sent', el('div', { class: 'list', id: 'ir-sent' })),
+      group('UDP sockets', el('div', { class: 'mono', id: 'udp-where' }), el('div', { class: 'list', id: 'udp-sockets' })),
+      group('Send a datagram to a socket', el('div', { class: 'row' }, udpSocket), el('div', { class: 'row' }, field('From', udpHost), udpPort),
+        el('div', { class: 'row' }, udpData, el('label', {}, udpHex, 'hex'), el('button', { type: 'button', text: 'Send', onclick: injectUdp })), statusLine('udp-status')),
+      group('Datagrams', el('div', { class: 'list', id: 'udp-log' }), el('div', { class: 'muted', text: 'A datagram the application sends to a loopback address reaches the socket bound there; one sent anywhere else is recorded here and never transmitted.' })),
     ];
   });
 
@@ -511,6 +544,9 @@ const SCRIPT = String.raw`(function () {
     wire('hw-camera', hardware.camera.available, function (v) { command({ command: 'hardware', change: 'camera.available', value: v }); });
     wire('hw-ble', hardware.ble.adapter, function (v) { command({ command: 'hardware', change: 'ble.adapter', value: v }); });
     wire('hw-gpio', hardware.gpio.chip, function (v) { command({ command: 'hardware', change: 'gpio.chip', value: v }); });
+    wire('hw-ir', hardware.ir.available, function (v) { command({ command: 'hardware', change: 'ir.available', value: v }); });
+    $('hdmi').textContent = 'device.hdmi_input ' + (host.capabilities['device.hdmi_input'] ? 'granted: the frame allows camera and microphone' : 'not granted: the frame has no camera or microphone') + '\nframe allow: ' + state.frame_allow;
+    $('hdmi').style.whiteSpace = 'pre-wrap';
     $('scanner').textContent = 'scanner ' + (host.frame.scanning ? 'running' : 'stopped') + '   camera reads: ' + hardware.camera.formats.join(', ');
   }
 
@@ -553,11 +589,29 @@ const SCRIPT = String.raw`(function () {
     gpio.textContent = '';
     hardware.gpio.pins.forEach(function (pin) {
       var listened = host.frame.pins.indexOf(pin.pin) >= 0;
-      var level = el('button', { type: 'button', class: 'small', text: pin.value ? 'high' : 'low', onclick: function () { fire({ device: 'gpio', pin: pin.pin, value: !pin.value }, 'serial-status'); } });
+      var key = String(pin.pin);
+      var level = host.frame.levels[key] === true;
+      var pull = host.frame.pull[key] || 'none';
+      var idle = host.frame.idle[key];
+      var levelButton = el('button', { type: 'button', class: 'small', text: level ? 'high' : 'low', onclick: function () { fire({ device: 'gpio', pin: pin.pin, value: !level }, 'gpio-status'); } });
       var busy = el('input', { type: 'checkbox' });
       busy.checked = pin.busy === true;
-      busy.addEventListener('change', function () { command({ command: 'hardware', change: 'pin.busy', id: String(pin.pin), value: busy.checked }); });
-      gpio.appendChild(el('div', { class: 'item' }, el('div', { class: 'head' }, el('span', { class: 'mono', text: 'line ' + pin.pin }), level, el('span', { class: 'muted', text: listened ? 'application listens' : '' })), el('label', { class: 'row' }, busy, 'held by another process')));
+      busy.addEventListener('change', function () { command({ command: 'hardware', change: 'pin.busy', id: key, value: busy.checked }); });
+      var floating = el('input', { type: 'checkbox' });
+      floating.checked = pin.floating === true;
+      floating.addEventListener('change', function () { command({ command: 'hardware', change: 'pin.floating', id: key, value: floating.checked }); });
+      var released = pin.floating === true && pin.driven !== undefined ? el('button', { type: 'button', class: 'small', text: 'Let go', title: 'Stop driving the line from outside: it floats to its pull again', onclick: function () { fire({ device: 'gpio', pin: pin.pin, value: null }, 'gpio-status'); } }) : null;
+      var notes = [];
+      if (listened) notes.push('application listens, pull ' + pull);
+      if (idle !== undefined) notes.push('written: let go at ' + (idle ? 'high' : 'low'));
+      gpio.appendChild(el('div', { class: 'item' },
+        el('div', { class: 'head' }, el('span', { class: 'mono', text: 'line ' + pin.pin }), el('span', { class: 'row' }, levelButton, released), el('span', { class: 'muted', text: notes.join('; ') })),
+        el('div', { class: 'row' }, el('label', {}, floating, 'nothing connected (floating)'), el('label', {}, busy, 'held by another process'))));
+    });
+    var letGo = $('gpio-released');
+    letGo.textContent = '';
+    host.frame.released.slice(-6).reverse().forEach(function (item) {
+      letGo.appendChild(el('div', { class: 'item' }, el('span', { class: 'mono', text: 'line ' + item.pin + ' driven ' + (item.value ? 'high' : 'low') + ' and released: ' + (item.cause === 'leaving' ? 'the page left the glass' : item.cause === 'context' ? 'its context ended' : 'it was destroyed') })));
     });
     var ble = $('ble');
     ble.textContent = '';
@@ -584,6 +638,37 @@ const SCRIPT = String.raw`(function () {
     jobs.textContent = '';
     host.frame.printed.slice().reverse().forEach(function (job) {
       jobs.appendChild(el('div', { class: 'item' }, el('div', { class: 'head' }, el('span', { class: 'mono', text: job.job }), el('span', { class: job.failed ? 'pill bad' : 'pill ok', text: (job.failed ? 'failed' : 'printed') + ' on ' + job.printer + ', ' + job.bytes + ' bytes, ' + job.format })), el('pre', { class: 'mono', text: job.preview })));
+    });
+  }
+
+  function hex(value) { var text = Number(value).toString(16).toUpperCase(); while (text.length < 6) text = '0' + text; return '0x' + text; }
+
+  function renderIrUdp() {
+    var frameState = state.host.frame;
+    var sent = $('ir-sent');
+    sent.textContent = '';
+    frameState.ir_sent.slice().reverse().forEach(function (item) {
+      sent.appendChild(el('div', { class: 'item' }, el('span', { class: 'mono', text: item.encoding + ' ' + hex(item.code) + (item.repeat ? ', repeat ' + item.repeat : '') })));
+    });
+    if (!frameState.ir_sent.length) sent.appendChild(el('div', { class: 'muted', text: 'None yet.' }));
+    $('udp-where').textContent = frameState.udp_transport === 'loopback' ? 'Sockets bind on 127.0.0.1 only: a tool on this machine can send them datagrams.' : 'Sockets are simulated: nothing is bound.';
+    var select = $('udp-socket');
+    var chosen = select.value;
+    select.textContent = '';
+    frameState.sockets.forEach(function (socket) { select.appendChild(el('option', { value: socket.handle, text: socket.handle + (socket.port ? '  port ' + socket.port : '  send only') })); });
+    if (chosen) select.value = chosen;
+    var sockets = $('udp-sockets');
+    sockets.textContent = '';
+    frameState.sockets.forEach(function (socket) {
+      sockets.appendChild(el('div', { class: 'item' }, el('span', { class: 'mono', text: socket.handle + '  ' + (socket.port ? 'port ' + socket.port : 'send only') + (socket.broadcast ? ', broadcast' : '') + (socket.multicast ? ', multicast ' + socket.multicast : '') })));
+    });
+    if (!frameState.sockets.length) sockets.appendChild(el('div', { class: 'muted', text: 'The application holds no socket.' }));
+    var log = $('udp-log');
+    log.textContent = '';
+    frameState.datagrams.slice().reverse().forEach(function (item) {
+      var where = item.direction === 'sent' ? 'to ' : 'from ';
+      var how = item.direction === 'sent' ? (item.delivered ? ', delivered on loopback' : ', recorded only') : '';
+      log.appendChild(el('div', { class: 'item' }, el('div', { class: 'head' }, el('span', { class: 'mono', text: item.direction + ' ' + where + item.host + ':' + item.port + how }), el('span', { class: 'muted', text: item.bytes + ' bytes' })), el('pre', { class: 'mono', text: item.text + '\n' + item.hex })));
     });
   }
 
@@ -634,6 +719,7 @@ const SCRIPT = String.raw`(function () {
     renderCapabilities();
     renderStatic();
     renderHardware();
+    renderIrUdp();
     layoutFrame();
     renderLog();
   }

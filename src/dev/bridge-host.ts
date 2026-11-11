@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import {
-  BASELINE_FEATURES, DEVICE_CHUNK_BYTES, ID_RE, KIND_RE, MAX_MESSAGE_BYTES, PARENT_HANDSHAKE_PROTOCOL, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
+  BASELINE_FEATURES, DEVICE_CHUNK_BYTES, ID_RE, KIND_RE, MAX_IR_CODE, MAX_MESSAGE_BYTES, MAX_UDP_BYTES, PARENT_HANDSHAKE_PROTOCOL, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
   featureOf, isRecord, type BridgeMessage, type Capabilities, type CapabilityName, type Posted, type Size,
 } from "./bridge-protocol.js";
 import { FrameDevice, type DeviceActivity, type Outcome } from "./hardware-requests.js";
 import { base64Length, unknownMembers, type Hardware } from "./hardware.js";
+import { SimulatedUdp, type UdpTransport } from "./udp.js";
 import { validKvKey, type KvResult, type KvStore } from "./kv.js";
 
 /** One thing the application or the device did that the harness shows and the terminal prints. */
@@ -40,6 +41,8 @@ export interface BridgeHostOptions {
   viewport: Size;
   manifest?: HostManifest;
   hardware: Hardware;
+  /** Where an application's UDP sockets bind; without one they are simulated and hold no socket. */
+  udp?: UdpTransport;
   kv: KvStore;
   events: EventSink;
   clock: () => number;
@@ -64,17 +67,24 @@ export type Trigger =
   | { device: "people"; count: number; atMs?: number }
   | { device: "sound"; dbfs: number; atMs?: number }
   | { device: "serial"; handle: string; data_base64?: string; closed?: boolean; reason?: string }
-  | { device: "gpio"; pin: number; value: boolean }
+  /** `value` null lets go of a line the outside was driving (a button released): it floats to its bias again. */
+  | { device: "gpio"; pin: number; value: boolean | null }
   | { device: "ble"; subscription: string; value_base64: string }
+  | { device: "ir"; code: number; repeat?: boolean; encoding?: string }
+  | { device: "udp"; socket: string; from_host: string; from_port: number; data_base64: string }
   | { page: "display"; on: boolean }
   | { page: "pause"; paused: boolean }
-  | { page: "leaving" };
+  | { page: "leaving" }
+  /** The frame's context ends (a new generation or nonce). */
+  | { page: "context" };
 
 /** What applying a trigger did: whether the frame was told, whether the Player consumed the input, and why nothing was posted. */
 export interface TriggerResult {
   posted: boolean;
   consumed?: boolean;
   dropped?: string;
+  /** The levels the Player drove on lines the page let go of, in ascending pin order. */
+  drives?: Array<{ pin: number; value: boolean }>;
 }
 
 const SCAN_SOURCES = ["scanner", "nfc", "camera"];
@@ -163,13 +173,16 @@ export class BridgeHost {
   onPageEnd: ((end: PageEnd, detail?: string) => void) | undefined;
 
   constructor(readonly options: BridgeHostOptions) {
-    this.frame = new FrameDevice(options.hardware, options.clock, (activity: DeviceActivity) => this.options.log({ type: activity.type, detail: activity.detail }));
+    this.frame = new FrameDevice(options.hardware, options.clock, (activity: DeviceActivity) => this.options.log({ type: activity.type, detail: activity.detail }), options.udp ?? new SimulatedUdp(),
+      (socket, packet) => { this.trigger({ device: "udp", socket, from_host: packet.fromHost, from_port: packet.fromPort, data_base64: packet.data.toString("base64") }); });
     this.unsubscribeKv = options.kv.subscribe((change) => this.kvChanged(change));
   }
 
   destroy(): void {
     this.unsubscribeKv?.();
     this.unsubscribeKv = undefined;
+    this.frame.releaseLines("destroyed");
+    this.frame.reset();
     this.active = false;
   }
 
@@ -185,6 +198,8 @@ export class BridgeHost {
   }
 
   private newContext(): void {
+    // The page lets go of the lines it wrote, then everything it held ends.
+    this.frame.releaseLines("context");
     this.active = false;
     this.readied = false;
     this.advanced = false;
@@ -277,7 +292,9 @@ export class BridgeHost {
 
   supports(kind: string): boolean {
     const feature = featureOf(kind);
-    return this.options.features === null ? BASELINE_FEATURES.includes(feature) : this.options.features.includes(feature);
+    const advertised = this.options.features === null ? BASELINE_FEATURES : this.options.features;
+    // A host that receives infrared advertises device.ir; one that only sends advertises device.ir.send.
+    return advertised.includes(feature) || (feature === "device.ir.send" && advertised.includes("device.ir"));
   }
 
   // Inbound messages.
@@ -375,6 +392,10 @@ export class BridgeHost {
     "device.serial.close": { capability: "device.serial", run: (payload) => this.frame.serialClose(payload) },
     "device.gpio.write": { capability: "device.gpio", run: this.gpioWrite },
     "device.gpio.watch": { capability: "device.gpio", run: this.gpioWatch },
+    "device.ir.send": { capability: "device.ir", run: (payload) => this.frame.irSend(payload) },
+    "device.udp.open": { capability: "device.udp", run: (payload) => this.frame.udpOpen(payload) },
+    "device.udp.send": { capability: "device.udp", run: (payload) => this.frame.udpSend(payload) },
+    "device.udp.close": { capability: "device.udp", run: (payload) => this.frame.udpClose(payload) },
     "device.ble.read": { capability: "device.ble", run: (payload) => this.frame.bleRead(payload) },
     "device.ble.watch": { capability: "device.ble", run: (payload) => this.frame.bleWatch(payload, this.watching.has("ble")) },
     "device.ble.unwatch": { capability: "device.ble", run: (payload) => this.frame.bleUnwatch(payload) },
@@ -565,23 +586,23 @@ export class BridgeHost {
   }
 
   private gpioWrite(payload: Record<string, unknown>): HostOutcome {
-    const outcome = this.frame.gpioWrite(payload);
+    const outcome = this.frame.gpioWrite(payload, this.supports("device.gpio.idle"));
     if (!outcome.ok) return outcome;
     const { pin, value } = outcome.effect as { pin: number; value: boolean };
     return { ok: true, after: () => { this.trigger({ device: "gpio", pin, value }); } };
   }
 
   private gpioWatch(payload: Record<string, unknown>): HostOutcome {
-    const outcome = this.frame.gpioWatch(payload, this.watching.has("gpio"));
+    const outcome = this.frame.gpioWatch(payload, this.watching.has("gpio"), this.supports("device.gpio.pull"));
     if (!outcome.ok) return outcome;
-    const added = (outcome.effect?.added as number[] | undefined) ?? [];
-    // The ack goes first; each line newly in the set then posts its level at once.
+    const post = (outcome.effect?.post as number[] | undefined) ?? [];
+    // The ack goes first; each line newly in the set, and each whose bias changed its level, then posts its level at once.
     return {
       ok: true, result: outcome.result,
       after: () => {
-        for (const pin of added) {
-          const spec = this.options.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
-          if (spec && this.frame.watchedPins.includes(pin) && this.watching.has("gpio")) this.deviceEvent({ type: "gpio", pin, value: spec.value });
+        for (const pin of post) {
+          const value = this.frame.gpioLevel(pin);
+          if (value !== undefined && this.frame.watchedPins.includes(pin) && this.watching.has("gpio")) this.deviceEvent({ type: "gpio", pin, value });
         }
       },
     };
@@ -597,7 +618,7 @@ export class BridgeHost {
     }
     const before = this.watching;
     this.watching = next;
-    if (!next.has("gpio")) this.frame.watchedPins = [];
+    if (!next.has("gpio")) { this.frame.watchedPins = []; this.frame.pulls.clear(); }
     if (!next.has("ble")) this.frame.subscriptions.clear();
     for (const name of next) if (!before.has(name)) this.limits = { ...this.limits, ...this.fresh(name) };
     this.options.log({ type: "device.watch", level: "debug", detail: { events: [...next] } });
@@ -648,11 +669,13 @@ export class BridgeHost {
     this.options.log({ type: "visibility.changed", level: "debug", detail: { visible, reason } });
   }
 
-  /** Best effort, once: the frame is about to be torn down or hidden. */
-  leaving(): void {
-    if (!this.active || this.leftPosted) return;
-    this.postVisible(false, "leaving");
-    this.leftPosted = true;
+  /** Best effort, once: the frame is about to be torn down or hidden. The page lets go of the lines it wrote; what the Player drove is returned. */
+  leaving(): Array<{ pin: number; value: boolean }> {
+    if (this.active && !this.leftPosted) {
+      this.postVisible(false, "leaving");
+      this.leftPosted = true;
+    }
+    return this.frame.releaseLines("leaving");
   }
 
   setPaused(paused: boolean): void {
@@ -680,8 +703,8 @@ export class BridgeHost {
     if ("page" in trigger) {
       if (trigger.page === "display") { this.displayChanged(trigger.on, undefined); return { posted: false }; }
       if (trigger.page === "pause") { this.setPaused(trigger.paused); return { posted: false }; }
-      this.leaving();
-      return { posted: false };
+      if (trigger.page === "context") return { posted: false, drives: this.frame.releaseLines("context") };
+      return { posted: false, drives: this.leaving() };
     }
     switch (trigger.device) {
       case "watch": return { posted: false };
@@ -703,6 +726,8 @@ export class BridgeHost {
       case "serial": return this.serial(trigger);
       case "gpio": return this.gpio(trigger.pin, trigger.value);
       case "ble": return this.ble(trigger.subscription, trigger.value_base64);
+      case "ir": return this.ir(trigger.code, trigger.repeat === true, trigger.encoding ?? "NEC");
+      case "udp": return this.udpReceived(trigger.socket, trigger.from_host, trigger.from_port, trigger.data_base64);
     }
   }
 
@@ -815,14 +840,33 @@ export class BridgeHost {
     return { posted: true };
   }
 
-  private gpio(pin: number, value: boolean): TriggerResult {
-    const spec = this.options.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
-    if (!spec) return { posted: false, dropped: "the device has no such line" };
-    const changed = spec.value !== value;
-    spec.value = value;
-    if (!changed) return { posted: false, dropped: "the level did not change" };
+  private gpio(pin: number, value: boolean | null): TriggerResult {
+    const before = this.frame.gpioLevel(pin);
+    if (before === undefined) return { posted: false, dropped: "the device has no such line" };
+    if (value === null) this.frame.gpioFloat(pin); else this.frame.gpioDrive(pin, value);
+    if (before === this.frame.gpioLevel(pin)) return { posted: false, dropped: "the level did not change" };
     if (!this.watching.has("gpio") || !this.frame.watchedPins.includes(pin)) return { posted: false, dropped: "the frame does not listen to this line" };
-    this.deviceEvent({ type: "gpio", pin, value });
+    this.deviceEvent({ type: "gpio", pin, value: this.frame.gpioLevel(pin)! });
+    return { posted: true };
+  }
+
+  private ir(code: number, repeat: boolean, encoding: string): TriggerResult {
+    if (!this.watching.has("ir")) return { posted: false, dropped: "the frame does not watch ir" };
+    if (!this.options.hardware.ir.available) return { posted: false, dropped: "the device has no infrared receiver" };
+    if (encoding !== "NEC") return { posted: false, dropped: "encoding is NEC" };
+    if (!Number.isInteger(code) || code < 0 || code > MAX_IR_CODE) return { posted: false, dropped: "code is a whole number from 0 to 16777215" };
+    this.options.log({ type: "device.ir.receive", level: "debug", detail: { code, repeat } });
+    this.deviceEvent({ type: "ir", encoding: "NEC", code, repeat });
+    return { posted: true };
+  }
+
+  private udpReceived(handle: string, fromHost: string, fromPort: number, dataBase64: string): TriggerResult {
+    if (!this.frame.sockets.has(handle)) return { posted: false, dropped: "the frame holds no such socket" };
+    const length = base64Length(dataBase64);
+    if (length === undefined || length < 1 || length > MAX_UDP_BYTES) return { posted: false, dropped: "a datagram is 1 to 8192 bytes of base64" };
+    this.frame.noteHeard(handle, fromHost, fromPort, Buffer.from(dataBase64, "base64"));
+    if (!this.watching.has("udp")) return { posted: false, dropped: "the frame does not watch udp" };
+    this.deviceEvent({ type: "udp", socket: handle, from_host: fromHost, from_port: fromPort, data_base64: dataBase64 });
     return { posted: true };
   }
 

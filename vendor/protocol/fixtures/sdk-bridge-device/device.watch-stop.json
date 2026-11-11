@@ -1,10 +1,18 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-stop",
   "kind": "device.watch",
   "requires": [
-    "device.watch"
+    "device.watch",
+    "device.display"
+  ],
+  "requiresSources": [
+    "display",
+    "keys",
+    "light",
+    "network",
+    "presence"
   ],
   "purpose": "An empty events list stops every device event for the frame, and volume keys return to default handling.",
   "host": {
@@ -56,7 +64,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

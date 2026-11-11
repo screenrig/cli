@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.write",
   "kind": "device.serial.write",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "device.serial.write sends 1 to 32768 bytes (data_base64) to an open port and is acknowledged, with no result, once the host has handed them to the port. Larger data is sent as several writes, in order.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

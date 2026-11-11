@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.watch",
   "kind": "device.ble.watch",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "device.ble.watch subscribes to a characteristic's notifications and is acknowledged with {subscription}: the host-chosen identifier (8 to 64 of A-Z a-z 0-9 _ -) its device.event {type: ble} messages carry. It follows a device.watch that names ble, which is the opt-in. A frame holds at most 8 subscriptions; they end with the frame's context, or when a device.watch no longer names ble.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

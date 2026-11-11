@@ -1,10 +1,15 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-network-kept",
   "kind": "device.watch",
   "requires": [
-    "device.watch"
+    "device.watch",
+    "device.display"
+  ],
+  "requiresSources": [
+    "display",
+    "network"
   ],
   "purpose": "Only a watch that adds network posts the state: a frame that already watches network and sends a set that still holds it gets no second post at the watch, and its later changes still arrive.",
   "host": {
@@ -56,7 +61,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

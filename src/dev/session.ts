@@ -5,6 +5,7 @@ import { defaultHardware, type Hardware } from "./hardware.js";
 import type { KvStore } from "./kv.js";
 import { buildDevRelease, type DevRelease, type Refusal } from "./release.js";
 import { appOrigin, playerOrigin } from "./origins.js";
+import type { UdpTransport } from "./udp.js";
 
 /** One line of the event log: shown on the page and, for the kinds in TERMINAL, printed. */
 export interface LogEntry {
@@ -26,7 +27,7 @@ export type ServerEvent =
   | { event: "state"; data: unknown }
   | { event: "bridge"; data: Posted }
   | { event: "log"; data: LogEntry }
-  | { event: "frame"; data: { action: "reload" | "restart"; src: string } };
+  | { event: "frame"; data: { action: "reload" | "restart"; src: string; allow: string } };
 
 export interface SessionOptions {
   directory: string;
@@ -39,6 +40,8 @@ export interface SessionOptions {
   kvLocation: string;
   autoReload: boolean;
   hardware?: Hardware;
+  /** Where the application's UDP sockets bind. Without one they are simulated and hold no socket; `app dev` binds loopback. */
+  udp?: UdpTransport;
   clock?: () => number;
   /** Where terminal lines go. */
   print?: (entry: LogEntry) => void;
@@ -51,6 +54,8 @@ export const VIEWPORT_PRESETS: Record<string, Size> = {
 };
 
 const MAX_LOG = 500;
+/** What every frame may do, as the Permissions Policy `allow` attribute says it. */
+const FRAME_ALLOW = "autoplay; fullscreen; clipboard-read; clipboard-write";
 const PRIMITIVE_ID = "prm_dev_0001";
 
 function isSize(value: unknown): value is Size {
@@ -121,6 +126,7 @@ export class DevSession {
       viewport: { ...this.viewport },
       manifest: this.manifest(),
       hardware: this.hardware,
+      ...(this.options.udp ? { udp: this.options.udp } : {}),
       kv: this.options.kv,
       events,
       clock: this.clock,
@@ -223,6 +229,16 @@ export class DevSession {
     });
   }
 
+  /**
+   * The `allow` attribute of the application's frame. A frame whose page holds
+   * the `device.hdmi_input` capability may use the camera and the microphone, so
+   * `screenrig.device.hdmiInput.open()` gets the browser's capture device; a
+   * frame without it may not. The policy applies when the frame loads.
+   */
+  frameAllow(): string {
+    return this.host.capabilities["device.hdmi_input"] ? `${FRAME_ALLOW}; camera; microphone` : FRAME_ALLOW;
+  }
+
   frameSrc(): string {
     const query = new URLSearchParams(contextMembers({ launchParams: this.params }).params ?? {}).toString();
     return `${appOrigin(this.options.releaseHost, this.options.port)}/index.html${query ? `?${query}` : ""}`;
@@ -235,6 +251,7 @@ export class DevSession {
       player_origin: playerOrigin(this.options.port),
       app_origin: appOrigin(this.options.releaseHost, this.options.port),
       frame_src: this.frameSrc(),
+      frame_allow: this.frameAllow(),
       application_id: this.options.applicationId,
       release_id: this.options.releaseId,
       release: this.release ? { revision: this.release.revision, file_count: this.release.file_count, expanded_bytes: this.release.expanded_bytes, built_at: this.release.built_at, sdk_sha256: this.release.sdk_sha256 ?? null } : null,
@@ -270,7 +287,7 @@ export class DevSession {
     clearTimeout(this.restartTimer);
     this.host.leaving();
     this.record({ type: "restart", level: "debug", message: reason });
-    this.broadcast({ event: "frame", data: { action: "restart", src: this.frameSrc() } });
+    this.broadcast({ event: "frame", data: { action: "restart", src: this.frameSrc(), allow: this.frameAllow() } });
     this.changedSinceLoad = false;
     this.queueState();
   }
@@ -310,6 +327,7 @@ export class DevSession {
       case "trigger": return this.fire(raw.trigger);
       case "ble-notify": return this.bleNotify(raw);
       case "serial-send": return this.serialSend(raw);
+      case "udp-inject": return this.udpInject(raw);
       case "hardware": return this.setHardware(raw);
       case "clear-log": this.log.length = 0; this.queueState(); return {};
       default: throw new CommandError(`Unknown command ${name.slice(0, 40)}.`);
@@ -318,20 +336,29 @@ export class DevSession {
 
   private setCapability(raw: Record<string, unknown>): unknown {
     if (typeof raw.name !== "string" || !(CAPABILITY_NAMES as readonly string[]).includes(raw.name) || typeof raw.value !== "boolean") throw new CommandError("capability needs a capability name and true or false.");
+    const allowBefore = this.frameAllow();
     this.host.setCapability(raw.name as CapabilityName, raw.value);
+    this.allowChanged(allowBefore);
     this.queueState();
     return {};
   }
 
   private setCapabilities(raw: Record<string, unknown>): unknown {
     if (!isRecord(raw.values)) throw new CommandError("capabilities needs a values object.");
+    const allowBefore = this.frameAllow();
     for (const [name, value] of Object.entries(raw.values)) {
       if (!(CAPABILITY_NAMES as readonly string[]).includes(name) || typeof value !== "boolean") throw new CommandError(`${name.slice(0, 40)} is not a capability set to true or false.`);
       this.host.options.capabilities[name as CapabilityName] = value;
     }
     this.host.refreshContext();
+    this.allowChanged(allowBefore);
     this.queueState();
     return {};
+  }
+
+  /** A frame's permissions are fixed when it loads: when they change, it loads again (a new generation). */
+  private allowChanged(before: string): void {
+    if (this.frameAllow() !== before) this.restart(`the frame's camera and microphone permission changed (device.hdmi_input)`);
   }
 
   private setFeature(raw: Record<string, unknown>): unknown {
@@ -392,10 +419,10 @@ export class DevSession {
     if (!isRecord(raw)) throw new CommandError("trigger needs a trigger object.");
     const device = raw.device;
     const page = raw.page;
-    const allowed = ["display", "presence", "key", "light", "network", "typing", "scan", "people", "sound", "serial", "gpio", "ble"];
-    if (!(typeof device === "string" && allowed.includes(device)) && !(page === "leaving")) throw new CommandError("trigger names a device event.");
+    const allowed = ["display", "presence", "key", "light", "network", "typing", "scan", "people", "sound", "serial", "gpio", "ble", "ir", "udp"];
+    if (!(typeof device === "string" && allowed.includes(device)) && !(page === "leaving" || page === "context")) throw new CommandError("trigger names a device event.");
     const result = this.host.trigger(raw as unknown as Trigger);
-    this.record({ type: result.posted ? "harness.fired" : "harness.dropped", level: result.posted ? "debug" : "info", message: result.posted ? `${String(device ?? page)} sent` : `${String(device ?? page)} not sent${result.dropped ? `: ${result.dropped}` : ""}`, detail: { trigger: raw, ...(result.consumed === undefined ? {} : { consumed: result.consumed }) } });
+    this.record({ type: result.posted ? "harness.fired" : "harness.dropped", level: result.posted ? "debug" : "info", message: result.posted ? `${String(device ?? page)} sent` : `${String(device ?? page)} not sent${result.dropped ? `: ${result.dropped}` : ""}`, detail: { trigger: raw, ...(result.consumed === undefined ? {} : { consumed: result.consumed }), ...(result.drives && result.drives.length > 0 ? { drives: result.drives } : {}) } });
     this.queueState();
     return result;
   }
@@ -419,6 +446,20 @@ export class DevSession {
     return this.fire({ device: "serial", handle, data_base64: bytes.toString("base64") });
   }
 
+  /** A datagram arrives at a socket the application opened, from a peer the operator names (the loopback address and a port by default). */
+  private udpInject(raw: Record<string, unknown>): unknown {
+    const socket = typeof raw.socket === "string" ? raw.socket : [...this.host.frame.sockets.values()][0]?.handle;
+    if (socket === undefined) throw new CommandError("The application has no open UDP socket to send to.");
+    const bytes = typeof raw.hex === "string" ? Buffer.from(raw.hex.replace(/[^0-9a-f]/gi, ""), "hex") : Buffer.from(String(raw.text ?? ""), "utf8");
+    if (bytes.length === 0) throw new CommandError("Nothing to send.");
+    if (bytes.length > 8192) throw new CommandError("A datagram is at most 8192 bytes.");
+    const host = raw.host === undefined || raw.host === "" ? "127.0.0.1" : raw.host;
+    const port = raw.port === undefined || raw.port === "" ? 40000 : raw.port;
+    if (typeof host !== "string" || host.length > 253) throw new CommandError("host is the sender's address.");
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) throw new CommandError("port is a whole number from 1 to 65535.");
+    return this.fire({ device: "udp", socket, from_host: host, from_port: port, data_base64: bytes.toString("base64") });
+  }
+
   private setHardware(raw: Record<string, unknown>): unknown {
     const hardware = this.hardware;
     const id = typeof raw.id === "string" ? raw.id : "";
@@ -427,6 +468,8 @@ export class DevSession {
       case "serial.echo": this.port(id).echo = value; break;
       case "serial.busy": this.port(id).busy = value; break;
       case "printer.failing": { const printer = hardware.printers.find((candidate) => candidate.id === id); if (!printer) throw new CommandError("No such printer."); printer.failing = value; break; }
+      case "pin.floating": { const pin = hardware.gpio.pins.find((candidate) => String(candidate.pin) === id); if (!pin) throw new CommandError("No such line."); pin.floating = value; pin.driven = undefined; break; }
+      case "ir.available": hardware.ir.available = value; break;
       case "pin.busy": { const pin = hardware.gpio.pins.find((candidate) => String(candidate.pin) === id); if (!pin) throw new CommandError("No such line."); pin.busy = value; break; }
       case "gpio.chip": hardware.gpio.chip = value; break;
       case "ble.adapter": hardware.ble.adapter = value; break;

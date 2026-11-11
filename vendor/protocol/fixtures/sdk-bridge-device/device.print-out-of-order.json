@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.print-out-of-order",
   "kind": "device.print",
   "requires": [
     "device.print"
   ],
+  "requiresSources": [],
   "purpose": "A chunk whose seq is not the next of a job in progress (or a first chunk whose seq is not 0) is refused with invalid_request (400) and the job is discarded.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

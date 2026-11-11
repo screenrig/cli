@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.read",
   "kind": "device.ble.read",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "device.ble.read reads a characteristic (at most 512 bytes) of the first peripheral that advertises the service, or of the one the optional device selector names (its advertised name or its address as aa:bb:cc:dd:ee:ff), and is acknowledged with {value_base64}. service and characteristic are UUIDs in lower case: 4 or 8 hexadecimal characters, or 36 with dashes. There is no pairing and no writing.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

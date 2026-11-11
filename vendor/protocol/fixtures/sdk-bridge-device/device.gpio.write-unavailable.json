@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.gpio.write-unavailable",
   "kind": "device.gpio.write",
   "requires": [
     "device.gpio"
   ],
+  "requiresSources": [],
   "purpose": "A device with no GPIO chip it can open is refused with gpio_unavailable (503).",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

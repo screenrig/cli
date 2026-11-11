@@ -1,11 +1,14 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-scan",
   "kind": "device.watch",
   "requires": [
     "device.watch",
     "device.scan"
+  ],
+  "requiresSources": [
+    "scan.scanner"
   ],
   "purpose": "A frame that watches scan receives device.event {type: scan, source: scanner, format: text, data} for a keyboard-wedge barcode scanner or badge reader: a burst of at least 4 keystrokes, each at most 50 ms after the one before, ending in Enter, while no editable field of the page has focus. The Player captures the burst (consumed) instead of typing it into the page; a burst that turns out not to be a scan (shorter than 4 characters, a gap over 50 ms, no Enter, an editable field in focus) is not captured and the page receives it as typed. Scan events are posted at most once per 100 ms.",
   "host": {
@@ -57,7 +60,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -77,7 +82,7 @@
           "upca",
           "code128"
         ],
-        "scanning": true
+        "scanning": false
       },
       "serial": {
         "ports": [

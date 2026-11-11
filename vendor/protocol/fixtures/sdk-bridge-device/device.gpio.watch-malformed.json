@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.gpio.watch-malformed",
   "kind": "device.gpio.watch",
   "requires": [
     "device.gpio"
   ],
+  "requiresSources": [],
   "purpose": "pins must be a list of at most 16 distinct integers from 0 to 255; anything else is refused with invalid_request (400) and the set is unchanged.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

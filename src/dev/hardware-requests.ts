@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { DEVICE_CHUNK_BYTES, MAX_BLE_SUBSCRIPTIONS, MAX_GPIO_PINS, MAX_PRINT_BYTES, MAX_SERIAL_PORTS, PRINT_IDLE_MS } from "./bridge-protocol.js";
-import { BLE_UUID, HANDLE, SCAN_FORMATS, base64Length, unknownMembers, validDeviceId, type Hardware, type PrintFormat, type PrinterSpec } from "./hardware.js";
+import {
+  DEVICE_CHUNK_BYTES, MAX_BLE_SUBSCRIPTIONS, MAX_GPIO_PINS, MAX_IR_CODE, MAX_IR_REPEAT, MAX_PRINT_BYTES, MAX_SERIAL_PORTS, MAX_UDP_BYTES, MAX_UDP_SOCKETS, PRINT_IDLE_MS, SYNC_BEACON_PORT,
+  isRecord,
+} from "./bridge-protocol.js";
+import { BLE_UUID, HANDLE, SCAN_FORMATS, base64Length, pinLevel, unknownMembers, validDeviceId, type GpioPull, type Hardware, type PrintFormat, type PrinterSpec } from "./hardware.js";
+import { isLoopbackHost, type UdpBound, type UdpPacket, type UdpTransport } from "./udp.js";
 
 /** One answered request: a result for an ack, or the problem the hardware or the members earned. */
 export type Outcome =
@@ -54,6 +58,60 @@ export interface PrintedJob {
   preview: string;
 }
 
+export interface UdpSocketState {
+  handle: string;
+  /** The port the socket holds, `0` for none (a send-only socket the system gave a port). */
+  port: number;
+  broadcast: boolean;
+  multicast?: string;
+}
+
+export interface UdpDatagram {
+  direction: "sent" | "received";
+  socket: string;
+  /** The peer: where a sent datagram went, where a received one came from. */
+  host: string;
+  port: number;
+  bytes: number;
+  hex: string;
+  text: string;
+  /** A sent datagram that reached a loopback socket, or was only recorded because the harness never reaches the network. */
+  delivered?: boolean;
+  at: number;
+}
+
+export interface IrSent {
+  encoding: "NEC";
+  code: number;
+  repeat: number;
+  at: number;
+}
+
+/** A line the page wrote that the Player lets go of: the level it drives and why. */
+export interface GpioRelease {
+  pin: number;
+  value: boolean;
+  cause: "leaving" | "context" | "destroyed";
+  at: number;
+}
+
+/** An IPv4 literal, a `.local` name or a single-label LAN name; no DNS is consulted. */
+export function validUdpHost(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 253) return false;
+  const octets = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (octets) return octets.slice(1).every((part) => Number(part) <= 255);
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(value) || /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+local$/i.test(value);
+}
+
+function validPort(value: unknown, from: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= from && value <= 65535;
+}
+
+function validMulticast(value: unknown): value is string {
+  const match = typeof value === "string" ? value.match(/^239\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) : null;
+  return match !== null && match.slice(1).every((part) => Number(part) <= 255);
+}
+
 function handleId(prefix: string): string {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
 }
@@ -61,6 +119,25 @@ function handleId(prefix: string): string {
 function printable(bytes: Buffer, format: PrintFormat): string {
   if (format === "pdf") return bytes.subarray(0, 24).toString("hex");
   return bytes.toString("latin1").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "·").slice(0, 400);
+}
+
+export interface FrameState {
+  scanning: boolean;
+  ports: OpenSerialPort[];
+  pins: number[];
+  subscriptions: BleSubscription[];
+  printed: PrintedJob[];
+  /** The bias of each watched line that has one, by pin. */
+  pull: Record<string, GpioPull>;
+  /** What each line reads now, by pin. */
+  levels: Record<string, boolean>;
+  /** The level each line the page wrote is let go at, by pin. */
+  idle: Record<string, boolean>;
+  released: GpioRelease[];
+  sockets: UdpSocketState[];
+  datagrams: UdpDatagram[];
+  udp_transport: "loopback" | "simulated";
+  ir_sent: IrSent[];
 }
 
 /**
@@ -73,18 +150,49 @@ export class FrameDevice {
   readonly ports = new Map<string, OpenSerialPort>();
   watchedPins: number[] = [];
   readonly subscriptions = new Map<string, BleSubscription>();
+  /** The bias of each watched line that has one; a line with no entry has none. */
+  readonly pulls = new Map<number, GpioPull>();
+  /** The lines the page wrote and the level each is let go at (the latest write's `idle`). */
+  readonly written = new Map<number, boolean>();
+  /** What the Player did when the page let go of lines, newest last. */
+  readonly released: GpioRelease[] = [];
+  readonly sockets = new Map<string, UdpSocketState>();
+  /** The datagrams this frame sent and heard, newest last. */
+  readonly datagrams: UdpDatagram[] = [];
+  /** The codes this frame sent, newest last. */
+  readonly irSent: IrSent[] = [];
   private job?: PrintJob;
+  private readonly bindings = new Map<string, UdpBound>();
+  private opening = 0;
+  private epoch = 0;
   /** The jobs this frame printed, newest last. */
   readonly printed: PrintedJob[] = [];
 
-  constructor(private readonly hardware: Hardware, private readonly clock: () => number, private readonly activity: (event: DeviceActivity) => void) {}
+  constructor(
+    private readonly hardware: Hardware,
+    private readonly clock: () => number,
+    private readonly activity: (event: DeviceActivity) => void,
+    private readonly udp: UdpTransport,
+    private readonly heard: (handle: string, packet: UdpPacket) => void = () => undefined,
+  ) {}
 
+  /** The frame's context ended: everything it held goes. Lines it wrote are let go first (`releaseLines`). */
   reset(): void {
+    this.epoch += 1;
     this.scanning = false;
     this.ports.clear();
     this.watchedPins = [];
+    this.pulls.clear();
+    this.written.clear();
     this.subscriptions.clear();
+    for (const binding of this.bindings.values()) binding.close();
+    this.bindings.clear();
+    this.sockets.clear();
     this.job = undefined;
+  }
+
+  get udpKind(): "loopback" | "simulated" {
+    return this.udp.kind;
   }
 
   // Scanner.
@@ -165,16 +273,62 @@ export class FrameDevice {
 
   // GPIO.
 
-  gpioWrite(payload: Record<string, unknown>): Outcome {
-    if (unknownMembers(payload, [...BINDING, "pin", "value"]).length > 0) return invalid("device.gpio.write takes pin and value only.");
+  /** `idleOk` is whether the host advertises `device.gpio.idle`, which makes `idle` a member of the write. */
+  gpioWrite(payload: Record<string, unknown>, idleOk: boolean): Outcome {
+    if (unknownMembers(payload, [...BINDING, "pin", "value", ...(idleOk ? ["idle"] : [])]).length > 0) return invalid(idleOk ? "device.gpio.write takes pin, value and idle only." : "device.gpio.write takes pin and value only.");
     const pin = payload.pin;
     if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > 255) return invalid("pin is an integer from 0 to 255.");
     if (typeof payload.value !== "boolean") return invalid("value must be true or false.");
+    if (payload.idle !== undefined && typeof payload.idle !== "boolean") return invalid("idle must be true or false.");
     const problem = this.gpioProblem([pin]);
     if (problem) return problem;
-    const spec = this.hardware.gpio.pins.find((candidate) => candidate.pin === pin)!;
-    this.activity({ type: "device.gpio.write", detail: { pin, value: payload.value } });
-    return ok(undefined, { pin, value: payload.value, changed: spec.value !== payload.value });
+    const idle = idleOk ? payload.idle ?? false : undefined;
+    // Only a host with idle lets go at a level; without it the line stays where it was last driven.
+    if (idle !== undefined) this.written.set(pin, idle);
+    this.activity({ type: "device.gpio.write", detail: { pin, value: payload.value, ...(idle === undefined ? {} : { idle }) } });
+    return ok(undefined, { pin, value: payload.value });
+  }
+
+  /** What a line reads now, by the bias the frame requested it with. */
+  gpioLevel(pin: number): boolean | undefined {
+    const spec = this.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
+    return spec === undefined ? undefined : pinLevel(spec, this.pulls.get(pin));
+  }
+
+  /** Something drives a line to a level: an output the page wrote, or the outside (a button, a signal). */
+  gpioDrive(pin: number, value: boolean): void {
+    const spec = this.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
+    if (!spec) return;
+    spec.value = spec.floating === true ? spec.value : value;
+    if (spec.floating === true) spec.driven = value;
+  }
+
+  /** The outside lets go of a line: it floats to its bias again. */
+  gpioFloat(pin: number): void {
+    const spec = this.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
+    if (spec) spec.driven = undefined;
+  }
+
+  /**
+   * The page lets go: each line it wrote is driven to its idle level, in
+   * ascending pin order, and released. What was driven is returned and kept for
+   * the panel.
+   */
+  releaseLines(cause: GpioRelease["cause"]): Array<{ pin: number; value: boolean }> {
+    const drives = [...this.written.entries()].sort(([left], [right]) => left - right).map(([pin, value]) => ({ pin, value }));
+    this.written.clear();
+    for (const { pin, value } of drives) {
+      const spec = this.hardware.gpio.pins.find((candidate) => candidate.pin === pin);
+      if (spec) {
+        spec.value = value;
+        // Released, a line nothing is connected to floats again.
+        spec.driven = undefined;
+      }
+      this.released.push({ pin, value, cause, at: this.clock() });
+      if (this.released.length > 20) this.released.shift();
+      this.activity({ type: "device.gpio.release", detail: { pin, value, cause } });
+    }
+    return drives;
   }
 
   private gpioProblem(pins: number[]): Outcome | undefined {
@@ -187,20 +341,135 @@ export class FrameDevice {
     return undefined;
   }
 
-  /** `watching` is whether the frame's latest device.watch names gpio. */
-  gpioWatch(payload: Record<string, unknown>, watching: boolean): Outcome {
-    if (unknownMembers(payload, [...BINDING, "pins"]).length > 0) return invalid("device.gpio.watch takes pins only.");
+  /**
+   * `watching` is whether the frame's latest device.watch names gpio; `pullOk`
+   * whether the host advertises `device.gpio.pull`, which makes `pull` a member.
+   * The effect lists the lines to post: each one newly in the set and each whose
+   * level changed because its bias did.
+   */
+  gpioWatch(payload: Record<string, unknown>, watching: boolean, pullOk: boolean): Outcome {
+    if (unknownMembers(payload, [...BINDING, "pins", ...(pullOk ? ["pull"] : [])]).length > 0) return invalid(pullOk ? "device.gpio.watch takes pins and pull only." : "device.gpio.watch takes pins only.");
     const pins = payload.pins;
     if (!Array.isArray(pins) || pins.length > MAX_GPIO_PINS || pins.some((pin) => typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > 255) || new Set(pins).size !== pins.length) {
       return invalid("pins is at most 16 distinct integers from 0 to 255.");
     }
+    const pulls = new Map<number, GpioPull>();
+    if (payload.pull !== undefined) {
+      if (!isRecord(payload.pull)) return invalid("pull is an object keyed by pin.");
+      for (const [key, value] of Object.entries(payload.pull)) {
+        if (!/^(?:0|[1-9]\d{0,2})$/.test(key) || !(pins as number[]).includes(Number(key))) return invalid(`pull names ${key.slice(0, 12)}, which is not a pin in pins.`);
+        if (value !== "up" && value !== "down" && value !== "none") return invalid("pull is up, down or none.");
+        if (value !== "none") pulls.set(Number(key), value);
+      }
+    }
     if (!watching) return invalid("device.gpio.watch follows a device.watch that names gpio.");
     const problem = this.gpioProblem(pins as number[]);
     if (problem) return problem;
-    const added = (pins as number[]).filter((pin) => !this.watchedPins.includes(pin));
+    const before = new Map(this.watchedPins.map((pin) => [pin, this.gpioLevel(pin)]));
     this.watchedPins = [...(pins as number[])];
-    this.activity({ type: "device.gpio.watch", detail: { pins: this.watchedPins } });
-    return ok({ pins: this.watchedPins }, { added });
+    this.pulls.clear();
+    for (const [pin, pull] of pulls) this.pulls.set(pin, pull);
+    const post = this.watchedPins.filter((pin) => !before.has(pin) || before.get(pin) !== this.gpioLevel(pin));
+    this.activity({ type: "device.gpio.watch", detail: { pins: this.watchedPins, ...(pulls.size > 0 ? { pull: Object.fromEntries([...pulls].map(([pin, pull]) => [String(pin), pull])) } : {}) } });
+    return ok({ pins: this.watchedPins }, { post });
+  }
+
+  // Infrared.
+
+  /** The page sends one NEC code. */
+  irSend(payload: Record<string, unknown>): Outcome {
+    if (unknownMembers(payload, [...BINDING, "encoding", "code", "repeat"]).length > 0) return invalid("device.ir.send takes encoding, code and repeat only.");
+    if (payload.encoding !== "NEC") return invalid("encoding is NEC.");
+    const code = payload.code;
+    if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || code > MAX_IR_CODE) return invalid("code is a whole number from 0 to 16777215 (0xFFFFFF).");
+    const repeat = payload.repeat;
+    if (repeat !== undefined && (typeof repeat !== "number" || !Number.isInteger(repeat) || repeat < 0 || repeat > MAX_IR_REPEAT)) return invalid("repeat is a whole number from 0 to 10.");
+    if (!this.hardware.ir.available) return refuse("ir_unavailable", 503, "The device has no infrared emitter the page may use.");
+    const sent: IrSent = { encoding: "NEC", code, repeat: repeat ?? 0, at: this.clock() };
+    this.irSent.push(sent);
+    if (this.irSent.length > 20) this.irSent.shift();
+    this.activity({ type: "device.ir.send", detail: { encoding: sent.encoding, code, hex: `0x${code.toString(16).toUpperCase().padStart(6, "0")}`, repeat: sent.repeat } });
+    return ok();
+  }
+
+  // UDP.
+
+  /** Opens a socket; `port` 0 is a send-only socket. The socket ends with the frame's context. */
+  async udpOpen(payload: Record<string, unknown>): Promise<Outcome> {
+    if (unknownMembers(payload, [...BINDING, "port", "broadcast", "multicast"]).length > 0) return invalid("device.udp.open takes port, broadcast and multicast only.");
+    const port = payload.port;
+    if (typeof port !== "number" || !Number.isInteger(port) || (port !== 0 && !validPort(port, 1024))) return invalid("port is 0 or a whole number from 1024 to 65535.");
+    if (payload.broadcast !== undefined && typeof payload.broadcast !== "boolean") return invalid("broadcast must be true or false.");
+    if (payload.multicast !== undefined && !validMulticast(payload.multicast)) return invalid("multicast is an address of the form 239.x.x.x.");
+    if (port === SYNC_BEACON_PORT) return refuse("port_busy", 409, `Port ${SYNC_BEACON_PORT} is the Player's own.`);
+    if (port !== 0 && [...this.sockets.values()].some((open) => open.port === port)) return refuse("port_busy", 409, `This frame holds port ${port} already.`);
+    if (this.sockets.size + this.opening >= MAX_UDP_SOCKETS) return refuse("socket_limit", 409, "A frame holds at most 4 UDP sockets.");
+    const epoch = this.epoch;
+    this.opening += 1;
+    const handle = handleId("udp");
+    let bind;
+    try {
+      bind = await this.udp.bind({ port }, (packet) => this.heard(handle, packet));
+    } finally {
+      this.opening -= 1;
+    }
+    if (!bind.ok) return refuse(bind.reason === "busy" ? "port_busy" : "io_failed", bind.reason === "busy" ? 409 : 502, bind.detail);
+    if (epoch !== this.epoch) {
+      // The context ended while the socket was being bound: nobody holds it.
+      bind.bound.close();
+      return refuse("invalid_request", 400, "The context ended before the socket opened.");
+    }
+    const state: UdpSocketState = { handle, port: port === 0 ? 0 : bind.bound.port, broadcast: payload.broadcast === true, ...(payload.multicast === undefined ? {} : { multicast: payload.multicast as string }) };
+    this.sockets.set(handle, state);
+    this.bindings.set(handle, bind.bound);
+    this.activity({ type: "device.udp.open", detail: { socket: handle, port: state.port, broadcast: state.broadcast, ...(state.multicast ? { multicast: state.multicast } : {}), transport: this.udp.kind } });
+    return ok({ socket: handle });
+  }
+
+  async udpSend(payload: Record<string, unknown>): Promise<Outcome> {
+    if (unknownMembers(payload, [...BINDING, "socket", "host", "port", "data_base64"]).length > 0) return invalid("device.udp.send takes socket, host, port and data_base64 only.");
+    if (typeof payload.socket !== "string" || payload.socket.length === 0) return invalid("socket must be a socket handle.");
+    if (!validUdpHost(payload.host)) return invalid("host is an IPv4 address, a .local name or a LAN name.");
+    if (!validPort(payload.port, 1)) return invalid("port is a whole number from 1 to 65535.");
+    const length = base64Length(payload.data_base64);
+    if (length === undefined || length < 1) return invalid("data_base64 must be 1 or more bytes of base64.");
+    if (length > MAX_UDP_BYTES) return refuse("payload_too_large", 413, "A datagram is at most 8192 bytes.");
+    const binding = this.bindings.get(payload.socket);
+    const socket = this.sockets.get(payload.socket);
+    if (!binding || !socket) return refuse("invalid_handle", 404, "This frame holds no open socket with that handle.");
+    const bytes = Buffer.from(payload.data_base64 as string, "base64");
+    const result = await binding.send(payload.host, payload.port, bytes);
+    this.noteDatagram({ direction: "sent", socket: socket.handle, host: payload.host, port: payload.port, bytes, delivered: result.delivered });
+    return ok();
+  }
+
+  udpClose(payload: Record<string, unknown>): Outcome {
+    if (typeof payload.socket === "string" && this.sockets.delete(payload.socket)) {
+      this.bindings.get(payload.socket)?.close();
+      this.bindings.delete(payload.socket);
+      this.activity({ type: "device.udp.close", detail: { socket: payload.socket } });
+    }
+    return ok();
+  }
+
+  /** A datagram the frame heard, for the panel's list. */
+  noteHeard(handle: string, host: string, port: number, bytes: Buffer): void {
+    this.noteDatagram({ direction: "received", socket: handle, host, port, bytes });
+  }
+
+  private noteDatagram(input: { direction: "sent" | "received"; socket: string; host: string; port: number; bytes: Buffer; delivered?: boolean }): void {
+    const { bytes } = input;
+    const entry: UdpDatagram = {
+      direction: input.direction, socket: input.socket, host: input.host, port: input.port, bytes: bytes.length,
+      hex: bytes.subarray(0, 64).toString("hex"), text: bytes.subarray(0, 64).toString("latin1").replace(/[^\x20-\x7e]/g, "."),
+      ...(input.delivered === undefined ? {} : { delivered: input.delivered }), at: this.clock(),
+    };
+    this.datagrams.push(entry);
+    if (this.datagrams.length > 30) this.datagrams.shift();
+    this.activity({
+      type: input.direction === "sent" ? "device.udp.send" : "device.udp.receive",
+      detail: { socket: entry.socket, [input.direction === "sent" ? "to" : "from"]: `${entry.host}:${entry.port}`, bytes: entry.bytes, hex: entry.hex, text: entry.text, ...(entry.delivered === undefined ? {} : { delivered: entry.delivered ? "loopback" : isLoopbackHost(entry.host) ? "failed" : "recorded only: the harness never reaches the network" }) },
+    });
   }
 
   // Bluetooth LE.
@@ -310,8 +579,15 @@ export class FrameDevice {
     return ok();
   }
 
-  /** The state of the frame's hardware in the fixtures' `host.hardware` shape (open ports, watched lines, subscriptions, scanner). */
-  state(): { scanning: boolean; ports: OpenSerialPort[]; pins: number[]; subscriptions: BleSubscription[]; printed: PrintedJob[] } {
-    return { scanning: this.scanning, ports: [...this.ports.values()], pins: this.watchedPins, subscriptions: [...this.subscriptions.values()], printed: this.printed };
+  /** The state of the frame's hardware in the fixtures' `host.hardware` shape (open ports, watched lines, subscriptions, scanner), and what the panel adds. */
+  state(): FrameState {
+    return {
+      scanning: this.scanning, ports: [...this.ports.values()], pins: this.watchedPins, subscriptions: [...this.subscriptions.values()], printed: this.printed,
+      pull: Object.fromEntries([...this.pulls].map(([pin, pull]) => [String(pin), pull])),
+      levels: Object.fromEntries(this.hardware.gpio.pins.map((spec) => [String(spec.pin), pinLevel(spec, this.pulls.get(spec.pin))])),
+      idle: Object.fromEntries([...this.written].map(([pin, idle]) => [String(pin), idle])),
+      released: this.released,
+      sockets: [...this.sockets.values()], datagrams: this.datagrams, udp_transport: this.udp.kind, ir_sent: this.irSent,
+    };
   }
 }

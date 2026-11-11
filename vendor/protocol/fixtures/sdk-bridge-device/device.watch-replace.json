@@ -1,10 +1,16 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-replace",
   "kind": "device.watch",
   "requires": [
-    "device.watch"
+    "device.watch",
+    "device.display"
+  ],
+  "requiresSources": [
+    "display",
+    "keys",
+    "presence"
   ],
   "purpose": "Each device.watch replaces the previous one: a frame that watched display and keys and now sends presence receives presence only, and a volume key is no longer consumed.",
   "host": {
@@ -56,7 +62,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

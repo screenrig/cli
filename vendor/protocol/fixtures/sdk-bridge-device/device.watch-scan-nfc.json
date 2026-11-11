@@ -1,13 +1,16 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
-  "name": "device.watch-scan-sources",
+  "name": "device.watch-scan-nfc",
   "kind": "device.watch",
   "requires": [
     "device.watch",
     "device.scan"
   ],
-  "purpose": "NFC tags and the camera scanner post through the same scan event: source nfc with format uid (the tag's UID, upper case hexadecimal without separators), ndef_text or ndef_uri (the first NDEF text or URI record, decoded), and source camera with the symbology as format once device.scanner.start runs. The camera posts a code it has just posted again only after 2000 ms; any other source posts every read. At most one scan event per 100 ms, whatever the source: a scan arriving sooner is dropped, not deferred. data is at most 2048 characters.",
+  "requiresSources": [
+    "scan.nfc"
+  ],
+  "purpose": "An NFC reader posts source nfc with format uid (the tag UID, upper case hexadecimal without separators), ndef_text or ndef_uri (the first NDEF text or URI record, decoded). At most one scan per 100 ms: an earlier read is dropped, not deferred. Unlike a camera, repeated NFC reads are not deduplicated. data is at most 2048 characters.",
   "host": {
     "applicationId": "app_bridge",
     "releaseId": "rel_bridge",
@@ -57,7 +60,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -77,7 +82,7 @@
           "upca",
           "code128"
         ],
-        "scanning": true
+        "scanning": false
       },
       "serial": {
         "ports": [
@@ -253,9 +258,42 @@
       {
         "trigger": {
           "device": "scan",
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12",
+          "source": "nfc",
+          "format": "uid",
+          "data": "04A224B1",
+          "atMs": 450
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "nfc",
+          "format": "uid",
+          "data": "04A224B1",
+          "atMs": 500
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "scan",
+            "source": "nfc",
+            "format": "uid",
+            "data": "04A224B1"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "nfc",
+          "format": "uid",
+          "data": "04A224B1",
           "atMs": 600
         },
         "message": {
@@ -267,85 +305,9 @@
             "generation": 7,
             "nonce": "bridge-nonce-0123456789abcdef",
             "type": "scan",
-            "source": "camera",
-            "format": "qr",
-            "data": "https://example.com/menu?t=12"
-          }
-        }
-      },
-      {
-        "trigger": {
-          "device": "scan",
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12",
-          "atMs": 700
-        },
-        "message": null
-      },
-      {
-        "trigger": {
-          "device": "scan",
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12",
-          "atMs": 2599
-        },
-        "message": null
-      },
-      {
-        "trigger": {
-          "device": "scan",
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12",
-          "atMs": 2600
-        },
-        "message": {
-          "protocol": "1",
-          "message_id": "",
-          "kind": "device.event",
-          "primitive_id": "prm_bridge_0001",
-          "payload": {
-            "generation": 7,
-            "nonce": "bridge-nonce-0123456789abcdef",
-            "type": "scan",
-            "source": "camera",
-            "format": "qr",
-            "data": "https://example.com/menu?t=12"
-          }
-        }
-      },
-      {
-        "trigger": {
-          "device": "scan",
-          "source": "camera",
-          "format": "ean13",
-          "data": "4006381333931",
-          "atMs": 2650
-        },
-        "message": null
-      },
-      {
-        "trigger": {
-          "device": "scan",
-          "source": "camera",
-          "format": "ean13",
-          "data": "4006381333931",
-          "atMs": 2700
-        },
-        "message": {
-          "protocol": "1",
-          "message_id": "",
-          "kind": "device.event",
-          "primitive_id": "prm_bridge_0001",
-          "payload": {
-            "generation": 7,
-            "nonce": "bridge-nonce-0123456789abcdef",
-            "type": "scan",
-            "source": "camera",
-            "format": "ean13",
-            "data": "4006381333931"
+            "source": "nfc",
+            "format": "uid",
+            "data": "04A224B1"
           }
         }
       }
@@ -382,23 +344,16 @@
       ],
       [
         {
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12"
+          "source": "nfc",
+          "format": "uid",
+          "data": "04A224B1"
         }
       ],
       [
         {
-          "source": "camera",
-          "format": "qr",
-          "data": "https://example.com/menu?t=12"
-        }
-      ],
-      [
-        {
-          "source": "camera",
-          "format": "ean13",
-          "data": "4006381333931"
+          "source": "nfc",
+          "format": "uid",
+          "data": "04A224B1"
         }
       ]
     ]

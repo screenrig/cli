@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.read-characteristic-not-found",
   "kind": "device.ble.read",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "A characteristic the peripheral's service does not have is refused with characteristic_not_found (404).",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.gpio.watch",
   "kind": "device.gpio.watch",
   "requires": [
     "device.gpio"
   ],
+  "requiresSources": [],
   "purpose": "device.gpio.watch sets the full set of lines the frame hears (at most 16; each send replaces the previous one; [] stops) and is acknowledged with {pins}. It follows a device.watch that names gpio, which is the opt-in: events flow only while both hold. Each line newly added posts device.event {type: gpio, pin, value} at once with its level, then on every change; a level the line already had posts nothing more, and a change to a line not in the set posts nothing.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

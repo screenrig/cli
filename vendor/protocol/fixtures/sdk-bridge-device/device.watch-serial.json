@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-serial",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "A frame that watches serial receives device.event {type: serial, handle, data_base64} for every chunk an open port reads, in order, each chunk 1 to 32768 bytes (the host splits larger reads), and {type: serial, handle, closed: true, reason} once when the port closes by itself: reason unplugged or error. Events carry only the frame's own ports; a port of another frame, or a handle that is not open, posts nothing.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -170,7 +173,7 @@
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0008",
+    "message_id": "msg_app_devwatch_0009",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

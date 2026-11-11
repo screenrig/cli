@@ -1,10 +1,14 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-display",
   "kind": "device.watch",
   "requires": [
-    "device.watch"
+    "device.watch",
+    "device.display"
+  ],
+  "requiresSources": [
+    "display"
   ],
   "purpose": "A frame that watches display receives device.event {type: display, on, brightness} for every change of the effective display state, whoever made it: this application, the screen's display schedule, an operator.",
   "host": {
@@ -56,7 +60,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

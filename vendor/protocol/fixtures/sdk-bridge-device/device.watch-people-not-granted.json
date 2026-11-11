@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-people-not-granted",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.camera"
   ],
+  "requiresSources": [],
   "purpose": "A frame without the device.camera capability gets no people event.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -165,7 +168,7 @@
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0005",
+    "message_id": "msg_app_devwatch_0006",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

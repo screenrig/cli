@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.vibrate",
   "kind": "device.vibrate",
   "requires": [
     "device.vibrate"
   ],
+  "requiresSources": [],
   "purpose": "device.vibrate plays one haptic tick of ms milliseconds on the device and is acknowledged; the ack has no result.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

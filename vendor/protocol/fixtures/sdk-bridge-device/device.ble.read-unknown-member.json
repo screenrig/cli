@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.read-unknown-member",
   "kind": "device.ble.read",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "An unknown payload member (there is no pairing or writing) is refused with invalid_request (400).",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

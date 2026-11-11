@@ -1,0 +1,322 @@
+{
+  "fixtureVersion": 2,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-scan-camera",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch",
+    "device.scan",
+    "device.camera"
+  ],
+  "requiresSources": [
+    "scan.camera"
+  ],
+  "purpose": "While device.scanner.start runs, the camera posts source camera with its symbology as format. It posts a code it has just posted again only after 2000 ms. At most one scan per 100 ms: an earlier scan is dropped, not deferred. data is at most 2048 characters.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": true,
+        "formats": [
+          "qr",
+          "ean13",
+          "upca",
+          "code128"
+        ],
+        "scanning": true
+      },
+      "serial": {
+        "ports": [
+          {
+            "id": "ttyUSB0",
+            "name": "FT232R USB UART",
+            "vendor_id": 1027,
+            "product_id": 24577
+          },
+          {
+            "id": "ttyACM0",
+            "name": "Arduino Uno",
+            "vendor_id": 9025,
+            "product_id": 67,
+            "busy": true
+          }
+        ],
+        "open": []
+      },
+      "gpio": {
+        "pins": [
+          {
+            "pin": 17,
+            "value": false
+          },
+          {
+            "pin": 27,
+            "value": true
+          },
+          {
+            "pin": 22,
+            "value": false,
+            "busy": true
+          }
+        ],
+        "watched": []
+      },
+      "ble": {
+        "adapter": true,
+        "peripherals": [
+          {
+            "name": "HRM-Strap",
+            "address": "aa:bb:cc:dd:ee:ff",
+            "services": [
+              {
+                "service": "180d",
+                "characteristics": [
+                  {
+                    "characteristic": "2a37",
+                    "value_base64": "ABg="
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "subscriptions": []
+      },
+      "printers": [
+        {
+          "id": "usb:epson-tm-t20",
+          "name": "Epson TM-T20",
+          "formats": [
+            "escpos"
+          ],
+          "default": true
+        },
+        {
+          "id": "office",
+          "name": "Office laser",
+          "formats": [
+            "pdf"
+          ]
+        },
+        {
+          "id": "jammed",
+          "name": "Jammed receipt printer",
+          "formats": [
+            "escpos"
+          ],
+          "failing": true
+        }
+      ]
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0003",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": [
+        "scan"
+      ]
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12",
+          "atMs": 600
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "scan",
+            "source": "camera",
+            "format": "qr",
+            "data": "https://example.com/menu?t=12"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12",
+          "atMs": 700
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12",
+          "atMs": 2599
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12",
+          "atMs": 2600
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "scan",
+            "source": "camera",
+            "format": "qr",
+            "data": "https://example.com/menu?t=12"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "ean13",
+          "data": "4006381333931",
+          "atMs": 2650
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "scan",
+          "source": "camera",
+          "format": "ean13",
+          "data": "4006381333931",
+          "atMs": 2700
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "scan",
+            "source": "camera",
+            "format": "ean13",
+            "data": "4006381333931"
+          }
+        }
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.onScan",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        {
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12"
+        }
+      ],
+      [
+        {
+          "source": "camera",
+          "format": "qr",
+          "data": "https://example.com/menu?t=12"
+        }
+      ],
+      [
+        {
+          "source": "camera",
+          "format": "ean13",
+          "data": "4006381333931"
+        }
+      ]
+    ]
+  }
+}

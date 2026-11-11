@@ -380,26 +380,74 @@ export interface ScreenRigDeviceSerial {
      */
     open(port: string, options: SerialOptions): Promise<ScreenRigSerialPort>;
 }
+/** The bias the Player sets on an input line: `"up"` or `"down"` connects it to the supply or to ground through the chip's own resistor, `"none"` sets no bias. */
+export type GpioPull = "up" | "down" | "none";
+/** The options of `screenrig.device.gpio.write`. */
+export interface GpioWriteOptions {
+    /**
+     * The level the Player drives the line to when the page lets go of it, which
+     * it then releases: when the page leaves the screen, when its context ends
+     * (a new generation or nonce) and when `destroy()` runs. The default is
+     * `false` (low), and the latest write's `idle` for a pin is the one that
+     * applies, so a write that omits it sets the pin's idle level back to low.
+     * Pass it on every write to the pin.
+     *
+     * An active-low relay board, which most cheap boards are, energizes on low,
+     * so the default would leave its relay energized when the page is gone: pass
+     * `idle: true` so the relay is off when the page lets go of the line.
+     *
+     * Needs a Player that advertises `device.gpio.idle`; on any other the call
+     * rejects `not_supported` and drives nothing (call `supports("device.gpio.idle")`
+     * first to choose another way).
+     */
+    idle?: boolean;
+}
+/** The options of `screenrig.device.gpio.onChange`. */
+export interface GpioChangeOptions {
+    /**
+     * The bias of the input line. An input with nothing connected floats and
+     * reads random flips, so a button wired between the pin and ground needs
+     * `"up"` (idle high, low while pressed), and a button wired between the pin
+     * and the supply needs `"down"`. `"none"`, which is also what no option
+     * means, sets no bias: use it for a line an external resistor or a driven
+     * signal already holds.
+     *
+     * All the handlers of one pin share its pull. A handler that names a `pull`
+     * other than the one a live handler of the same pin named throws
+     * `invalid_request`; a handler that names none goes along with the pin's pull.
+     *
+     * Needs a Player that advertises `device.gpio.pull`. On any other the handler
+     * still runs, the line gets no bias and the runtime logs one
+     * `gpio_pull_unsupported` warning, so wire an external resistor there
+     * (`supports("device.gpio.pull")` says which).
+     */
+    pull?: GpioPull;
+}
 export interface ScreenRigDeviceGpio {
     /**
      * Drives a GPIO line as an output: `true` is high. `pin` is an integer from 0
      * to 255, the line number of the device's GPIO chip (on a Raspberry Pi, the
-     * BCM number). Needs the `device.gpio` capability. Rejects `not_supported`
-     * when the Player does not advertise `device.gpio`, `capability_denied`
-     * without the capability, `invalid_request` (before anything is sent) for a
-     * bad `pin` or `value`, and `pin_not_found`, `pin_busy` or `gpio_unavailable`
-     * from the Player.
+     * BCM number). `options.idle` is the level the line is left at when the page
+     * lets go of it (see `GpioWriteOptions`). Needs the `device.gpio`
+     * capability. Rejects `not_supported` when the Player does not advertise
+     * `device.gpio` (or `device.gpio.idle`, when `options.idle` is given),
+     * `capability_denied` without the capability, `invalid_request` (before
+     * anything is sent) for a bad `pin`, `value`, `options` or `idle`, and
+     * `pin_not_found`, `pin_busy` or `gpio_unavailable` from the Player.
      */
-    write(pin: number, value: boolean): Promise<void>;
+    write(pin: number, value: boolean, options?: GpioWriteOptions): Promise<void>;
     /**
      * Calls `handler` with the level of a line, first for the level it has when
      * the Player starts watching it, then whenever it changes (the Player filters
      * contact bounce). Needs the `device.gpio` capability and a Player that
      * advertises `device.gpio` and `device.watch`; otherwise the handler never
-     * runs. At most 16 lines are watched at once. Returns a function that removes
-     * the handler.
+     * runs. At most 16 lines are watched at once. `options.pull` sets the bias of
+     * the line (see `GpioChangeOptions`). Throws `invalid_handler`, or
+     * `invalid_request` for a bad `pin` or `options`, a 17th line, or a `pull`
+     * other than the one a live handler of the same pin named. Returns a function that
+     * removes the handler.
      */
-    onChange(pin: number, handler: (value: boolean) => void): () => void;
+    onChange(pin: number, handler: (value: boolean) => void, options?: GpioChangeOptions): () => void;
 }
 /** A Bluetooth LE characteristic. */
 export interface BleTarget {
@@ -635,7 +683,8 @@ export interface ScreenRig {
      * feature, such as `"page.skip"`, `"kv.watch"`, `"visibility.watch"`,
      * `"page.timing"`, `"device.display"`, `"device.watch"`, `"device.vibrate"`,
      * `"device.scan"`, `"device.camera"`, `"device.sound"`, `"device.serial"`,
-     * `"device.gpio"`, `"device.ble"` or `"device.print"`. `supports` says what the Player can
+     * `"device.gpio"`, `"device.gpio.pull"`, `"device.gpio.idle"`, `"device.ble"` or
+     * `"device.print"`. `supports` says what the Player can
      * do; `capabilities` says what this page may do. A request for a feature the
      * Player lacks rejects `not_supported` without being sent.
      */

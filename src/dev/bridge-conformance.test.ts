@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { FEATURE_NAMES, allCapabilities, isRecord, type BridgeMessage, type Capabilities, type Posted } from "./bridge-protocol.js";
-import { BridgeHost, contextMembers, type EventSink, type HostEvent, type Trigger } from "./bridge-host.js";
+import { DEVICE_SOURCES, FEATURE_NAMES, allCapabilities, isRecord, type BridgeMessage, type Capabilities, type Posted } from "./bridge-protocol.js";
+import { BridgeHost, contextMembers, type EventSink, type HostEvent, type Trigger, type TriggerResult } from "./bridge-host.js";
 import { HANDLE, defaultHardware, type Hardware } from "./hardware.js";
 import { type KvDelete, type KvEntry, type KvResult, type KvStore, type KvSummary, type KvWrite } from "./kv.js";
 
@@ -15,12 +15,13 @@ import { type KvDelete, type KvEntry, type KvResult, type KvStore, type KvSummar
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-interface IndexEntry { path: string; kind: string; bytes: number; sha256: string; requires?: string[]; runs?: string[] }
+interface IndexEntry { path: string; kind: string; bytes: number; sha256: string; requires?: string[]; requiresSources?: string[]; runs?: string[] }
 
 interface Fixture {
   name: string;
   kind: string;
   requires?: string[];
+  requiresSources?: string[];
   runs?: string[];
   host: {
     primitiveId: string; generation: number; nonce: string; applicationId?: string; releaseId?: string; controller: boolean;
@@ -36,14 +37,14 @@ interface Fixture {
   then?: Array<{ in: BridgeMessage; reply: Json | null }>;
   expect: {
     reply?: Json | null; hostChosen?: string[]; backendRequests?: string; context?: Json | null;
-    deliveries?: Array<{ trigger: Json; message: Json | null; consumed?: boolean }>;
+    deliveries?: Array<{ trigger: Json; message: Json | null; consumed?: boolean; drives?: Array<{ pin: number; value: boolean }> }>;
   };
 }
 
 interface FixtureHardware {
   camera: { available: boolean; formats: string[]; scanning: boolean };
   serial: { ports: Hardware["serial"]["ports"]; open: Array<{ handle: string; port: string; failing?: boolean }> };
-  gpio: { pins: Hardware["gpio"]["pins"]; watched: number[]; chip?: boolean };
+  gpio: { pins: Hardware["gpio"]["pins"]; watched: number[]; pull?: Record<string, "up" | "down" | "none">; chip?: boolean };
   ble: { adapter: boolean; peripherals: Hardware["ble"]["peripherals"]; subscriptions: Array<{ subscription: string; service: string; characteristic: string }> };
   printers: Hardware["printers"];
 }
@@ -65,10 +66,12 @@ function corpus(directory: string): Array<{ entry: IndexEntry; fixture: Fixture 
   });
 }
 
+// Index v2: a runner runs the files whose `requires` it advertises and whose `requiresSources` it supports.
 function applicable(entry: IndexEntry, fixture: Fixture): boolean {
   const requires = entry.requires ?? fixture.requires ?? [];
+  const sources = entry.requiresSources ?? fixture.requiresSources ?? [];
   const runs = entry.runs ?? fixture.runs ?? ["host", "sdk"];
-  return runs.includes("host") && requires.every((feature) => ALL_FEATURES.includes(feature));
+  return runs.includes("host") && requires.every((feature) => ALL_FEATURES.includes(feature)) && sources.every((source) => DEVICE_SOURCES.includes(source));
 }
 
 /** A fixture's own backend response, as the store or the report sink answers it. */
@@ -139,6 +142,7 @@ function hardwareOf(fixture: Fixture): Hardware {
     camera: { available: given.camera.available, formats: given.camera.formats },
     serial: { ports: given.serial.ports },
     gpio: { pins: given.gpio.pins, chip: given.gpio.chip !== false },
+    ir: { available: true },
     ble: { adapter: given.ble.adapter, peripherals: given.ble.peripherals },
     printers: given.printers,
   };
@@ -169,6 +173,7 @@ function build(fixture: Fixture): { host: BridgeHost; posted: Posted[]; logs: Ho
     host.frame.scanning = given.camera.scanning;
     for (const open of given.serial.open) host.frame.ports.set(open.handle, { ...open });
     host.frame.watchedPins = [...given.gpio.watched];
+    for (const [pin, pull] of Object.entries(given.gpio.pull ?? {})) host.frame.pulls.set(Number(pin), pull);
     for (const subscription of given.ble.subscriptions) host.frame.subscriptions.set(subscription.subscription, { ...subscription });
   }
   if (fixture.host.page) host.restorePage(fixture.host.page);
@@ -247,7 +252,7 @@ async function deliver(fixture: Fixture, host: BridgeHost, posted: Posted[], imm
     const label = `${fixture.name}: delivery ${index + 1} ${JSON.stringify(delivery.trigger)}`;
     const trigger = JSON.parse(JSON.stringify(delivery.trigger)) as Record<string, Json>;
     if (typeof trigger.atMs === "number" && first !== undefined) trigger.atMs = trigger.atMs - first + 5_000_000;
-    let result;
+    let result: TriggerResult;
     let pushed: Posted[];
     if (trigger.device === "watch") {
       result = { posted: false };
@@ -263,6 +268,7 @@ async function deliver(fixture: Fixture, host: BridgeHost, posted: Posted[], imm
       assertSame(pushed[0], delivery.message, chosen, label);
     }
     if (delivery.consumed !== undefined) assert.equal(result.consumed, delivery.consumed, `${label}: consumed`);
+    if (delivery.drives !== undefined) assert.deepEqual(result.drives, delivery.drives, `${label}: the levels driven on release`);
   }
 }
 
@@ -285,6 +291,8 @@ test("the harness advertises every feature the corpora name", () => {
     const index = JSON.parse(readFileSync(new URL(`${directory}/index.json`, root), "utf8")) as Record<string, string[]>;
     for (const feature of index[key]!) assert.ok(ALL_FEATURES.includes(feature), `${feature} is not advertised`);
   }
+  const device = JSON.parse(readFileSync(new URL("sdk-bridge-device/index.json", root), "utf8")) as { deviceSources: string[] };
+  for (const source of device.deviceSources) assert.ok(DEVICE_SOURCES.includes(source), `${source} is not simulated`);
   const base = JSON.parse(readFileSync(new URL("sdk-bridge/index.json", root), "utf8")) as { hostFeatures: string[] };
   for (const feature of base.hostFeatures) assert.ok(ALL_FEATURES.includes(feature), `${feature} is not advertised`);
 });

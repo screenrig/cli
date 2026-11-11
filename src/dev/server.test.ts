@@ -187,13 +187,14 @@ test("the page and its state stream: the state first, then a frame event when th
       const first = await events.next("state");
       const state = first.data as { host: { active: boolean; generation: number }; frame_src: string; log: unknown[]; capability_names: string[] };
       assert.equal(state.host.active, false);
-      assert.equal(state.capability_names.length, 17);
+      assert.equal(state.capability_names.length, 20);
       assert.match(state.frame_src, /^http:\/\/r-[a-f0-9]{40}\.apps\.screenrig\.localhost:\d+\/index\.html$/);
       assert.ok(state.log.some((entry) => (entry as { type: string }).type === "release.built"));
       const answer = await request(port, `${PLAYER}:${port}`, { method: "POST", path: "/_dev/command", headers: { "content-type": "application/json", origin: `http://${PLAYER}:${port}` }, body: JSON.stringify({ command: "restart" }) });
       assert.equal(answer.status, 200);
       const frame = await events.next("frame");
       assert.equal((frame.data as { action: string }).action, "restart");
+      assert.equal((frame.data as { allow: string }).allow, "autoplay; fullscreen; clipboard-read; clipboard-write; camera; microphone", "hdmi input is granted, so the frame may use the camera");
     } finally {
       events.close();
     }

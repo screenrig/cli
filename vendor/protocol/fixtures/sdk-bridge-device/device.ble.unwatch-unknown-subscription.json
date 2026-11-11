@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.unwatch-unknown-subscription",
   "kind": "device.ble.unwatch",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "An identifier the frame does not hold is acknowledged too: unwatch is idempotent.",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-people",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.camera"
   ],
+  "requiresSources": [],
   "purpose": "A frame that watches people receives device.event {type: people, count} with the number of people the device's camera sees, an integer from 0 to 1000: the first reading after the watch, then only when the count changes, and never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted people event: a reading that would post sooner is dropped, not deferred. The camera is analysed on the device and released when nobody watches.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -165,7 +168,7 @@
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0004",
+    "message_id": "msg_app_devwatch_0005",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

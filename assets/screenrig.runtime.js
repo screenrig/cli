@@ -1553,6 +1553,7 @@
   var SERIAL_BUFFER_BYTES = 65536;
   var SERIAL_CLOSE_REASONS = ["unplugged", "error"];
   var GPIO_PIN_MAX = 255;
+  var GPIO_PULLS = ["up", "down", "none"];
   var MAX_GPIO_WATCH_PINS = 16;
   var MAX_BLE_VALUE_BYTES = 512;
   var MAX_BLE_SUBSCRIPTIONS = 8;
@@ -2526,6 +2527,27 @@
     if (typeof value !== "boolean") throw invalidRequest("value is a boolean");
     return value;
   }
+  function ownMember(value, member) {
+    return isRecord(value) && Object.prototype.hasOwnProperty.call(value, member) ? value[member] : void 0;
+  }
+  function parseGpioWriteOptions(options) {
+    if (options === void 0) return {};
+    if (!isRecord(options)) throw invalidRequest("GPIO write options are an object with idle");
+    onlyMembers(options, ["idle"], "GPIO write");
+    const idle = ownMember(options, "idle");
+    if (idle === void 0) return {};
+    if (typeof idle !== "boolean") throw invalidRequest("idle is a boolean");
+    return { idle };
+  }
+  function parseGpioChangeOptions(options) {
+    if (options === void 0) return {};
+    if (!isRecord(options)) throw invalidRequest("GPIO input options are an object with pull");
+    onlyMembers(options, ["pull"], "GPIO input");
+    const pull = ownMember(options, "pull");
+    if (pull === void 0) return {};
+    if (typeof pull !== "string" || !GPIO_PULLS.includes(pull)) throw invalidRequest(`pull is one of ${GPIO_PULLS.join(", ")}`);
+    return { pull };
+  }
   function parseBleTarget(target) {
     if (!isRecord(target)) throw invalidRequest("A BLE target is an object with service and characteristic");
     onlyMembers(target, ["service", "characteristic", "device"], "BLE");
@@ -2621,6 +2643,7 @@
   var CAMERA = { features: ["device.camera"], capabilities: ["device.camera"] };
   var SERIAL = { features: ["device.serial"], capabilities: ["device.serial"] };
   var GPIO = { features: ["device.gpio"], capabilities: ["device.gpio"] };
+  var GPIO_IDLE = { features: ["device.gpio", "device.gpio.idle"], capabilities: ["device.gpio"] };
   var BLE = { features: ["device.ble"], capabilities: ["device.ble"] };
   var PRINT = { features: ["device.print"], capabilities: ["device.print"] };
   function enqueue(queue, run) {
@@ -2651,9 +2674,12 @@
     soundHandlers = /* @__PURE__ */ new Set();
     ports = /* @__PURE__ */ new Map();
     pendingPorts = 0;
+    /** Per watched line, its handlers and the pull each asked for (a pin's handlers all ask for the same). */
     gpioHandlers = /* @__PURE__ */ new Map();
-    /** The context and pins device.gpio.watch last carried; a new context sends it again. */
+    /** The context and pins (with the pull each carried) device.gpio.watch last carried; a new context sends it again. */
     gpioSent = null;
+    /** The context a `gpio_pull_unsupported` warning was last logged for: one per context. */
+    gpioPullWarned = null;
     bleSubscriptions = /* @__PURE__ */ new Map();
     pendingBle = 0;
     printing = { tail: null, active: 0 };
@@ -2666,8 +2692,8 @@
       open: (port, options) => this.serialOpen(port, options)
     };
     gpio = {
-      write: (pin, value) => this.gpioWrite(pin, value),
-      onChange: (pin, handler) => this.gpioOnChange(pin, handler)
+      write: (pin, value, options) => this.gpioWrite(pin, value, options),
+      onChange: (pin, handler, options) => this.gpioOnChange(pin, handler, options)
     };
     ble = {
       read: (target) => this.bleRead(target),
@@ -2826,19 +2852,25 @@
       this.bridge.watchChanged();
     }
     // ---- GPIO -----------------------------------------------------------------
-    async gpioWrite(pin, value) {
-      this.bridge.check(GPIO);
-      const members = { pin: parseGpioPin(pin), value: parseGpioValue(value) };
+    async gpioWrite(pin, value, options) {
+      this.bridge.check(ownMember(options, "idle") !== void 0 ? GPIO_IDLE : GPIO);
+      const members = { pin: parseGpioPin(pin), value: parseGpioValue(value), ...parseGpioWriteOptions(options) };
       await this.bridge.send("device.gpio.write", members);
     }
-    gpioOnChange(pin, handler) {
+    gpioOnChange(pin, handler, options) {
       if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "device.gpio.onChange needs a function");
       const line = parseGpioPin(pin);
+      const pull = parseGpioChangeOptions(options).pull;
       if (!this.gpioHandlers.has(line) && this.gpioHandlers.size >= MAX_GPIO_WATCH_PINS) {
         throw new SdkValidationError("invalid_request", `At most ${MAX_GPIO_WATCH_PINS} GPIO lines are watched at once`);
       }
-      const handlers = this.gpioHandlers.get(line) ?? /* @__PURE__ */ new Set();
-      handlers.add(handler);
+      const handlers = this.gpioHandlers.get(line) ?? /* @__PURE__ */ new Map();
+      if (pull !== void 0) {
+        for (const asked of handlers.values()) {
+          if (asked !== void 0 && asked !== pull) throw new SdkValidationError("invalid_request", `GPIO line ${line} is already watched with pull ${asked}, not ${pull}`);
+        }
+      }
+      handlers.set(handler, pull);
       this.gpioHandlers.set(line, handlers);
       this.bridge.watchChanged();
       return () => {
@@ -2847,18 +2879,34 @@
         this.bridge.watchChanged();
       };
     }
+    /** The pull a pin's handlers name ("none" when none names one). */
+    gpioPull(line) {
+      var _a2;
+      for (const asked of ((_a2 = this.gpioHandlers.get(line)) == null ? void 0 : _a2.values()) ?? []) if (asked !== void 0) return asked;
+      return "none";
+    }
     /**
      * Called by the client after it settled `device.watch`. `device.gpio.watch`
-     * follows `device.watch` and carries the full set of lines; a watch without
-     * `gpio` ends the host's set, so nothing is sent for that.
+     * follows `device.watch` and carries the full set of lines, and their pull
+     * when the host can bias an input; a watch without `gpio` ends the host's set,
+     * so nothing is sent for that.
      */
     afterWatch(events, bound) {
       const pins = events.includes("gpio") ? [...this.gpioHandlers.keys()].sort((a, b) => a - b) : [];
-      const key = pins.join(",");
+      const biased = pins.filter((line) => this.gpioPull(line) !== "none");
+      const canBias = this.bridge.supports("device.gpio.pull");
+      if (biased.length > 0 && !canBias && this.gpioPullWarned !== bound) {
+        this.gpioPullWarned = bound;
+        this.bridge.report("warn", "gpio_pull_unsupported", `The Player cannot set a pull on GPIO line ${biased.join(", ")}: watching it without one. Add an external resistor.`);
+      }
+      const pull = {};
+      if (canBias) for (const line of biased) pull[String(line)] = this.gpioPull(line);
+      const key = pins.map((line) => `${line}${pull[String(line)] === void 0 ? "" : `:${pull[String(line)]}`}`).join(",");
       const previous2 = this.gpioSent !== null && this.gpioSent.bound === bound ? this.gpioSent.pins : "";
       this.gpioSent = { bound, pins: key };
       if (key === previous2 || pins.length === 0) return;
-      this.bridge.send("device.gpio.watch", { pins }).catch((err) => {
+      const members = { pins, ...Object.keys(pull).length > 0 ? { pull } : {} };
+      this.bridge.send("device.gpio.watch", members).catch((err) => {
         this.bridge.report("warn", "gpio_watch", `device.gpio.watch failed: ${err instanceof Error ? err.message : String(err)}`);
       });
     }
@@ -2922,6 +2970,7 @@
     // ---- host events ----------------------------------------------------------
     /** Delivers one hardware `device.event` to its handlers. */
     dispatch(event) {
+      var _a2;
       const call = (invoke) => {
         try {
           invoke();
@@ -2949,7 +2998,7 @@
           return;
         }
         case "gpio":
-          for (const handler of [...this.gpioHandlers.get(event.pin) ?? []]) call(() => handler(event.value));
+          for (const handler of [...((_a2 = this.gpioHandlers.get(event.pin)) == null ? void 0 : _a2.keys()) ?? []]) call(() => handler(event.value));
           return;
         case "ble": {
           const handler = this.bleSubscriptions.get(event.subscription);
@@ -2979,6 +3028,7 @@
       }
       this.bleSubscriptions.clear();
       this.gpioSent = null;
+      this.gpioPullWarned = null;
     }
     /** The SDK was destroyed: drop every handler. */
     destroy() {
@@ -3080,6 +3130,7 @@
       check: (needs) => this.checkDevice(needs),
       send: (kind, members) => this.sendDevice(kind, members),
       on: (name, handlers, handler) => this.deviceOn(name, handlers, handler),
+      supports: (feature) => this.supports(feature),
       watchChanged: () => this.watchDevice(),
       report: (level, code, message) => this.report(level, code, message),
       newId: () => this.idFactory()

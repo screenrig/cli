@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-gpio-dropped",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.gpio"
   ],
+  "requiresSources": [],
   "purpose": "Dropping gpio from the watch ends the frame's lines: a level change posts nothing, even if the frame names gpio again later without naming lines.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
@@ -169,7 +172,7 @@
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0013",
+    "message_id": "msg_app_devwatch_0014",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.scanner.start-not-granted",
   "kind": "device.scanner.start",
@@ -7,6 +7,7 @@
     "device.camera",
     "device.scan"
   ],
+  "requiresSources": [],
   "purpose": "device.scanner.start from a frame without the device.camera capability is refused with forbidden (403) and opens no camera. The capability is checked before the members, so a malformed payload is forbidden too.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

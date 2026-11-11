@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.ble.read-malformed",
   "kind": "device.ble.read",
   "requires": [
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "A service or characteristic that is not a lower case UUID of 4, 8 or 36 characters is refused with invalid_request (400).",
   "host": {
     "applicationId": "app_bridge",
@@ -56,7 +57,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,

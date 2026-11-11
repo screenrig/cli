@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.scanner.start-none-decodable",
   "kind": "device.scanner.start",
@@ -7,6 +7,7 @@
     "device.camera",
     "device.scan"
   ],
+  "requiresSources": [],
   "purpose": "When the device decodes none of the formats asked for, nothing starts and the ack lists no format.",
   "host": {
     "applicationId": "app_bridge",
@@ -57,7 +58,9 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle"
     ],
     "display": {
       "on": true,
