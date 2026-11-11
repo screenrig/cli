@@ -51,6 +51,12 @@ Player plays it, so applications are tried before upload.
 - `src/dev/bridge-host.ts` is the host side of the SDK bridge. It must pass every host fixture of
   `vendor/protocol/fixtures/sdk-bridge*` (vendored through `contracts.toml`); `sdk-integration.test.ts`
   also runs the pinned `assets/screenrig.runtime.js` against it.
+- Device simulation lives in `src/dev/hardware.ts` (the example device), `hardware-requests.ts` (what one frame holds:
+  GPIO pull and idle, IR, UDP, serial, Bluetooth, printing) and `udp.ts` (the UDP seam). A line reads its pull when it is
+  floating; the page's written lines are driven to their `idle` level on leaving, a new context and destroy.
+  UDP sockets bind through `LoopbackUdp` (127.0.0.1 only; a datagram for any other host is recorded, never sent) and
+  tests use `SimulatedUdp`. `device.hdmi_input` is a frame `allow="camera; microphone"`, set when the frame loads, so a
+  change of that capability restarts the activation; there is no bridge message.
 - The page (`src/dev/page.ts`) is plain script and style in raw strings, without a backtick or a
   dollar-brace and with no remote URL; `server.test.ts` checks both.
 

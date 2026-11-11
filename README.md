@@ -52,8 +52,9 @@ production availability from the independent monitor without credentials
   Touch, peripherals, pushed data or an exact look no card has: an application.
 - Live video or an existing web page: playlist primitives.
 - Building an application: `screenrig app dev DIRECTORY` serves it in a local Player harness
-  (capabilities, device events, stored values, the page timer), reloading on every change and printing
-  `emit` and `log`, before `app upload`.
+  (capabilities, device events, stored values, the page timer, and simulated GPIO with pull and idle
+  levels, infrared, loopback UDP sockets, serial, Bluetooth, printers and the HDMI input permission),
+  reloading on every change and printing `emit` and `log`, before `app upload`.
 - A backdrop behind cards and primitives: a catalog image (`screenrig background sets`, then `background apply`).
 
 Videos play silent by default. A video plays its audio when its page sets sound
