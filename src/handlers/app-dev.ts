@@ -16,7 +16,12 @@ const local = commandHandler(appDev, false);
 const signedIn = commandHandler(appDev, true);
 
 /** `--kv-from` reads the application's real store, which takes the signed-in CLI; every other run needs no credential. */
-export const handleAppDev: CommandHandler = (args, runtime) => (flagString(args.flags, "kv-from") ? signedIn : local)(args, runtime);
+export const handleAppDev: CommandHandler = (args, runtime) => {
+  const from = flagString(args.flags, "kv-from");
+  if (from === undefined) return local(args, runtime);
+  if (!/^(?:(?:stage|qa|development)_)?app_[A-Za-z0-9_-]+$/.test(from)) throw usageError("--kv-from must be an application identifier (app_...).", { command: "screenrig app list", reason: "Lists the applications this project can read." });
+  return signedIn(args, runtime);
+};
 
 function remoteReader(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): KvRead {
   const token = requireToken(resolved.token);
@@ -49,7 +54,6 @@ async function appDev(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedC
   let kvFrom: { applicationId: string; read: KvRead } | undefined;
   const from = flagString(args.flags, "kv-from");
   if (from !== undefined) {
-    if (!/^(?:(?:stage|qa|development)_)?app_[A-Za-z0-9_-]+$/.test(from)) throw usageError("--kv-from must be an application identifier (app_...).");
     const read = remoteReader(args, runtime, resolved);
     const probe = await read(`/api/applications/${encodeURIComponent(from)}/kv`);
     if (!probe.ok) throw usageError(`Cannot read the stored values of ${from}: ${probe.problem.detail}`, { command: "screenrig app list", reason: "Lists the applications this project can read." });
