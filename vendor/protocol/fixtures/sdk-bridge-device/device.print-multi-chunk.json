@@ -1,0 +1,255 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.print-multi-chunk",
+  "kind": "device.print",
+  "requires": [
+    "device.print"
+  ],
+  "purpose": "A job larger than one chunk is sent as several device.print requests of the same job, seq 0, 1, 2, … in order, each answered before the next is sent. Chunk 0 also carries format, total_bytes and the optional printer; every chunk carries 1 to 32768 bytes and the last has last true. Chunks need not be full: a host accepts any chunk size in range. The ack of a chunk with last false means the chunk was taken; the ack of the chunk with last true means the printer, or its spooler, has the whole job. The bytes of all chunks add up to total_bytes. A host assembles one job per frame at a time and discards a job that is abandoned for 30 seconds, whose frame's context ends, or when a chunk 0 of another job arrives.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": true,
+        "formats": [
+          "qr",
+          "ean13",
+          "upca",
+          "code128"
+        ],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [
+          {
+            "id": "ttyUSB0",
+            "name": "FT232R USB UART",
+            "vendor_id": 1027,
+            "product_id": 24577
+          },
+          {
+            "id": "ttyACM0",
+            "name": "Arduino Uno",
+            "vendor_id": 9025,
+            "product_id": 67,
+            "busy": true
+          }
+        ],
+        "open": []
+      },
+      "gpio": {
+        "pins": [
+          {
+            "pin": 17,
+            "value": false
+          },
+          {
+            "pin": 27,
+            "value": true
+          },
+          {
+            "pin": 22,
+            "value": false,
+            "busy": true
+          }
+        ],
+        "watched": []
+      },
+      "ble": {
+        "adapter": true,
+        "peripherals": [
+          {
+            "name": "HRM-Strap",
+            "address": "aa:bb:cc:dd:ee:ff",
+            "services": [
+              {
+                "service": "180d",
+                "characteristics": [
+                  {
+                    "characteristic": "2a37",
+                    "value_base64": "ABg="
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "subscriptions": []
+      },
+      "printers": [
+        {
+          "id": "usb:epson-tm-t20",
+          "name": "Epson TM-T20",
+          "formats": [
+            "escpos"
+          ],
+          "default": true
+        },
+        {
+          "id": "office",
+          "name": "Office laser",
+          "formats": [
+            "pdf"
+          ]
+        },
+        {
+          "id": "jammed",
+          "name": "Jammed receipt printer",
+          "formats": [
+            "escpos"
+          ],
+          "failing": true
+        }
+      ]
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_print_0001",
+    "kind": "device.print",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "job": "job_bridge_multi",
+      "seq": 0,
+      "last": false,
+      "data_base64": "G0A=",
+      "format": "escpos",
+      "total_bytes": 5
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_print_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef"
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "then": [
+    {
+      "in": {
+        "protocol": "1",
+        "message_id": "msg_app_print_0002",
+        "kind": "device.print",
+        "primitive_id": "prm_bridge_0001",
+        "payload": {
+          "generation": 7,
+          "nonce": "bridge-nonce-0123456789abcdef",
+          "job": "job_bridge_multi",
+          "seq": 1,
+          "last": false,
+          "data_base64": "SGk="
+        }
+      },
+      "reply": {
+        "protocol": "1",
+        "message_id": "",
+        "kind": "response.ack",
+        "primitive_id": "prm_bridge_0001",
+        "payload": {
+          "request_message_id": "msg_app_print_0002",
+          "generation": 7,
+          "nonce": "bridge-nonce-0123456789abcdef"
+        }
+      }
+    },
+    {
+      "in": {
+        "protocol": "1",
+        "message_id": "msg_app_print_0003",
+        "kind": "device.print",
+        "primitive_id": "prm_bridge_0001",
+        "payload": {
+          "generation": 7,
+          "nonce": "bridge-nonce-0123456789abcdef",
+          "job": "job_bridge_multi",
+          "seq": 2,
+          "last": true,
+          "data_base64": "Cg=="
+        }
+      },
+      "reply": {
+        "protocol": "1",
+        "message_id": "",
+        "kind": "response.ack",
+        "primitive_id": "prm_bridge_0001",
+        "payload": {
+          "request_message_id": "msg_app_print_0003",
+          "generation": 7,
+          "nonce": "bridge-nonce-0123456789abcdef"
+        }
+      }
+    }
+  ]
+}

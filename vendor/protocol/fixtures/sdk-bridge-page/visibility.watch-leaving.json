@@ -1,0 +1,102 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "visibility.watch-leaving",
+  "kind": "visibility.watch",
+  "requires": [
+    "visibility.watch"
+  ],
+  "purpose": "When the page is about to leave the glass the host posts visible false with reason leaving, best effort and once, before the frame is torn down or hidden; it does so whether or not the page was visible. Nothing follows for the frame.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ],
+    "page": {
+      "elapsedMs": 4200,
+      "remainingMs": 5800,
+      "paused": false,
+      "visibilityWatching": false,
+      "held": [
+        "display"
+      ]
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_vwatch_0003",
+    "kind": "visibility.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "page": "leaving"
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "visibility.changed",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "visible": false,
+            "reason": "leaving"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "page": "display",
+          "on": true
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "page": "leaving"
+        },
+        "message": null
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  }
+}

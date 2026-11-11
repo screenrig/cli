@@ -1,0 +1,294 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-light",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch"
+  ],
+  "purpose": "A frame that watches light receives device.event {type: light, lux} for the ambient light in lux. The first reading after the watch posts. A later reading posts only when it differs from the last posted lux by at least 10% of it (the 5% and 9% readings post nothing, the 11% reading posts) or crosses 1 lux (0.95 after 1.05 posts although it is under 10%; 0.97 after 0.95 posts nothing), and never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted event: the large change at 1900 ms is dropped, not deferred. A reading that posts nothing does not move the last posted value or time. 0 lux is a reading.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": false,
+        "formats": [],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [],
+        "open": []
+      },
+      "gpio": {
+        "pins": [],
+        "watched": []
+      },
+      "ble": {
+        "adapter": false,
+        "peripherals": [],
+        "subscriptions": []
+      },
+      "printers": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0010",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": [
+        "light"
+      ]
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 100,
+          "atMs": 0
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 100
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 105,
+          "atMs": 1200
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 109,
+          "atMs": 1300
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 111,
+          "atMs": 1400
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 111
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 200,
+          "atMs": 1900
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 200,
+          "atMs": 2400
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 200
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 1.05,
+          "atMs": 4000
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 1.05
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 0.95,
+          "atMs": 5000
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 0.95
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 0.97,
+          "atMs": 6000
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 0,
+          "atMs": 7000
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "light",
+            "lux": 0
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "display",
+          "on": false,
+          "brightness": 0.5
+        },
+        "message": null
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.onLight",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        100
+      ],
+      [
+        111
+      ],
+      [
+        200
+      ],
+      [
+        1.05
+      ],
+      [
+        0.95
+      ],
+      [
+        0
+      ]
+    ]
+  }
+}

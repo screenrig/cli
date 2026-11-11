@@ -1,0 +1,158 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-stop",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch"
+  ],
+  "purpose": "An empty events list stops every device event for the frame, and volume keys return to default handling.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [
+      "display",
+      "presence",
+      "keys",
+      "light",
+      "network"
+    ],
+    "hardware": {
+      "camera": {
+        "available": false,
+        "formats": [],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [],
+        "open": []
+      },
+      "gpio": {
+        "pins": [],
+        "watched": []
+      },
+      "ble": {
+        "adapter": false,
+        "peripherals": [],
+        "subscriptions": []
+      },
+      "printers": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0004",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": []
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "display",
+          "on": false,
+          "brightness": 0.5
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "presence",
+          "atMs": 0
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "key",
+          "key": "volume_down",
+          "action": "down"
+        },
+        "message": null,
+        "consumed": false
+      },
+      {
+        "trigger": {
+          "device": "light",
+          "lux": 80,
+          "atMs": 0
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "network",
+          "online": false
+        },
+        "message": null
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  }
+}

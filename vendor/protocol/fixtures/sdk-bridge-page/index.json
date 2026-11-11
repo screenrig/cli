@@ -1,0 +1,275 @@
+{
+  "schema": "screenrig.sdk-bridge-page-fixtures.index/v1",
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "protocol": "1",
+  "hostFeatures": [
+    "ready",
+    "log",
+    "event.emit",
+    "page.advance",
+    "page.skip",
+    "kv.get",
+    "kv.list",
+    "kv.set",
+    "kv.delete",
+    "kv.watch"
+  ],
+  "pageFeatures": [
+    "visibility.watch",
+    "page.timing",
+    "context.params",
+    "context.screen"
+  ],
+  "files": [
+    {
+      "path": "context.params-absent.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1583,
+      "sha256": "1c3363d4b5a63b5d722cc1fa104c7652cf2136609c24495a249166f7dba60f42"
+    },
+    {
+      "path": "context.params-limit.json",
+      "kind": "context",
+      "requires": [
+        "context.params"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2786,
+      "sha256": "5188c1265d5de5e9b22f1a0528e4b3a2726c5024f41c4bd1cf2e8fd21f3c004d"
+    },
+    {
+      "path": "context.params-malformed.json",
+      "kind": "context",
+      "requires": [
+        "context.params"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2278,
+      "sha256": "ec90f1150b0367e852fd2902051fd3b831bd22dbee6c8eacff50a4079d43257e"
+    },
+    {
+      "path": "context.params-not-an-object.json",
+      "kind": "context",
+      "requires": [
+        "context.params"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1299,
+      "sha256": "a42fbf81dd14b8b89689297616d66d4b339aaede4a6c59750b2b587ae517aa4f"
+    },
+    {
+      "path": "context.params.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2228,
+      "sha256": "b922d515a484c7c2ac016d092b28a5a08ef9271320ae2c90cb76dd37d471dcb6"
+    },
+    {
+      "path": "context.screen-absent.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1354,
+      "sha256": "c063090bd0dd10c27e6a69f737126f7539611ec713df9e41ddd074809ad9afa1"
+    },
+    {
+      "path": "context.sdk-absent.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "sdk"
+      ],
+      "bytes": 1154,
+      "sha256": "6a8f50a44eea75254a5f817e901ea7eba56369b213364442ba89af161901aff7"
+    },
+    {
+      "path": "context.sdk-lenient-non-objects.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "sdk"
+      ],
+      "bytes": 1247,
+      "sha256": "b059fd0edb563fd8504e0974987c1110e8f358a27d8c89c56f329432d6507818"
+    },
+    {
+      "path": "context.sdk-lenient.json",
+      "kind": "context",
+      "requires": [
+        "context.params",
+        "context.screen"
+      ],
+      "runs": [
+        "sdk"
+      ],
+      "bytes": 2332,
+      "sha256": "462ff635f7ba8b7bde6bd6cec121da12cf7ad622768866a101bc0086e021e160"
+    },
+    {
+      "path": "page.timing-no-end.json",
+      "kind": "page.timing",
+      "requires": [
+        "page.timing"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2157,
+      "sha256": "8ec435eca4dfe23cbc4b64f48c8b42071f44206102745e1ca87df24aa1e3d912"
+    },
+    {
+      "path": "page.timing-paused.json",
+      "kind": "page.timing",
+      "requires": [
+        "page.timing"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2100,
+      "sha256": "c42a2661a62676b98adcc915f42cb3f0578a64d429cb7c56f12dc0a26487a5e8"
+    },
+    {
+      "path": "page.timing-stale-generation.json",
+      "kind": "page.timing",
+      "requires": [
+        "page.timing"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1474,
+      "sha256": "68a086e371b4e85efbe3f7ffeb9d4de094f7a17a4eb4c0808c47d02b714cbae0"
+    },
+    {
+      "path": "page.timing-unknown-members.json",
+      "kind": "page.timing",
+      "requires": [
+        "page.timing"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1929,
+      "sha256": "c6159df23d12176f58f2c0258b0938c909ec824a19a571f9b439a742e64014aa"
+    },
+    {
+      "path": "page.timing.json",
+      "kind": "page.timing",
+      "requires": [
+        "page.timing"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2315,
+      "sha256": "e64799bdad74a548386ffaafd203fe2bc6b20b5d09dd3f5dbe1cc245c31fb9d3"
+    },
+    {
+      "path": "visibility.watch-leaving.json",
+      "kind": "visibility.watch",
+      "requires": [
+        "visibility.watch"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2396,
+      "sha256": "64a04add6b430160dfb81a9a49da3d2ccc6051e89f61577a8dd94aa36d269f26"
+    },
+    {
+      "path": "visibility.watch-overlap.json",
+      "kind": "visibility.watch",
+      "requires": [
+        "visibility.watch"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2866,
+      "sha256": "c8228bf6a8c72d082a576bdf6abdf33870c907a061a98ff9931746b43936da1d"
+    },
+    {
+      "path": "visibility.watch-stale-generation.json",
+      "kind": "visibility.watch",
+      "requires": [
+        "visibility.watch"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 1831,
+      "sha256": "99e55680808ad98cc9ce02661e40661666f4993beb52c20226c022a5e6a9fb53"
+    },
+    {
+      "path": "visibility.watch-unknown-members.json",
+      "kind": "visibility.watch",
+      "requires": [
+        "visibility.watch"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 2029,
+      "sha256": "8ff30cd662f7f08b622a4d11299c2c1a8210da7783ba45176f6cc7f10079efb6"
+    },
+    {
+      "path": "visibility.watch.json",
+      "kind": "visibility.watch",
+      "requires": [
+        "visibility.watch"
+      ],
+      "runs": [
+        "host",
+        "sdk"
+      ],
+      "bytes": 4304,
+      "sha256": "02c80a876fd2ff0d40b2ecdc453c6d42d6ee3ffcf3c15da91a66bb18bff6c02a"
+    }
+  ]
+}

@@ -15,3 +15,8 @@ repo = "backend"
 "assets/screenrig.runtime.js" = "contracts/sdk/dist/screenrig.runtime.js"
 # The declaration file for TypeScript applications, built beside the runtime.
 "assets/screenrig.d.ts" = "contracts/sdk/dist/screenrig.runtime.d.ts"
+# The SDK bridge conformance corpora `app dev` runs its host against: the base
+# protocol, the device kinds and the page kinds (visibility, timing, context).
+"vendor/protocol/fixtures/sdk-bridge" = "packages/protocol/fixtures/sdk-bridge"
+"vendor/protocol/fixtures/sdk-bridge-device" = "packages/protocol/fixtures/sdk-bridge-device"
+"vendor/protocol/fixtures/sdk-bridge-page" = "packages/protocol/fixtures/sdk-bridge-page"

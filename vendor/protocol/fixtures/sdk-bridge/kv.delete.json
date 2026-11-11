@@ -1,0 +1,91 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "kv.delete",
+  "kind": "kv.delete",
+  "purpose": "kv.delete deletes with If-Match and Idempotency-Key; a 204 is acknowledged with no result.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_kvdel_0001",
+    "kind": "kv.delete",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "key": "greeting",
+      "expected_revision": 4,
+      "idempotency_key": "idem-bridge-0001",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": {
+    "request": {
+      "method": "DELETE",
+      "path": "/screen/apps/app_bridge/kv/greeting",
+      "headers": {
+        "ScreenRig-Primitive-Capability": "pch_bridge_capability_handle",
+        "If-Match": "4",
+        "Idempotency-Key": "idem-bridge-0001"
+      }
+    },
+    "response": {
+      "status": 204
+    }
+  },
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_kvdel_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef"
+      }
+    },
+    "backendRequests": "one",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "kv.delete",
+    "args": [
+      "greeting",
+      4,
+      {
+        "idempotencyKey": "idem-bridge-0001"
+      }
+    ],
+    "settles": "resolve"
+  }
+}

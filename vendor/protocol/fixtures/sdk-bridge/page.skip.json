@@ -1,0 +1,72 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "page.skip",
+  "kind": "page.skip",
+  "purpose": "page.skip from a frame holding the page.skip capability, before its ready and inside the skip window, is acknowledged and the page leaves at once without counting a play. The optional reason is sanitized by the host for its Player log record.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_skip_0001",
+    "kind": "page.skip",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "reason": "no data"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_skip_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef"
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "skip",
+    "args": [
+      "no data"
+    ],
+    "settles": "resolve"
+  }
+}

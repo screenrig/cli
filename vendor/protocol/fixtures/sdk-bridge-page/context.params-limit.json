@@ -1,0 +1,137 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.params-limit",
+  "kind": "context",
+  "requires": [
+    "context.params"
+  ],
+  "runs": [
+    "host",
+    "sdk"
+  ],
+  "purpose": "At most 16 params are sent: when the manifest carries more, the first 16 in name order are kept.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "manifest": {
+    "primitive": {
+      "id": "clock",
+      "primitive": "application",
+      "launchParams": {
+        "p01": "v1",
+        "p02": "v2",
+        "p03": "v3",
+        "p04": "v4",
+        "p05": "v5",
+        "p06": "v6",
+        "p07": "v7",
+        "p08": "v8",
+        "p09": "v9",
+        "p10": "v10",
+        "p11": "v11",
+        "p12": "v12",
+        "p13": "v13",
+        "p14": "v14",
+        "p15": "v15",
+        "p16": "v16",
+        "p17": "v17",
+        "p18": "v18"
+      }
+    }
+  },
+  "expect": {
+    "context": {
+      "params": {
+        "p01": "v1",
+        "p02": "v2",
+        "p03": "v3",
+        "p04": "v4",
+        "p05": "v5",
+        "p06": "v6",
+        "p07": "v7",
+        "p08": "v8",
+        "p09": "v9",
+        "p10": "v10",
+        "p11": "v11",
+        "p12": "v12",
+        "p13": "v13",
+        "p14": "v14",
+        "p15": "v15",
+        "p16": "v16"
+      }
+    }
+  },
+  "sdk": {
+    "receives": {
+      "params": {
+        "p01": "v1",
+        "p02": "v2",
+        "p03": "v3",
+        "p04": "v4",
+        "p05": "v5",
+        "p06": "v6",
+        "p07": "v7",
+        "p08": "v8",
+        "p09": "v9",
+        "p10": "v10",
+        "p11": "v11",
+        "p12": "v12",
+        "p13": "v13",
+        "p14": "v14",
+        "p15": "v15",
+        "p16": "v16"
+      }
+    },
+    "context": {
+      "params": {
+        "p01": "v1",
+        "p02": "v2",
+        "p03": "v3",
+        "p04": "v4",
+        "p05": "v5",
+        "p06": "v6",
+        "p07": "v7",
+        "p08": "v8",
+        "p09": "v9",
+        "p10": "v10",
+        "p11": "v11",
+        "p12": "v12",
+        "p13": "v13",
+        "p14": "v14",
+        "p15": "v15",
+        "p16": "v16"
+      }
+    }
+  }
+}

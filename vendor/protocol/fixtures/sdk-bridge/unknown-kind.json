@@ -1,0 +1,73 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "unknown-kind",
+  "kind": "screen.future",
+  "purpose": "A well-formed message whose kind the host does not implement is answered not_supported (501) with the request's request_message_id (sdk-not-supported-v1). A named exception kind is answered the same way.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_future_0001",
+    "kind": "screen.future",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "anything": 1
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.problem",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_future_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "problem": {
+          "code": "not_supported",
+          "status": 501,
+          "detail": "",
+          "request_id": ""
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id",
+      "/payload/problem/detail",
+      "/payload/problem/request_id"
+    ]
+  }
+}

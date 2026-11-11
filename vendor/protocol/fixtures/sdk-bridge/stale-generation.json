@@ -1,0 +1,51 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "stale-generation",
+  "kind": "ready",
+  "purpose": "A message bound to another generation is dropped silently: no reply, no backend request.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_stale_0001",
+    "kind": "ready",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 6,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none"
+  }
+}

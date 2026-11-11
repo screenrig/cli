@@ -1,0 +1,221 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.serial.open",
+  "kind": "device.serial.open",
+  "requires": [
+    "device.serial"
+  ],
+  "purpose": "device.serial.open opens a port with its line settings and is acknowledged with {handle}: the host-chosen identifier (8 to 64 of A-Z a-z 0-9 _ -) every later message about the port carries. port and baud_rate (an integer from 50 to 4000000) are required; data_bits (5, 6, 7 or 8), stop_bits (1 or 2), parity (none, even, odd) and flow_control (none, hardware) default to 8, 1, none and none. Opening a port does not start data events: the frame watches serial for that.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": true,
+        "formats": [
+          "qr",
+          "ean13",
+          "upca",
+          "code128"
+        ],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [
+          {
+            "id": "ttyUSB0",
+            "name": "FT232R USB UART",
+            "vendor_id": 1027,
+            "product_id": 24577
+          },
+          {
+            "id": "ttyACM0",
+            "name": "Arduino Uno",
+            "vendor_id": 9025,
+            "product_id": 67,
+            "busy": true
+          }
+        ],
+        "open": []
+      },
+      "gpio": {
+        "pins": [
+          {
+            "pin": 17,
+            "value": false
+          },
+          {
+            "pin": 27,
+            "value": true
+          },
+          {
+            "pin": 22,
+            "value": false,
+            "busy": true
+          }
+        ],
+        "watched": []
+      },
+      "ble": {
+        "adapter": true,
+        "peripherals": [
+          {
+            "name": "HRM-Strap",
+            "address": "aa:bb:cc:dd:ee:ff",
+            "services": [
+              {
+                "service": "180d",
+                "characteristics": [
+                  {
+                    "characteristic": "2a37",
+                    "value_base64": "ABg="
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "subscriptions": []
+      },
+      "printers": [
+        {
+          "id": "usb:epson-tm-t20",
+          "name": "Epson TM-T20",
+          "formats": [
+            "escpos"
+          ],
+          "default": true
+        },
+        {
+          "id": "office",
+          "name": "Office laser",
+          "formats": [
+            "pdf"
+          ]
+        },
+        {
+          "id": "jammed",
+          "name": "Jammed receipt printer",
+          "formats": [
+            "escpos"
+          ],
+          "failing": true
+        }
+      ]
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_seropen_0001",
+    "kind": "device.serial.open",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "port": "ttyUSB0",
+      "baud_rate": 115200,
+      "data_bits": 7,
+      "stop_bits": 2,
+      "parity": "even",
+      "flow_control": "hardware"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_seropen_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "result": {
+          "handle": "ser_bridge_0001"
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id",
+      "/payload/result/handle"
+    ]
+  },
+  "sdk": {
+    "call": "device.serial.open",
+    "args": [
+      "ttyUSB0",
+      {
+        "baudRate": 115200,
+        "dataBits": 7,
+        "stopBits": 2,
+        "parity": "even",
+        "flowControl": "hardware"
+      }
+    ],
+    "settles": "resolve",
+    "result": {
+      "id": "ttyUSB0"
+    },
+    "posts": 2
+  }
+}

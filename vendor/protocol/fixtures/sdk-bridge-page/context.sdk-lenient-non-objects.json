@@ -1,0 +1,56 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.sdk-lenient-non-objects",
+  "kind": "context",
+  "requires": [
+    "context.params",
+    "context.screen"
+  ],
+  "runs": [
+    "sdk"
+  ],
+  "purpose": "A params or screen that is not an object is treated as absent: the SDK shows empty params and no screen, and the context still activates.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "sdk": {
+    "receives": {
+      "params": "kiosk=1",
+      "screen": 7
+    },
+    "context": {
+      "params": {}
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.params",
+  "kind": "context",
+  "requires": [
+    "context.params",
+    "context.screen"
+  ],
+  "runs": [
+    "host",
+    "sdk"
+  ],
+  "purpose": "The context payload carries params: the application primitive's launchParams from the manifest, copied as they are (string to string), and screen: {name, timezone} from the manifest's screenLabel and timezone. params keeps an empty string value.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "manifest": {
+    "primitive": {
+      "id": "clock",
+      "primitive": "application",
+      "launchParams": {
+        "kiosk": "B 2\u00263",
+        "empty": "",
+        "start_page": "lobby"
+      }
+    },
+    "screenLabel": "Lobby East",
+    "timezone": "America/Vancouver"
+  },
+  "expect": {
+    "context": {
+      "params": {
+        "kiosk": "B 2\u00263",
+        "empty": "",
+        "start_page": "lobby"
+      },
+      "screen": {
+        "name": "Lobby East",
+        "timezone": "America/Vancouver"
+      }
+    }
+  },
+  "sdk": {
+    "receives": {
+      "params": {
+        "kiosk": "B 2\u00263",
+        "empty": "",
+        "start_page": "lobby"
+      },
+      "screen": {
+        "name": "Lobby East",
+        "timezone": "America/Vancouver"
+      }
+    },
+    "context": {
+      "params": {
+        "kiosk": "B 2\u00263",
+        "empty": "",
+        "start_page": "lobby"
+      },
+      "screen": {
+        "name": "Lobby East",
+        "timezone": "America/Vancouver"
+      }
+    }
+  }
+}

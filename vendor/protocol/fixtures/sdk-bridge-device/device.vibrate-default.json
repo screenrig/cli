@@ -1,0 +1,126 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.vibrate-default",
+  "kind": "device.vibrate",
+  "requires": [
+    "device.vibrate"
+  ],
+  "purpose": "screenrig.device.vibrate() with no argument sends ms 12, the SDK's default tick.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": false,
+        "formats": [],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [],
+        "open": []
+      },
+      "gpio": {
+        "pins": [],
+        "watched": []
+      },
+      "ble": {
+        "adapter": false,
+        "peripherals": [],
+        "subscriptions": []
+      },
+      "printers": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_vibrate_0002",
+    "kind": "device.vibrate",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "ms": 12
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_vibrate_0002",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef"
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.vibrate",
+    "args": [],
+    "settles": "resolve"
+  }
+}

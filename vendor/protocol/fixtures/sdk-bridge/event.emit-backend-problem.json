@@ -1,0 +1,111 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "event.emit-backend-problem",
+  "kind": "event.emit",
+  "purpose": "A refused runtime report becomes response.problem with the backend's code, status, and request_id; the event is never acknowledged.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_event_0002",
+    "kind": "event.emit",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "code": "visit.done",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": {
+    "request": {
+      "method": "POST",
+      "path": "/screen/reports",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "severity": "info",
+        "code": "application.event",
+        "context": {
+          "primitive_id": "prm_bridge_0001",
+          "code": "visit.done"
+        }
+      }
+    },
+    "response": {
+      "status": 429,
+      "headers": {
+        "Content-Type": "application/problem+json",
+        "Retry-After": "5"
+      },
+      "body": {
+        "type": "https://screenrig.ai/problems/rate-limited",
+        "title": "Request rate is too high",
+        "status": 429,
+        "code": "rate_limited",
+        "detail": "Request rate is too high.",
+        "request_id": "req_bridge_event_0002"
+      }
+    }
+  },
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.problem",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_event_0002",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "problem": {
+          "code": "rate_limited",
+          "status": 429,
+          "detail": "",
+          "request_id": "req_bridge_event_0002"
+        }
+      }
+    },
+    "backendRequests": "one",
+    "hostChosen": [
+      "/message_id",
+      "/payload/problem/detail"
+    ]
+  },
+  "sdk": {
+    "call": "emitConfirmed",
+    "args": [
+      "visit.done"
+    ],
+    "settles": "reject",
+    "code": "rate_limited"
+  }
+}

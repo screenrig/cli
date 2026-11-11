@@ -1,0 +1,93 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "page.timing",
+  "kind": "page.timing",
+  "requires": [
+    "page.timing"
+  ],
+  "purpose": "page.timing is acknowledged with {elapsed_ms, remaining_ms, paused}: how long this page has been on the glass this activation (paused time excluded), how long until the Player advances, and whether playback is held (a dark display or an operator pause). Both durations are integers of milliseconds, 0 or more.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ],
+    "page": {
+      "elapsedMs": 4200,
+      "remainingMs": 5800,
+      "paused": false,
+      "visibilityWatching": false,
+      "held": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_timing_0001",
+    "kind": "page.timing",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_timing_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "result": {
+          "elapsed_ms": 4200,
+          "remaining_ms": 5800,
+          "paused": false
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "pageTiming",
+    "args": [],
+    "settles": "resolve",
+    "result": {
+      "elapsedMs": 4200,
+      "remainingMs": 5800,
+      "paused": false
+    }
+  }
+}

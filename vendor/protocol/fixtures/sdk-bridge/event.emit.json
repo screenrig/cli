@@ -1,0 +1,91 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "event.emit",
+  "kind": "event.emit",
+  "purpose": "event.emit is reported as application.event and acknowledged only after the runtime report is accepted (any 2xx). emit() ignores the ack; emitConfirmed() resolves on it.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_event_0001",
+    "kind": "event.emit",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "code": "visit.done",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": {
+    "request": {
+      "method": "POST",
+      "path": "/screen/reports",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "severity": "info",
+        "code": "application.event",
+        "context": {
+          "primitive_id": "prm_bridge_0001",
+          "code": "visit.done"
+        }
+      }
+    },
+    "response": {
+      "status": 202
+    }
+  },
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_event_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef"
+      }
+    },
+    "backendRequests": "one",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "emitConfirmed",
+    "args": [
+      "visit.done"
+    ],
+    "settles": "resolve"
+  }
+}

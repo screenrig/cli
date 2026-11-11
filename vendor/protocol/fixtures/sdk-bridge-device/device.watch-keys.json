@@ -1,0 +1,186 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-keys",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch"
+  ],
+  "purpose": "A frame that watches keys receives device.event {type: key, key} for every key-down of a hardware volume key, auto-repeat included, and the Player consumes the key press, key-ups included, instead of changing the device volume.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": false,
+        "formats": [],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [],
+        "open": []
+      },
+      "gpio": {
+        "pins": [],
+        "watched": []
+      },
+      "ble": {
+        "adapter": false,
+        "peripherals": [],
+        "subscriptions": []
+      },
+      "printers": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0009",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": [
+        "keys"
+      ]
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "key",
+          "key": "volume_up",
+          "action": "down"
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "key",
+            "key": "volume_up"
+          }
+        },
+        "consumed": true
+      },
+      {
+        "trigger": {
+          "device": "key",
+          "key": "volume_down",
+          "action": "down",
+          "repeat": true
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "key",
+            "key": "volume_down"
+          }
+        },
+        "consumed": true
+      },
+      {
+        "trigger": {
+          "device": "key",
+          "key": "volume_down",
+          "action": "up"
+        },
+        "message": null,
+        "consumed": true
+      },
+      {
+        "trigger": {
+          "device": "display",
+          "on": false,
+          "brightness": 0.5
+        },
+        "message": null
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.onKey",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        "volume_up"
+      ],
+      [
+        "volume_down"
+      ]
+    ]
+  }
+}

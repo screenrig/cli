@@ -1,0 +1,199 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-network",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch"
+  ],
+  "purpose": "A frame that watches network receives device.event {type: network, online} once at the watch itself, with the connectivity the device has then, and again whenever the device's validated internet connectivity changes. A trigger that leaves the connectivity as it is posts nothing.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": false,
+        "formats": [],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [],
+        "open": []
+      },
+      "gpio": {
+        "pins": [],
+        "watched": []
+      },
+      "ble": {
+        "adapter": false,
+        "peripherals": [],
+        "subscriptions": []
+      },
+      "printers": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0011",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": [
+        "network"
+      ]
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "watch"
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "network",
+            "online": true
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "network",
+          "online": false
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "network",
+            "online": false
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "network",
+          "online": false
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "network",
+          "online": true
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "network",
+            "online": true
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "display",
+          "on": false,
+          "brightness": 0.5
+        },
+        "message": null
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.onNetwork",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        true
+      ],
+      [
+        false
+      ],
+      [
+        true
+      ]
+    ]
+  }
+}

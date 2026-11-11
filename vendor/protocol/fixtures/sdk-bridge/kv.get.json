@@ -1,0 +1,113 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "kv.get",
+  "kind": "kv.get",
+  "purpose": "kv.get reads the runtime KV route with the primitive capability handle and acknowledges with the entry as result (known members only).",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_kvget_0001",
+    "kind": "kv.get",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "key": "greeting",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": {
+    "request": {
+      "method": "GET",
+      "path": "/screen/apps/app_bridge/kv/greeting",
+      "headers": {
+        "ScreenRig-Primitive-Capability": "pch_bridge_capability_handle"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "application_id": "app_bridge",
+        "key": "greeting",
+        "value_base64": "aGVsbG8=",
+        "content_type": "text/plain",
+        "bytes": 5,
+        "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "revision": 3
+      }
+    }
+  },
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_kvget_0001",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "result": {
+          "application_id": "app_bridge",
+          "key": "greeting",
+          "value_base64": "aGVsbG8=",
+          "content_type": "text/plain",
+          "bytes": 5,
+          "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          "revision": 3
+        }
+      }
+    },
+    "backendRequests": "one",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "kv.get",
+    "args": [
+      "greeting"
+    ],
+    "settles": "resolve",
+    "result": {
+      "application_id": "app_bridge",
+      "key": "greeting",
+      "value_base64": "aGVsbG8=",
+      "content_type": "text/plain",
+      "bytes": 5,
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "revision": 3
+    }
+  }
+}

@@ -1,0 +1,300 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "device.watch-people",
+  "kind": "device.watch",
+  "requires": [
+    "device.watch",
+    "device.camera"
+  ],
+  "purpose": "A frame that watches people receives device.event {type: people, count} with the number of people the device's camera sees, an integer from 0 to 1000: the first reading after the watch, then only when the count changes, and never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted people event: a reading that would post sooner is dropped, not deferred. The camera is analysed on the device and released when nobody watches.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true,
+      "device.display": true,
+      "device.presence": true,
+      "device.keys": true,
+      "device.light": true,
+      "device.network": true,
+      "device.haptics": true,
+      "device.scan": true,
+      "device.camera": true,
+      "device.sound": true,
+      "device.serial": true,
+      "device.gpio": true,
+      "device.ble": true,
+      "device.print": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "device.display",
+      "device.watch",
+      "device.vibrate",
+      "device.scan",
+      "device.camera",
+      "device.sound",
+      "device.serial",
+      "device.gpio",
+      "device.ble",
+      "device.print"
+    ],
+    "display": {
+      "on": true,
+      "brightness": 0.5
+    },
+    "network": {
+      "online": true
+    },
+    "darkHeld": false,
+    "watching": [],
+    "hardware": {
+      "camera": {
+        "available": true,
+        "formats": [
+          "qr",
+          "ean13",
+          "upca",
+          "code128"
+        ],
+        "scanning": false
+      },
+      "serial": {
+        "ports": [
+          {
+            "id": "ttyUSB0",
+            "name": "FT232R USB UART",
+            "vendor_id": 1027,
+            "product_id": 24577
+          },
+          {
+            "id": "ttyACM0",
+            "name": "Arduino Uno",
+            "vendor_id": 9025,
+            "product_id": 67,
+            "busy": true
+          }
+        ],
+        "open": []
+      },
+      "gpio": {
+        "pins": [
+          {
+            "pin": 17,
+            "value": false
+          },
+          {
+            "pin": 27,
+            "value": true
+          },
+          {
+            "pin": 22,
+            "value": false,
+            "busy": true
+          }
+        ],
+        "watched": []
+      },
+      "ble": {
+        "adapter": true,
+        "peripherals": [
+          {
+            "name": "HRM-Strap",
+            "address": "aa:bb:cc:dd:ee:ff",
+            "services": [
+              {
+                "service": "180d",
+                "characteristics": [
+                  {
+                    "characteristic": "2a37",
+                    "value_base64": "ABg="
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "subscriptions": []
+      },
+      "printers": [
+        {
+          "id": "usb:epson-tm-t20",
+          "name": "Epson TM-T20",
+          "formats": [
+            "escpos"
+          ],
+          "default": true
+        },
+        {
+          "id": "office",
+          "name": "Office laser",
+          "formats": [
+            "pdf"
+          ]
+        },
+        {
+          "id": "jammed",
+          "name": "Jammed receipt printer",
+          "formats": [
+            "escpos"
+          ],
+          "failing": true
+        }
+      ]
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_devwatch_0004",
+    "kind": "device.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef",
+      "events": [
+        "people"
+      ]
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "device": "people",
+          "count": 2,
+          "atMs": 0
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "people",
+            "count": 2
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "people",
+          "count": 2,
+          "atMs": 1500
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "people",
+          "count": 3,
+          "atMs": 1600
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "people",
+            "count": 3
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "people",
+          "count": 4,
+          "atMs": 2200
+        },
+        "message": null
+      },
+      {
+        "trigger": {
+          "device": "people",
+          "count": 4,
+          "atMs": 2600
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "people",
+            "count": 4
+          }
+        }
+      },
+      {
+        "trigger": {
+          "device": "people",
+          "count": 0,
+          "atMs": 3600
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "device.event",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "type": "people",
+            "count": 0
+          }
+        }
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "device.onPeople",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        0
+      ]
+    ]
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "page.timing-no-end",
+  "kind": "page.timing",
+  "requires": [
+    "page.timing"
+  ],
+  "purpose": "remaining_ms is null when the page has no scheduled end: the only page of a playlist, or a page that ends only when its application advances.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ],
+    "page": {
+      "elapsedMs": 60000,
+      "remainingMs": null,
+      "paused": false,
+      "visibilityWatching": false,
+      "held": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_timing_0002",
+    "kind": "page.timing",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.ack",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_timing_0002",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "result": {
+          "elapsed_ms": 60000,
+          "remaining_ms": null,
+          "paused": false
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "pageTiming",
+    "args": [],
+    "settles": "resolve",
+    "result": {
+      "elapsedMs": 60000,
+      "remainingMs": null,
+      "paused": false
+    }
+  }
+}

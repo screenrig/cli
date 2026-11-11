@@ -1,0 +1,75 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.params-absent",
+  "kind": "context",
+  "requires": [
+    "context.params",
+    "context.screen"
+  ],
+  "runs": [
+    "host",
+    "sdk"
+  ],
+  "purpose": "An application whose primitive has no launchParams gets no params member; the SDK shows an empty params object. A manifest without timezone gives a screen with the name alone.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "manifest": {
+    "primitive": {
+      "id": "clock",
+      "primitive": "application"
+    },
+    "screenLabel": "Lobby East"
+  },
+  "expect": {
+    "context": {
+      "screen": {
+        "name": "Lobby East"
+      }
+    }
+  },
+  "sdk": {
+    "receives": {
+      "screen": {
+        "name": "Lobby East"
+      }
+    },
+    "context": {
+      "params": {},
+      "screen": {
+        "name": "Lobby East"
+      }
+    }
+  }
+}

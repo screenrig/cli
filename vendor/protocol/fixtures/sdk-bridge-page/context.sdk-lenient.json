@@ -1,0 +1,71 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.sdk-lenient",
+  "kind": "context",
+  "requires": [
+    "context.params",
+    "context.screen"
+  ],
+  "runs": [
+    "sdk"
+  ],
+  "purpose": "The SDK reads params and screen leniently and never fails a context over them: an invalid entry is dropped on its own (a name that is not 1 to 32 lower case letters, digits or underscores, ticket, policy, a value that is not a string, a value over 512 characters), at most 16 entries are kept, a screen name that is not 1 to 200 characters and a timezone that is not an IANA zone are dropped, and a screen with neither is absent. The SDK shows what is left.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "sdk": {
+    "receives": {
+      "params": {
+        "ok": "1",
+        "Bad": "x",
+        "ticket": "t",
+        "policy": "p",
+        "n": 3,
+        "long": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "screen": {
+        "name": "Lobby",
+        "timezone": "Mars/Olympus"
+      }
+    },
+    "context": {
+      "params": {
+        "ok": "1"
+      },
+      "screen": {
+        "name": "Lobby"
+      }
+    }
+  }
+}

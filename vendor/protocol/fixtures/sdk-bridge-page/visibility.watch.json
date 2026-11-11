@@ -1,0 +1,173 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "visibility.watch",
+  "kind": "visibility.watch",
+  "requires": [
+    "visibility.watch"
+  ],
+  "purpose": "visibility.watch is a notification: the host never replies. From then on, for this frame's current context, the host posts visibility.changed {visible, reason, generation, nonce} to the frame, and only to the active frame of the current generation: visible false with reason display when the display goes dark (its schedule, idle, an operator), visible false with reason paused when an operator pauses playback, and visible true with the reason that ended it when playback resumes. A page is visible again only when every cause has ended.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ],
+    "page": {
+      "elapsedMs": 4200,
+      "remainingMs": 5800,
+      "paused": false,
+      "visibilityWatching": false,
+      "held": []
+    }
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_vwatch_0001",
+    "kind": "visibility.watch",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "none",
+    "deliveries": [
+      {
+        "trigger": {
+          "page": "display",
+          "on": false
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "visibility.changed",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "visible": false,
+            "reason": "display"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "page": "display",
+          "on": true
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "visibility.changed",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "visible": true,
+            "reason": "display"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "page": "pause",
+          "paused": true
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "visibility.changed",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "visible": false,
+            "reason": "paused"
+          }
+        }
+      },
+      {
+        "trigger": {
+          "page": "pause",
+          "paused": false
+        },
+        "message": {
+          "protocol": "1",
+          "message_id": "",
+          "kind": "visibility.changed",
+          "primitive_id": "prm_bridge_0001",
+          "payload": {
+            "generation": 7,
+            "nonce": "bridge-nonce-0123456789abcdef",
+            "visible": true,
+            "reason": "paused"
+          }
+        }
+      }
+    ],
+    "hostChosen": [
+      "/message_id"
+    ]
+  },
+  "sdk": {
+    "call": "onVisibility",
+    "args": [],
+    "settles": "none",
+    "handlerCalls": [
+      [
+        {
+          "visible": false,
+          "reason": "display"
+        }
+      ],
+      [
+        {
+          "visible": true,
+          "reason": "display"
+        }
+      ],
+      [
+        {
+          "visible": false,
+          "reason": "paused"
+        }
+      ],
+      [
+        {
+          "visible": true,
+          "reason": "paused"
+        }
+      ]
+    ]
+  }
+}

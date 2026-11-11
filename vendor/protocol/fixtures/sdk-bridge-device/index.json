@@ -1,0 +1,1216 @@
+{
+  "schema": "screenrig.sdk-bridge-device-fixtures.index/v1",
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "protocol": "1",
+  "hostFeatures": [
+    "ready",
+    "log",
+    "event.emit",
+    "page.advance",
+    "page.skip",
+    "kv.get",
+    "kv.list",
+    "kv.set",
+    "kv.delete",
+    "kv.watch"
+  ],
+  "deviceFeatures": [
+    "device.display",
+    "device.watch",
+    "device.vibrate",
+    "device.scan",
+    "device.camera",
+    "device.sound",
+    "device.serial",
+    "device.gpio",
+    "device.ble",
+    "device.print"
+  ],
+  "files": [
+    {
+      "path": "device.ble.read-characteristic-not-found.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4591,
+      "sha256": "c668c6a43f86c25fe98f10f6cdf604a3d23a4c126acbaf1e901f99c4d09e95a5"
+    },
+    {
+      "path": "device.ble.read-device-not-found.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4650,
+      "sha256": "6ade930def5afcc4a42f3f0f128152bff741d688fb0cdaada17496e27325b17d"
+    },
+    {
+      "path": "device.ble.read-malformed.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4591,
+      "sha256": "592308018489fb53369c6b99c4bbda726afe1bc1842af3e2da463287d70d04b7"
+    },
+    {
+      "path": "device.ble.read-not-granted.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4583,
+      "sha256": "c77bc092e10cd5ad29f2e71229b328a3f0f74916d66b147c2d263155092cff59"
+    },
+    {
+      "path": "device.ble.read-unavailable.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4576,
+      "sha256": "c419288c803fae5893863fbd36e707ab18be1cc300554b092683a57d51fcece9"
+    },
+    {
+      "path": "device.ble.read-unknown-member.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4586,
+      "sha256": "3cb6a68fbca5239ada2751ed4ade8976a368e9c8146b4d0f7ccef417d8cd8cc3"
+    },
+    {
+      "path": "device.ble.read.json",
+      "kind": "device.ble.read",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4997,
+      "sha256": "6a3f5ea1be68d94e7681cd9e2e5a52ccbf20acb0feafeef9f90f3b4f8d887df3"
+    },
+    {
+      "path": "device.ble.unwatch-not-granted.json",
+      "kind": "device.ble.unwatch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4706,
+      "sha256": "05a7fccc9a6d7d1aa60a029095d349f1f401d0af32a5979069c083e1df6b97ac"
+    },
+    {
+      "path": "device.ble.unwatch-unknown-subscription.json",
+      "kind": "device.ble.unwatch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4484,
+      "sha256": "40dbd3630558ae4010a3fa74a6365161d6ba478dcf17d1b4e02add5e1abe25d5"
+    },
+    {
+      "path": "device.ble.unwatch.json",
+      "kind": "device.ble.unwatch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4456,
+      "sha256": "476dc88248aae332ef0dbfd9086d7587894141e396b2acbe820d0bb98f0068c4"
+    },
+    {
+      "path": "device.ble.watch-device-not-found.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4626,
+      "sha256": "c57117d8c14306288a946e618b6c509d97b84419802eb0381d114924760a0e5f"
+    },
+    {
+      "path": "device.ble.watch-limit.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 5675,
+      "sha256": "0cff7663b7e9adbddde23e6512134bf68131a08e939db73a2abf73e59195eb59"
+    },
+    {
+      "path": "device.ble.watch-malformed.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4565,
+      "sha256": "ed3135e323ed6a709aaa89b14b7fcedaedd309778dece08149982af4e36895fb"
+    },
+    {
+      "path": "device.ble.watch-not-granted.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4579,
+      "sha256": "fb15e294219db56982e5f4f87b35800d77ac50bc9d78b0fcb40e208cf9018792"
+    },
+    {
+      "path": "device.ble.watch-not-watched.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4576,
+      "sha256": "c204198ed6163391554c70dd602e44be083f244f49d77bd6a299624d932502a9"
+    },
+    {
+      "path": "device.ble.watch.json",
+      "kind": "device.ble.watch",
+      "requires": [
+        "device.ble"
+      ],
+      "bytes": 4968,
+      "sha256": "d14218f14af2b47dbc820c7c7bb5c1cab297ac60d287c42c7823c157457e8dff"
+    },
+    {
+      "path": "device.display-held-dark.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3095,
+      "sha256": "cf470679a97e4c1d5811f50094dc5b5990ce85f3654db0cb6958c68911d7ddaa"
+    },
+    {
+      "path": "device.display-malformed.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3065,
+      "sha256": "1c1c3109cf85e92ed27939733a492413f76c61b1792e1ed7f0109942efe4ee03"
+    },
+    {
+      "path": "device.display-not-granted.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3063,
+      "sha256": "3f31f98eeb979aff7cdf46aef3f0dc9bfe61d6ba07ceb5fa5144106a44366f2d"
+    },
+    {
+      "path": "device.display-out-of-range.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 2964,
+      "sha256": "56429959c6fa38330bbd9793db2e07b922b3db8f11cf756614182cdc8f14086d"
+    },
+    {
+      "path": "device.display-read-unreported.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 2933,
+      "sha256": "ab10af773824bf8710be0aa3f54f345c40ce4712ccd181117d9eace4218c2370"
+    },
+    {
+      "path": "device.display-read.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 2908,
+      "sha256": "854de148f143f94a863b2d4abd26ac41fa62081c21b2f0eef93d71015f7b6b4e"
+    },
+    {
+      "path": "device.display-set-partial.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3005,
+      "sha256": "01d76f70c746b4ee9b04939158c9900899659dfefa65ab0abdebc636da2210e6"
+    },
+    {
+      "path": "device.display-set.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3177,
+      "sha256": "9a8cc56d9056d9062813aaf8d81bbc2fece883bb4cde6f17bcff491766a7ca38"
+    },
+    {
+      "path": "device.display-unknown-member.json",
+      "kind": "device.display",
+      "requires": [
+        "device.display"
+      ],
+      "bytes": 3028,
+      "sha256": "1e259cda0d527a233927a47964342e3d463fdc3a2db622d5e4c21a3cdbc237ee"
+    },
+    {
+      "path": "device.gpio.watch-clear.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4515,
+      "sha256": "8992af7ddd426064b4ae9af88832f512a520a02e813dc03fd59fc2347e4d0e85"
+    },
+    {
+      "path": "device.gpio.watch-malformed.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4628,
+      "sha256": "90cdc0341ffcf2796a52ffc12956f5684d1ebd087556ed3b15730e8bf1eae20d"
+    },
+    {
+      "path": "device.gpio.watch-not-granted.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4567,
+      "sha256": "b38fa965ff955c6dab3afea1d207f0ddd51bc91aecc374b1f90c5b1aad586d75"
+    },
+    {
+      "path": "device.gpio.watch-not-watched.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4588,
+      "sha256": "b41ad44eefe5279162f293e5b7cff7e039f3becd68f76f4b2c57a942ba7fec10"
+    },
+    {
+      "path": "device.gpio.watch-pin-not-found.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4577,
+      "sha256": "0dfbc983e2a9bdf88e857ee83775a474110b719a71588a447cbbc129a32306c5"
+    },
+    {
+      "path": "device.gpio.watch-replace.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 5419,
+      "sha256": "2fc74a4ed6cc59d0f0ca7fcf9c86e9d52121cf2823e68031fe68af3718bdb505"
+    },
+    {
+      "path": "device.gpio.watch.json",
+      "kind": "device.gpio.watch",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 6508,
+      "sha256": "5b3d7c2c6b76c25257d5af5d35a4a3cf646c7dc6af332af4a79608fd4f342a9a"
+    },
+    {
+      "path": "device.gpio.write-low.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4375,
+      "sha256": "eee47cf400c0791124b14f4d55b060617ad80cd78dc3eb539a1fbc968470b4a0"
+    },
+    {
+      "path": "device.gpio.write-malformed.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4548,
+      "sha256": "bcb278cd929eafc5607207085bacef99fd4af191869960c6aaa201e62a0af0c2"
+    },
+    {
+      "path": "device.gpio.write-not-granted.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4583,
+      "sha256": "fefa2cbd0528374d270eedf28331809af0fa1239293ddd6d50c223330e61a031"
+    },
+    {
+      "path": "device.gpio.write-out-of-range.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4541,
+      "sha256": "8a6f60cc52a3d9c90545f96d32ebc36121129413daa6fd8193535d945afc7491"
+    },
+    {
+      "path": "device.gpio.write-pin-busy.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4508,
+      "sha256": "a138ebe2642c156e6d7c320441bc6a877ff5dce541a8c1edbea7081787bba125"
+    },
+    {
+      "path": "device.gpio.write-pin-not-found.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4524,
+      "sha256": "2c7963df4bf2db64e22463b324e52485fa08c01d5cf5c10ab75317ee15f78816"
+    },
+    {
+      "path": "device.gpio.write-unavailable.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4302,
+      "sha256": "8f40f60aed8d008be8b41777c831b8df5c654abd1f2330eadb8669ec73f9c033"
+    },
+    {
+      "path": "device.gpio.write-unknown-member.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4545,
+      "sha256": "f0d73168aea555058f3c2b7d9ccf899c086d2693859cf5cc2659aee72a6f0606"
+    },
+    {
+      "path": "device.gpio.write.json",
+      "kind": "device.gpio.write",
+      "requires": [
+        "device.gpio"
+      ],
+      "bytes": 4556,
+      "sha256": "badd5478deb6f4e105e81fd1434e35c67eec54916e8dda2b9d264868aa2d27fc"
+    },
+    {
+      "path": "device.print-chunk-too-large.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 48316,
+      "sha256": "94532567579b43bbd10e3dcd54a9a54d98a8b215edfefc5566fe74382b0211db"
+    },
+    {
+      "path": "device.print-failed.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4707,
+      "sha256": "80d027e51303860f00742a713d51e5cd945d20db5507edc665568aca3729b0a6"
+    },
+    {
+      "path": "device.print-malformed.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4613,
+      "sha256": "e0d5fa31d04b98036ca35fb7773ee28c35a324c1a3bf91a8f02df3542931c17a"
+    },
+    {
+      "path": "device.print-missing-format.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4575,
+      "sha256": "4783cf23fce136b94a62cffd6b239891010e3aa2eab7270edf41c4c4db0fb335"
+    },
+    {
+      "path": "device.print-multi-chunk.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 6494,
+      "sha256": "a0e25226828d1da936b41634ec17fbcbcc25ae874b8af69d9ef76dc98a51e76b"
+    },
+    {
+      "path": "device.print-not-granted.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4595,
+      "sha256": "677608020c82203a8d8f09a4f0bb7aa4867c1e93f6281dcb65b1a75747fa3efb"
+    },
+    {
+      "path": "device.print-out-of-order.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4652,
+      "sha256": "7581b66c008ceda69a6f87de46c2aa61535b803913867aa98bfb40b997527afa"
+    },
+    {
+      "path": "device.print-pdf.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4642,
+      "sha256": "fc31a35b61a9d9212bcd1a53e16d4d6b00255d0e54947e05531f45fcd0b3bf00"
+    },
+    {
+      "path": "device.print-printer-not-found.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4659,
+      "sha256": "ee73624e45c4aa1fbe19bdfde031a36fa42e5b4542e1d440d2020f5858c836ab"
+    },
+    {
+      "path": "device.print-too-large.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4664,
+      "sha256": "2ee7e8385e13317732f1ca51355940d76b71373ec5b17e4e62d92751285034d3"
+    },
+    {
+      "path": "device.print-total-mismatch.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4666,
+      "sha256": "5635d20f89f4be839089f08b39f7a25a64e6393c6ecc1e5039c5b4d5b151e671"
+    },
+    {
+      "path": "device.print-unknown-member.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4631,
+      "sha256": "fc7721cc0db539ec660583959a1b7c78c514f128ee64794da33d2948888d7a4b"
+    },
+    {
+      "path": "device.print-wrong-format.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4707,
+      "sha256": "75e1a838d9974391aa02b6b41a0d934a6c5c3638852421f27ed0f296bd259b2e"
+    },
+    {
+      "path": "device.print.json",
+      "kind": "device.print",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 5024,
+      "sha256": "1622a9fefde17d2497d24ba7b297763aa1b6dc896dca11bb0dce0fbde67c354e"
+    },
+    {
+      "path": "device.printers-not-granted.json",
+      "kind": "device.printers",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 4505,
+      "sha256": "a2cd6f461d3fb37709ccae90450a486046fbc58a84d47408c56713da1c4434e9"
+    },
+    {
+      "path": "device.printers.json",
+      "kind": "device.printers",
+      "requires": [
+        "device.print"
+      ],
+      "bytes": 5558,
+      "sha256": "0fcace8c501214ba4adad4337ed82bb058a20216c03cb31fb57f3d1a91c8fc08"
+    },
+    {
+      "path": "device.scanner.start-camera-unavailable.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4586,
+      "sha256": "8736fa743a653b30a18c40c0bf1c13aeafc8c50c0e0063fbe3a8a3a6b43b1b39"
+    },
+    {
+      "path": "device.scanner.start-default.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4668,
+      "sha256": "7594deec77aff7e3db7d25b0d8cfab61f6e656e0070a65290b50b5f73149245c"
+    },
+    {
+      "path": "device.scanner.start-duplicate.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4566,
+      "sha256": "9f47d2f93896be0d309139b82fe63d16668031dc79903427dd2133794b92ac09"
+    },
+    {
+      "path": "device.scanner.start-malformed.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4657,
+      "sha256": "369529a0aa19af42e685acc7604727bdfe96530088450ad6c1b88d5a090472c6"
+    },
+    {
+      "path": "device.scanner.start-no-scan-capability.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4587,
+      "sha256": "dba8b9dc3625c04eae5d8c2ece512489edf0adb068e691028dee6e5ddacc7993"
+    },
+    {
+      "path": "device.scanner.start-none-decodable.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4431,
+      "sha256": "3b8867d978b9254b1c1f844b8036ab289d188baec68c3a3c4b25944ebf2c744a"
+    },
+    {
+      "path": "device.scanner.start-not-granted.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4702,
+      "sha256": "bd2db7f45b16857cdbdf2c0f7407f44f6ffe2e3d1b845463a55964793e9ce5b2"
+    },
+    {
+      "path": "device.scanner.start-unknown-member.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 4601,
+      "sha256": "ebe2c0600d3b567cc3900ad37273dc0191c46a8fa4f51cb49db2960764f19b51"
+    },
+    {
+      "path": "device.scanner.start.json",
+      "kind": "device.scanner.start",
+      "requires": [
+        "device.camera",
+        "device.scan"
+      ],
+      "bytes": 5002,
+      "sha256": "c84276313d4db4b0f3c44fec1f51abf8c29eb5dc1b20241b88dcd84944c82b67"
+    },
+    {
+      "path": "device.scanner.stop-not-granted.json",
+      "kind": "device.scanner.stop",
+      "requires": [
+        "device.camera"
+      ],
+      "bytes": 4523,
+      "sha256": "da7fe9ccd95bb1678c87c088ab24f695cf087bf4955167a7509342481f735f4c"
+    },
+    {
+      "path": "device.scanner.stop.json",
+      "kind": "device.scanner.stop",
+      "requires": [
+        "device.camera"
+      ],
+      "bytes": 4424,
+      "sha256": "16beb18bb374edf2d9bc20708b13d7e8143d7dd01d5bc0503d3b71e839079f02"
+    },
+    {
+      "path": "device.serial.close-not-granted.json",
+      "kind": "device.serial.close",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4662,
+      "sha256": "b7d78eeebf26daeab3641a8cb96c0d9e53069f80c3bd344d0fdb0f828ab08783"
+    },
+    {
+      "path": "device.serial.close-unknown-handle.json",
+      "kind": "device.serial.close",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4500,
+      "sha256": "df4a2dbc8e50f14e359c480b84170ba40f83289e479daed722ed77c7d891d7f9"
+    },
+    {
+      "path": "device.serial.close.json",
+      "kind": "device.serial.close",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4443,
+      "sha256": "ea1aa22d0333c04e5f78b74021bd729c5fdeec02ea8e53f0934f31b2847508a1"
+    },
+    {
+      "path": "device.serial.list-not-granted.json",
+      "kind": "device.serial.list",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4517,
+      "sha256": "a6b5c7701ea2298f41b41a4eb9d33aa552334e1bffb872045fcea56a9388489b"
+    },
+    {
+      "path": "device.serial.list.json",
+      "kind": "device.serial.list",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 5185,
+      "sha256": "5f9bbcd0691214cb58c420c229a9f41387c29ccdbf2503b1861f94a64359c053"
+    },
+    {
+      "path": "device.serial.open-bad-line.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4607,
+      "sha256": "6a5c56539f166d8462cf6e5c54b9e3f4c55141c5b8d6bf86db4b23e570420c58"
+    },
+    {
+      "path": "device.serial.open-busy.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4519,
+      "sha256": "352b55a18193822349ee28c4579284e2521a149d9640b67573f1a996af42ba09"
+    },
+    {
+      "path": "device.serial.open-defaults.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4670,
+      "sha256": "aebe458a9565e014a597534248036778242429420b9f4ce1bb3606a8b7eb0502"
+    },
+    {
+      "path": "device.serial.open-limit.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4929,
+      "sha256": "543e5abc2564270c043bc3df3611a1916748e7bcbc24a421093597ee3e9bb7f2"
+    },
+    {
+      "path": "device.serial.open-malformed.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4577,
+      "sha256": "2d3b25db0312dcd63ba73c2b56d21b65540541bdd83983a6d8e1a38e623572c2"
+    },
+    {
+      "path": "device.serial.open-no-push.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4730,
+      "sha256": "49974f2a2207e03a4922495e6b9c1466b0b0d301bc3c42a6126f3a1857084c6c"
+    },
+    {
+      "path": "device.serial.open-not-granted.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4586,
+      "sha256": "a649303ffccdfcebf6007808301a47cb26a172eef6568931e2b853750b95e88e"
+    },
+    {
+      "path": "device.serial.open-unknown-member.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4619,
+      "sha256": "c629414ebf9870671a8cdffdef3ce4fefb66a81ca3b23c90189d80e976715d6f"
+    },
+    {
+      "path": "device.serial.open-unknown-port.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4538,
+      "sha256": "5942c4096ff2386a14f1eb6f4c6720be55c368763896bad9a8278afbeef77718"
+    },
+    {
+      "path": "device.serial.open.json",
+      "kind": "device.serial.open",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 5238,
+      "sha256": "388a658af13abdaa0eec5cbb3a58540b19d56e77cc11ef52a33a4487cbabe2d2"
+    },
+    {
+      "path": "device.serial.write-empty.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4642,
+      "sha256": "181764bb2c9e6251c0d5dca108be03781e959adce54f7fdb97ced737a85e9140"
+    },
+    {
+      "path": "device.serial.write-invalid-handle.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4714,
+      "sha256": "36a56fbe1725313052e1e8e09455118256579358976f7bc2a611d4fdee006ce9"
+    },
+    {
+      "path": "device.serial.write-io-failed.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4724,
+      "sha256": "9d34de802f434e3af4998ce54e6b073868db810796e90c4d37180199738ab011"
+    },
+    {
+      "path": "device.serial.write-malformed.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4684,
+      "sha256": "23c03c6a28b02ef6c0191834258d4723420bd1a937f9c09e7f729ece686d82b9"
+    },
+    {
+      "path": "device.serial.write-not-granted.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4691,
+      "sha256": "6e256f1c855763a27a97851d82e6377b3fdf53b65942fda3f9a8d1ce20ad7913"
+    },
+    {
+      "path": "device.serial.write-too-large.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 48418,
+      "sha256": "976d8e5639079de63ff86cc06592a99f5163de16d6b5fef2676dbfd87077a323"
+    },
+    {
+      "path": "device.serial.write-unknown-member.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4682,
+      "sha256": "dd6b2e09373d2597417add97e227f0729ac20eb2ccbd4de9827d8ec63b4e040e"
+    },
+    {
+      "path": "device.serial.write.json",
+      "kind": "device.serial.write",
+      "requires": [
+        "device.serial"
+      ],
+      "bytes": 4564,
+      "sha256": "d007d62a427ab6624898f2ebdd335ada87c065ce50eaefa707d6952d0c6437bc"
+    },
+    {
+      "path": "device.vibrate-default.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2804,
+      "sha256": "7d6da93cef26b99227e0a63fc8372e0a3d8f08f38e62c5f157457235320e6d00"
+    },
+    {
+      "path": "device.vibrate-fractional.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2928,
+      "sha256": "501bb9f4f01331de2d140efc63da3ae2ee37dda699117613bf74e7a19cac0495"
+    },
+    {
+      "path": "device.vibrate-malformed.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2959,
+      "sha256": "c95ee5116721ad717fa26214b35d25808207c4002767e50ce3d02f365291f5f3"
+    },
+    {
+      "path": "device.vibrate-max.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2779,
+      "sha256": "29778764a36278b9de8eaa223662f8eeaac54fc6340e18589b87b7e006938910"
+    },
+    {
+      "path": "device.vibrate-min.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2774,
+      "sha256": "e44aab91d5633613de61888fdca577865efbf297abd2979a5fbe48ace6637a1e"
+    },
+    {
+      "path": "device.vibrate-missing.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2947,
+      "sha256": "a0935d543916fa65c2cd8378efa6a1756572473b9eb42c25334b14cbad056e78"
+    },
+    {
+      "path": "device.vibrate-not-granted.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 3073,
+      "sha256": "803e7cae66d0a46c66b5ac4a8abd343da7e57616ac4e1bf5957b74d922fdfbad"
+    },
+    {
+      "path": "device.vibrate-out-of-range.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2939,
+      "sha256": "11137f16fa03bec1130dafb2affd6f1cf397b7fa412be7eeafd642d1edfd25ea"
+    },
+    {
+      "path": "device.vibrate-unknown-member.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 3052,
+      "sha256": "e93eeca804535c4d81825eb64f21478ca389779ed748348e736bbe9a1299cc84"
+    },
+    {
+      "path": "device.vibrate-zero.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2927,
+      "sha256": "5b5291e6622b64f839b78e24a225aea1b511cfd60fe2fafee24843cd82b612b6"
+    },
+    {
+      "path": "device.vibrate.json",
+      "kind": "device.vibrate",
+      "requires": [
+        "device.vibrate"
+      ],
+      "bytes": 2843,
+      "sha256": "447913cec4e86ad0836af53600deb89fcb216429bf4aea4ef283872f604cab77"
+    },
+    {
+      "path": "device.watch-ble-dropped.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ble"
+      ],
+      "bytes": 4420,
+      "sha256": "e87f2fb0f008d9250e3d7bec263bb3e1239203b4ce4ff39e8b10572e6539f96c"
+    },
+    {
+      "path": "device.watch-ble.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.ble"
+      ],
+      "bytes": 5622,
+      "sha256": "8967c16bb608bf9ffc32200e099bfca9d47ac4b5b7210f8cf42376c57e5d81fd"
+    },
+    {
+      "path": "device.watch-display.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 4034,
+      "sha256": "baf3a38dcb174ce62f29d38fb1b0c605061a028a168ac629f5dc206c2b8d55a3"
+    },
+    {
+      "path": "device.watch-gpio-dropped.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.gpio"
+      ],
+      "bytes": 4305,
+      "sha256": "21af1dc185083f2b83f4cb9817458ef8c532ac70ade697d67a81f11b25468967"
+    },
+    {
+      "path": "device.watch-gpio.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.gpio"
+      ],
+      "bytes": 4311,
+      "sha256": "dfc3f4fc00287089805a4e79ae9800869e96ff984a44d466dc59c25d1cd289e9"
+    },
+    {
+      "path": "device.watch-keys.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 4184,
+      "sha256": "ab2766ade9be3fb1dfa2b39c6c83fde3eac2f0a8c63d77925fb3058480739dd5"
+    },
+    {
+      "path": "device.watch-light.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 6810,
+      "sha256": "18bc5625028b1a2b8922b27919a3abaecf544559d373ef58778f12e2980f8826"
+    },
+    {
+      "path": "device.watch-network-kept.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3192,
+      "sha256": "51d7ae1fce0e1db1dd874427d8a37fc2e88c851253a6a5f52d874d15b531f152"
+    },
+    {
+      "path": "device.watch-network-offline.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3422,
+      "sha256": "d46bdc799396d72e6170ea34b32501eee863e486ef17be4310db02d81295d87f"
+    },
+    {
+      "path": "device.watch-network.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 4490,
+      "sha256": "06d1c3519e948291b4b01f50a06099fca6df7896aaba6bf506754a67919cb4ae"
+    },
+    {
+      "path": "device.watch-partial-grant.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3893,
+      "sha256": "e49994fb67fc7628f15e0edb3c62ba4af61db4d82ac6a361cf067dec88f9bd06"
+    },
+    {
+      "path": "device.watch-people-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.camera"
+      ],
+      "bytes": 4218,
+      "sha256": "9e0c8bae68bb2fcd6b141bc816f6191d213758c611d3e85c4c4eb6d8ea0c02db"
+    },
+    {
+      "path": "device.watch-people.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.camera"
+      ],
+      "bytes": 6799,
+      "sha256": "94428209eecac83b134c0853c59187ebac7b52a1d7331bb6850734749b642bd3"
+    },
+    {
+      "path": "device.watch-presence.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3865,
+      "sha256": "ab721c159aa705d8e87231a88a167cf73d03e33b597687f9b247765bf0fae015"
+    },
+    {
+      "path": "device.watch-replace.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3368,
+      "sha256": "1a8e96bfd244fe41fb18282f388ddffceb0675adda90eceae4dd2419a8dcc5bc"
+    },
+    {
+      "path": "device.watch-scan-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.scan"
+      ],
+      "bytes": 4818,
+      "sha256": "91972aed8637bde82659c11e255b7766e67067ec6e919d627c4eff435011dd10"
+    },
+    {
+      "path": "device.watch-scan-sources.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.scan"
+      ],
+      "bytes": 9793,
+      "sha256": "6df6f8bece9d23407537ebe3dcf692308ffb5649da7d69d86b96e6b82932cffc"
+    },
+    {
+      "path": "device.watch-scan.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.scan"
+      ],
+      "bytes": 8276,
+      "sha256": "f80cc0c9fd85fed7f342df1d077a14e7e7d1e0c72431e8cee8b5c9204db4c956"
+    },
+    {
+      "path": "device.watch-serial-error.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.serial"
+      ],
+      "bytes": 4758,
+      "sha256": "37bc1203dba5ee017dc0741eaa4a40a29061f6ea9d0880fadbc7aad827bcea38"
+    },
+    {
+      "path": "device.watch-serial-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.serial"
+      ],
+      "bytes": 4351,
+      "sha256": "71a36082b173d88a3f642058df4cc56c298fd1de0bdb45687d9b029cefb098a0"
+    },
+    {
+      "path": "device.watch-serial-stop.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.serial"
+      ],
+      "bytes": 4383,
+      "sha256": "e839151a0e4f264b5cd352ceec84d815e8afddcbe58eab3ef4486af78cc2f156"
+    },
+    {
+      "path": "device.watch-serial.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.serial"
+      ],
+      "bytes": 6528,
+      "sha256": "d4edda172bb8afcb1e566e7da5f43b8297603059db65edd394df6acb0a3ae7b0"
+    },
+    {
+      "path": "device.watch-sound-not-granted.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.sound"
+      ],
+      "bytes": 4215,
+      "sha256": "9b1b6c7c7f7a4a706d7b8c53a309f3ca2d67c07d56c8473d48ea12067eaae88c"
+    },
+    {
+      "path": "device.watch-sound.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch",
+        "device.sound"
+      ],
+      "bytes": 6765,
+      "sha256": "96754da21bfc7666c17893ed8816b562a132845164026f2984678c2059b07f42"
+    },
+    {
+      "path": "device.watch-stop.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3309,
+      "sha256": "214098134f89654d785434b444b8b465d48772072b3e111bfb645b8536f71492"
+    },
+    {
+      "path": "device.watch-unknown-event.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 3132,
+      "sha256": "affb6a8052cd413ec2ab5ae805d0db07636eb084fe9f9e7a57086d5b826400b7"
+    },
+    {
+      "path": "device.watch.json",
+      "kind": "device.watch",
+      "requires": [
+        "device.watch"
+      ],
+      "bytes": 7159,
+      "sha256": "39e1125ea696958f53fb57f631213170f9a89be86a1e0e36bec4508009b95e9e"
+    }
+  ]
+}

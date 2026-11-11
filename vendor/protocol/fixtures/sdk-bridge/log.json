@@ -1,0 +1,65 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "log",
+  "kind": "log",
+  "purpose": "log is a notification: the host records it locally and never replies.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_log_0001",
+    "kind": "log",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "level": "warn",
+      "code": "app.cache_miss",
+      "message": "cache miss",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": null,
+    "backendRequests": "unspecified"
+  },
+  "sdk": {
+    "call": "log",
+    "args": [
+      {
+        "level": "warn",
+        "code": "app.cache_miss",
+        "message": "cache miss"
+      }
+    ],
+    "settles": "none"
+  }
+}

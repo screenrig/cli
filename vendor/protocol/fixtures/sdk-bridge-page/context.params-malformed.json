@@ -1,0 +1,83 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "context.params-malformed",
+  "kind": "context",
+  "requires": [
+    "context.params"
+  ],
+  "runs": [
+    "host",
+    "sdk"
+  ],
+  "purpose": "A host never forwards an entry it should not: a name that is not 1 to 32 lower case letters, digits or underscores, ticket and policy, a value that is not a string, and a value over 512 characters are dropped on their own and the rest is sent.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch",
+      "visibility.watch",
+      "page.timing",
+      "context.params",
+      "context.screen"
+    ]
+  },
+  "manifest": {
+    "primitive": {
+      "id": "clock",
+      "primitive": "application",
+      "launchParams": {
+        "Kiosk": "a",
+        "ticket": "t",
+        "policy": "p",
+        "count": 3,
+        "long": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "nested": {
+          "a": 1
+        },
+        "ok": "kept"
+      }
+    }
+  },
+  "expect": {
+    "context": {
+      "params": {
+        "ok": "kept"
+      }
+    }
+  },
+  "sdk": {
+    "receives": {
+      "params": {
+        "ok": "kept"
+      }
+    },
+    "context": {
+      "params": {
+        "ok": "kept"
+      }
+    }
+  }
+}

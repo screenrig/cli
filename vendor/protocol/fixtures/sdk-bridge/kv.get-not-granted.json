@@ -1,0 +1,73 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "kv.get-not-granted",
+  "kind": "kv.get",
+  "purpose": "kv.get without the kv.read capability is refused with forbidden (403) and makes no backend request.",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": false,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": false,
+      "kv.write": false
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_kvget_0002",
+    "kind": "kv.get",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "key": "greeting",
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.problem",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_kvget_0002",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "problem": {
+          "code": "forbidden",
+          "status": 403,
+          "detail": "",
+          "request_id": ""
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id",
+      "/payload/problem/detail",
+      "/payload/problem/request_id"
+    ]
+  }
+}

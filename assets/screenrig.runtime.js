@@ -884,7 +884,7 @@
           if (!fontFamily) {
             fontFamilies.set(family, fontFamily = /* @__PURE__ */ new Set());
           }
-          word.split("").forEach((text) => fontFamily.add(text));
+          word.split("").forEach((text2) => fontFamily.add(text2));
         });
       } : void 0;
       copyPseudoClass(
@@ -986,7 +986,7 @@
         families.forEach((family) => {
           if (!fontFamilies.has(family))
             return;
-          fontFamilies.get(family).forEach((text) => fontTexts.add(text));
+          fontFamilies.get(family).forEach((text2) => fontTexts.add(text2));
         });
       }
       const needFontMinify = canFontMinify && fontTexts.size;
@@ -1463,6 +1463,22 @@
     "device.watch",
     "device.vibrate",
     "device.event",
+    "visibility.watch",
+    "visibility.changed",
+    "page.timing",
+    "device.scanner.start",
+    "device.scanner.stop",
+    "device.serial.list",
+    "device.serial.open",
+    "device.serial.write",
+    "device.serial.close",
+    "device.gpio.write",
+    "device.gpio.watch",
+    "device.ble.read",
+    "device.ble.watch",
+    "device.ble.unwatch",
+    "device.print",
+    "device.printers",
     "response.ack",
     "response.problem"
   ];
@@ -1480,13 +1496,73 @@
     "response.ack",
     "response.problem"
   ];
+  var KIND_FEATURES = {
+    "device.scanner.start": "device.camera",
+    "device.scanner.stop": "device.camera",
+    "device.serial.list": "device.serial",
+    "device.serial.open": "device.serial",
+    "device.serial.write": "device.serial",
+    "device.serial.close": "device.serial",
+    "device.gpio.write": "device.gpio",
+    "device.gpio.watch": "device.gpio",
+    "device.ble.read": "device.ble",
+    "device.ble.watch": "device.ble",
+    "device.ble.unwatch": "device.ble",
+    "device.print": "device.print",
+    "device.printers": "device.print"
+  };
+  function featureOf(kind) {
+    return Object.prototype.hasOwnProperty.call(KIND_FEATURES, kind) ? KIND_FEATURES[kind] : kind;
+  }
   var MAX_FEATURES = 64;
   var MAX_FEATURE_LENGTH = 64;
   var MAX_SKIP_REASON_CODE_POINTS = 64;
   var DEVICE_VIBRATE_MAX_MS = 200;
   var DEVICE_VIBRATE_DEFAULT_MS = 12;
-  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys", "light", "network"];
+  var DEVICE_WATCH_EVENTS = ["display", "presence", "keys", "light", "network", "scan", "people", "sound", "serial", "gpio", "ble"];
+  var DEVICE_WATCH_NEEDS = {
+    display: { capability: "device.display" },
+    presence: { capability: "device.presence" },
+    keys: { capability: "device.keys" },
+    light: { capability: "device.light" },
+    network: { capability: "device.network" },
+    scan: { capability: "device.scan", feature: "device.scan" },
+    people: { capability: "device.camera", feature: "device.camera" },
+    sound: { capability: "device.sound", feature: "device.sound" },
+    serial: { capability: "device.serial", feature: "device.serial" },
+    gpio: { capability: "device.gpio", feature: "device.gpio" },
+    ble: { capability: "device.ble", feature: "device.ble" }
+  };
   var DEVICE_KEYS = ["volume_up", "volume_down"];
+  var DEVICE_CHUNK_BYTES = 32768;
+  var SCAN_FORMATS = ["qr", "ean13", "ean8", "upca", "upce", "code128", "code39", "code93", "itf", "codabar", "datamatrix", "pdf417", "aztec"];
+  var SCAN_SOURCES = ["scanner", "nfc", "camera"];
+  var MAX_SCAN_DATA_CHARS = 2048;
+  var SCAN_FORMAT_RE = /^[a-z0-9_]{1,32}$/;
+  var MAX_PEOPLE_COUNT = 1e3;
+  var SOUND_MIN_DBFS = -120;
+  var SERIAL_DATA_BITS = [5, 6, 7, 8];
+  var SERIAL_STOP_BITS = [1, 2];
+  var SERIAL_PARITIES = ["none", "even", "odd"];
+  var SERIAL_FLOW_CONTROLS = ["none", "hardware"];
+  var SERIAL_BAUD_MIN = 50;
+  var SERIAL_BAUD_MAX = 4e6;
+  var MAX_SERIAL_PORTS = 4;
+  var MAX_SERIAL_LIST = 16;
+  var MAX_SERIAL_WRITE_BYTES = 1048576;
+  var SERIAL_BUFFER_BYTES = 65536;
+  var SERIAL_CLOSE_REASONS = ["unplugged", "error"];
+  var GPIO_PIN_MAX = 255;
+  var MAX_GPIO_WATCH_PINS = 16;
+  var MAX_BLE_VALUE_BYTES = 512;
+  var MAX_BLE_SUBSCRIPTIONS = 8;
+  var BLE_UUID_RE = /^(?:[0-9a-f]{4}|[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+  var MAX_BLE_DEVICE_CHARS = 64;
+  var PRINT_FORMATS = ["escpos", "pdf"];
+  var MAX_PRINT_BYTES = 4194304;
+  var MAX_PRINTERS = 16;
+  var HANDLE_RE = /^[A-Za-z0-9_-]{8,64}$/;
+  var MAX_DEVICE_ID_CHARS = 128;
   var EMPTY_CAPABILITIES = {
     "page.advance": false,
     "page.skip": false,
@@ -1497,7 +1573,14 @@
     "device.keys": false,
     "device.light": false,
     "device.network": false,
-    "device.haptics": false
+    "device.haptics": false,
+    "device.scan": false,
+    "device.camera": false,
+    "device.sound": false,
+    "device.serial": false,
+    "device.gpio": false,
+    "device.ble": false,
+    "device.print": false
   };
 
   // src/capture.ts
@@ -1893,6 +1976,55 @@
     };
   }
 
+  // src/bytes.ts
+  var ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function encodeBase64(bytes) {
+    let output = "";
+    for (let index = 0; index < bytes.length; index += 3) {
+      const first = bytes[index] ?? 0;
+      const second = bytes[index + 1];
+      const third = bytes[index + 2];
+      const word = first << 16 | (second ?? 0) << 8 | (third ?? 0);
+      output += ALPHABET[word >>> 18 & 63] ?? "";
+      output += ALPHABET[word >>> 12 & 63] ?? "";
+      output += second === void 0 ? "=" : ALPHABET[word >>> 6 & 63] ?? "";
+      output += third === void 0 ? "=" : ALPHABET[word & 63] ?? "";
+    }
+    return output;
+  }
+  var DECODE = (() => {
+    const table = new Int8Array(128).fill(-1);
+    for (let index = 0; index < ALPHABET.length; index += 1) table[ALPHABET.charCodeAt(index)] = index;
+    return table;
+  })();
+  function decodeBase64(text2, maxBytes = Number.MAX_SAFE_INTEGER) {
+    if (text2.length % 4 !== 0) return void 0;
+    const padding = text2.endsWith("==") ? 2 : text2.endsWith("=") ? 1 : 0;
+    const length = text2.length / 4 * 3 - padding;
+    if (length > maxBytes) return void 0;
+    const output = new Uint8Array(length);
+    let written = 0;
+    for (let index = 0; index < text2.length; index += 4) {
+      let word = 0;
+      for (let offset = 0; offset < 4; offset += 1) {
+        const code = text2.charCodeAt(index + offset);
+        const isPad = code === 61;
+        if (isPad) {
+          if (index + 4 !== text2.length || offset < 4 - padding) return void 0;
+          word <<= 6;
+          continue;
+        }
+        const value = code < 128 ? DECODE[code] ?? -1 : -1;
+        if (value < 0) return void 0;
+        word = word << 6 | value;
+      }
+      for (const shift of [16, 8, 0]) {
+        if (written < length) output[written++] = word >>> shift & 255;
+      }
+    }
+    return output;
+  }
+
   // src/validate.ts
   var SdkValidationError = class extends Error {
     code;
@@ -2033,24 +2165,78 @@
     }
     return features;
   }
+  var CAPABILITY_NAMES = Object.keys(EMPTY_CAPABILITIES);
+  function readCapabilities(source) {
+    const capabilities = { ...EMPTY_CAPABILITIES };
+    for (const name of CAPABILITY_NAMES) capabilities[name] = source[name] === true;
+    return capabilities;
+  }
   function parseCapabilities(value) {
     if (!isRecord(value)) {
       throw new SdkValidationError("invalid_context", "capabilities must be an object");
     }
-    return {
-      "page.advance": value["page.advance"] === true,
-      "page.skip": value["page.skip"] === true,
-      "kv.read": value["kv.read"] === true,
-      "kv.write": value["kv.write"] === true,
-      "device.display": value["device.display"] === true,
-      "device.presence": value["device.presence"] === true,
-      "device.keys": value["device.keys"] === true,
-      "device.light": value["device.light"] === true,
-      "device.network": value["device.network"] === true,
-      "device.haptics": value["device.haptics"] === true
-    };
+    return readCapabilities(value);
   }
-  function parseContextPayload(payload, expectedOrigin) {
+  var MAX_CONTEXT_PARAMS = 16;
+  var MAX_CONTEXT_PARAM_VALUE = 512;
+  var MAX_SCREEN_NAME = 200;
+  var PARAM_NAME_RE = /^[a-z0-9_]{1,32}$/;
+  var RESERVED_PARAMS = ["ticket", "policy"];
+  var CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+  function codePoints(text2) {
+    return text2.length <= 1 ? text2.length : Array.from(text2).length;
+  }
+  function parseContextParams(value, notes) {
+    const params = {};
+    if (value === void 0) return Object.freeze(params);
+    if (!isRecord(value)) {
+      notes == null ? void 0 : notes.push("invalid_params");
+      return Object.freeze(params);
+    }
+    let kept = 0;
+    let dropped = false;
+    for (const name of Object.keys(value).sort()) {
+      const entry = value[name];
+      if (!PARAM_NAME_RE.test(name) || RESERVED_PARAMS.includes(name) || typeof entry !== "string" || codePoints(entry) > MAX_CONTEXT_PARAM_VALUE || kept >= MAX_CONTEXT_PARAMS) {
+        dropped = true;
+        continue;
+      }
+      Object.defineProperty(params, name, { value: entry, enumerable: true, writable: false, configurable: false });
+      kept += 1;
+    }
+    if (dropped) notes == null ? void 0 : notes.push("invalid_params");
+    return Object.freeze(params);
+  }
+  function isTimeZone(value) {
+    if (value.length > 64 || !/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/.test(value)) return false;
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value });
+      return true;
+    } catch (err) {
+      return !(err instanceof RangeError);
+    }
+  }
+  function parseContextScreen(value, notes) {
+    if (value === void 0) return void 0;
+    if (!isRecord(value)) {
+      notes == null ? void 0 : notes.push("invalid_screen");
+      return void 0;
+    }
+    const screen = {};
+    let dropped = false;
+    const { name, timezone } = value;
+    if (name !== void 0) {
+      if (typeof name === "string" && name.length > 0 && codePoints(name) <= MAX_SCREEN_NAME && !CONTROL_RE.test(name)) screen.name = name;
+      else dropped = true;
+    }
+    if (timezone !== void 0) {
+      if (typeof timezone === "string" && isTimeZone(timezone)) screen.timezone = timezone;
+      else dropped = true;
+    }
+    if (dropped) notes == null ? void 0 : notes.push("invalid_screen");
+    return screen.name === void 0 && screen.timezone === void 0 ? void 0 : screen;
+  }
+  function parseContextPayload(payload, expectedOrigin, notes) {
     const application_id = payload.application_id;
     const release_id = payload.release_id;
     const primitive_id = payload.primitive_id;
@@ -2079,6 +2265,8 @@
       throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
     }
     const features = parseFeatures(payload.features);
+    const params = parseContextParams(payload.params, notes);
+    const screen = parseContextScreen(payload.screen, notes);
     return {
       application_id,
       release_id,
@@ -2090,7 +2278,9 @@
       viewport: parseSize(payload.viewport, "viewport"),
       primitive: parsePrimitiveSize(payload),
       screen_id: typeof payload.screen_id === "string" && ID_RE.test(payload.screen_id) ? payload.screen_id : void 0,
-      ...features === void 0 ? {} : { features }
+      ...features === void 0 ? {} : { features },
+      params,
+      ...screen === void 0 ? {} : { screen }
     };
   }
   function parseResponseAckPayload(payload) {
@@ -2181,7 +2371,205 @@
       const known = DEVICE_KEYS.includes(key);
       return known ? { type, generation, nonce, key } : void 0;
     }
+    return parseHardwareEvent(type, payload, generation, nonce);
+  }
+  function invalidEvent(what) {
+    return new SdkValidationError("invalid_device_event", `Invalid device.event ${what}`);
+  }
+  function parseHardwareEvent(type, payload, generation, nonce) {
+    if (type === "scan") {
+      const { source, format, data } = payload;
+      if (typeof source !== "string") throw invalidEvent("scan source");
+      if (!SCAN_SOURCES.includes(source)) return void 0;
+      if (typeof format !== "string" || !SCAN_FORMAT_RE.test(format)) throw invalidEvent("scan format");
+      if (typeof data !== "string" || data.length === 0 || codePoints(data) > MAX_SCAN_DATA_CHARS) throw invalidEvent("scan data");
+      return { type, generation, nonce, source, format, data };
+    }
+    if (type === "people") {
+      const count = payload.count;
+      if (typeof count !== "number" || !Number.isInteger(count) || count < 0 || count > MAX_PEOPLE_COUNT) throw invalidEvent("people count");
+      return { type, generation, nonce, count };
+    }
+    if (type === "sound") {
+      const dbfs = payload.dbfs;
+      if (typeof dbfs !== "number" || !Number.isFinite(dbfs) || dbfs < SOUND_MIN_DBFS || dbfs > 0) throw invalidEvent("sound level");
+      return { type, generation, nonce, dbfs };
+    }
+    if (type === "serial") {
+      const { handle, data_base64: data, closed, reason } = payload;
+      if (typeof handle !== "string" || !HANDLE_RE.test(handle)) throw invalidEvent("serial handle");
+      if (closed !== void 0) {
+        if (closed !== true || data !== void 0) throw invalidEvent("serial close");
+        const known = typeof reason === "string" && SERIAL_CLOSE_REASONS.includes(reason);
+        return { type, generation, nonce, handle, closed: true, ...known ? { reason } : {} };
+      }
+      const bytes = typeof data === "string" ? decodeBase64(data, DEVICE_CHUNK_BYTES) : void 0;
+      if (bytes === void 0 || bytes.length === 0) throw invalidEvent("serial data");
+      return { type, generation, nonce, handle, data_base64: data };
+    }
+    if (type === "gpio") {
+      const { pin, value } = payload;
+      if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > GPIO_PIN_MAX || typeof value !== "boolean") throw invalidEvent("gpio level");
+      return { type, generation, nonce, pin, value };
+    }
+    if (type === "ble") {
+      const { subscription, value_base64: value } = payload;
+      if (typeof subscription !== "string" || !HANDLE_RE.test(subscription)) throw invalidEvent("ble subscription");
+      if (typeof value !== "string" || decodeBase64(value, MAX_BLE_VALUE_BYTES) === void 0) throw invalidEvent("ble value");
+      return { type, generation, nonce, subscription, value_base64: value };
+    }
     return void 0;
+  }
+  function parseVisibilityChangedPayload(payload) {
+    const { visible: visible2, reason, generation, nonce } = payload;
+    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || typeof nonce !== "string" || !NONCE_RE.test(nonce) || typeof visible2 !== "boolean" || typeof reason !== "string") {
+      throw new SdkValidationError("invalid_visibility", "Invalid visibility.changed payload");
+    }
+    if (reason !== "display" && reason !== "paused" && reason !== "leaving") return void 0;
+    if (visible2 && reason === "leaving") throw new SdkValidationError("invalid_visibility", "A page that is leaving is not visible");
+    return { generation, nonce, visible: visible2, reason };
+  }
+  function parsePageTimingResult(value) {
+    if (!isRecord(value)) throw new SdkValidationError("invalid_response", "Invalid page timing");
+    const { elapsed_ms: elapsed, remaining_ms: remaining, paused } = value;
+    const count = (n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+    if (!count(elapsed) || !(remaining === null || count(remaining)) || typeof paused !== "boolean") {
+      throw new SdkValidationError("invalid_response", "Invalid page timing");
+    }
+    return { elapsedMs: elapsed, remainingMs: remaining, paused };
+  }
+  function invalidRequest(message) {
+    return new SdkValidationError("invalid_request", message);
+  }
+  function onlyMembers(value, allowed, what) {
+    for (const member of Object.keys(value)) {
+      if (!allowed.includes(member)) throw invalidRequest(`Unknown ${what} member ${member}`);
+    }
+  }
+  function isDeviceId(value) {
+    return typeof value === "string" && value.length > 0 && codePoints(value) <= MAX_DEVICE_ID_CHARS && !CONTROL_RE.test(value);
+  }
+  function parseScannerOptions(options) {
+    if (options === void 0) return {};
+    if (!isRecord(options)) throw invalidRequest("Scanner options are an object with formats");
+    onlyMembers(options, ["formats"], "scanner");
+    const formats = options.formats;
+    if (formats === void 0) return {};
+    if (!Array.isArray(formats) || formats.length === 0 || formats.length > SCAN_FORMATS.length) throw invalidRequest("formats is a list of 1 to 13 symbologies");
+    const seen = [];
+    for (const format of formats) {
+      if (typeof format !== "string" || !SCAN_FORMATS.includes(format) || seen.includes(format)) {
+        throw invalidRequest("formats lists each known symbology once");
+      }
+      seen.push(format);
+    }
+    return { formats: seen };
+  }
+  function parseScannerStartResult(value) {
+    if (!isRecord(value) || !Array.isArray(value.formats)) throw new SdkValidationError("invalid_response", "Invalid scanner state");
+    return { formats: value.formats.filter((format) => typeof format === "string" && SCAN_FORMATS.includes(format)) };
+  }
+  function parseSerialPortId(port) {
+    if (!isDeviceId(port)) throw invalidRequest(`A serial port is a name of 1 to ${MAX_DEVICE_ID_CHARS} characters`);
+    return port;
+  }
+  function oneOf(value, allowed, member) {
+    if (!allowed.includes(value)) throw invalidRequest(`${member} is one of ${allowed.join(", ")}`);
+    return value;
+  }
+  function parseSerialOptions(options) {
+    if (!isRecord(options)) throw invalidRequest("Serial options are an object with baudRate");
+    onlyMembers(options, ["baudRate", "dataBits", "stopBits", "parity", "flowControl"], "serial");
+    const baud = options.baudRate;
+    if (typeof baud !== "number" || !Number.isInteger(baud) || baud < SERIAL_BAUD_MIN || baud > SERIAL_BAUD_MAX) {
+      throw invalidRequest(`baudRate is an integer from ${SERIAL_BAUD_MIN} to ${SERIAL_BAUD_MAX}`);
+    }
+    const out = { baud_rate: baud };
+    if (options.dataBits !== void 0) out.data_bits = oneOf(options.dataBits, SERIAL_DATA_BITS, "dataBits");
+    if (options.stopBits !== void 0) out.stop_bits = oneOf(options.stopBits, SERIAL_STOP_BITS, "stopBits");
+    if (options.parity !== void 0) out.parity = oneOf(options.parity, SERIAL_PARITIES, "parity");
+    if (options.flowControl !== void 0) out.flow_control = oneOf(options.flowControl, SERIAL_FLOW_CONTROLS, "flowControl");
+    return out;
+  }
+  function parseSerialWriteData(data) {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data instanceof Uint8Array ? data : void 0;
+    if (bytes === void 0) throw invalidRequest("Serial data is a Uint8Array or a string");
+    if (bytes.length === 0 || bytes.length > MAX_SERIAL_WRITE_BYTES) throw invalidRequest(`Serial data is 1 to ${MAX_SERIAL_WRITE_BYTES} bytes`);
+    return bytes;
+  }
+  function readPortInfo(value) {
+    if (!isRecord(value) || !isDeviceId(value.id)) return void 0;
+    const id = value.id;
+    const name = typeof value.name === "string" && value.name.length > 0 && !CONTROL_RE.test(value.name) ? value.name.slice(0, 200) : id;
+    const usb = (n) => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 65535;
+    return { id, name, ...usb(value.vendor_id) ? { vendorId: value.vendor_id } : {}, ...usb(value.product_id) ? { productId: value.product_id } : {} };
+  }
+  function parseSerialListResult(value) {
+    if (!isRecord(value) || !Array.isArray(value.ports)) throw new SdkValidationError("invalid_response", "Invalid serial port list");
+    const ports = [];
+    for (const entry of value.ports) {
+      const port = readPortInfo(entry);
+      if (port !== void 0 && ports.length < MAX_SERIAL_LIST) ports.push(port);
+    }
+    return ports;
+  }
+  function parseHandleResult(value, member) {
+    const handle = isRecord(value) ? value[member] : void 0;
+    if (typeof handle !== "string" || !HANDLE_RE.test(handle)) throw new SdkValidationError("invalid_response", `Invalid ${member}`);
+    return handle;
+  }
+  function parseGpioPin(pin) {
+    if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > GPIO_PIN_MAX) throw invalidRequest(`pin is an integer from 0 to ${GPIO_PIN_MAX}`);
+    return pin;
+  }
+  function parseGpioValue(value) {
+    if (typeof value !== "boolean") throw invalidRequest("value is a boolean");
+    return value;
+  }
+  function parseBleTarget(target) {
+    if (!isRecord(target)) throw invalidRequest("A BLE target is an object with service and characteristic");
+    onlyMembers(target, ["service", "characteristic", "device"], "BLE");
+    const uuid3 = (value, member) => {
+      const text2 = typeof value === "string" ? value.toLowerCase() : "";
+      if (!BLE_UUID_RE.test(text2)) throw invalidRequest(`${member} is a UUID of 4, 8 or 36 hexadecimal characters`);
+      return text2;
+    };
+    const service = uuid3(target.service, "service");
+    const characteristic = uuid3(target.characteristic, "characteristic");
+    const device = target.device;
+    if (device === void 0) return { service, characteristic };
+    if (typeof device !== "string" || device.length === 0 || codePoints(device) > MAX_BLE_DEVICE_CHARS || CONTROL_RE.test(device)) {
+      throw invalidRequest(`device is a name or address of 1 to ${MAX_BLE_DEVICE_CHARS} characters`);
+    }
+    return { service, characteristic, device };
+  }
+  function parseBleReadResult(value) {
+    const bytes = isRecord(value) && typeof value.value_base64 === "string" ? decodeBase64(value.value_base64, MAX_BLE_VALUE_BYTES) : void 0;
+    if (bytes === void 0) throw new SdkValidationError("invalid_response", "Invalid BLE value");
+    return bytes;
+  }
+  function parsePrintJob(job) {
+    if (!isRecord(job)) throw invalidRequest("A print job is an object with escpos or pdf");
+    onlyMembers(job, ["escpos", "pdf", "printer"], "print job");
+    const { escpos, pdf, printer } = job;
+    if (escpos === void 0 === (pdf === void 0)) throw invalidRequest("A print job has exactly one of escpos and pdf");
+    const bytes = escpos === void 0 ? pdf : escpos;
+    if (!(bytes instanceof Uint8Array)) throw invalidRequest("escpos and pdf are Uint8Array");
+    if (bytes.length === 0 || bytes.length > MAX_PRINT_BYTES) throw invalidRequest(`A print job is 1 to ${MAX_PRINT_BYTES} bytes`);
+    if (printer !== void 0 && !isDeviceId(printer)) throw invalidRequest(`printer is an id of 1 to ${MAX_DEVICE_ID_CHARS} characters`);
+    const format = escpos === void 0 ? "pdf" : "escpos";
+    return { format, bytes, ...printer === void 0 ? {} : { printer } };
+  }
+  function parsePrintersResult(value) {
+    if (!isRecord(value) || !Array.isArray(value.printers)) throw new SdkValidationError("invalid_response", "Invalid printer list");
+    const printers = [];
+    for (const entry of value.printers) {
+      if (!isRecord(entry) || !isDeviceId(entry.id) || !Array.isArray(entry.formats)) continue;
+      const formats = entry.formats.filter((format) => PRINT_FORMATS.includes(format));
+      const name = typeof entry.name === "string" && entry.name.length > 0 && !CONTROL_RE.test(entry.name) ? entry.name.slice(0, 200) : entry.id;
+      if (printers.length < MAX_PRINTERS) printers.push({ id: entry.id, name, formats, ...entry.default === true ? { default: true } : {} });
+    }
+    return printers;
   }
   function parseResponseProblemPayload(payload) {
     const requestMessageId = payload.request_message_id;
@@ -2220,24 +2608,387 @@
     }
   }
   function negotiateCapabilities(offered) {
-    return {
-      "page.advance": offered["page.advance"] === true,
-      "page.skip": offered["page.skip"] === true,
-      "kv.read": offered["kv.read"] === true,
-      "kv.write": offered["kv.write"] === true,
-      "device.display": offered["device.display"] === true,
-      "device.presence": offered["device.presence"] === true,
-      "device.keys": offered["device.keys"] === true,
-      "device.light": offered["device.light"] === true,
-      "device.network": offered["device.network"] === true,
-      "device.haptics": offered["device.haptics"] === true
-    };
+    return readCapabilities(offered);
   }
   function sanitizeSkipReason(reason) {
     const cleaned = reason.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "").replace(/\s+/g, " ").trim();
     const clipped = Array.from(cleaned).slice(0, MAX_SKIP_REASON_CODE_POINTS).join("").trim();
     return clipped === "" ? void 0 : clipped;
   }
+
+  // src/hardware.ts
+  var SCANNER_START = { features: ["device.camera", "device.scan"], capabilities: ["device.camera", "device.scan"] };
+  var CAMERA = { features: ["device.camera"], capabilities: ["device.camera"] };
+  var SERIAL = { features: ["device.serial"], capabilities: ["device.serial"] };
+  var GPIO = { features: ["device.gpio"], capabilities: ["device.gpio"] };
+  var BLE = { features: ["device.ble"], capabilities: ["device.ble"] };
+  var PRINT = { features: ["device.print"], capabilities: ["device.print"] };
+  function enqueue(queue, run) {
+    const idle = queue.active === 0;
+    queue.active += 1;
+    const job = async () => {
+      try {
+        return await run();
+      } finally {
+        queue.active -= 1;
+      }
+    };
+    const result = idle || queue.tail === null ? job() : queue.tail.then(job, job);
+    queue.tail = result.then(() => void 0, () => void 0);
+    return result;
+  }
+  function chunksOf(bytes) {
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += DEVICE_CHUNK_BYTES) chunks.push(bytes.subarray(offset, offset + DEVICE_CHUNK_BYTES));
+    return chunks;
+  }
+  var DeviceHardware = class {
+    constructor(bridge) {
+      this.bridge = bridge;
+    }
+    scanHandlers = /* @__PURE__ */ new Set();
+    peopleHandlers = /* @__PURE__ */ new Set();
+    soundHandlers = /* @__PURE__ */ new Set();
+    ports = /* @__PURE__ */ new Map();
+    pendingPorts = 0;
+    gpioHandlers = /* @__PURE__ */ new Map();
+    /** The context and pins device.gpio.watch last carried; a new context sends it again. */
+    gpioSent = null;
+    bleSubscriptions = /* @__PURE__ */ new Map();
+    pendingBle = 0;
+    printing = { tail: null, active: 0 };
+    scanner = {
+      start: (options) => this.scannerStart(options),
+      stop: () => this.scannerStop()
+    };
+    serial = {
+      list: () => this.serialList(),
+      open: (port, options) => this.serialOpen(port, options)
+    };
+    gpio = {
+      write: (pin, value) => this.gpioWrite(pin, value),
+      onChange: (pin, handler) => this.gpioOnChange(pin, handler)
+    };
+    ble = {
+      read: (target) => this.bleRead(target),
+      watch: (target, handler) => this.bleWatch(target, handler)
+    };
+    onScan(handler) {
+      return this.bridge.on("onScan", this.scanHandlers, handler);
+    }
+    onPeople(handler) {
+      return this.bridge.on("onPeople", this.peopleHandlers, handler);
+    }
+    onSoundLevel(handler) {
+      return this.bridge.on("onSoundLevel", this.soundHandlers, handler);
+    }
+    /** Whether a hardware event type has a reason to be watched now. */
+    wants(event) {
+      switch (event) {
+        case "scan":
+          return this.scanHandlers.size > 0;
+        case "people":
+          return this.peopleHandlers.size > 0;
+        case "sound":
+          return this.soundHandlers.size > 0;
+        case "serial":
+          return this.ports.size + this.pendingPorts > 0;
+        case "gpio":
+          return this.gpioHandlers.size > 0;
+        case "ble":
+          return this.bleSubscriptions.size + this.pendingBle > 0;
+      }
+    }
+    // ---- camera ---------------------------------------------------------------
+    async scannerStart(options) {
+      this.bridge.check(SCANNER_START);
+      const members = parseScannerOptions(options);
+      return parseScannerStartResult(await this.bridge.send("device.scanner.start", members));
+    }
+    async scannerStop() {
+      this.bridge.check(CAMERA);
+      await this.bridge.send("device.scanner.stop", {});
+    }
+    // ---- serial ---------------------------------------------------------------
+    async serialList() {
+      this.bridge.check(SERIAL);
+      return parseSerialListResult(await this.bridge.send("device.serial.list", {}));
+    }
+    async serialOpen(port, options) {
+      this.bridge.check(SERIAL);
+      const id = parseSerialPortId(port);
+      const line = parseSerialOptions(options);
+      if (this.ports.size + this.pendingPorts >= MAX_SERIAL_PORTS) {
+        throw new SdkValidationError("port_limit", `At most ${MAX_SERIAL_PORTS} serial ports are open at once`);
+      }
+      this.pendingPorts += 1;
+      this.bridge.watchChanged();
+      let handle;
+      try {
+        handle = parseHandleResult(await this.bridge.send("device.serial.open", { port: id, ...line }), "handle");
+      } catch (err) {
+        this.pendingPorts -= 1;
+        this.bridge.watchChanged();
+        throw err;
+      }
+      this.pendingPorts -= 1;
+      const state = { id, handle, open: true, writing: { tail: null, active: 0 }, data: /* @__PURE__ */ new Set(), close: /* @__PURE__ */ new Set(), buffered: [], bufferedBytes: 0 };
+      this.ports.set(handle, state);
+      this.bridge.watchChanged();
+      return this.portApi(state);
+    }
+    portApi(state) {
+      const api = {
+        id: state.id,
+        write: (data) => this.serialWrite(state, data),
+        onData: (handler) => {
+          if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "port.onData needs a function");
+          state.data.add(handler);
+          const held = state.buffered;
+          state.buffered = [];
+          state.bufferedBytes = 0;
+          for (const bytes of held) this.callPort(() => handler(bytes));
+          return () => {
+            state.data.delete(handler);
+          };
+        },
+        onClose: (handler) => {
+          if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "port.onClose needs a function");
+          state.close.add(handler);
+          return () => {
+            state.close.delete(handler);
+          };
+        },
+        close: () => this.serialClose(state)
+      };
+      return Object.freeze(api);
+    }
+    serialWrite(state, data) {
+      const run = async () => {
+        this.bridge.check(SERIAL);
+        const bytes = parseSerialWriteData(data);
+        for (const chunk of chunksOf(bytes)) {
+          if (!state.open) throw new SdkValidationError("invalid_handle", "The serial port is closed");
+          await this.bridge.send("device.serial.write", { handle: state.handle, data_base64: encodeBase64(chunk) });
+        }
+      };
+      return enqueue(state.writing, run);
+    }
+    async serialClose(state) {
+      if (!state.open) return;
+      state.open = false;
+      state.data.clear();
+      state.close.clear();
+      this.ports.delete(state.handle);
+      try {
+        await this.bridge.send("device.serial.close", { handle: state.handle });
+      } finally {
+        this.bridge.watchChanged();
+      }
+    }
+    callPort(invoke) {
+      try {
+        invoke();
+      } catch {
+        this.bridge.report("warn", "device_handler", "A screenrig.device serial handler threw");
+      }
+    }
+    serialData(handle, bytes) {
+      const state = this.ports.get(handle);
+      if (state === void 0) return;
+      if (state.data.size === 0) {
+        state.buffered.push(bytes);
+        state.bufferedBytes += bytes.length;
+        while (state.bufferedBytes > SERIAL_BUFFER_BYTES && state.buffered.length > 0) {
+          const excess = state.bufferedBytes - SERIAL_BUFFER_BYTES;
+          const oldest = state.buffered[0];
+          if (oldest.length <= excess) {
+            state.buffered.shift();
+            state.bufferedBytes -= oldest.length;
+          } else {
+            state.buffered[0] = oldest.subarray(excess);
+            state.bufferedBytes -= excess;
+          }
+        }
+        return;
+      }
+      for (const handler of [...state.data]) this.callPort(() => handler(bytes.slice()));
+    }
+    serialClosed(handle, reason) {
+      const state = this.ports.get(handle);
+      if (state === void 0) return;
+      state.open = false;
+      this.ports.delete(handle);
+      const handlers = [...state.close];
+      state.data.clear();
+      state.close.clear();
+      for (const handler of handlers) this.callPort(() => handler(reason));
+      this.bridge.watchChanged();
+    }
+    // ---- GPIO -----------------------------------------------------------------
+    async gpioWrite(pin, value) {
+      this.bridge.check(GPIO);
+      const members = { pin: parseGpioPin(pin), value: parseGpioValue(value) };
+      await this.bridge.send("device.gpio.write", members);
+    }
+    gpioOnChange(pin, handler) {
+      if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "device.gpio.onChange needs a function");
+      const line = parseGpioPin(pin);
+      if (!this.gpioHandlers.has(line) && this.gpioHandlers.size >= MAX_GPIO_WATCH_PINS) {
+        throw new SdkValidationError("invalid_request", `At most ${MAX_GPIO_WATCH_PINS} GPIO lines are watched at once`);
+      }
+      const handlers = this.gpioHandlers.get(line) ?? /* @__PURE__ */ new Set();
+      handlers.add(handler);
+      this.gpioHandlers.set(line, handlers);
+      this.bridge.watchChanged();
+      return () => {
+        handlers.delete(handler);
+        if (handlers.size === 0 && this.gpioHandlers.get(line) === handlers) this.gpioHandlers.delete(line);
+        this.bridge.watchChanged();
+      };
+    }
+    /**
+     * Called by the client after it settled `device.watch`. `device.gpio.watch`
+     * follows `device.watch` and carries the full set of lines; a watch without
+     * `gpio` ends the host's set, so nothing is sent for that.
+     */
+    afterWatch(events, bound) {
+      const pins = events.includes("gpio") ? [...this.gpioHandlers.keys()].sort((a, b) => a - b) : [];
+      const key = pins.join(",");
+      const previous2 = this.gpioSent !== null && this.gpioSent.bound === bound ? this.gpioSent.pins : "";
+      this.gpioSent = { bound, pins: key };
+      if (key === previous2 || pins.length === 0) return;
+      this.bridge.send("device.gpio.watch", { pins }).catch((err) => {
+        this.bridge.report("warn", "gpio_watch", `device.gpio.watch failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+    // ---- Bluetooth LE ---------------------------------------------------------
+    async bleRead(target) {
+      this.bridge.check(BLE);
+      const members = parseBleTarget(target);
+      return parseBleReadResult(await this.bridge.send("device.ble.read", members));
+    }
+    async bleWatch(target, handler) {
+      this.bridge.check(BLE);
+      if (typeof handler !== "function") throw new SdkValidationError("invalid_handler", "device.ble.watch needs a function");
+      const members = parseBleTarget(target);
+      if (this.bleSubscriptions.size + this.pendingBle >= MAX_BLE_SUBSCRIPTIONS) {
+        throw new SdkValidationError("subscription_limit", `At most ${MAX_BLE_SUBSCRIPTIONS} BLE subscriptions are held at once`);
+      }
+      this.pendingBle += 1;
+      this.bridge.watchChanged();
+      let subscription;
+      try {
+        subscription = parseHandleResult(await this.bridge.send("device.ble.watch", members), "subscription");
+      } catch (err) {
+        this.pendingBle -= 1;
+        this.bridge.watchChanged();
+        throw err;
+      }
+      this.pendingBle -= 1;
+      this.bleSubscriptions.set(subscription, handler);
+      this.bridge.watchChanged();
+      return () => {
+        if (!this.bleSubscriptions.delete(subscription)) return;
+        this.bridge.send("device.ble.unwatch", { subscription }).catch((err) => {
+          this.bridge.report("warn", "ble_unwatch", `device.ble.unwatch failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        this.bridge.watchChanged();
+      };
+    }
+    // ---- printing -------------------------------------------------------------
+    async printers() {
+      this.bridge.check(PRINT);
+      return parsePrintersResult(await this.bridge.send("device.printers", {}));
+    }
+    print(job) {
+      const run = async () => {
+        this.bridge.check(PRINT);
+        const { format, bytes, printer } = parsePrintJob(job);
+        const id = this.bridge.newId();
+        const chunks = chunksOf(bytes);
+        for (const [seq, chunk] of chunks.entries()) {
+          const members = { job: id, seq, last: seq === chunks.length - 1, data_base64: encodeBase64(chunk) };
+          if (seq === 0) {
+            members.format = format;
+            members.total_bytes = bytes.length;
+            if (printer !== void 0) members.printer = printer;
+          }
+          await this.bridge.send("device.print", members);
+        }
+      };
+      return enqueue(this.printing, run);
+    }
+    // ---- host events ----------------------------------------------------------
+    /** Delivers one hardware `device.event` to its handlers. */
+    dispatch(event) {
+      const call = (invoke) => {
+        try {
+          invoke();
+        } catch {
+          this.bridge.report("warn", "device_handler", "A screenrig.device handler threw");
+        }
+      };
+      switch (event.type) {
+        case "scan":
+          for (const handler of [...this.scanHandlers]) call(() => handler({ source: event.source, format: event.format, data: event.data }));
+          return;
+        case "people":
+          for (const handler of [...this.peopleHandlers]) call(() => handler(event.count));
+          return;
+        case "sound":
+          for (const handler of [...this.soundHandlers]) call(() => handler(event.dbfs));
+          return;
+        case "serial": {
+          if ("closed" in event) {
+            this.serialClosed(event.handle, event.reason ?? "error");
+            return;
+          }
+          const bytes = decodeBase64(event.data_base64, DEVICE_CHUNK_BYTES);
+          if (bytes !== void 0) this.serialData(event.handle, bytes);
+          return;
+        }
+        case "gpio":
+          for (const handler of [...this.gpioHandlers.get(event.pin) ?? []]) call(() => handler(event.value));
+          return;
+        case "ble": {
+          const handler = this.bleSubscriptions.get(event.subscription);
+          const bytes = handler === void 0 ? void 0 : decodeBase64(event.value_base64, 512);
+          if (handler !== void 0 && bytes !== void 0) call(() => handler(bytes));
+          return;
+        }
+        default:
+          return;
+      }
+    }
+    /**
+     * A frame's context ended: ports, subscriptions and the host's pin set end with
+     * it. A new context starts with none, so each is gone here and a port's
+     * `onClose` handlers hear `context`. GPIO handlers stay: they are re-sent with
+     * the new context's watch.
+     */
+    reset(notify) {
+      const ports = [...this.ports.values()];
+      this.ports.clear();
+      for (const state of ports) {
+        state.open = false;
+        const handlers = [...state.close];
+        state.data.clear();
+        state.close.clear();
+        if (notify) for (const handler of handlers) this.callPort(() => handler("context"));
+      }
+      this.bleSubscriptions.clear();
+      this.gpioSent = null;
+    }
+    /** The SDK was destroyed: drop every handler. */
+    destroy() {
+      this.reset(false);
+      this.scanHandlers.clear();
+      this.peopleHandlers.clear();
+      this.soundHandlers.clear();
+      this.gpioHandlers.clear();
+    }
+  };
 
   // src/screenrig.ts
   function randomId() {
@@ -2248,29 +2999,16 @@
   function randomIdempotencyKey() {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
-    return base64(bytes).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    return encodeBase64(bytes).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
   }
-  function base64(bytes) {
-    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let output = "";
-    for (let index = 0; index < bytes.length; index += 3) {
-      const first = bytes[index] ?? 0;
-      const second = bytes[index + 1];
-      const third = bytes[index + 2];
-      const word = first << 16 | (second ?? 0) << 8 | (third ?? 0);
-      output += alphabet[word >>> 18 & 63] ?? "";
-      output += alphabet[word >>> 12 & 63] ?? "";
-      output += second === void 0 ? "=" : alphabet[word >>> 6 & 63] ?? "";
-      output += third === void 0 ? "=" : alphabet[word & 63] ?? "";
-    }
-    return output;
-  }
+  var MAX_FORWARDED_ERRORS = 10;
   function isSideChannelMessage(data) {
     return typeof data === "object" && data !== null && SIDE_CHANNEL_PROTOCOLS.includes(data.protocol);
   }
   var ScreenRigClient = class {
     constructor(options, allowOpaqueNativeParent = false, nativeParentOrigin) {
       this.nativeParentOrigin = nativeParentOrigin;
+      var _a2, _b;
       this.host = options.host;
       this.trustedPlayerOrigins = options.trustedPlayerOrigins ?? [options.trustedPlayerOrigin ?? DEFAULT_PLAYER_ORIGIN];
       if (this.trustedPlayerOrigins.length === 0 || this.trustedPlayerOrigins.some((origin) => !origin || origin === "*")) {
@@ -2280,6 +3018,7 @@
       this.ackTimeoutMs = options.ackTimeoutMs ?? 1e4;
       this.allowOpaqueNativeParent = allowOpaqueNativeParent;
       this.unsubscribe = this.host.addMessageListener((event) => this.onMessage(event));
+      this.unsubscribeErrors = (_b = (_a2 = this.host).addErrorListener) == null ? void 0 : _b.call(_a2, (error) => this.forwardError(error));
     }
     readyState = "inert";
     context = null;
@@ -2297,6 +3036,17 @@
     kvChangeHandlers = /* @__PURE__ */ new Set();
     /** The context (generation and nonce) kv.watch was last sent under; a new context sends it again. */
     watchedContext = null;
+    visibilityHandlers = /* @__PURE__ */ new Set();
+    /** The context visibility.watch was last sent under; a new context sends it again. */
+    visibilityWatched = null;
+    /** Uncaught errors forwarded this activation (at most MAX_FORWARDED_ERRORS). */
+    forwardedErrors = 0;
+    /**
+     * The generation and nonce of the context in force. A `context` message with
+     * another binding is a new context and ends what the last one held; one with
+     * the same binding only refreshes capabilities, features and sizes.
+     */
+    activeBinding = null;
     deviceHandlers = {
       display: /* @__PURE__ */ new Set(),
       presence: /* @__PURE__ */ new Set(),
@@ -2307,6 +3057,7 @@
     /** The context and event types device.watch last carried; a new context sends it again. */
     deviceWatched = null;
     unsubscribe;
+    unsubscribeErrors;
     advanced = false;
     /** `ready()` was called for this activation: a skip is no longer a start-time decision. */
     readied = false;
@@ -2317,11 +3068,22 @@
     opaqueSourceBound = false;
     kv = {
       get: (key) => this.kvGet(key),
+      getText: (key) => this.kvGetText(key),
+      getJSON: (key) => this.kvGetJSON(key),
       list: () => this.kvList(),
       set: (key, value, options) => this.kvSet(key, value, options),
+      setJSON: (key, value, options) => this.kvSetJSON(key, value, options),
       delete: (key, expectedRevision, options) => this.kvDelete(key, expectedRevision, options),
       onChange: (handler) => this.kvOnChange(handler)
     };
+    hardware = new DeviceHardware({
+      check: (needs) => this.checkDevice(needs),
+      send: (kind, members) => this.sendDevice(kind, members),
+      on: (name, handlers, handler) => this.deviceOn(name, handlers, handler),
+      watchChanged: () => this.watchDevice(),
+      report: (level, code, message) => this.report(level, code, message),
+      newId: () => this.idFactory()
+    });
     device = {
       display: {
         get: () => this.deviceDisplay(void 0),
@@ -2332,11 +3094,23 @@
       onKey: (handler) => this.deviceOn("onKey", this.deviceHandlers.keys, handler),
       onLight: (handler) => this.deviceOn("onLight", this.deviceHandlers.light, handler),
       onNetwork: (handler) => this.deviceOn("onNetwork", this.deviceHandlers.network, handler),
-      vibrate: (ms) => this.deviceVibrate(ms)
+      vibrate: (ms) => this.deviceVibrate(ms),
+      onScan: (handler) => this.hardware.onScan(handler),
+      scanner: this.hardware.scanner,
+      onPeople: (handler) => this.hardware.onPeople(handler),
+      onSoundLevel: (handler) => this.hardware.onSoundLevel(handler),
+      serial: this.hardware.serial,
+      gpio: this.hardware.gpio,
+      ble: this.hardware.ble,
+      print: (job) => this.hardware.print(job),
+      printers: () => this.hardware.printers()
     };
     destroy() {
+      var _a2;
       this.destroyed = true;
       this.unsubscribe();
+      (_a2 = this.unsubscribeErrors) == null ? void 0 : _a2.call(this);
+      this.unsubscribeErrors = void 0;
       for (const waiter of this.activeWaiters) {
         clearTimeout(waiter.timer);
         waiter.reject(new SdkValidationError("destroyed", "SDK was destroyed before activation"));
@@ -2355,6 +3129,10 @@
       this.deviceHandlers.light.clear();
       this.deviceHandlers.network.clear();
       this.deviceWatched = null;
+      this.hardware.destroy();
+      this.activeBinding = null;
+      this.visibilityHandlers.clear();
+      this.visibilityWatched = null;
       this.readied = false;
       this.readyState = "inert";
       this.context = null;
@@ -2448,6 +3226,18 @@
           this.dispatchDeviceEvent(event2);
           return;
         }
+        if (message.kind === "visibility.changed") {
+          const change = parseVisibilityChangedPayload(message.payload);
+          if (change === void 0 || !this.matchesRuntime(change.generation, change.nonce)) return;
+          for (const handler of [...this.visibilityHandlers]) {
+            try {
+              handler({ visible: change.visible, reason: change.reason });
+            } catch {
+              this.report("warn", "visibility_handler", "A screenrig.onVisibility handler threw");
+            }
+          }
+          return;
+        }
       } catch (err) {
         if (err instanceof SdkValidationError && err.code === "wildcard_origin") {
           this.readyState = "failed";
@@ -2488,7 +3278,8 @@
       if (this.parentOrigin === null || this.handshakeChallenge === null) {
         throw new SdkValidationError("invalid_handshake", "Context arrived before the parent handshake");
       }
-      const context = parseContextPayload(message.payload, this.parentOrigin);
+      const notes = [];
+      const context = parseContextPayload(message.payload, this.parentOrigin, notes);
       if (context.nonce !== this.handshakeChallenge) {
         throw new SdkValidationError("invalid_nonce", "Context nonce does not match the parent challenge");
       }
@@ -2505,10 +3296,20 @@
       this.activeWaiters.clear();
       this.advanced = false;
       this.readied = false;
+      const binding = `${context.generation}:${context.nonce}`;
+      if (binding !== this.activeBinding) {
+        this.activeBinding = binding;
+        this.forwardedErrors = 0;
+        this.hardware.reset(true);
+      }
+      for (const note of notes) {
+        this.report("debug", note, note === "invalid_params" ? "Dropped invalid launch params from the context" : "Dropped an invalid screen from the context");
+      }
       for (const handler of this.capabilityHandlers) {
         handler(this.capabilities);
       }
       this.watchKv();
+      this.watchVisibility();
       this.watchDevice();
     }
     supports(kind) {
@@ -2520,7 +3321,7 @@
       if (this.targetOrigin === null || this.handshakeChallenge === null) {
         throw new SdkValidationError("inert", "SDK has not bound a parent handshake");
       }
-      if (!this.supports(message.kind)) {
+      if (!this.supports(featureOf(message.kind))) {
         if (!wait) return Promise.resolve(void 0);
         return Promise.reject(new SdkValidationError("not_supported", `The Player does not support ${message.kind}`));
       }
@@ -2694,6 +3495,32 @@
       const payload = { key: this.requireKey(key), generation: context.generation, nonce: context.nonce };
       return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.get", primitive_id: context.primitive_id, payload: { ...payload } }, true);
     }
+    async kvGetText(key) {
+      const entry = await this.kvGet(key);
+      const bytes = typeof (entry == null ? void 0 : entry.value_base64) === "string" ? decodeBase64(entry.value_base64) : void 0;
+      if (bytes === void 0) throw new SdkValidationError("invalid_response", "The stored value is not base64");
+      return new TextDecoder().decode(bytes);
+    }
+    async kvGetJSON(key) {
+      const text2 = await this.kvGetText(key);
+      try {
+        return JSON.parse(text2);
+      } catch {
+        throw new SdkValidationError("invalid_value", "The stored value is not JSON");
+      }
+    }
+    kvSetJSON(key, value, options = {}) {
+      let text2;
+      try {
+        text2 = JSON.stringify(value);
+      } catch {
+        text2 = void 0;
+      }
+      if (typeof text2 !== "string") {
+        return Promise.reject(new SdkValidationError("invalid_value", "K/V value must be representable as JSON"));
+      }
+      return this.kvSet(key, text2, { ...options, contentType: options.contentType ?? "application/json" });
+    }
     async kvList() {
       const context = this.requireCapability("kv.read");
       return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.list", primitive_id: context.primitive_id, payload: { generation: context.generation, nonce: context.nonce } }, true);
@@ -2706,7 +3533,7 @@
       const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
       const payload = {
         key: this.requireKey(key),
-        value_base64: base64(bytes),
+        value_base64: encodeBase64(bytes),
         content_type: options.contentType ?? (typeof value === "string" ? "text/plain" : "application/octet-stream"),
         idempotency_key: options.idempotencyKey ?? randomIdempotencyKey(),
         generation: context.generation,
@@ -2816,18 +3643,36 @@
         for (const handler of [...this.deviceHandlers.light]) call(() => handler(event.lux));
       } else if (event.type === "network") {
         for (const handler of [...this.deviceHandlers.network]) call(() => handler(event.online));
-      } else {
+      } else if (event.type === "key") {
         for (const handler of [...this.deviceHandlers.keys]) call(() => handler(event.key));
+      } else {
+        this.hardware.dispatch(event);
+      }
+    }
+    /** Whether some handler wants this event type now. */
+    wantsDeviceEvent(event) {
+      switch (event) {
+        case "display":
+        case "presence":
+        case "keys":
+        case "light":
+        case "network":
+          return this.deviceHandlers[event].size > 0;
+        default:
+          return this.hardware.wants(event);
       }
     }
     /**
      * The device event types this frame can watch now: a handler exists, the
-     * context holds the capability, and the host advertises device.watch.
+     * context holds the capability, and the host advertises device.watch (and, for
+     * a hardware event, the feature of that device).
      */
     deviceWatchEvents() {
       if (!this.supports("device.watch")) return [];
-      const capability = { display: "device.display", presence: "device.presence", keys: "device.keys", light: "device.light", network: "device.network" };
-      return DEVICE_WATCH_EVENTS.filter((event) => this.deviceHandlers[event].size > 0 && this.capabilities[capability[event]]);
+      return DEVICE_WATCH_EVENTS.filter((event) => {
+        const needs = DEVICE_WATCH_NEEDS[event];
+        return this.wantsDeviceEvent(event) && this.capabilities[needs.capability] && (needs.feature === void 0 || this.supports(needs.feature));
+      });
     }
     /**
      * device.watch carries the full set of event types the frame wants and each
@@ -2842,9 +3687,67 @@
       const key = events.join(",");
       const previous2 = this.deviceWatched !== null && this.deviceWatched.bound === bound ? this.deviceWatched.events : "";
       this.deviceWatched = { bound, events: key };
-      if (key === previous2) return;
-      const payload = { generation: context.generation, nonce: context.nonce, events };
-      void this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.watch", primitive_id: context.primitive_id, payload: { ...payload } }, false);
+      if (key !== previous2) {
+        const payload = { generation: context.generation, nonce: context.nonce, events };
+        void this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "device.watch", primitive_id: context.primitive_id, payload: { ...payload } }, false);
+      }
+      this.hardware.afterWatch(events, bound);
+    }
+    /** Throws `inert`, `not_supported` or `capability_denied` for a hardware call, in that order. */
+    checkDevice(needs) {
+      this.requireActive();
+      for (const feature of needs.features) {
+        if (!this.supports(feature)) throw new SdkValidationError("not_supported", `The Player does not support ${feature}`);
+      }
+      for (const capability of needs.capabilities) {
+        if (!this.capabilities[capability]) throw new SdkValidationError("capability_denied", `This primitive does not have ${capability}`);
+      }
+    }
+    /** Posts a request bound to the current context and resolves with its ack's result. */
+    sendDevice(kind, members) {
+      const context = this.requireActive();
+      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind, primitive_id: context.primitive_id, payload: { ...members, generation: context.generation, nonce: context.nonce } }, true);
+    }
+    // ---- visibility, timing, uncaught errors -----------------------------------
+    onVisibility(handler) {
+      if (typeof handler !== "function") {
+        throw new SdkValidationError("invalid_handler", "onVisibility needs a function");
+      }
+      this.visibilityHandlers.add(handler);
+      this.watchVisibility();
+      return () => {
+        this.visibilityHandlers.delete(handler);
+      };
+    }
+    /**
+     * visibility.watch is a notification sent once per context while a handler
+     * exists, as kv.watch is: the host then posts visibility.changed to this frame.
+     */
+    watchVisibility() {
+      const context = this.context;
+      const bound = context ? `${context.generation}:${context.nonce}` : null;
+      if (this.readyState !== "active" || !context || this.visibilityHandlers.size === 0 || this.visibilityWatched === bound) return;
+      if (!this.supports("visibility.watch")) return;
+      this.visibilityWatched = bound;
+      void this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "visibility.watch", primitive_id: context.primitive_id, payload: { generation: context.generation, nonce: context.nonce } }, false);
+    }
+    async pageTiming() {
+      const context = this.requireActive();
+      const result = await this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "page.timing", primitive_id: context.primitive_id, payload: { generation: context.generation, nonce: context.nonce } }, true);
+      return parsePageTimingResult(result);
+    }
+    /**
+     * An uncaught error or unhandled rejection becomes a `log` entry while the
+     * runtime is active: level error, at most MAX_FORWARDED_ERRORS per activation,
+     * and counted in the client's report cap. It never touches the event.
+     */
+    forwardError(error) {
+      if (this.readyState !== "active" || this.forwardedErrors >= MAX_FORWARDED_ERRORS) return;
+      this.forwardedErrors += 1;
+      const location = error.file === void 0 ? "" : ` (${error.file}${error.line === void 0 ? "" : `:${error.line}${error.column === void 0 ? "" : `:${error.column}`}`})`;
+      const code = error.kind === "error" ? "uncaught_error" : "unhandled_rejection";
+      const head = error.message.slice(0, Math.max(0, MAX_LOG_MESSAGE_BYTES - location.length));
+      this.report("error", code, `${head}${location}`);
     }
     onResize(handler) {
       this.resizeHandlers.add(handler);
@@ -2860,6 +3763,42 @@
   }
 
   // src/host.ts
+  function text(value) {
+    return typeof value === "string" && value.length > 0 ? value : void 0;
+  }
+  function position(value) {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : void 0;
+  }
+  function readErrorEvent(event) {
+    const source = event;
+    if (typeof source !== "object" || source === null || typeof source.message !== "string") return void 0;
+    const file = text(source.filename);
+    const line = position(source.lineno);
+    const column = position(source.colno);
+    return { kind: "error", message: source.message, ...file === void 0 ? {} : { file }, ...line === void 0 ? {} : { line }, ...column === void 0 ? {} : { column } };
+  }
+  function stackLocation(stack) {
+    if (typeof stack !== "string") return void 0;
+    const match = /(?:\(|@|at\s+)([^\s()@]+?):(\d+):(\d+)\)?\s*$/m.exec(stack);
+    return match ? { file: match[1], line: Number(match[2]), column: Number(match[3]) } : void 0;
+  }
+  function readRejectionEvent(event) {
+    const source = event;
+    if (typeof source !== "object" || source === null || !("reason" in source)) return void 0;
+    const reason = source.reason;
+    let message;
+    if (reason instanceof Error) message = reason.message || reason.name;
+    else if (typeof reason === "string") message = reason;
+    else {
+      try {
+        message = JSON.stringify(reason) ?? String(reason);
+      } catch {
+        message = String(reason);
+      }
+    }
+    const where = reason instanceof Error ? stackLocation(reason.stack) : void 0;
+    return { kind: "unhandledrejection", message, ...where === void 0 ? {} : where };
+  }
   var BrowserHost = class {
     constructor(windowLike) {
       this.windowLike = windowLike;
@@ -2870,6 +3809,30 @@
       const wrapped = (event) => listener(event);
       this.windowLike.addEventListener("message", wrapped);
       return () => this.windowLike.removeEventListener("message", wrapped);
+    }
+    /**
+     * `error` and `unhandledrejection` of the window. The listeners only read the
+     * event: they never call preventDefault, so the browser's console report and
+     * the page's own handlers are untouched. An event of another shape (a window
+     * that treats every type alike) is ignored.
+     */
+    addErrorListener(listener) {
+      const target = this.windowLike;
+      if (typeof target.addEventListener !== "function") return () => void 0;
+      const onError = (event) => {
+        const error = readErrorEvent(event);
+        if (error !== void 0) listener(error);
+      };
+      const onRejection = (event) => {
+        const error = readRejectionEvent(event);
+        if (error !== void 0) listener(error);
+      };
+      target.addEventListener("error", onError);
+      target.addEventListener("unhandledrejection", onRejection);
+      return () => {
+        target.removeEventListener("error", onError);
+        target.removeEventListener("unhandledrejection", onRejection);
+      };
     }
     postToParent(data, targetOrigin, opaqueSourceBound = false) {
       if (!targetOrigin || targetOrigin === "*" && !opaqueSourceBound) {
@@ -2882,13 +3845,15 @@
   // src/trusted-origin.ts
   var LOCAL_PLAYER_ORIGIN = "http://play.screenrig.localhost:8088";
   var LOCAL_EDGE_PLAYER_ORIGIN = "http://play.screenrig.localhost:18880";
+  var DEV_PLAYER_ORIGIN = "http://play.screenrig.localhost:18890";
   var STAGE_PLAYER_ORIGIN = "https://play.stage.screenrig.ai";
   var DASHBOARD_ORIGIN = "https://screenrig.ai";
   var STAGE_DASHBOARD_ORIGIN = "https://stage.screenrig.ai";
   var LOCAL_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.screenrig\.localhost$/;
   var LOCAL_PORTS = [
     { port: "8088", playerOrigin: LOCAL_PLAYER_ORIGIN },
-    { port: "18880", playerOrigin: LOCAL_EDGE_PLAYER_ORIGIN }
+    { port: "18880", playerOrigin: LOCAL_EDGE_PLAYER_ORIGIN },
+    { port: "18890", playerOrigin: DEV_PLAYER_ORIGIN }
   ];
   var STAGE_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.stage\.screenrig\.ai$/;
   var NATIVE_PACKAGE_HOSTNAME = /^p-[a-f0-9]{32}\.[a-f0-9]{32}\.offline\.screenrig\.invalid$/;
@@ -2931,7 +3896,7 @@
     }
     const localParent = localReleaseParentOrigin(location);
     if (localParent !== void 0) {
-      return localParent.replace("://play.", "://");
+      return localParent === DEV_PLAYER_ORIGIN ? void 0 : localParent.replace("://play.", "://");
     }
     if (isStageReleaseDocument(location)) {
       return STAGE_DASHBOARD_ORIGIN;

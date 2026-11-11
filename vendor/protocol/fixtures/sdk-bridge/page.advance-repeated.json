@@ -1,0 +1,72 @@
+{
+  "fixtureVersion": 1,
+  "contractVersion": "screenrig.sdk-bridge/v1",
+  "name": "page.advance-repeated",
+  "kind": "page.advance",
+  "purpose": "page.advance is one-shot per activation: a second one is refused with forbidden (403).",
+  "host": {
+    "applicationId": "app_bridge",
+    "releaseId": "rel_bridge",
+    "primitiveId": "prm_bridge_0001",
+    "generation": 7,
+    "nonce": "bridge-nonce-0123456789abcdef",
+    "capabilityHandle": "pch_bridge_capability_handle",
+    "controller": true,
+    "advanced": true,
+    "readied": false,
+    "capabilities": {
+      "page.advance": true,
+      "page.skip": true,
+      "kv.read": true,
+      "kv.write": true
+    },
+    "features": [
+      "ready",
+      "log",
+      "event.emit",
+      "page.advance",
+      "page.skip",
+      "kv.get",
+      "kv.list",
+      "kv.set",
+      "kv.delete",
+      "kv.watch"
+    ]
+  },
+  "in": {
+    "protocol": "1",
+    "message_id": "msg_app_advance_0003",
+    "kind": "page.advance",
+    "primitive_id": "prm_bridge_0001",
+    "payload": {
+      "generation": 7,
+      "nonce": "bridge-nonce-0123456789abcdef"
+    }
+  },
+  "backend": null,
+  "expect": {
+    "reply": {
+      "protocol": "1",
+      "message_id": "",
+      "kind": "response.problem",
+      "primitive_id": "prm_bridge_0001",
+      "payload": {
+        "request_message_id": "msg_app_advance_0003",
+        "generation": 7,
+        "nonce": "bridge-nonce-0123456789abcdef",
+        "problem": {
+          "code": "forbidden",
+          "status": 403,
+          "detail": "",
+          "request_id": ""
+        }
+      }
+    },
+    "backendRequests": "none",
+    "hostChosen": [
+      "/message_id",
+      "/payload/problem/detail",
+      "/payload/problem/request_id"
+    ]
+  }
+}
