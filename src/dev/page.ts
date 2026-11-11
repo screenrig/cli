@@ -138,11 +138,12 @@ const SCRIPT = String.raw`(function () {
         else node.setAttribute(name, value === true ? '' : String(value));
       });
     }
-    for (var i = 2; i < arguments.length; i += 1) {
-      var child = arguments[i];
-      if (child === null || child === undefined || child === false) continue;
+    function add(child) {
+      if (child === null || child === undefined || child === false) return;
+      if (Array.isArray(child)) { child.forEach(add); return; }
       node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
     }
+    for (var i = 2; i < arguments.length; i += 1) add(arguments[i]);
     return node;
   }
 

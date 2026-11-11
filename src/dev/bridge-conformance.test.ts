@@ -158,7 +158,6 @@ function build(fixture: Fixture): { host: BridgeHost; posted: Posted[]; logs: Ho
     post: (message) => { posted.push(message); }, log: (event) => { logs.push(event); },
   });
   host.activateAs(fixture.host.generation, fixture.host.nonce);
-  host.controller = fixture.host.controller;
   host.advanced = fixture.host.advanced ?? false;
   host.readied = fixture.host.readied ?? false;
   if (fixture.host.display) host.display = { ...fixture.host.display };

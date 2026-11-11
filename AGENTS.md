@@ -38,6 +38,22 @@ Players, backend services or the site.
   test fails otherwise); help guidance loads only for help.
 - `npm-release.yml` is the only npm publication path (`RELEASING.md`).
 
+## Application dev harness
+
+`app dev` (`src/handlers/app-dev.ts`, loaded on demand with `src/dev/`) serves a directory the way a
+Player plays it, so applications are tried before upload.
+
+- It builds through `releaseEntries` in `src/pack/index.ts`, the same walk, inline-asset hoisting,
+  runtime injection and limits `app pack` uses; never rebuild that path in `src/dev/`.
+- The runtime trusts the harness as its parent on port 18890 only, for a release host
+  `r-<40 hex>.apps.screenrig.localhost` and the Player host `play.screenrig.localhost`; another port is
+  refused. `src/dev/csp.ts` is a copy of the backend's `releaseAssetPolicy`: change it with that function.
+- `src/dev/bridge-host.ts` is the host side of the SDK bridge. It must pass every host fixture of
+  `vendor/protocol/fixtures/sdk-bridge*` (vendored through `contracts.toml`); `sdk-integration.test.ts`
+  also runs the pinned `assets/screenrig.runtime.js` against it.
+- The page (`src/dev/page.ts`) is plain script and style in raw strings, without a backtick or a
+  dollar-brace and with no remote URL; `server.test.ts` checks both.
+
 ## Rules
 
 - Edit `src/`, never `dist/`. Never hand-edit `assets/` or `src/generated/`;

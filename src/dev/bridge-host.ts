@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
-  BASELINE_FEATURES, CAPABILITY_NAMES, DEVICE_CHUNK_BYTES, ID_RE, KIND_RE, MAX_MESSAGE_BYTES, PARENT_HANDSHAKE_PROTOCOL, PRIMITIVE_ID_RE, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
+  BASELINE_FEATURES, DEVICE_CHUNK_BYTES, ID_RE, KIND_RE, MAX_MESSAGE_BYTES, PARENT_HANDSHAKE_PROTOCOL, PROTOCOL, SKIP_WINDOW_MS, WATCH_EVENTS,
   featureOf, isRecord, type BridgeMessage, type Capabilities, type CapabilityName, type Posted, type Size,
 } from "./bridge-protocol.js";
 import { FrameDevice, type DeviceActivity, type Outcome } from "./hardware-requests.js";
@@ -149,7 +149,6 @@ export class BridgeHost {
   darkHeld = false;
   network = { online: true };
   maxMs: number | null = null;
-  controller = true;
 
   private activatedAt = 0;
   private startedAt = 0;
@@ -874,5 +873,3 @@ export class BridgeHost {
     };
   }
 }
-
-export { CAPABILITY_NAMES, PRIMITIVE_ID_RE };
