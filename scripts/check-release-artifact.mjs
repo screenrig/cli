@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,6 +131,13 @@ async function main() {
     const packed = successfulEnvelope(packageRoot, ["app", "pack", path.join(root, "fixtures", "pack", "ok-app"), "--output", path.join(temporary, "app.tgz")], environment);
     const runtime = createHash("sha256").update(await readFile(path.join(root, "assets", "screenrig.runtime.js"))).digest("hex");
     if (packed.data?.sdk_injection?.asset_sha256 !== runtime) throw new Error("bundled browser runtime differs from assets/screenrig.runtime.js");
+    // It also carries the declaration file for TypeScript applications, which `app types` writes.
+    const sources = path.join(temporary, "sources");
+    await mkdir(sources);
+    const declared = await readFile(path.join(root, "assets", "screenrig.d.ts"));
+    const typed = successfulEnvelope(packageRoot, ["app", "types", sources], environment);
+    if (typed.data?.sha256 !== createHash("sha256").update(declared).digest("hex")) throw new Error("bundled SDK types differ from assets/screenrig.d.ts");
+    if (!(await readFile(path.join(sources, "screenrig.d.ts"))).equals(declared)) throw new Error("app types did not write assets/screenrig.d.ts");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

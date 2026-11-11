@@ -13,3 +13,5 @@ repo = "backend"
 "vendor/protocol/openapi.gen.ts" = "api/public/openapi.gen.ts"
 "vendor/openapi.yaml" = "api/public/openapi.yaml"
 "assets/screenrig.runtime.js" = "contracts/sdk/dist/screenrig.runtime.js"
+# The declaration file for TypeScript applications, built beside the runtime.
+"assets/screenrig.d.ts" = "contracts/sdk/dist/screenrig.runtime.d.ts"

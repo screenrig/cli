@@ -32,6 +32,8 @@ export interface CliRuntime {
   vendorFetch?: typeof fetch;
   /** The fetch for files the site serves beside the dashboard (the Android build list); the global fetch when absent. Tests inject a fixture. */
   siteFetch?: typeof fetch;
+  /** The bytes `app types` writes; the packaged assets/screenrig.d.ts when absent. Tests inject a fixture. */
+  sdkTypes?: () => Uint8Array;
 }
 
 export interface SignedRawPutRequest {

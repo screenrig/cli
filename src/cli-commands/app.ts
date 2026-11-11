@@ -1,6 +1,6 @@
 import { positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../handlers/app.js";
+import { handleAppPack, handleAppTypes, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../handlers/app.js";
 import type { Command } from "commander";
 
 export function registerAppCommands(root: Command, bind: CommandActionBinder): void {
@@ -10,6 +10,10 @@ export function registerAppCommands(root: Command, bind: CommandActionBinder): v
     .argument("<directory>", "Local directory")
     .option("--output <PATH>", "Write the application package to this file")
     .action(bind(handleAppPack));
+
+  app.command("types").description("Write the TypeScript types for window.screenrig into a directory")
+    .argument("[directory]", "Directory to write screenrig.d.ts into; defaults to the current directory")
+    .action(bind(handleAppTypes));
 
   app.command("upload").description("Upload an application directory")
     .argument("<directory>", "Local directory")

@@ -1,15 +1,17 @@
 // Command handlers for the app commands, loaded on demand.
-import { stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { limitsFromCapabilities, type Capabilities, type OperationAccepted } from "../adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "../adapters/sdk-injection.js";
+import { readSdkTypes, SDK_TYPES_FILE } from "../adapters/sdk-types.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "../command-input.js";
 import { requireToken } from "../client.js";
 import { resolveConfig } from "../config.js";
 import { loggerOf } from "../log/index.js";
 import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
-import { usageError } from "../problems.js";
+import { CliError, usageError } from "../problems.js";
 import { packDirectory } from "../pack/index.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
@@ -19,6 +21,8 @@ import { clientFor, commandHandler, humanLines, jsonBody, requireFlagValue, simp
 
 
 export const handleAppPack = commandHandler(appPack, false);
+
+export const handleAppTypes = commandHandler(appTypes, false);
 
 export const handleAppUpload = commandHandler(async (args, runtime, resolved) => {
   return loggerOf(runtime).withLocal({ op: "app.upload", message: "app upload" }, () =>
@@ -100,6 +104,58 @@ export async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<Co
       ["expanded_bytes", String(result.expanded_bytes)],
       ["file_count", String(result.file_count)],
       ["sdk_injection", result.sdk_injection.injected ? "yes" : "deferred"],
+    ]),
+  };
+}
+
+/** `app types` writes the declaration file for `window.screenrig` into a directory; it needs no credential and sends nothing. */
+export async function appTypes(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
+  const dir = args.positionals[2] ?? ".";
+  const root = path.resolve(runtime.cwd(), dir);
+  const next = { command: "screenrig app types ./SOURCES", reason: `Writes ${SDK_TYPES_FILE} into a directory that exists.` };
+  let isDirectory = false;
+  try {
+    isDirectory = (await stat(root)).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    throw usageError(`${dir} does not exist. Name the directory that holds your TypeScript sources.`, next);
+  }
+  if (!isDirectory) {
+    throw usageError(`${dir} is a file. Name the directory to write ${SDK_TYPES_FILE} into.`, next);
+  }
+  const types = runtime.sdkTypes ? Buffer.from(runtime.sdkTypes()) : readSdkTypes();
+  const target = path.join(root, SDK_TYPES_FILE);
+  const shown = path.join(dir, SDK_TYPES_FILE);
+  let existing: Buffer | undefined;
+  try {
+    if (!(await lstat(target)).isFile()) {
+      throw usageError(`${shown} exists and is not a regular file. Move it aside, then run the command again.`, next);
+    }
+    existing = await readFile(target);
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const written = existing === undefined || !existing.equals(types);
+  if (written) {
+    // The file replaces a previous copy whole or not at all.
+    const temporary = `${target}.${process.pid}.tmp`;
+    try {
+      await writeFile(temporary, types, { flag: "wx", mode: 0o644 });
+      await rename(temporary, target);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+  }
+  const data = { path: shown, bytes: types.length, sha256: createHash("sha256").update(types).digest("hex"), written };
+  return {
+    envelope: successEnvelope(data),
+    exitCode: ExitCode.Success,
+    human: humanLines(written ? "SDK types written" : "SDK types already current", [
+      ["path", data.path],
+      ["bytes", String(data.bytes)],
+      ["sha256", data.sha256],
     ]),
   };
 }

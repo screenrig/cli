@@ -18,6 +18,7 @@
   "files": [
     "SECURITY.md",
     "assets/screenrig.runtime.js",
+    "assets/screenrig.d.ts",
     "assets/playlist-write-v2.schema.json",
     "dist/**/*.js",
     "dist/**/*.js.map",
