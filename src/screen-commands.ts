@@ -239,7 +239,7 @@ export function suspendProblem(error: unknown, id: string): unknown {
 
 /**
  * The replace refusals: both screens must be active with a paired Player, a
- * video wall needs a replacement that declares display.wall, and neither id
+ * video wall needs a replacement that declares display.wall (display.rotate for one output), and neither id
  * may be another project's or the same screen.
  */
 export function replaceProblem(error: unknown, id: string, withId: string): unknown {

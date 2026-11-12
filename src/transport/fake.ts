@@ -1658,7 +1658,8 @@ export function memoryBackend(options: {
     if (stale) return stale;
     if (kept.state === "archived" || taker.state === "archived") return refusal(409, "screen_archived", "The screen is archived.");
     if (kept.state !== "active" || taker.state !== "active") return refusal(409, "resource_conflict", "The screen has no paired Player yet.");
-    if (kept.wall && !(taker.host?.capabilities ?? []).includes("display.wall")) return refusal(409, "wall_unsupported", "The screen's Player did not declare the display.wall host capability.");
+    const wallCapability = kept.wall?.outputs.length === 1 ? "display.rotate" : "display.wall";
+    if (kept.wall && !(taker.host?.capabilities ?? []).includes(wallCapability)) return refusal(409, "wall_unsupported", `The screen's Player did not declare the ${wallCapability} host capability.`);
     const next: Record<string, unknown> = { ...kept, revision: kept.revision + 1, content_access_generation: kept.content_access_generation + 1 };
     for (const key of DEVICE_READ_MODELS) delete next[key];
     if (taker.host) next.host = taker.host;

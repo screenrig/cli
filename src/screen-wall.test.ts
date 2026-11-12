@@ -73,6 +73,37 @@ test("screen wall set without --rotation or --expect-rev sends neither", async (
   }
 });
 
+test("screen wall set with one output rotates a single screen: arrangement row is sent, columns and other arrangements are refused", async (t) => {
+  const { invoke, cleanup } = await fixture("wall-set-one-"); t.after(cleanup);
+  const patches: TransportRequest[] = [];
+  const transport = wallTransport(patches);
+  const result = await invoke(transport, ["--json", "screen", "wall", "set", SCREEN, "--outputs", "HDMI-A-1", "--rotation", "90"]);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(patches[0]!.body, { wall: { outputs: ["HDMI-A-1"], arrangement: "row", rotation: 90 } });
+  assert.deepEqual(result.body.data.wall, { outputs: ["HDMI-A-1"], arrangement: "row", rotation: 90 });
+  const explicit = await invoke(transport, ["--json", "screen", "wall", "set", SCREEN, "--outputs", "DP-2", "--arrangement", "row", "--rotation", "180"]);
+  assert.equal(explicit.code, 0, explicit.stdout);
+  assert.deepEqual(patches[1]!.body, { wall: { outputs: ["DP-2"], arrangement: "row", rotation: 180 } });
+  // Two or more outputs without --arrangement are a row too.
+  assert.equal((await invoke(transport, ["--json", "screen", "wall", "set", SCREEN, "--outputs", "A,B,C"])).code, 0);
+  assert.deepEqual(patches[2]!.body, { wall: { outputs: ["A", "B", "C"], arrangement: "row" } });
+  const human = await invoke(transport, ["--human", "screen", "wall", "set", SCREEN, "--outputs", "HDMI-A-1", "--rotation", "270"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, new RegExp(`Set video wall on ${SCREEN}: HDMI-A-1 \\(single screen, rotation 270\\)`));
+  const sent = patches.length;
+  for (const [flags, detail] of [
+    [["--arrangement", "grid"], /--arrangement grid needs two or more outputs; one output rotates a single screen/],
+    [["--arrangement", "column"], /--arrangement column needs two or more outputs/],
+    [["--columns", "2"], /--columns is only for a grid of two or more outputs/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await invoke(transport, ["--json", "screen", "wall", "set", SCREEN, "--outputs", "HDMI-A-1", ...flags]);
+    assert.equal(refused.code, 2, `${flags.join(" ")}: ${refused.stdout}`);
+    assert.equal(refused.body.error.code, "usage_error");
+    assert.match(refused.body.error.detail, detail);
+  }
+  assert.equal(patches.length, sent, "a refused one-output wall sends nothing");
+});
+
 test("screen wall set says what it set in human output", async (t) => {
   const { invoke, cleanup } = await fixture("wall-set-human-"); t.after(cleanup);
   const result = await invoke(wallTransport([]), ["--human", "screen", "wall", "set", SCREEN, "--outputs", "DP-1,DP-2", "--arrangement", "row", "--rotation", "270"]);
@@ -126,8 +157,7 @@ test("screen wall validation errors are usage errors that send nothing", async (
   const patches: TransportRequest[] = [];
   const transport = wallTransport(patches);
   const cases: Array<[string[], RegExp]> = [
-    [["set", SCREEN, "--outputs", "HDMI-A-1", "--arrangement", "row"], /--outputs takes 2 to 12 comma-separated output names/],
-    [["set", SCREEN, "--outputs", "A,B,C,D,E,F,G,H,I,J,K,L,M", "--arrangement", "row"], /--outputs takes 2 to 12 comma-separated output names/],
+    [["set", SCREEN, "--outputs", "A,B,C,D,E,F,G,H,I,J,K,L,M", "--arrangement", "row"], /--outputs takes 1 to 12 comma-separated output names/],
     [["set", SCREEN, "--outputs", "A,A", "--arrangement", "row"], /--outputs lists an output more than once/],
     [["set", SCREEN, "--outputs", "A,B C", "--arrangement", "row"], /1 to 64 letters, digits, dots, underscores or dashes/],
     [["set", SCREEN, "--outputs", "A,", "--arrangement", "row"], /1 to 64 letters, digits, dots, underscores or dashes/],
@@ -137,7 +167,6 @@ test("screen wall validation errors are usage errors that send nothing", async (
     [["set", SCREEN, "--outputs", "A,B,C,D", "--arrangement", "grid", "--columns", "0"], /--columns must be greater than zero/],
     [["set", SCREEN, "--outputs", "A,B", "--arrangement", "row", "--rotation", "45"], /--rotation must be 0, 90, 180, or 270/],
     [["set", SCREEN, "--arrangement", "row"], /screen wall set requires .*--outputs/],
-    [["set", SCREEN, "--outputs", "A,B"], /screen wall set requires .*--arrangement/],
     [["set", "--outputs", "A,B", "--arrangement", "row"], /screen wall set requires <id>/],
     [["clear"], /screen wall clear requires <id>/],
   ];
@@ -166,12 +195,13 @@ test("wall_unsupported tells the agent to check the Player's host capabilities",
 
 test("screen wall help states the contract and carries examples", () => {
   const set = commandHelp(["screen", "wall", "set"], true);
-  assert.deepEqual(set.options.filter((option) => option.required).map((option) => option.name).sort(), ["--arrangement", "--outputs"]);
+  assert.deepEqual(set.options.filter((option) => option.required).map((option) => option.name).sort(), ["--outputs"]);
   assert.ok(set.examples.every((example: string) => example.startsWith("screenrig screen wall set ")));
-  assert.equal(set.examples.length, 3);
+  assert.equal(set.examples.length, 4);
+  assert.equal(set.examples[0], `screenrig screen wall set scr_SCREEN --outputs HDMI-A-1 --rotation 90`);
   assert.ok(set.options.some((option) => option.name === "--columns" && !option.required));
   const text = set.notes.join("\n");
-  for (const phrase of [/observation\.surfaces/, /two to twelve/, /left to right then top to bottom/, /rows of --columns displays/, /fill a rectangle of the wall/, /90 and 270 are portrait/, /wlr-randr/, /Windows Player/, /wall_unsupported/, /20 seconds/, /playlist init --screen-id/]) assert.match(text, phrase);
+  for (const phrase of [/observation\.surfaces/, /two to twelve/, /left to right then top to bottom/, /rows of --columns displays/, /fill a rectangle of the wall/, /90 and 270 are portrait/, /wlr-randr/, /Windows Player/, /wall_unsupported/, /rotates a single screen/, /display\.rotate/, /in every plan/, /1080x1920/, /20 seconds/, /playlist init --screen-id/]) assert.match(text, phrase);
   assert.deepEqual(commandHelp(["screen", "wall", "clear"], true).examples, [`screenrig screen wall clear scr_SCREEN`, `screenrig screen wall clear scr_SCREEN --expect-rev 5`]);
 });
 
@@ -186,8 +216,17 @@ test("wallOutputs and wallCanvas follow ScreenWall", () => {
   assert.deepEqual(wallCanvas({ wall: { outputs: ["a", "b"], arrangement: "column", rotation: 180 } }), { width: 1920, height: 2160, format: { displays: 2, arrangement: "column", orientation: "landscape" } });
   assert.deepEqual(wallCanvas({ wall: { outputs: ["a", "b"], arrangement: "column", rotation: 90 } }), { width: 1080, height: 3840, format: { displays: 2, arrangement: "column", orientation: "portrait" } });
   assert.deepEqual(wallCanvas({ wall: { outputs: ["a", "b", "c"], arrangement: "row", rotation: 270 } }), { width: 3240, height: 1920, format: { displays: 3, arrangement: "row", orientation: "portrait" } });
-  assert.throws(() => wallCanvas({ wall: { outputs: ["a"], arrangement: "row" } }), /invalid video wall/);
+  assert.throws(() => wallCanvas({ wall: { outputs: [], arrangement: "row" } }), /invalid video wall/);
   assert.throws(() => wallCanvas({ wall: { outputs: ["a", "b"], arrangement: "diagonal" } }), /invalid video wall/);
+});
+
+test("wallCanvas gives a one-output screen one tile and never a wall format", () => {
+  assert.deepEqual(wallCanvas({ wall: { outputs: ["a"], arrangement: "row" } }), { width: 1920, height: 1080 });
+  assert.deepEqual(wallCanvas({ wall: { outputs: ["a"], arrangement: "row", rotation: 180 } }), { width: 1920, height: 1080 });
+  assert.deepEqual(wallCanvas({ wall: { outputs: ["a"], arrangement: "row", rotation: 90 } }), { width: 1080, height: 1920 });
+  assert.deepEqual(wallCanvas({ wall: { outputs: ["a"], arrangement: "row", rotation: 270 } }), { width: 1080, height: 1920 });
+  assert.equal(Object.hasOwn(wallCanvas({ wall: { outputs: ["a"], arrangement: "row", rotation: 90 } })!, "format"), false);
+  assert.deepEqual(targetDimensions({ wall: { outputs: ["a"], arrangement: "row", rotation: 90 }, observation: { surfaces: [{ id: "a", width: 1920, height: 1080 }] } }), { width: 1080, height: 1920 });
 });
 
 test("wallCanvas lays out up to twelve tiles: C columns by displays / C rows, columns only for a grid", () => {
@@ -200,7 +239,7 @@ test("wallCanvas lays out up to twelve tiles: C columns by displays / C rows, co
   assert.deepEqual(wallCanvas({ wall: { outputs: names(6), arrangement: "grid", columns: 2, rotation: 270 } }), { width: 2160, height: 5760, format: { displays: 6, arrangement: "grid", orientation: "portrait", columns: 2 } });
   assert.deepEqual(wallCanvas({ wall: { outputs: names(6), arrangement: "grid", columns: 3 } }), { width: 5760, height: 2160, format: { displays: 6, arrangement: "grid", orientation: "landscape", columns: 3 } });
   // A row or column never carries columns into the format.
-  assert.equal(Object.hasOwn(wallCanvas({ wall: { outputs: names(3), arrangement: "row", columns: 3 } })!.format, "columns"), false);
+  assert.equal(Object.hasOwn(wallCanvas({ wall: { outputs: names(3), arrangement: "row", columns: 3 } })!.format!, "columns"), false);
   assert.throws(() => wallCanvas({ wall: { outputs: names(13), arrangement: "row" } }), /invalid video wall/);
   // A grid holds whole rows: columns is required, at least 2, and divides the displays into at least 2 rows.
   for (const columns of [undefined, 1, 3, 4, 4.5, 6, 12]) {
@@ -276,6 +315,36 @@ test("playlist init on a wall screen writes the wall canvas and its format", asy
   assert.match(ambiguous.body.error.detail, /unknown or ambiguous/);
   await assert.rejects(readFile(path.join(dir, "ambiguous.json")));
   assert.equal(transport.calls.some((call) => call.method !== "GET"), false);
+});
+
+test("playlist init on a rotated single screen writes a portrait canvas and no format", async (t) => {
+  const { dir, invoke, cleanup } = await fixture("wall-init-one-"); t.after(cleanup);
+  const transport = new FakeTransport().on("GET", `/api/screens/${SCREEN}`, () => ({
+    status: 200, headers: {}, body: {
+      id: SCREEN, revision: 3, wall: { outputs: ["HDMI-A-1"], arrangement: "row", rotation: 90 },
+      observation: { observed_at: "2026-10-22T10:00:00Z", surfaces: [{ id: "HDMI-A-1", width: 1080, height: 1920, pixel_ratio: 1, presentation: "output", rotation: 90 }] },
+    },
+  }));
+  const result = await invoke(transport, ["--json", "playlist", "init", "rel_TEST", "https://example.com/board", "--name", "Portrait", "--screen-id", SCREEN, "--output", "portrait.json"]);
+  assert.equal(result.code, 0, result.stdout);
+  const document = JSON.parse(await readFile(path.join(dir, "portrait.json"), "utf8"));
+  assert.equal(document.format, undefined);
+  assert.deepEqual(Object.keys(document), ["name", "pages"]);
+  assert.deepEqual([document.pages[0].canvas.width, document.pages[0].canvas.height], [1080, 1920]);
+  assert.deepEqual([result.body.data.width, result.body.data.height], [1080, 1920]);
+  assert.equal(result.body.data.format, undefined);
+});
+
+test("wall_unsupported for one output names display.rotate", async (t) => {
+  const { invoke, cleanup } = await fixture("wall-unsupported-one-"); t.after(cleanup);
+  const transport = new FakeTransport().on("PATCH", `/api/screens/${SCREEN}`, () => ({
+    status: 409, headers: { "content-type": "application/problem+json" },
+    body: { type: "https://screenrig.ai/problems/wall-unsupported", title: "Wall unsupported", status: 409, code: "wall_unsupported", detail: "The screen's Player did not declare display.rotate." },
+  }));
+  const result = await invoke(transport, ["--json", "screen", "wall", "set", SCREEN, "--outputs", "A", "--rotation", "90"]);
+  assert.equal(result.code, 5, result.stdout);
+  assert.match(result.body.error.detail, /one rotated screen needs the Linux Player's kiosk install, which declares display\.rotate/);
+  assert.match(result.body.error.next.reason, /display\.rotate \(one output\)/);
 });
 
 test("a wall playlist passes format through create, update, patch and an editable read", async (t) => {

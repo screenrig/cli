@@ -765,7 +765,7 @@ export const handleScreenWallSet = commandHandler(async (args, runtime, resolved
   const id = args.positionals[3];
   const outputs = flagString(args.flags, "outputs");
   const arrangement = flagString(args.flags, "arrangement");
-  if (!id || !outputs || !arrangement) throw usageError("screen wall set requires <id> --outputs --arrangement.");
+  if (!id || !outputs) throw usageError("screen wall set requires <id> --outputs.");
   const wall = wallFromFlags(outputs, arrangement, flagString(args.flags, "rotation"), flagString(args.flags, "columns"));
   const { response, client, screen } = await screenWallPatch(args, runtime, resolved, id, wall);
   return {

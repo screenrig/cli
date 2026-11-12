@@ -412,8 +412,9 @@ export type ScreenWallArrangement = "row" | "column" | "grid";
 export type ScreenWallRotation = 0 | 90 | 180 | 270;
 
 /**
- * The video wall a screen's Player lays out: two to twelve outputs that show
- * one canvas. `outputs` are output names as the Player reports them
+ * How a screen's Player lays out its outputs: one to twelve. Two or more show
+ * one canvas (a video wall); one output is a single screen turned by
+ * `rotation` and its `arrangement` is row. `outputs` are output names as the Player reports them
  * (observation surface ids) in physical order: left to right, then top to
  * bottom. `columns` is the outputs per row of a grid, given for a grid only.
  * `rotation` is clockwise degrees on every output (default 0); 90 and 270
@@ -426,7 +427,7 @@ export interface ScreenWall {
   rotation?: ScreenWallRotation;
 }
 
-/** The video wall a playlist is authored for: 2 to 12 displays, tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait); `columns` for a grid only. */
+/** The video wall a playlist is authored for: 2 to 12 displays (a one-output screen has no format), tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait); `columns` for a grid only. */
 export interface PlaylistWallFormat {
   displays: number;
   arrangement: ScreenWallArrangement;
@@ -1160,7 +1161,7 @@ export interface ScreenPatch {
   timezone?: string | null;
   /** Replaces the whole tag set; an empty array clears it. Bumps the screen revision. */
   tags?: ScreenTags;
-  /** An object sets the screen's video wall, null clears it. Needs a Player that declared display.wall (409 wall_unsupported otherwise). */
+  /** An object sets the screen's video wall, null clears it. Two or more outputs need a Player that declared display.wall, one output display.rotate (409 wall_unsupported otherwise). */
   wall?: ScreenWall | null;
   /**
    * Merges into the screen's fields: a string sets one, null removes it. A null

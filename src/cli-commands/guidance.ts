@@ -212,7 +212,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "screen assign": ["scr_SCREEN --playlist-id pl_PLAYLIST", "--tag Lobby --playlist-id pl_PLAYLIST", "--folder sfd_NORTH --playlist-id pl_PLAYLIST", "scr_LOBBY scr_ENTRANCE --playlist-id pl_PLAYLIST"],
     "screen tag": ["scr_SCREEN --add Lobby,Floor2", "scr_SCREEN --set Lobby --expect-rev 4", "scr_SCREEN --clear", "--tag Lobby --add Spring", "--folder sfd_NORTH --add Spring"],
     "screen set-timezone": ["scr_SCREEN --timezone America/Los_Angeles", "scr_SCREEN --clear"],
-    "screen wall set": ["scr_SCREEN --outputs HDMI-A-1,HDMI-A-2 --arrangement row", "scr_SCREEN --outputs DP-1,DP-2,DP-3 --arrangement row --rotation 90 --expect-rev 4", "scr_SCREEN --outputs DP-1,DP-2,DP-3,DP-4,DP-5,DP-6 --arrangement grid --columns 3"],
+    "screen wall set": ["scr_SCREEN --outputs HDMI-A-1 --rotation 90", "scr_SCREEN --outputs HDMI-A-1,HDMI-A-2 --arrangement row", "scr_SCREEN --outputs DP-1,DP-2,DP-3 --arrangement row --rotation 90 --expect-rev 4", "scr_SCREEN --outputs DP-1,DP-2,DP-3,DP-4,DP-5,DP-6 --arrangement grid --columns 3"],
     "screen wall clear": ["scr_SCREEN", "scr_SCREEN --expect-rev 5"],
     "screen display-idle": ["scr_SCREEN --after 300 --wake touch", "scr_SCREEN --after 600 --wake touch,presence --expect-rev 4", "scr_SCREEN --off"],
     "screen brightness": ["scr_SCREEN --mode auto", "scr_SCREEN --mode fixed --expect-rev 4"],
