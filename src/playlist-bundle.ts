@@ -995,7 +995,6 @@ export async function importPlaylistBundle(options: {
   pollMs?: number;
   /** The proposer's note when the playlist write becomes a review. */
   note?: string;
-  beforePlaylistWrite?: (playlist: JsonRecord, updateId: string | undefined) => Promise<void>;
 }): Promise<PlaylistBundleImportResult> {
   if (options.name !== undefined) {
     const trimmed = options.name.trim();
@@ -1035,7 +1034,6 @@ export async function importPlaylistBundle(options: {
         );
       }
     }
-    await options.beforePlaylistWrite?.(bundle.playlist, options.updateId);
     const list = await options.client.listAll("/api/media");
     const existing = existingMediaList(list.body);
     for (const source of bundle.manifest.media) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
+import { renameSync, writeFileSync } from "node:fs";
 import {
   chmod,
   link,
@@ -597,14 +598,19 @@ function importTransport(
     playlistResponse?: (request: TransportRequest) => TransportResponse | undefined;
     /** Serve the media list this many rows per page, with next_cursor; without it the list is one page with no next_cursor. */
     pageSize?: number;
+    /** Runs when the media list is read: after the local preflight, before any upload. */
+    onMediaList?: () => void;
   } = {},
 ) {
   const transport = new FakeTransport();
   let declaration = 0;
   const operations = new Map<string, string>();
-  transport.on("GET", "/api/media", (req) => options.pageSize === undefined
-    ? { status: 200, headers: {}, body: { items: existing } }
-    : listPage(req, existing, options.pageSize));
+  transport.on("GET", "/api/media", (req) => {
+    options.onMediaList?.();
+    return options.pageSize === undefined
+      ? { status: 200, headers: {}, body: { items: existing } }
+      : listPage(req, existing, options.pageSize);
+  });
   transport.on("GET", /^\/api\/playlists\/pl_/, (req) => ({
     status: 200,
     headers: { etag: '"8"' },
@@ -1136,16 +1142,17 @@ test("import uploads the verified open file even when the bundle path is replace
   const replacement = Uint8Array.from([9, 9, 9, 9]);
   const manifest = await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: original }]);
   const filename = path.join(dir, manifest.media[0]!.path);
-  const transport = importTransport([], ["med_NEW"]);
+  const transport = importTransport([], ["med_NEW"], {
+    onMediaList: () => {
+      renameSync(filename, `${filename}.replaced`);
+      writeFileSync(filename, replacement, { mode: 0o600 });
+    },
+  });
   const signedBodies: Uint8Array[] = [];
   await importPlaylistBundle({
     directory: dir,
     client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
     runtime: runtimeForImport(signedBodies),
-    beforePlaylistWrite: async () => {
-      await rename(filename, `${filename}.replaced`);
-      await writeFile(filename, replacement, { mode: 0o600 });
-    },
   });
   assert.deepEqual(signedBodies.map((value) => [...value]), [[...original]]);
   await rm(dir, { recursive: true, force: true });
@@ -1165,7 +1172,7 @@ test("import validates create/update flags and all local bytes before any networ
   await rm(dir, { recursive: true, force: true });
 });
 
-test("update target revision and the before-write hook finish before any media upload", async () => {
+test("update target revision is checked before any media upload", async () => {
   const dir = await testTemp("bundle-update-preflight-");
   await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2]) }]);
 
@@ -1178,17 +1185,6 @@ test("update target revision and the before-write hook finish before any media u
     ifMatch: "7",
   }), /revision 8/);
   assert.deepEqual(revisionTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
-
-  const hookTransport = importTransport([]);
-  await assert.rejects(() => importPlaylistBundle({
-    directory: dir,
-    client: new ApiClient({ transport: hookTransport, token: "token" }),
-    runtime: runtimeForImport([]),
-    updateId: "pl_TARGET",
-    ifMatch: "8",
-    beforePlaylistWrite: async () => { throw new Error("preflight failed"); },
-  }), /preflight failed/);
-  assert.deepEqual(hookTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
   await rm(dir, { recursive: true, force: true });
 });
 
