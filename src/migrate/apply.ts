@@ -150,6 +150,9 @@ function stopNext(error: CliError, rerun: string): Stopped["next"] {
   if (code === "payment_required" || code === "quota_exceeded") {
     return { command: rerun, reason: "Add credit or free storage first (screenrig billing balance, screenrig project show), then run the same apply again: it continues where it stopped." };
   }
+  if (code === "feature_not_in_plan") {
+    return { command: "screenrig project capabilities", reason: "The project's plan does not include the feature the problem names (campaigns need Plus), and required_plan names the plan that does. What was made before it stays. Running the same apply again repeats the refusal: tell the user which plan includes it, or leave it out." };
+  }
   if (code === "campaign_limit_reached") {
     return { command: rerun, reason: "Delete campaigns the project no longer needs (screenrig campaign list, campaign delete), then run the same apply again: only the campaigns still missing are made." };
   }
