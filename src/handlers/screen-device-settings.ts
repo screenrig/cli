@@ -9,7 +9,7 @@ import { usageError } from "../problems.js";
 import { playlistAnswerWarnings, withoutAnswerWarnings } from "../playlist-warnings.js";
 import type { CliRuntime } from "../runtime.js";
 import type { Screen, ScreenPatch } from "../adapters/protocol.js";
-import { brightnessPatch, displayIdlePatch, displayIdleText, kioskLockPatch } from "../screen-device-settings.js";
+import { brightnessPatch, displayCecPatch, displayIdlePatch, displayIdleText, displayOutputPatch, kioskLockPatch } from "../screen-device-settings.js";
 
 /**
  * One ScreenPatch carrying only the device setting asked for: a member left
@@ -49,6 +49,20 @@ export const handleScreenDisplayIdle = commandHandler(async (args, runtime, reso
 export const handleScreenBrightness = commandHandler(async (args, runtime, resolved) => {
   const patch = brightnessPatch(flagString(args.flags, "mode"));
   return patchDeviceSetting(args, runtime, resolved, "screen brightness", patch, (id) => `Set display brightness on ${id}: ${patch.display?.brightness?.mode}`);
+}, true);
+
+export const handleScreenDisplayOutput = commandHandler(async (args, runtime, resolved) => {
+  const patch = displayOutputPatch(flagString(args.flags, "mode"), flagBool(args.flags, "clear"));
+  const output = patch.display?.output;
+  return patchDeviceSetting(args, runtime, resolved, "screen display-output", patch,
+    (id) => (output ? `Set display output on ${id}: ${output.mode}` : `Cleared the display output mode on ${id}`));
+}, true);
+
+export const handleScreenDisplayCec = commandHandler(async (args, runtime, resolved) => {
+  const patch = displayCecPatch(flagBool(args.flags, "on"), flagBool(args.flags, "off"), flagBool(args.flags, "clear"));
+  const cec = patch.display?.cec;
+  return patchDeviceSetting(args, runtime, resolved, "screen display-cec", patch,
+    (id) => (cec ? `Set display CEC on ${id}: ${cec.take_input ? "the Player takes the TV's input" : "the Player leaves the TV's input alone"}` : `Cleared the display CEC setting on ${id}`));
 }, true);
 
 export const handleScreenKioskLock = commandHandler(async (args, runtime, resolved) => {

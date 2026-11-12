@@ -17,8 +17,23 @@ export interface SerialPortSpec {
 
 export interface PinSpec {
   pin: number;
+  /** The level of the line: what an output drives and what a line with something connected reads. */
   value: boolean;
   busy?: boolean;
+  /** Nothing is connected: the line reads its pull (up is high, down is low) and, with none, its `value`. */
+  floating?: boolean;
+  /** What something outside drives a floating line to (a button pressed to ground), until it is released. */
+  driven?: boolean;
+}
+
+/** The bias the Player sets on an input line. */
+export type GpioPull = "up" | "down" | "none";
+
+/** What a line reads, given the bias it was requested with. */
+export function pinLevel(spec: PinSpec, pull: GpioPull | undefined): boolean {
+  if (spec.floating !== true) return spec.value;
+  if (spec.driven !== undefined) return spec.driven;
+  return pull === "up" ? true : pull === "down" ? false : spec.value;
 }
 
 export interface BleCharacteristicSpec {
@@ -52,6 +67,8 @@ export interface Hardware {
   camera: { available: boolean; formats: string[] };
   serial: { ports: SerialPortSpec[] };
   gpio: { pins: PinSpec[]; chip: boolean };
+  /** The infrared emitter sends, the receiver hears. */
+  ir: { emitter: boolean; receiver: boolean };
   ble: { adapter: boolean; peripherals: PeripheralSpec[] };
   printers: PrinterSpec[];
 }
@@ -68,7 +85,8 @@ export function defaultHardware(): Hardware {
         { id: "ttyACM0", name: "Arduino Uno", vendor_id: 9025, product_id: 67, busy: true },
       ],
     },
-    gpio: { chip: true, pins: [{ pin: 17, value: false }, { pin: 27, value: true }, { pin: 22, value: false, busy: true }] },
+    gpio: { chip: true, pins: [{ pin: 17, value: false, floating: true }, { pin: 27, value: true, floating: true }, { pin: 22, value: false, busy: true }] },
+    ir: { emitter: true, receiver: true },
     ble: {
       adapter: true,
       peripherals: [{ name: "HRM-Strap", address: "aa:bb:cc:dd:ee:ff", services: [{ service: "180d", characteristics: [{ characteristic: "2a37", value_base64: "ABg=" }] }] }],

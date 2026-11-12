@@ -7,6 +7,7 @@ import type { Hardware } from "./hardware.js";
 import { FileKvStore, RemoteKvStore, type KvRead, type KvStore } from "./kv.js";
 import { DEV_PORT, playerOrigin, releaseHostFor } from "./origins.js";
 import { createDevServer } from "./server.js";
+import { LoopbackUdp, type UdpTransport } from "./udp.js";
 import { DevSession, type LogEntry } from "./session.js";
 import { watchDirectory, type WatchHandle } from "./watcher.js";
 
@@ -21,6 +22,12 @@ export interface DevOptions {
   reload: boolean;
   print?: (entry: LogEntry) => void;
   hardware?: Hardware;
+  /**
+   * Where the application's UDP sockets bind. `app dev` binds real sockets on
+   * 127.0.0.1 only (so a tool on this machine can talk to the application); a
+   * session made without it simulates them and holds no socket.
+   */
+  udp?: UdpTransport;
   /** Tests listen on a port the runtime would not trust; the command itself never does. */
   allowAnyPort?: boolean;
 }
@@ -91,7 +98,7 @@ export async function createDevSession(options: DevOptions): Promise<CreatedSess
   session = new DevSession({
     directory: options.directory, port: options.port, releaseHost, applicationId, releaseId: `rel_dev_${tag}`,
     kv, kvMode: options.kvFrom ? "remote" : "file", kvLocation, autoReload: options.reload,
-    hardware: options.hardware, print: options.print,
+    hardware: options.hardware, udp: options.udp, print: options.print,
   });
   await session.start();
   const warn = (message: string): void => { session!.record({ type: "harness.warning", level: "warn", message }); };
@@ -107,7 +114,7 @@ export async function createDevSession(options: DevOptions): Promise<CreatedSess
 
 export async function startDevServer(options: DevOptions): Promise<DevHandle> {
   if (!options.allowAnyPort) assertDevPort(options.port);
-  const { session, releaseHost, kv, kvFile, warn } = await createDevSession(options);
+  const { session, releaseHost, kv, kvFile, warn } = await createDevSession({ ...options, udp: options.udp ?? new LoopbackUdp() });
   const server = createDevServer(session);
   try {
     await listen(server, options.port);

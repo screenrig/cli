@@ -10,6 +10,14 @@ export const DEVICE_CHUNK_BYTES = 32_768;
 export const MAX_SERIAL_PORTS = 4;
 export const MAX_BLE_SUBSCRIPTIONS = 8;
 export const MAX_GPIO_PINS = 16;
+export const MAX_UDP_SOCKETS = 4;
+/** The NEC frame, then the whole code again `repeat` times. A send of `repeat` n is n + 1 frames, about this far apart. */
+export const IR_REPEAT_GAP_MS = 110;
+export const MAX_UDP_BYTES = 8192;
+export const MAX_IR_REPEAT = 10;
+export const MAX_IR_CODE = 0xffffff;
+/** The Player's own eventual-sync beacon and roster ports: an application may not bind either. */
+export const PLAYER_UDP_PORTS: readonly number[] = [49817, 49818];
 export const MAX_PRINT_BYTES = 4_194_304;
 export const PRINT_IDLE_MS = 30_000;
 /** A frame may ask the Player to skip its page only this long after activation. */
@@ -19,6 +27,7 @@ export const CAPABILITY_NAMES = [
   "page.advance", "page.skip", "kv.read", "kv.write",
   "device.display", "device.presence", "device.keys", "device.light", "device.network", "device.haptics",
   "device.scan", "device.camera", "device.sound", "device.serial", "device.gpio", "device.ble", "device.print",
+  "device.ir", "device.udp", "device.hdmi_input",
 ] as const;
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
 export type Capabilities = Record<CapabilityName, boolean>;
@@ -27,8 +36,20 @@ export type Capabilities = Record<CapabilityName, boolean>;
 export const FEATURE_NAMES = [
   "ready", "log", "event.emit", "page.advance", "page.skip", "kv.get", "kv.list", "kv.set", "kv.delete", "kv.watch",
   "device.display", "device.watch", "device.vibrate", "device.scan", "device.camera", "device.sound", "device.serial", "device.gpio", "device.ble", "device.print",
+  "device.gpio.pull", "device.gpio.idle", "device.ir", "device.ir.send", "device.udp", "device.hdmi_input",
   "visibility.watch", "page.timing", "context.params", "context.screen",
 ] as const;
+
+/** A Player that advertises the key supports each listed feature without listing it (the device index's `impliedFeatures`). */
+export const IMPLIED_FEATURES: Readonly<Record<string, readonly string[]>> = { "device.ir": ["device.ir.send"] };
+
+/** Whether a list of advertised features covers `feature`, directly or by implication. */
+export function advertises(features: readonly string[], feature: string): boolean {
+  return features.includes(feature) || features.some((held) => IMPLIED_FEATURES[held]?.includes(feature) === true);
+}
+
+/** The device event sources a fixture's `requiresSources` names; the harness simulates every one. */
+export const DEVICE_SOURCES: readonly string[] = ["display", "presence", "keys", "light", "network", "scan.scanner", "scan.nfc", "scan.camera"];
 
 /** What a host that sends no `features` list implements. */
 export const BASELINE_FEATURES: readonly string[] = [
@@ -40,6 +61,7 @@ const KIND_FEATURES: Readonly<Record<string, string>> = {
   "device.scanner.start": "device.camera", "device.scanner.stop": "device.camera",
   "device.serial.list": "device.serial", "device.serial.open": "device.serial", "device.serial.write": "device.serial", "device.serial.close": "device.serial",
   "device.gpio.write": "device.gpio", "device.gpio.watch": "device.gpio",
+  "device.udp.open": "device.udp", "device.udp.send": "device.udp", "device.udp.close": "device.udp",
   "device.ble.read": "device.ble", "device.ble.watch": "device.ble", "device.ble.unwatch": "device.ble",
   "device.print": "device.print", "device.printers": "device.print",
 };
@@ -61,6 +83,8 @@ export const WATCH_EVENTS: ReadonlyArray<{ name: string; capability: CapabilityN
   { name: "serial", capability: "device.serial", feature: "device.serial" },
   { name: "gpio", capability: "device.gpio", feature: "device.gpio" },
   { name: "ble", capability: "device.ble", feature: "device.ble" },
+  { name: "ir", capability: "device.ir", feature: "device.ir" },
+  { name: "udp", capability: "device.udp", feature: "device.udp" },
 ];
 
 export interface BridgeMessage {

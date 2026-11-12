@@ -432,6 +432,13 @@ export type PlaylistFormat = PlaylistWallFormat | PlaylistRegionFormat;
 export interface ScreenObservation {
   observed_at: string;
   surfaces: ScreenObservationSurface[];
+  /** A Player that declares display_output.mode: the mode in force and the modes it can set now. */
+  display_output?: ScreenObservationDisplayOutput;
+}
+
+export interface ScreenObservationDisplayOutput {
+  mode?: string;
+  modes?: string[];
 }
 
 /** Last durable page failure reported for a screen. Read-only on the project API. */
@@ -682,10 +689,22 @@ export interface ScreenDisplayBrightness {
   mode: "auto" | "fixed";
 }
 
+/** display.output: the video mode the Player sets on its output, auto or WIDTHxHEIGHTxFPS with an optional p or i (3840x2160x60p). */
+export interface ScreenDisplayOutput {
+  mode: string;
+}
+
+/** display.cec: true has the Player assert HDMI-CEC active source at start and whenever display power turns on, so the TV switches to its input. */
+export interface ScreenDisplayCEC {
+  take_input: boolean;
+}
+
 /** The display member of ScreenPatch: a member sent replaces it, null clears it, a member left out stays. */
 export interface ScreenDisplayPatch {
   idle?: ScreenDisplayIdle | null;
   brightness?: ScreenDisplayBrightness | null;
+  output?: ScreenDisplayOutput | null;
+  cec?: ScreenDisplayCEC | null;
 }
 
 /** Screen.kiosk: present only while the lock is on. */
@@ -707,6 +726,8 @@ export interface ScreenDisplay {
   override?: ScreenDisplayOverride;
   idle?: ScreenDisplayIdle;
   brightness?: ScreenDisplayBrightness;
+  output?: ScreenDisplayOutput;
+  cec?: ScreenDisplayCEC;
   reported?: ScreenDisplayReported;
   control?: "hardware" | "scrim" | "unknown";
   /** Observation comparison for an active override, never command acknowledgement. */
@@ -1131,7 +1152,7 @@ export interface ScreenPatch {
   fields?: Record<string, string | null> | null;
   /** Replaces the whole location; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. */
   location?: ScreenLocation | null;
-  /** The idle-dark and brightness settings; a member sent replaces it, null clears it, a null display clears both. Protected screens refuse it (protected_target). */
+  /** The idle-dark, brightness, video output mode and CEC settings; a member sent replaces it, null clears it, a null display clears all four. Protected screens refuse it (protected_target). */
   display?: ScreenDisplayPatch | null;
   /** The kiosk lock; null releases it. */
   kiosk?: ScreenKioskPatch | null;

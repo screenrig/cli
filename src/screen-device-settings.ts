@@ -1,4 +1,4 @@
-import type { ScreenDisplay, ScreenDisplayBrightness, ScreenDisplayIdle, ScreenKiosk, ScreenPatch } from "./adapters/protocol.js";
+import type { ScreenDisplay, ScreenDisplayBrightness, ScreenDisplayIdle, ScreenKiosk, ScreenObservationDisplayOutput, ScreenPatch } from "./adapters/protocol.js";
 import { usageError } from "./problems.js";
 
 /** display.idle.after_s bounds (vendor/openapi.yaml ScreenDisplayIdle). */
@@ -46,6 +46,29 @@ export function brightnessPatch(mode: string | undefined): ScreenPatch {
   return { display: { brightness: { mode: mode as ScreenDisplayBrightness["mode"] } } };
 }
 
+/** display.output.mode (vendor/openapi.yaml ScreenDisplayOutput): auto, or WIDTHxHEIGHTxFPS with an optional p or i. */
+const DISPLAY_OUTPUT_MODE = /^(auto|[1-9][0-9]{1,4}x[1-9][0-9]{1,4}x[1-9][0-9]{0,2}(\.[0-9]{1,3})?[pi]?)$/;
+
+/** --mode MODE: auto or a video mode such as 3840x2160x60p or 1920x1080x59.94i. */
+export function displayOutputModeOption(value: string): string {
+  if (value.length > 24 || !DISPLAY_OUTPUT_MODE.test(value)) {
+    throw usageError("--mode takes auto or a video mode WIDTHxHEIGHTxFPS with an optional p or i, such as 3840x2160x60p or 1920x1080x59.94i.");
+  }
+  return value;
+}
+
+/** The ScreenPatch that sets the video output mode (--mode) or clears the setting (--clear sends null). */
+export function displayOutputPatch(mode: string | undefined, clear: boolean): ScreenPatch {
+  if (clear === (mode !== undefined)) throw usageError("screen display-output requires --mode MODE or --clear.");
+  return { display: { output: clear ? null : { mode: displayOutputModeOption(mode!) } } };
+}
+
+/** The ScreenPatch for display.cec: --on has the Player take the TV's input, --off keeps it from, --clear removes the setting. */
+export function displayCecPatch(on: boolean, off: boolean, clear: boolean): ScreenPatch {
+  if ([on, off, clear].filter(Boolean).length !== 1) throw usageError("screen display-cec requires exactly one of --on, --off or --clear.");
+  return { display: { cec: clear ? null : { take_input: on } } };
+}
+
 /** The ScreenPatch that pins the Player to the screen (on) or releases it (off). */
 export function kioskLockPatch(on: boolean, off: boolean): ScreenPatch {
   if (on === off) throw usageError("screen kiosk-lock requires --on or --off.");
@@ -64,6 +87,22 @@ export function displaySettingsLines(display: ScreenDisplay): string[] {
   if (idle && Number.isSafeInteger(idle.after_s) && Array.isArray(idle.wake) && idle.wake.length > 0) lines.push(`Display idle: ${displayIdleText(idle)}`);
   const mode = display.brightness?.mode;
   if (mode === "auto" || mode === "fixed") lines.push(`Display brightness: ${mode}`);
+  if (typeof display.output?.mode === "string") lines.push(`Display output: ${display.output.mode}`);
+  if (typeof display.cec?.take_input === "boolean") lines.push(`Display CEC: ${display.cec.take_input ? "takes the TV's input (active source) at start and when display power turns on" : "does not take the TV's input"}`);
+  return lines;
+}
+
+/**
+ * The video output a Player reports (observation.display_output): the mode in
+ * force and the modes it can set now, which `screen display-output --mode`
+ * must pick from. Nothing for a Player that does not report it.
+ */
+export function displayOutputObservationLines(reported: ScreenObservationDisplayOutput | undefined): string[] {
+  if (!reported) return [];
+  const modes = Array.isArray(reported.modes) ? reported.modes.filter((mode) => typeof mode === "string") : [];
+  const lines: string[] = [];
+  if (typeof reported.mode === "string") lines.push(`Output mode in force: ${reported.mode}`);
+  if (modes.length > 0) lines.push(`Output modes the Player can set (${modes.length}): ${modes.join(", ")}`);
   return lines;
 }
 

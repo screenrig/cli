@@ -9,7 +9,7 @@ import { shortApplicationPageWarning } from "../playlist-authoring.js";
 import { callPlaylist } from "../playlist-api.js";
 import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, screenControlProblem, timezoneLine, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "../screen-control.js";
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
-import { kioskLines } from "../screen-device-settings.js";
+import { displayOutputObservationLines, kioskLines } from "../screen-device-settings.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
 import { volumeLines, volumeProblem, volumeText, volumeWrite } from "../screen-volume.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, displayWarnings, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
@@ -583,6 +583,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.effective_timezone),
+      ...displayOutputObservationLines(screen?.observation?.display_output),
       ...volumeLines(screen?.volume),
       ...kioskLines(screen?.kiosk),
       ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.effective_timezone),

@@ -5,8 +5,8 @@ import type { CommandHandler } from "../commands.js";
 import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
 import { calendarInstantOption } from "../change-control.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenVolume, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
-import { handleScreenBrightness, handleScreenDisplayIdle, handleScreenKioskLock } from "../handlers/screen-device-settings.js";
-import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption } from "../screen-device-settings.js";
+import { handleScreenBrightness, handleScreenDisplayCec, handleScreenDisplayIdle, handleScreenDisplayOutput, handleScreenKioskLock } from "../handlers/screen-device-settings.js";
+import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption, displayOutputModeOption } from "../screen-device-settings.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
@@ -158,6 +158,23 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--mode <MODE>", "auto follows the device's light sensor; fixed keeps the operator's brightness (required)").choices([...DISPLAY_BRIGHTNESS_MODES]).makeOptionMandatory())
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenBrightness));
+
+  const displayOutput = screen.command("display-output").description("Set the video mode a screen's Player sets on its output, or clear it")
+    .argument("<id>", "Screen identifier")
+    .option("--mode <MODE>", "auto (the display's own preferred mode) or WIDTHxHEIGHTxFPS with an optional p or i, such as 3840x2160x60p", displayOutputModeOption)
+    .addOption(new Option("--clear", "Remove the setting").conflicts("mode"))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenDisplayOutput));
+  requireOptionGroup(displayOutput, "exactlyOne", ["--mode", "--clear"]);
+
+  const displayCec = screen.command("display-cec").description("Have a screen's Player take the TV's HDMI input over CEC, or stop")
+    .argument("<id>", "Screen identifier")
+    .addOption(new Option("--on", "Assert HDMI-CEC active source at start and whenever display power turns on").conflicts(["off", "clear"]))
+    .addOption(new Option("--off", "Do not take the TV's input").conflicts(["on", "clear"]))
+    .addOption(new Option("--clear", "Remove the setting").conflicts(["on", "off"]))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenDisplayCec));
+  requireOptionGroup(displayCec, "exactlyOne", ["--on", "--off", "--clear"]);
 
   const kioskLock = screen.command("kiosk-lock").description("Pin a screen's Player to the screen, or release it")
     .argument("<id>", "Screen identifier")
