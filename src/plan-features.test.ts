@@ -76,9 +76,11 @@ const CAPABILITIES = {
     features: [
       { id: "video_walls", enabled: true, required_plan: "plus" },
       { id: "reports", enabled: true, required_plan: "plus" },
+      { id: "campaigns", enabled: true, required_plan: "plus" },
       { id: "direct_campaigns", enabled: false, required_plan: "premium" },
-      { id: "sso", enabled: false, required_plan: "enterprise" },
-      { id: "audit_log", enabled: false, required_plan: "enterprise" },
+      { id: "sso", enabled: false, required_plan: "premium" },
+      { id: "audit_log", enabled: false, required_plan: "premium" },
+      { id: "scim", enabled: false, required_plan: "enterprise" },
     ],
   },
   limits: { screens: 0, members: 25, video_bytes: 1_000_000_000, event_retention_days: 7 },
@@ -121,7 +123,7 @@ test("a plan-limit refusal that carries required_plan names the plan; one that d
   const limit = (status: number, code: string, extra: Record<string, unknown>) => planProblem({ status, code, hint: "At the limit.", feature: undefined, plan: undefined, required_plan: undefined, ...extra });
   const transport = new FakeTransport()
     .on("GET", "/api/screens", () => ({ status: 409, headers: {}, body: limit(409, "project_limit_reached", { required_plan: "plus" }) }))
-    .on("GET", "/api/media", () => ({ status: 409, headers: {}, body: limit(409, "member_limit_reached", { required_plan: "enterprise" }) }))
+    .on("GET", "/api/media", () => ({ status: 409, headers: {}, body: limit(409, "member_limit_reached", { required_plan: "premium" }) }))
     .on("GET", "/api/playlists", () => ({ status: 409, headers: {}, body: limit(409, "member_limit_reached", {}) }));
   const projects = JSON.parse((await invoke(["--json", "screen", "list"], transport)).stdout).error;
   assert.equal(projects.code, "project_limit_reached");
@@ -129,7 +131,7 @@ test("a plan-limit refusal that carries required_plan names the plan; one that d
   assert.match(projects.hint, /^At the limit\. The Plus plan raises this limit/);
   const media = JSON.parse((await invoke(["--json", "media", "list"], transport)).stdout).error;
   assert.equal(media.code, "member_limit_reached");
-  assert.match(media.hint, /^At the limit\. The Enterprise plan raises this limit/);
+  assert.match(media.hint, /^At the limit\. The Premium plan raises this limit/);
   const playlists = JSON.parse((await invoke(["--json", "playlist", "list"], transport)).stdout).error;
   assert.equal(playlists.hint, "At the limit.");
   assert.equal("required_plan" in playlists, false);
@@ -137,13 +139,13 @@ test("a plan-limit refusal that carries required_plan names the plan; one that d
 
 test("a refused download gets the same plan guidance", async () => {
   const transport = new FakeTransport().onDownload("GET", "/api/audit", () => ({
-    status: 402, headers: { "content-type": "application/problem+json" }, problem: planProblem({ feature: "audit_log", required_plan: "enterprise", hint: SERVER_HINT }),
+    status: 402, headers: { "content-type": "application/problem+json" }, problem: planProblem({ feature: "audit_log", required_plan: "premium", hint: SERVER_HINT }),
   }));
   await assert.rejects(new ApiClient({ transport, token: TOKEN }).download({ method: "GET", path: "/api/audit" }), (error: unknown) => {
     assert.ok(error instanceof CliError, String(error));
     assert.equal(error.problem.feature, "audit_log");
-    assert.equal(error.problem.required_plan, "enterprise");
-    assert.match(error.problem.hint ?? "", /Enterprise/);
+    assert.equal(error.problem.required_plan, "premium");
+    assert.match(error.problem.hint ?? "", /Premium/);
     assert.equal(error.problem.next?.command, "screenrig project capabilities");
     return true;
   });
@@ -165,8 +167,8 @@ test("project capabilities shows the featuresets and which plan features are on 
   assert.equal(result.code, ExitCode.Success, result.stderr);
   assert.match(result.stdout, /^plan_id: standard$/m);
   assert.match(result.stdout, /^featuresets: founding$/m);
-  assert.match(result.stdout, /^plan_features_on: video_walls, reports$/m);
-  assert.match(result.stdout, /^plan_features_off: direct_campaigns \(premium\), sso \(enterprise\), audit_log \(enterprise\)$/m);
+  assert.match(result.stdout, /^plan_features_on: video_walls, reports, campaigns$/m);
+  assert.match(result.stdout, /^plan_features_off: direct_campaigns \(premium\), sso \(premium\), audit_log \(premium\), scim \(enterprise\)$/m);
   assert.match(result.stdout, /^limits: screens=none members=25 video_bytes=1000000000 event_retention_days=7$/m);
 });
 

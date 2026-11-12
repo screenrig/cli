@@ -607,6 +607,24 @@ test("campaign_limit_reached stops the run at the campaigns; the playlists and s
   }
 });
 
+test("a plan without campaigns (feature_not_in_plan) stops the run at the campaigns; the playlists and screens before it stand", async () => {
+  const w = await world();
+  try {
+    await scanFixture(w);
+    w.project.intercept = (req: TransportRequest) => (req.method === "POST" && req.path === "/api/campaigns"
+      ? { status: 402, headers: { "content-type": "application/problem+json" }, body: { status: 402, code: "feature_not_in_plan", title: "This feature is not in the project's plan", detail: "Campaigns are part of Plus. This project is on Standard.", feature: "campaigns", plan: "standard", required_plan: "plus" } }
+      : undefined);
+    const result = await applyFixture(w);
+    assert.equal(result.json.data.stopped.code, "feature_not_in_plan");
+    assert.equal(result.code, 8);
+    assert.equal(result.json.data.stopped.next.command, "screenrig project capabilities");
+    assert.equal(w.project.campaigns.size, 0);
+    assert.equal(w.project.links.size, 3);
+  } finally {
+    await w.cleanup();
+  }
+});
+
 test("the vendor refusing the key mid-run ends the run as vendor_refused with the command to run again", async () => {
   const w = await world();
   try {
