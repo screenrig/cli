@@ -209,7 +209,7 @@ test("screen screenshot --tag finds the tagged screens on later pages", async (t
   assert.deepEqual(lists.map((call) => call.query), [{ tag: "Lobby" }, { tag: "Lobby", after: "pg_2" }, { tag: "Lobby", after: "pg_4" }]);
 });
 
-test("media upload reuses its earlier upload from a later page of the media list", async (t) => {
+test("media upload reuses its earlier upload with one request for the media list", async (t) => {
   const env = await enrolled(t);
   const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
   const file = path.join(env.cwd, "lobby-loop.mp4");
@@ -222,7 +222,7 @@ test("media upload reuses its earlier upload from a later page of the media list
   const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
   const transport = new FakeTransport()
     .on("GET", "/api/project/capabilities", () => ({ status: 200, headers: {}, body: { media_video_bytes: 500_000_000 } }))
-    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
+    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1000))
     .on("GET", "/api/operations/op_EARLIER", () => ({
       status: 200, headers: {},
       body: { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: earlier.id } },
@@ -233,7 +233,27 @@ test("media upload reuses its earlier upload from a later page of the media list
   assert.equal(result.envelope.data.media_id, earlier.id);
   assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false, "nothing was uploaded again");
   const lists = transport.calls.filter((call) => call.path === "/api/media");
-  assert.deepEqual(lists.map((call) => call.query), [{ primitive: "video" }, { primitive: "video", after: "pg_1" }]);
+  assert.deepEqual(lists.map((call) => call.query), [{ primitive: "video" }]);
+});
+
+test("media upload looks at the first page of the library only, whatever its size", async (t) => {
+  const env = await enrolled(t);
+  const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
+  const file = path.join(env.cwd, "lobby-loop.mp4");
+  await writeFile(file, bytes);
+  const row = (n: number) => ({
+    id: `med_OTHER${String(n).padStart(16, "A")}`, filename: "other.mp4", source_filename: "other.mp4", primitive: "video", content_type: "video/mp4",
+    operation_id: "op_OTHER", sha256: "0".repeat(64), bytes: 1, revision: 1, state: "ready",
+    created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:01.000Z",
+  });
+  const transport = new FakeTransport()
+    .on("GET", "/api/project/capabilities", () => ({ status: 200, headers: {}, body: { media_video_bytes: 500_000_000 } }))
+    .on("GET", "/api/media", (req) => listPage(req, Array.from({ length: 5 }, (_, n) => row(n)), 1));
+  await cli(["--json", "media", "upload", file, "--no-transcode", "--tag", "Lobby"], transport, env);
+  const lists = transport.calls.filter((call) => call.method === "GET" && call.path === "/api/media");
+  assert.equal(lists.length, 1, "five pages in the library, one request made");
+  assert.deepEqual(lists[0]?.query, { primitive: "video", tag: "Lobby" }, "the lookup is narrowed by what the upload names");
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/media/uploads"), true, "no copy on the first page, so the upload goes on");
 });
 
 test("media upload reuses normalized media by its original upload identity", async (t) => {
@@ -248,7 +268,7 @@ test("media upload reuses normalized media by its original upload identity", asy
   });
   const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
   const transport = new FakeTransport()
-    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
+    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1000))
     .on("GET", "/api/operations/op_EARLIER", () => ({
       status: 200, headers: {},
       body: { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: earlier.id } },
@@ -259,5 +279,5 @@ test("media upload reuses normalized media by its original upload identity", asy
   assert.equal(result.envelope.data.media_id, earlier.id);
   assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false, "nothing was uploaded again");
   const lists = transport.calls.filter((call) => call.path === "/api/media");
-  assert.deepEqual(lists.map((call) => call.query), [{ primitive: "image" }, { primitive: "image", after: "pg_1" }]);
+  assert.deepEqual(lists.map((call) => call.query), [{ primitive: "image" }]);
 });

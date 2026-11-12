@@ -977,7 +977,7 @@ export function validDelivery(state: unknown): boolean {
 }
 
 /**
- * One fleet action for any number of screens: one metered action across
+ * One fleet action for any number of screens across
  * bounded continuations, paced against control budgets. Aggregate every
  * result page; partial success keeps `ok: true` and moves the exit code (see
  * fleetOutcome). An Idempotency-Key is always sent. The command's write
@@ -1628,10 +1628,10 @@ export const SCREENSHOT_FLEET_MAX_CONCURRENCY = 8;
 export type ScreenshotFleetItem = FleetItem & Partial<Omit<ScreenshotSaved, "screen_id">>;
 
 /**
- * Client-side screenshot fan-out: screenshots are unbilled per screen, so
+ * Client-side screenshot fan-out: a screenshot is one screen message, so
  * there is no fleet screenshot action. --tag resolves through
  * GET /api/screens?tag=T and keeps active screens, matching the fleet
- * actions selector (one metered list request per page; captures are unbilled). Each
+ * actions selector (one list request per page). Each
  * capture writes DIRECTORY/<screen_id>.webp; a failed capture is that
  * screen's result, never a transport error. An unexpected (non-CliError)
  * failure stops scheduling: the failing screen and every screen not yet

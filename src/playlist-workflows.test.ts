@@ -144,7 +144,6 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  assert.deepEqual(JSON.parse(await readFile(dir+'/editable.json','utf8')),document());
  assert.equal((await invoke(['playlist','validate','editable.json'])).code,0);
  assert.equal((await invoke(['playlist','show','pl_TEST','--output','editable.json'],transport)).code,2);
- assert.throws(()=>parseArgv(['media','generate','--prompt','a','--prompt-file','b']));
 });
 
 for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision of [undefined, '7']) for (const failure of ['create','assign','verify']) test(`publish ${prefix || "production"} revision ${revision} resumes an ambiguous ${failure} without duplicating resources`, async t => {
@@ -280,7 +279,7 @@ test("publish checks the expected screen revision before creating a playlist",as
  assert.equal(transport.calls.some(c=>c.method!=='GET'),false);
 });
 
-test("init CLI writes a reusable document and prompt-file preserves exact text", async t => {
+test("init CLI writes a reusable document", async t => {
  const dir=await mkdtemp(path.join(tmpdir(), 'authoring-commands-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  const transport=new FakeTransport().on('GET','/api/media/med_IMAGE',()=>response(media[0])).on('GET','/api/media/med_VIDEO',()=>response(media[1]));
@@ -293,11 +292,6 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
  assert.equal(initialized.data.data.page_count,2);
  assert.deepEqual(JSON.parse(await readFile(dir+'/lobby.json','utf8')),document());
  assert.equal((await invoke(['playlist','validate','lobby.json'])).code,0);
- await writeFile(dir+'/prompt.txt',' exact copy\n');
- let seen='';transport.on('POST','/api/media/generations',req=>{seen=(req.body as any).prompt;return {status:402,headers:{},body:{code:'payment_required',title:'Test refusal',detail:'Test',status:402}};});
- await invoke(['media','generate','--prompt-file','prompt.txt','--no-progress']);
- assert.equal(seen,' exact copy\n');
- assert.equal((await invoke(['media','generate','--prompt-file','-'], 'x'.repeat(4001))).code,2);
 });
 
 test("expired ambiguous publish journals never retry writes", async t => {

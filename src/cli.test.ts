@@ -2560,6 +2560,138 @@ test("events follow --timeout exits during backoff without hanging", async () =>
   await rm(configDir, { recursive: true, force: true });
 });
 
+async function followConfig(prefix: string) {
+  const configDir = await testTemp(prefix);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  return { configDir, fsLike };
+}
+
+test("events follow waits the server's Retry-After after a 429 on connect, not 250 ms", async () => {
+  const transport = memoryBackend();
+  const limited = () => new CliError({ ...makeProblem("rate_limited", "Too many requests", 429, "The organization's agent requests for this hour are spent."), retry_after_seconds: 1234 });
+  transport.queueStream(limited());
+  transport.queueStream(limited());
+  transport.queueStream({ chunks: [followEventFrame("ev1_1", "project.created", "2026-08-14T17:00:00.000Z")] });
+  const { configDir, fsLike } = await followConfig("ev-rate-limited-");
+  const waits: number[] = [];
+  const run = await withRuntime(["--json", "events", "follow", "--timeout", "60"], transport, {
+    fs: fsLike,
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  assert.equal(run.code, 0, run.stdout);
+  assert.deepEqual(waits.slice(0, 2), [1_234_000, 1_234_000]);
+  assert.match(run.stderr, /request limit reached; reconnecting in 1234 s/);
+  assert.equal(run.stdout.split("\n").filter(Boolean).length, 1, "the event of the third connection prints");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow caps a 429 wait at one hour and backs off normally when it names none", async () => {
+  const transport = memoryBackend();
+  transport.queueStream(new CliError({ ...makeProblem("rate_limited", "Too many requests", 429, "Spent."), retry_after_seconds: 999_999 }));
+  transport.queueStream(new CliError(makeProblem("rate_limited", "Too many requests", 429, "Spent.")));
+  transport.queueStream(new CliError(makeProblem("rate_limited", "Too many requests", 429, "Spent.")));
+  const { configDir, fsLike } = await followConfig("ev-rate-limited-cap-");
+  const waits: number[] = [];
+  const run = await withRuntime(["--json", "events", "follow", "--timeout", "60"], transport, {
+    fs: fsLike,
+    sleep: async (ms) => { waits.push(ms); if (waits.length >= 3) await new Promise<void>(() => undefined); },
+  });
+  assert.equal(run.code, 0, run.stdout);
+  assert.deepEqual(waits.slice(0, 3), [3_600_000, EVENT_STREAM_BACKOFF_MS, EVENT_STREAM_BACKOFF_MS * 2]);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow ignores a frame that is not a project event and honours retry:", async () => {
+  const transport = memoryBackend();
+  const problem = `id: ev1_9\nevent: stream.error\ndata: ${JSON.stringify({ type: "https://screenrig.ai/problems/payment-required", title: "Payment required", status: 402, code: "payment_required", detail: "Refused." })}\n\n`;
+  const notAnEvent = `id: ev1_8\nevent: message\ndata: ${JSON.stringify({ type: "https://screenrig.ai/problems/payment-required", title: "Payment required", status: 402, code: "payment_required" })}\n\n`;
+  const named = `id: ev1_7\nevent: stream.error\ndata: ${JSON.stringify({ type: "project.created", severity: "info", message: "x", at: "2026-08-14T17:00:00.000Z" })}\n\n`;
+  transport.queueStream({ chunks: ["retry: 4000\n\n", followEventFrame("ev1_1", "project.created", "2026-08-14T17:00:00.000Z"), problem, notAnEvent, named] });
+  transport.queueStream({ chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")] });
+  const { configDir, fsLike } = await followConfig("ev-frames-");
+  const waits: number[] = [];
+  const run = await withRuntime(["--json", "events", "follow", "--timeout", "60"], transport, {
+    fs: fsLike,
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  assert.equal(run.code, 0, run.stdout);
+  const types = run.stdout.split("\n").filter(Boolean).map((line) => (JSON.parse(line) as { data: { type: string } }).data.type);
+  assert.deepEqual(types.slice(0, 2), ["project.created", "screen.paired"]);
+  assert.ok(!run.stdout.includes("payment"), run.stdout);
+  const streams = transport.calls.filter((call) => call.path === "/stream/project");
+  assert.equal(streams[1]?.query?.after, "ev1_1", "a refused or foreign frame never moves the cursor");
+  assert.equal(waits[0], 4000, "the server's retry: sets the reconnect wait");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("support follow waits the server's Retry-After after a 429 on connect", async () => {
+  const transport = memoryBackend();
+  transport.queueStream(new CliError({ ...makeProblem("rate_limited", "Too many requests", 429, "Spent."), retry_after_seconds: 90 }));
+  transport.queueStream({ chunks: [] });
+  const { configDir, fsLike } = await followConfig("support-rate-limited-");
+  const waits: number[] = [];
+  const run = await withRuntime(["--json", "support", "follow", "--timeout", "60"], transport, {
+    fs: fsLike,
+    sleep: async (ms) => { waits.push(ms); if (waits.length >= 2) await new Promise<void>(() => undefined); },
+  });
+  assert.equal(run.code, 0, run.stdout);
+  assert.equal(waits[0], 90_000);
+  assert.match(run.stderr, /reconnecting in 90 s/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("billing usage shows storage against its limit and the agent requests an hour", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/billing/usage", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: {
+      period: "2026-11", usage: { bandwidth_bytes: "10", storage_mcr: "0", api_events: "0" }, stored_bytes: "524288000",
+      allowance: { storage_bytes: "1073741824", requests_per_hour: "500", api_events: "0", storage_mcr_per_gb_month: "0" },
+    },
+  }));
+  const json = await withTokenConfig(transport, ["--json", "billing", "usage"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown> };
+  assert.deepEqual(envelope.data, { stored_bytes: "524288000", allowance: { storage_bytes: "1073741824", requests_per_hour: "500" } });
+  assert.doesNotMatch(json.stdout, /api_events|mcr|usage"/);
+  const human = await withTokenConfig(transport, ["--human", "billing", "usage"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /^storage: 524288000 of 1073741824 bytes$/m);
+  assert.match(human.stdout, /^agent_requests_per_hour: 500$/m);
+  assert.doesNotMatch(human.stdout, /credit|\$|per GB|month/i);
+});
+
+test("billing usage tolerates a server that has not sent requests_per_hour", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/billing/usage", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { period: "2026-11", stored_bytes: "0", allowance: { storage_bytes: "1073741824", api_events: "10000", storage_mcr_per_gb_month: "140" } },
+  }));
+  const json = await withTokenConfig(transport, ["--json", "billing", "usage"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { data: { allowance: Record<string, string> } };
+  assert.deepEqual(envelope.data.allowance, { storage_bytes: "1073741824" });
+  const human = await withTokenConfig(transport, ["--human", "billing", "usage"]);
+  assert.doesNotMatch(human.stdout, /agent_requests_per_hour/);
+  assert.match(human.stdout, /storage: 0 of 1073741824 bytes/);
+});
+
+test("media generate is not a command", async () => {
+  const transport = new FakeTransport();
+  const result = await withRuntime(["--json", "media", "generate", "--prompt", "x"], transport);
+  assert.notEqual(result.code, 0);
+  assert.equal(transport.calls.length, 0);
+  assert.doesNotMatch(commandHelp(["media"]).usage, /generate/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
 test("doctor requires Node.js 22.11 or newer", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(process.versions, "node")!;
   try {

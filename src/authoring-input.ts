@@ -49,7 +49,7 @@ async function holdsContent(output: string): Promise<boolean> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
 }
 
-/** Refuse a prepared document up front, before any slow or billed work. */
+/** Refuse a prepared document up front, before any slow work. */
 export async function assertOutputAvailable(output: string, overwrite: boolean): Promise<void> {
   if (!overwrite && await holdsContent(output)) throw usageError(outputExists(output));
 }

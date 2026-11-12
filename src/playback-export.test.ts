@@ -281,10 +281,11 @@ test("playback list --format csv exports the daily aggregates", async () => {
   assert.equal(json.envelope.data.items.length, 1);
 });
 
-test("playback help names the billing rule and the CSV output contract", async () => {
+test("playback help names the request rule and the CSV output contract", async () => {
   const env = await enrolled();
   const help = await cli(["--human", "playback", "plays", "--help"], memoryBackend(), env);
-  assert.match(help.stdout, /billed/);
+  assert.match(help.stdout, /one request toward the organization's\s+hourly cap/);
+  assert.doesNotMatch(help.stdout, /billed|bills/);
   assert.match(help.stdout, /--format <FORMAT>/);
   assert.match(help.stdout, /31 days/);
 });

@@ -13,7 +13,7 @@ export const PLAYS_DEFAULT_RANGE_MS = 86_400_000;
 export const PLAYS_LIMIT_MAX = 1000;
 /** GET /api/playback day_from to day_to spans at most 366 days (PlaybackDayFrom). */
 export const AGGREGATE_MAX_DAYS = 366;
-/** --all follows next_cursor for at most this many pages (each one billed request). */
+/** --all follows next_cursor for at most this many pages (each one a request). */
 export const PLAYS_ALL_MAX_PAGES = 50;
 export const PLAYS_CURSOR_PATTERN = /^pc_[A-Za-z0-9_-]{1,512}$/;
 /**

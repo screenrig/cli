@@ -119,6 +119,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "ads reports fill": ["", "--from 14d --to now"],
     "ads reports delivery": ["--from 2026-09-01T00:00:00Z --to 2026-09-08T00:00:00Z"],
     "ads reviews show": ["rev_REVIEW"],
+    "billing usage": [""],
     "billing balance": [""],
     "billing statement": ["--limit 20"],
     "agent enroll": [
@@ -291,7 +292,7 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "support follow": ["--after 0 --timeout 60000"],
     "support close": ["--conversation-id sc_ID"],
     "support read": ["--conversation-id sc_ID --sequence 12"],
-    "docs search": ["schedule import", "payment_required --limit 3"],
+    "docs search": ["schedule import", "rate_limited --limit 3"],
     "docs show": ["https://screenrig.ai/docs/cli", "https://screenrig.ai/docs/cli/schedules --section 'schedule import'"],
     "feedback bug": ['"Preview failed" --body-file report.md'],
     "feedback feature": ['"New workflow" --body-file request.md'], "feedback list": ["--kind bug"],

@@ -536,7 +536,7 @@ export function memoryBackend(options: {
       plan_features: { featuresets: [], features: [] },
       limits: { screens: 0, members: 25, video_bytes: options.videoBytes ?? 500_000_000, event_retention_days: 7 },
       capabilities: [
-        "media", "credits",
+        "media",
         ...(project.features?.screens ? ["signage.pairing", "signage.playlists", "signage.publish"] : []),
         ...(project.features?.advertiser ? ["advertising"] : []),
       ],

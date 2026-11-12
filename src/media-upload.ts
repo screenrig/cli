@@ -711,7 +711,7 @@ async function storedMediaFilename(
       typeof body?.source_filename === "string" && body.source_filename.length > 0 ? body.source_filename : undefined;
     return { ...(filename ? { filename } : {}), ...(sourceFilename ? { source_filename: sourceFilename } : {}) };
   } catch {
-    // The bytes are already stored and billed. A failed read-back downgrades the
+    // The bytes are already stored. A failed read-back downgrades the
     // reported name; it does not fail the upload.
     return {};
   }
@@ -720,7 +720,12 @@ async function storedMediaFilename(
 /**
  * Ready media this exact upload already produced: the same bytes, declared
  * name and tag. Rerunning an interrupted upload then returns that media ID
- * instead of storing a second copy. Best effort: any failure means upload.
+ * instead of storing a second copy. A convenience, not a guarantee, so it costs
+ * one request: the first page of the library (newest first, at most 1000 files),
+ * narrowed by the kind, the tag and the folder the upload names. A rerun's file
+ * is among the newest; an older copy is not looked for, and the upload goes on.
+ * Every request counts toward the organization's hourly cap, so it never walks
+ * the whole library. Best effort: any failure means upload.
  */
 async function existingUpload(
   client: ApiClient,
@@ -728,7 +733,11 @@ async function existingUpload(
 ): Promise<{ mediaId: string; operation: Operation; filename?: string; source_filename?: string } | undefined> {
   try {
     const primitive = declaration.content_type.split("/")[0];
-    const response = await client.listAll("/api/media", { primitive });
+    const response = await client.call({
+      method: "GET",
+      path: "/api/media",
+      query: { primitive, ...(declaration.tag === undefined ? {} : { tag: declaration.tag }), ...(declaration.folder_id === undefined ? {} : { folder: declaration.folder_id }) },
+    });
     const items = asRecord(response.body)?.items;
     if (!Array.isArray(items)) return undefined;
     const match = items.map(asRecord).find((item) => {

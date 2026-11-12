@@ -10,7 +10,7 @@ const outputOption = () => new Option("--output <FILE>", "File to write (with --
 
 export function registerPlaybackCommands(root: Command, bind: CommandActionBinder): void {
   const playback = root.command("playback").description("Inspect playback records");
-  addCommandNotes(playback, "Billing and limits:\n  Each JSON page and each CSV stream is one billed API request. playback plays\n  --all bills one request per page it follows. Every plays request and every\n  CSV export also spends the playback export budget (30 per minute per organization);\n  past it the answer is rate_limited (exit 7) with retry_after_seconds.");
+  addCommandNotes(playback, "Limits:\n  Each JSON page and each CSV stream is one request toward the organization's\n  hourly cap (screenrig billing usage shows it). playback plays --all makes one\n  request per page it follows. Every plays request and every\n  CSV export also spends the playback export budget (30 per minute per organization);\n  past it the answer is rate_limited (exit 7) with retry_after_seconds.");
 
   playback.command("list").description("List daily playback aggregates, or export them as CSV")
     .option("--screen-id <ID>", "Filter playback by screen")
@@ -30,7 +30,7 @@ export function registerPlaybackCommands(root: Command, bind: CommandActionBinde
     .option("--tag <TAG>", "Only plays on screens that carried this tag when the play was received")
     .option("--cursor <CURSOR>", "Continue from data.next_cursor of the previous page (same filters)", playsCursor)
     .option("--limit <N>", "JSON rows per page, 1 to 1000 (server default 200)", playsLimit)
-    .option("--all", "Follow next_cursor to the end of the range (at most 50 pages, one billed request each)")
+    .option("--all", "Follow next_cursor to the end of the range (at most 50 pages, one request each)")
     .addOption(formatOption())
     .addOption(outputOption())
     .action(bind(handlePlaybackPlays));

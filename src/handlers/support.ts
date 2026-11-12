@@ -8,7 +8,7 @@ import { ExitCode } from "../exit-codes.js";
 import { CliError, unexpectedResponseError, usageError } from "../problems.js";
 import { parseSse } from "../sse.js";
 import { redactEvent, redactText } from "../redact.js";
-import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, clientFor, commandHandler, isAbortError, isHardFollowError, jsonBody, readFeedbackBody, sleepWhileOpen, streamEnvelope, streamToken, transportFor } from "../commands.js";
+import { FollowBackoff, clientFor, commandHandler, isAbortError, isHardFollowError, jsonBody, noteRateLimitWait, readFeedbackBody, sleepWhileOpen, streamEnvelope, streamToken, transportFor } from "../commands.js";
 
 
 // Support messages are deliberately kept out of operation-log bodies.
@@ -68,19 +68,22 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
   const controller = new AbortController();
   const timeout = flagNumber(args.flags, "timeout");
   const timer = timeout && timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined;
-  let delay = EVENT_STREAM_BACKOFF_MS;
+  const backoff = new FollowBackoff();
   let printedContext = false;
   try {
     while (!controller.signal.aborted) {
       let buffer = "";
+      let failure: unknown;
       try {
         token = await streamToken(runtime, token);
         const stream = await transport.stream({ method: "GET", path: "/stream/support", query: { after, ...projectStreamQuery(resolved.projectId) }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId() }, signal: controller.signal });
+        backoff.connected();
         for await (const chunk of stream) {
           buffer += chunk;
           const parsed = parseSse(buffer); buffer = parsed.rest;
           if (buffer.length > 128 * 1024 || parsed.events.some((frame) => (frame.data?.length ?? 0) > 128 * 1024)) throw unexpectedResponseError("Support stream frame exceeded its size limit.");
           for (const frame of parsed.events) {
+            backoff.serverRetry(frame.retry);
             if (frame.event !== "support.message" || !frame.data) continue;
             let message: { conversation_id: string; sequence: number; author: string; body: string };
             try { message = JSON.parse(frame.data); } catch { throw unexpectedResponseError("Support stream sent invalid JSON."); }
@@ -95,15 +98,18 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
             }
             runtime.stdout.write(flagBool(args.flags, "human") ? `${message.author}: ${redactText(message.body)}\n` : `${JSON.stringify(streamEnvelope(runtime, redactEvent(message), client.requestId))}\n`);
           }
-          delay = EVENT_STREAM_BACKOFF_MS;
           if (controller.signal.aborted) break;
         }
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) break;
         if (isHardFollowError(error) || (error instanceof CliError && error.problem.code === "unexpected_response")) throw error;
+        failure = error;
       }
-      if (!controller.signal.aborted) await sleepWhileOpen(delay, controller.signal, runtime.sleep);
-      delay = Math.min(delay * 2, EVENT_STREAM_BACKOFF_CAP_MS);
+      if (!controller.signal.aborted) {
+        const wait = backoff.next(failure);
+        if (wait.rateLimited) noteRateLimitWait(runtime, wait.ms);
+        await sleepWhileOpen(wait.ms, controller.signal, runtime.sleep);
+      }
     }
   } finally { if (timer) clearTimeout(timer); }
   return { envelope: successEnvelope({ after }, { request_id: client.requestId }), exitCode: ExitCode.Success, human: "", output: "stream" };

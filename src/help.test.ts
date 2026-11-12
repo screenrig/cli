@@ -111,6 +111,7 @@ test("root help is compact and every command is discoverable through immediate c
     "ads direct end",
     "ads direct report",
     "ads direct availability",
+    "billing usage",
     "billing balance",
     "billing statement",
     "agent enroll",
@@ -138,7 +139,6 @@ test("root help is compact and every command is discoverable through immediate c
     "app list",
     "app show",
     "app delete",
-    "media generate",
     "media upload",
     "media replace",
     "media versions",
@@ -415,7 +415,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
   assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
   assert.deepEqual(media.commands.map((child) => child.name), [
-    "generate", "upload", "replace", "versions", "restore", "version", "upload-batch", "show", "download", "list", "selector-preview", "update", "availability", "delete", "move", "folder", "sync",
+    "upload", "replace", "versions", "restore", "version", "upload-batch", "show", "download", "list", "selector-preview", "update", "availability", "delete", "move", "folder", "sync",
   ]);
   for (const path of leafCommandPaths(findCommand(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
@@ -493,12 +493,6 @@ test("structured discovery exposes positional cardinality, choices, defaults and
   assert.match(init.options.find((option) => option.name === "--duration-ms")?.description ?? "", /8000.*86400000 for application pages/);
   assert.ok(init.examples.length > 0);
   assert.deepEqual(init.relationships, [{ kind: "together", options: ["--target-width", "--target-height"] }]);
-  const generate = invoke(["media", "generate", "--help"]).data;
-  assert.equal(generate.options.find((option) => option.name === "--quality")?.default, "medium");
-  assert.equal(generate.options.find((option) => option.name === "--aspect-ratio")?.default, "16:9");
-  assert.deepEqual(generate.options.find((option) => option.name === "--prompt")?.conflicts, ["--prompt-file"]);
-  assert.deepEqual(generate.relationships, [{ kind: "exactlyOne", options: ["--prompt", "--prompt-file"] }]);
-  assert.equal(generate.usage.split("Provide exactly one").length, 2, "notes should appear only once");
 });
 
 test("agent enroll declares mutually exclusive credential sources", () => {
@@ -524,13 +518,12 @@ test("explicit JSON inventory can be scoped to a group", () => {
   assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree([], undefined, ALL_COMMAND_REGISTRARS).root));
   const media = invoke(["help", "media", "--all"]).data;
   assert.ok(media.allCommands?.every((path) => path.startsWith("media ")));
-  assert.ok(media.allCommands?.includes("media generate"));
+  assert.ok(media.allCommands?.includes("media upload"));
+  assert.ok(!media.allCommands?.includes("media generate"));
 });
 
 test("declared relationships and choices reject invalid commands before authentication", () => {
   for (const args of [
-    ["media", "generate"],
-    ["media", "generate", "--prompt", "test", "--quality", "ultra"],
     ["playlist", "init", "med_TEST", "--name", "Test", "--output", "out.json", "--target-width", "1920"],
     ["playlist", "import", "bundle", "--expect-rev", "1"],
     ["notifications", "create"],

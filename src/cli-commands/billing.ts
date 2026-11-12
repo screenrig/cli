@@ -12,7 +12,7 @@ import { LIMITS_HELP } from "../help-text.js";
  * financial flow.
  */
 export function registerBillingCommands(root: Command, bind: CommandActionBinder): void {
-  const billing = root.command("billing").description("Read this plan's limits, and the advertising balance and ledger statement");
+  const billing = root.command("billing").description("Read plan limits, the advertising balance and the ledger");
 
   const usage = billing.command("usage").description("Read the plan's storage and agent request limits")
     .action(bind(handleBillingUsage));

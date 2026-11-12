@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { exitCodeForStatus, ExitCode } from "./exit-codes.js";
-import { fileError, literalCommandWords, networkError, normalizeProblem, problemCodeOf, renderProblem, withDefaultHint, withPaymentGuidance, withPlanGuidance, withQuotaGuidance, withRetryAfter } from "./problems.js";
+import { fileError, literalCommandWords, networkError, normalizeProblem, problemCodeOf, renderProblem, withDefaultHint, withPaymentGuidance, withPlanGuidance, withQuotaGuidance, withRateLimitGuidance, withRetryAfter } from "./problems.js";
 
 test("maps HTTP statuses onto explicit exit codes", () => {
   assert.equal(exitCodeForStatus(401), ExitCode.Auth);
@@ -110,15 +110,48 @@ const PAYMENT_BASE = {
   errors: [],
 };
 
-test("402 guidance tells the agent to stop, tell the user, and continue another way", () => {
+test("a 402 from an older server says to stop and tell the user, and names no pay command", () => {
   for (const code of ["payment_required", "insufficient_credits"]) {
     const problem = withPaymentGuidance({ ...PAYMENT_BASE, code });
-    assert.equal(problem.next?.command, "screenrig billing balance", code);
+    assert.equal(problem.next, undefined, code);
     assert.match(problem.hint ?? "", /Stop retrying/, code);
     assert.match(problem.hint ?? "", /tell the user/, code);
-    assert.match(problem.hint ?? "", /screenrig media upload/, code);
-    assert.doesNotMatch(`${problem.hint} ${problem.next?.reason}`, /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$/i, code);
+    assert.doesNotMatch(problem.hint ?? "", /credit|mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$/i, code);
   }
+});
+
+const RATE_BASE = {
+  type: "https://screenrig.ai/problems/rate-limited",
+  title: "Too many requests",
+  status: 429,
+  detail: "The organization's agent requests for this hour are spent.",
+  code: "rate_limited",
+  errors: [],
+};
+const ORG_HEADERS = { "ratelimit-policy": '"api-request-org";q=500;w=3600', ratelimit: '"api-request-org";r=0;t=120' };
+
+test("the hourly request cap says to wait Retry-After and not loop; other 429s keep the server's words", () => {
+  const capped = withRateLimitGuidance({ ...RATE_BASE, retry_after_seconds: 120 }, ORG_HEADERS);
+  assert.match(capped.hint ?? "", /Wait 120 seconds, then run the same command once; do not retry in a loop/);
+  assert.match(capped.hint ?? "", /nothing is charged/);
+  assert.equal(capped.next?.command, "screenrig billing usage");
+  // Without a parsed Retry-After the hint still says to wait for it.
+  assert.match(withRateLimitGuidance(RATE_BASE, ORG_HEADERS).hint ?? "", /Wait the time Retry-After names/);
+  // A server's own hint is kept.
+  assert.equal(withRateLimitGuidance({ ...RATE_BASE, hint: "Server hint." }, ORG_HEADERS).hint, "Server hint.");
+  // A shorter limit on one route (another policy, or none named) is left alone.
+  assert.deepEqual(withRateLimitGuidance(RATE_BASE, { ratelimit: '"playback-export-project";r=0;t=42' }), RATE_BASE);
+  assert.deepEqual(withRateLimitGuidance(RATE_BASE, {}), RATE_BASE);
+  assert.deepEqual(withRateLimitGuidance({ ...RATE_BASE, code: "forbidden" }, ORG_HEADERS), { ...RATE_BASE, code: "forbidden" });
+});
+
+test("quota_exceeded is storage full: delete content or change plan, and read the usage command", () => {
+  const stored = withQuotaGuidance({ ...PAYMENT_BASE, status: 413, code: "quota_exceeded" });
+  assert.match(stored.hint ?? "", /^Storage is full/);
+  assert.match(stored.hint ?? "", /delete media/);
+  assert.match(stored.hint ?? "", /larger plan/);
+  assert.equal(stored.next?.command, "screenrig billing usage");
+  assert.equal(withQuotaGuidance({ ...PAYMENT_BASE, status: 413, code: "quota_exceeded", hint: "Server hint." }).hint, "Server hint.");
 });
 
 const PLAN_BASE = {
@@ -141,7 +174,7 @@ test("feature_not_in_plan points at the plan's features and names the plan the s
   assert.doesNotMatch(`${hint} ${problem.next?.reason}`, /mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$|\d/i);
   // The credit guidance leaves it alone, and it names no credit command.
   assert.equal(withPaymentGuidance(PLAN_BASE).hint, undefined);
-  assert.notEqual(problem.next?.command, "screenrig billing balance");
+  assert.equal(problem.next?.command, "screenrig project capabilities");
 });
 
 test("feature_not_in_plan without a required_plan still points at the plan's features", () => {
@@ -173,11 +206,10 @@ test("member_limit_reached and project_limit_reached name the plan the server sa
     const { required_plan: _omitted, ...bare } = { ...PLAN_BASE, code, status, hint: "The project is at its limit." };
     assert.deepEqual(withPlanGuidance(bare), bare, code);
   }
-  // No plan lifts a storage quota, so that guidance names no plan.
+  // Plan guidance never rewrites the storage refusal's hint.
   const stored = withPlanGuidance(withQuotaGuidance({ ...PLAN_BASE, status: 413, code: "quota_exceeded", required_plan: "premium" }));
-  assert.match(stored.hint ?? "", /storage limit/);
-  assert.doesNotMatch(stored.hint ?? "", /plan/i);
-  assert.equal(stored.next?.command, "screenrig project show");
+  assert.match(stored.hint ?? "", /^Storage is full/);
+  assert.doesNotMatch(stored.hint ?? "", /Premium/);
 });
 
 test("plan guidance leaves every other problem alone", () => {

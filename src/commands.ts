@@ -755,6 +755,51 @@ export async function resolveDownloadOutput(cwd: string, defaultRelative: string
 /** First reconnect wait after a disconnect. Tests inject `runtime.sleep`. */
 export const EVENT_STREAM_BACKOFF_MS = 250;
 export const EVENT_STREAM_BACKOFF_CAP_MS = 15_000;
+/** The longest wait a 429's Retry-After is honoured for: the cap's window is one hour. */
+export const RATE_LIMIT_WAIT_CAP_MS = 3_600_000;
+/** A server's `retry:` field is honoured up to this many milliseconds. */
+const SSE_RETRY_CAP_MS = 60_000;
+
+/**
+ * The reconnect wait of a listen stream (`events follow`, `support follow`).
+ * Failures back off from 250 ms to 15 s; a connection that opened starts over.
+ * The server's SSE `retry:` sets the starting wait. A refusal with HTTP 429 is
+ * the organization's hourly request cap, which no quicker reconnect can lift:
+ * the wait is the server's Retry-After (an hour at most), and a 429 without one
+ * backs off like any other failure.
+ */
+export class FollowBackoff {
+  private baseMs = EVENT_STREAM_BACKOFF_MS;
+  private delayMs = EVENT_STREAM_BACKOFF_MS;
+
+  /** The `retry:` of a received frame becomes the starting wait. */
+  serverRetry(ms: number | undefined): void {
+    if (ms === undefined) return;
+    this.baseMs = Math.min(Math.max(ms, 0), SSE_RETRY_CAP_MS);
+    this.delayMs = this.baseMs;
+  }
+
+  /** A connection opened: the next wait starts over. */
+  connected(): void {
+    this.delayMs = this.baseMs;
+  }
+
+  /** The wait before the next connection after this failure (none: the stream just ended). */
+  next(failure?: unknown): { ms: number; rateLimited: boolean } {
+    const after = failure instanceof CliError && failure.problem.status === 429 ? failure.problem.retry_after_seconds : undefined;
+    if (after !== undefined) {
+      return { ms: Math.min(Math.max(after * 1000, EVENT_STREAM_BACKOFF_MS), RATE_LIMIT_WAIT_CAP_MS), rateLimited: true };
+    }
+    const ms = this.delayMs;
+    this.delayMs = Math.min(Math.max(ms, EVENT_STREAM_BACKOFF_MS) * 2, EVENT_STREAM_BACKOFF_CAP_MS);
+    return { ms, rateLimited: false };
+  }
+}
+
+/** Progress for a person watching stderr; the NDJSON on stdout is untouched. */
+export function noteRateLimitWait(runtime: CliRuntime, ms: number): void {
+  runtime.stderr.write(`screenrig: request limit reached; reconnecting in ${Math.ceil(ms / 1000)} s\n`);
+}
 
 export function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";

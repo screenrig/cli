@@ -1,5 +1,5 @@
 import { ExitCode } from "../exit-codes.js";
-import { CliError, makeProblem, networkError, normalizeProblem, timeoutError } from "../problems.js";
+import { CliError, makeProblem, networkError, normalizeProblem, parseRetryAfter, timeoutError, withRetryAfter } from "../problems.js";
 import { redactText } from "../redact.js";
 import { USER_AGENT } from "../user-agent.js";
 import type {
@@ -180,11 +180,12 @@ export class FetchTransport implements Transport {
       const text = await response.text();
       let body: unknown = text;
       try { body = JSON.parse(text) as unknown; } catch { /* Preserve the bounded fallback text. */ }
-      throw new CliError(normalizeProblem(body, {
+      const problem = normalizeProblem(body, {
         status: response.status,
         request_id: response.headers.get("x-request-id") ?? req.headers?.["x-request-id"],
         bodyText: text.slice(0, 300),
-      }));
+      });
+      throw new CliError(withRetryAfter(problem, parseRetryAfter(response.headers.get("retry-after") ?? undefined, Date.now())));
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

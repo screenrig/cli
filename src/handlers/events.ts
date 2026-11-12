@@ -12,9 +12,9 @@ import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
-import { parseSse } from "../sse.js";
+import { parseSse, projectEventOf } from "../sse.js";
 import { isSensitiveKey, isSensitiveValue, redactEvent } from "../redact.js";
-import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, clientFor, commandHandler, isAbortError, isHardFollowError, jsonBody, requireFlagValue, sleepWhileOpen, streamEnvelope, streamToken, transportFor, type CommandResult } from "../commands.js";
+import { FollowBackoff, clientFor, commandHandler, isAbortError, isHardFollowError, jsonBody, noteRateLimitWait, requireFlagValue, sleepWhileOpen, streamEnvelope, streamToken, transportFor, type CommandResult } from "../commands.js";
 
 
 export const handleEventsList = commandHandler(eventsList);
@@ -220,7 +220,7 @@ export async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolv
   const json = !flagBool(args.flags, "human");
   let printed = 0;
   let after = flagString(args.flags, "after");
-  let delayMs = EVENT_STREAM_BACKOFF_MS;
+  const backoff = new FollowBackoff();
   const controller = new AbortController();
   const timeoutMs = flagNumber(args.flags, "timeout");
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
@@ -242,7 +242,7 @@ export async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolv
   try {
     while (!controller.signal.aborted) {
       let buffer = "";
-      let connected = false;
+      let failure: unknown;
       try {
         token = await streamToken(runtime, token);
         const stream = await transport.stream({
@@ -252,21 +252,22 @@ export async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolv
           headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
-        connected = true;
+        backoff.connected();
         for await (const chunk of stream) {
           buffer += chunk;
           const parsed = parseSse(buffer);
           buffer = parsed.rest;
-          for (const event of parsed.events) {
-            if (event.id) {
-              after = event.id;
+          for (const frame of parsed.events) {
+            backoff.serverRetry(frame.retry);
+            if (!frame.data) continue;
+            // Only a project event moves the cursor and prints; an in-band problem or any
+            // other frame the server names is not event data.
+            const event = projectEventOf<ProjectEvent>(frame);
+            if (!event) continue;
+            if (frame.id) {
+              after = frame.id;
             }
-            if (!event.data) continue;
-            try {
-              emit(JSON.parse(event.data) as ProjectEvent);
-            } catch {
-              // Unstructured frames are not event data.
-            }
+            emit(event);
           }
           if (controller.signal.aborted) {
             break;
@@ -279,17 +280,14 @@ export async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolv
         if (isHardFollowError(err)) {
           throw err;
         }
+        failure = err;
       }
       if (controller.signal.aborted) {
         break;
       }
-      await sleepWhileOpen(delayMs, controller.signal, runtime.sleep);
-      if (controller.signal.aborted) {
-        break;
-      }
-      delayMs = connected
-        ? EVENT_STREAM_BACKOFF_MS
-        : Math.min(delayMs * 2, EVENT_STREAM_BACKOFF_CAP_MS);
+      const wait = backoff.next(failure);
+      if (wait.rateLimited) noteRateLimitWait(runtime, wait.ms);
+      await sleepWhileOpen(wait.ms, controller.signal, runtime.sleep);
     }
   } finally {
     if (timer) clearTimeout(timer);

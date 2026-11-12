@@ -519,13 +519,17 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
   });
 }
 
+/** The policy name of the organization's hourly request cap in RateLimit-Policy and RateLimit. */
+export const ORG_REQUEST_POLICY = "api-request-org";
+
 /**
- * A 429 rate_limited is a wait, not a failure. The organization's hourly
- * request cap (and the shorter limits on card data and exports) clears when
- * Retry-After ends; looping on it only spends the next window.
+ * A 429 from the organization's hourly request cap is a wait, not a failure: it
+ * clears when Retry-After ends, and looping on it only spends the next window.
+ * The response names the cap in its RateLimit-Policy; every other 429 (a
+ * shorter limit on one route) keeps the server's own words.
  */
-export function withRateLimitGuidance(problem: NormalizedProblem): NormalizedProblem {
-  if (problem.code !== "rate_limited") {
+export function withRateLimitGuidance(problem: NormalizedProblem, headers: Record<string, string>): NormalizedProblem {
+  if (problem.code !== "rate_limited" || !`${headers["ratelimit-policy"] ?? ""} ${headers["ratelimit"] ?? ""}`.includes(`"${ORG_REQUEST_POLICY}"`)) {
     return problem;
   }
   const wait = typeof problem.retry_after_seconds === "number" ? `${problem.retry_after_seconds} seconds` : "the time Retry-After names";
@@ -544,9 +548,8 @@ function planTitle(id: string): string {
 }
 
 /**
- * Plan guidance. feature_not_in_plan is a 402 that credit does not unlock, so
- * it must not read like the credit 402s above: the feature belongs to the plan
- * `required_plan` names, retrying is refused the same way, and the task goes on
+ * Plan guidance. feature_not_in_plan is a 402 that only a larger plan lifts:
+ * the feature belongs to the plan `required_plan` names, retrying is refused the same way, and the task goes on
  * without it. member_limit_reached and project_limit_reached that carry
  * `required_plan` also name the plan that has room. Server guidance is kept;
  * the plan is added to a hint that does not already name it.

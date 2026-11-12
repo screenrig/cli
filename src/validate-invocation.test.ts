@@ -57,7 +57,6 @@ test("a lone - is accepted wherever the help documents stdin, and only there", (
     [["screen", "reboot-schedule", "set", "scr_TEST", "--file", "-"], "file"],
     [["notifications", "create", "--email", "owner", "--conditions", "screen_offline", "--audience", "-"], "audience"],
     [["notifications", "update", "ntf_AAAAAAAAAAAAAAAAAAAA", "--audience", "-"], "audience"],
-    [["media", "generate", "--prompt-file", "-"], "prompt-file"],
     [["comment", "set", "screen", "scr_TEST", "--file", "-"], "file"],
     [["playback", "plays", "--from", "7d", "--format", "csv", "--output", "-"], "output"],
     [["ads", "direct", "report", "adc_TEST", "--format", "csv", "--output", "-"], "output"],

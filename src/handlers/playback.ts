@@ -229,7 +229,7 @@ export function playsNextArgv(
 }
 
 /**
- * One CSV stream (one billed request) into a file via temp + rename, or to
+ * One CSV stream (one request) into a file via temp + rename, or to
  * stdout only with an explicit --output -. The envelope reports the path,
  * bytes, rows, and SHA-256, never the CSV itself. A stream that fails after
  * the 200 never lands on the target path.

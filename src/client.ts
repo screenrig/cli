@@ -64,7 +64,7 @@ function errorBodyText(rawText: string | undefined, body: unknown): string {
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
-/** A cursor-paged list is read for at most this many pages (each one billed request). */
+/** A cursor-paged list is read for at most this many pages (each one a request). */
 export const LIST_MAX_PAGES = 50;
 
 /** listAll: no page cap (`uncapped`), and the names a route gives its cursor query parameter and items array. */
@@ -133,6 +133,7 @@ function withLocalGuidance(problem: NormalizedProblem, headers: Record<string, s
     withPaymentGuidance(
       withRateLimitGuidance(
         withQuotaGuidance(withOverbookingGuidance(withRetryAfter(problem, parseRetryAfter(headers["retry-after"], Date.now())))),
+        headers,
       ),
     ),
   );
