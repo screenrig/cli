@@ -59,6 +59,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

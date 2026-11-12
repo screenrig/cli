@@ -35,13 +35,18 @@ export type Capabilities = Record<CapabilityName, boolean>;
 /** In the order the fixtures list them. */
 export const FEATURE_NAMES = [
   "ready", "log", "event.emit", "page.advance", "page.skip", "kv.get", "kv.list", "kv.set", "kv.delete", "kv.watch",
-  "device.display", "device.watch", "device.vibrate", "device.scan", "device.camera", "device.sound", "device.serial", "device.gpio", "device.ble", "device.print",
+  "device.display", "device.watch", "device.vibrate", "device.scan", "device.scanner", "device.people", "device.camera", "device.sound", "device.serial", "device.gpio", "device.ble", "device.print",
   "device.gpio.pull", "device.gpio.idle", "device.ir", "device.ir.send", "device.udp", "device.hdmi_input",
   "visibility.watch", "page.timing", "context.params", "context.screen",
 ] as const;
 
 /** A Player that advertises the key supports each listed feature without listing it (the device index's `impliedFeatures`). */
-export const IMPLIED_FEATURES: Readonly<Record<string, readonly string[]>> = { "device.ir": ["device.ir.send"] };
+export const IMPLIED_FEATURES: Readonly<Record<string, readonly string[]>> = {
+  "device.ir": ["device.ir.send"],
+  // Older Players advertised camera as one feature for both scanner controls
+  // and people-count events.
+  "device.camera": ["device.scanner", "device.people"],
+};
 
 /** Whether a list of advertised features covers `feature`, directly or by implication. */
 export function advertises(features: readonly string[], feature: string): boolean {
@@ -58,7 +63,7 @@ export const BASELINE_FEATURES: readonly string[] = [
 
 /** Hardware kinds are advertised by device, not by kind. */
 const KIND_FEATURES: Readonly<Record<string, string>> = {
-  "device.scanner.start": "device.camera", "device.scanner.stop": "device.camera",
+  "device.scanner.start": "device.scanner", "device.scanner.stop": "device.scanner",
   "device.serial.list": "device.serial", "device.serial.open": "device.serial", "device.serial.write": "device.serial", "device.serial.close": "device.serial",
   "device.gpio.write": "device.gpio", "device.gpio.watch": "device.gpio",
   "device.udp.open": "device.udp", "device.udp.send": "device.udp", "device.udp.close": "device.udp",
@@ -78,7 +83,7 @@ export const WATCH_EVENTS: ReadonlyArray<{ name: string; capability: CapabilityN
   { name: "light", capability: "device.light", feature: "device.watch" },
   { name: "network", capability: "device.network", feature: "device.watch" },
   { name: "scan", capability: "device.scan", feature: "device.scan" },
-  { name: "people", capability: "device.camera", feature: "device.camera" },
+  { name: "people", capability: "device.camera", feature: "device.people" },
   { name: "sound", capability: "device.sound", feature: "device.sound" },
   { name: "serial", capability: "device.serial", feature: "device.serial" },
   { name: "gpio", capability: "device.gpio", feature: "device.gpio" },

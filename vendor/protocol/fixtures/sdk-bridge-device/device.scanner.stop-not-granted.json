@@ -4,7 +4,7 @@
   "name": "device.scanner.stop-not-granted",
   "kind": "device.scanner.stop",
   "requires": [
-    "device.camera"
+    "device.scanner"
   ],
   "requiresSources": [],
   "purpose": "device.scanner.stop from a frame without the device.camera capability is refused with forbidden (403).",
@@ -55,6 +55,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

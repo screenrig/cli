@@ -1501,8 +1501,8 @@
     "response.problem"
   ];
   var KIND_FEATURES = {
-    "device.scanner.start": "device.camera",
-    "device.scanner.stop": "device.camera",
+    "device.scanner.start": "device.scanner",
+    "device.scanner.stop": "device.scanner",
     "device.serial.list": "device.serial",
     "device.serial.open": "device.serial",
     "device.serial.write": "device.serial",
@@ -1519,6 +1519,7 @@
     "device.udp.close": "device.udp"
   };
   var IMPLIED_FEATURES = {
+    "device.camera": ["device.scanner", "device.people"],
     "device.ir": ["device.ir.send"]
   };
   function featureOf(kind) {
@@ -1537,7 +1538,7 @@
     light: { capability: "device.light" },
     network: { capability: "device.network" },
     scan: { capability: "device.scan", feature: "device.scan" },
-    people: { capability: "device.camera", feature: "device.camera" },
+    people: { capability: "device.camera", feature: "device.people" },
     sound: { capability: "device.sound", feature: "device.sound" },
     serial: { capability: "device.serial", feature: "device.serial" },
     gpio: { capability: "device.gpio", feature: "device.gpio" },
@@ -2759,8 +2760,9 @@
   }
 
   // src/hardware.ts
-  var SCANNER_START = { features: ["device.camera", "device.scan"], capabilities: ["device.camera", "device.scan"] };
-  var CAMERA = { features: ["device.camera"], capabilities: ["device.camera"] };
+  var SCANNER_START = { features: ["device.scanner", "device.scan"], capabilities: ["device.camera", "device.scan"] };
+  var SCANNER = { features: ["device.scanner"], capabilities: ["device.camera"] };
+  var CAMERA = { features: ["device.people"], capabilities: ["device.camera"] };
   var SERIAL = { features: ["device.serial"], capabilities: ["device.serial"] };
   var GPIO = { features: ["device.gpio"], capabilities: ["device.gpio"] };
   var GPIO_IDLE = { features: ["device.gpio", "device.gpio.idle"], capabilities: ["device.gpio"] };
@@ -3021,7 +3023,7 @@
       return parseScannerStartResult(await this.bridge.send("device.scanner.start", members));
     }
     async scannerStop() {
-      this.bridge.check(CAMERA);
+      this.bridge.check(SCANNER);
       await this.bridge.send("device.scanner.stop", {});
     }
     // ---- serial ---------------------------------------------------------------
@@ -3272,6 +3274,11 @@
           for (const handler of [...this.scanHandlers]) call(() => handler({ source: event.source, format: event.format, data: event.data }));
           return;
         case "people":
+          try {
+            this.bridge.check(CAMERA);
+          } catch {
+            return;
+          }
           for (const handler of [...this.peopleHandlers]) call(() => handler(event.count));
           return;
         case "sound":

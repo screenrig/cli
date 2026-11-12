@@ -34,7 +34,7 @@ export interface Capabilities {
     "device.haptics": boolean;
     /** `screenrig.device.onScan()`: hear what the device reads: keyboard-wedge scanners and badge readers, NFC tags, the camera scanner. */
     "device.scan": boolean;
-    /** `screenrig.device.scanner` and `device.onPeople()`: use the device's camera to read QR codes and barcodes and to count the people in view. The camera is analysed on the device; no image leaves it. */
+    /** Camera access granted to `device.scanner` and `device.onPeople()`. The camera is analysed on the device; no image leaves it. */
     "device.camera": boolean;
     /** `screenrig.device.onSoundLevel()`: hear the microphone level. No audio leaves the device. */
     "device.sound": boolean;
@@ -307,15 +307,17 @@ export interface ScreenRigDeviceScanner {
     /**
      * Starts decoding QR codes and barcodes from the device camera; each one
      * arrives as a scan with source `camera` at the `onScan` handlers. Needs the
-     * `device.camera` and `device.scan` capabilities. Rejects `not_supported` when
-     * the Player does not advertise them, `capability_denied` without them,
+     * `device.camera` and `device.scan` capabilities and the `device.scanner`
+     * host feature. Older hosts advertising `device.camera` provide that feature
+     * too. Rejects `not_supported` when the Player does not advertise it,
+     * `capability_denied` without the capabilities,
      * `invalid_request` (before anything is sent) for a bad `formats`,
      * `camera_unavailable` when the camera cannot open, and the Player's problem
      * otherwise. The camera is analysed on the device; no image leaves it. The
      * Player stops the scanner when the page leaves the screen.
      */
     start(options?: ScannerOptions): Promise<ScannerState>;
-    /** Stops the camera scanner. Needs the `device.camera` capability; resolves when the scanner is stopped or was not running. */
+    /** Stops the camera scanner. Needs the `device.camera` capability and the `device.scanner` host feature; legacy `device.camera` hosts provide it too. */
     stop(): Promise<void>;
 }
 /** A serial port the device offers. */
@@ -702,7 +704,8 @@ export interface ScreenRigDevice {
      * for the count at the watch, then whenever it changes, at most once per
      * second. The camera is analysed on the device; no image leaves it. Needs the
      * `device.camera` capability and a Player that supports `device.watch` and
-     * `device.camera`; otherwise the handler never runs. Returns a function that
+     * `device.people`; older hosts advertising `device.camera` provide it too.
+     * Otherwise the handler never runs. Returns a function that
      * removes the handler.
      */
     onPeople(handler: (count: number) => void): () => void;
@@ -831,7 +834,7 @@ export interface ScreenRig {
      * Whether the Player that hosts the page implements a message kind or
      * feature, such as `"page.skip"`, `"kv.watch"`, `"visibility.watch"`,
      * `"page.timing"`, `"device.display"`, `"device.watch"`, `"device.vibrate"`,
-     * `"device.scan"`, `"device.camera"`, `"device.sound"`, `"device.serial"`,
+     * `"device.scan"`, `"device.scanner"`, `"device.people"`, `"device.camera"` (the legacy aggregate), `"device.sound"`, `"device.serial"`,
      * `"device.gpio"`, `"device.gpio.pull"`, `"device.gpio.idle"`, `"device.ble"`,
      * `"device.print"`, `"device.ir"`, `"device.ir.send"`, `"device.udp"` or
      * `"device.hdmi_input"`; a Player that lists `"device.ir"` supports

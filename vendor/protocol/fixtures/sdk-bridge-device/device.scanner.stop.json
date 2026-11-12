@@ -4,7 +4,7 @@
   "name": "device.scanner.stop",
   "kind": "device.scanner.stop",
   "requires": [
-    "device.camera"
+    "device.scanner"
   ],
   "requiresSources": [],
   "purpose": "device.scanner.stop stops the camera scanner and is acknowledged with no result; it is acknowledged when the scanner was not running too.",
@@ -55,6 +55,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

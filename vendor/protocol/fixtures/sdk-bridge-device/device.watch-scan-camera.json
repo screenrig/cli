@@ -6,7 +6,7 @@
   "requires": [
     "device.watch",
     "device.scan",
-    "device.camera"
+    "device.scanner"
   ],
   "requiresSources": [
     "scan.camera"
@@ -59,6 +59,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

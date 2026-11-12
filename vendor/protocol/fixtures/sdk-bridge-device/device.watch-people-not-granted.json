@@ -5,7 +5,7 @@
   "kind": "device.watch",
   "requires": [
     "device.watch",
-    "device.camera"
+    "device.people"
   ],
   "requiresSources": [],
   "purpose": "A frame without the device.camera capability gets no people event.",
@@ -56,6 +56,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

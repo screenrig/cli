@@ -5,7 +5,7 @@
   "kind": "device.watch",
   "requires": [
     "device.watch",
-    "device.camera"
+    "device.people"
   ],
   "requiresSources": [],
   "purpose": "A frame that watches people receives device.event {type: people, count} with the number of people the device's camera sees, an integer from 0 to 1000: the first reading after the watch, then only when the count changes, and never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted people event: a reading that would post sooner is dropped, not deferred. The camera is analysed on the device and released when nobody watches.",
@@ -56,6 +56,8 @@
       "device.watch",
       "device.vibrate",
       "device.scan",
+      "device.scanner",
+      "device.people",
       "device.camera",
       "device.sound",
       "device.serial",

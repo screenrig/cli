@@ -279,3 +279,29 @@ test("the round-three features and capabilities are advertised", async () => {
     for (const name of ["device.gpio.pull", "device.gpio.idle", "device.ir", "device.ir.send", "device.udp", "device.hdmi_input"]) assert.ok(context.features.includes(name), name);
   } finally { await h.close(); }
 });
+
+test("scanner-only hosts allow scans without watching or emitting people events", async () => {
+  const h = await harness();
+  try {
+    h.session.host.setFeatures(["device.watch", "device.scan", "device.scanner"]);
+    await h.watch("scan", "people");
+    assert.deepEqual((await h.send("device.scanner.start", { formats: ["qr"] })).kind, "response.ack");
+    assert.equal((await h.trigger({ device: "scan", source: "camera", format: "qr", data: "https://example.com" })).posted, true);
+    assert.equal(h.events("scan").length, 1);
+    const people = await h.trigger({ device: "people", count: 2 });
+    assert.equal(people.posted, false);
+    assert.match(people.dropped ?? "", /does not watch people/);
+    assert.equal(h.events("people").length, 0);
+  } finally { await h.close(); }
+});
+
+test("the legacy device.camera feature still enables scanner controls and people events", async () => {
+  const h = await harness();
+  try {
+    h.session.host.setFeatures(["device.watch", "device.scan", "device.camera"]);
+    await h.watch("scan", "people");
+    assert.equal((await h.send("device.scanner.start", { formats: ["qr"] })).kind, "response.ack");
+    assert.equal((await h.trigger({ device: "people", count: 2 })).posted, true);
+    assert.equal(h.events("people").length, 1);
+  } finally { await h.close(); }
+});
