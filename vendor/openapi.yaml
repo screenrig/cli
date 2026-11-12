@@ -11851,10 +11851,12 @@ paths:
                   - next_cursor
                 properties:
                   items:
+                    description: "The project's card instances on this page."
                     type: array
                     items:
                       $ref: '#/components/schemas/CardInstance'
                   next_cursor:
+                    description: "Pass back as after for the next page; null on the last page."
                     type:
                       - string
                       - 'null'
@@ -28288,19 +28290,19 @@ components:
       additionalProperties: false
       required: [number, current, filename, content_type, sha256, bytes, source, created_at]
       properties:
-        number: {type: integer, minimum: 1}
+        number: {type: integer, minimum: 1, description: "Position of the version in the media item's history, starting at 1."}
         current: {type: boolean, description: "True for the version in service."}
-        filename: {type: string}
-        source_filename: {type: string}
-        content_type: {type: string}
-        sha256: {type: string}
-        bytes: {type: integer, minimum: 0}
-        width: {type: integer, minimum: 0}
-        height: {type: integer, minimum: 0}
-        duration_ms: {type: integer, minimum: 0}
-        codecs: {type: string}
+        filename: {type: string, description: "Stored file name of the version."}
+        source_filename: {type: string, description: "Original file name when the uploaded bytes were transcoded or orientation-normalized at ingest."}
+        content_type: {type: string, description: "Media type of the version's file."}
+        sha256: {type: string, description: "SHA-256 digest of the version's file."}
+        bytes: {type: integer, minimum: 0, description: "Size of the version's file in bytes."}
+        width: {type: integer, minimum: 0, description: "Width of the image or video in pixels; absent for audio."}
+        height: {type: integer, minimum: 0, description: "Height of the image or video in pixels; absent for audio."}
+        duration_ms: {type: integer, minimum: 0, description: "Playing time of the version in milliseconds."}
+        codecs: {type: string, description: "Codec string derived from the file's container, set for video."}
         source: {type: string, enum: [upload, replace, sync, restore], description: "How it came to be: the first upload, a replacement, a media sync's changed file, or a restore of an older version."}
-        note: {type: string}
+        note: {type: string, description: "Note kept with the version when it was put in service."}
         by: {$ref: "#/components/schemas/MediaVersionActor", description: "Who or which agent put the version in service; absent for the first upload."}
         restored_from: {type: integer, minimum: 1, description: "The version number a restore copied."}
         created_at: {type: string, format: date-time, description: "When the version went into service."}
@@ -28420,8 +28422,8 @@ components:
       additionalProperties: false
       required: [items, next_cursor]
       properties:
-        items: {type: array, items: {$ref: "#/components/schemas/MediaVersion"}}
-        next_cursor: {anyOf: [{type: string}, {type: "null"}]}
+        items: {type: array, items: {$ref: "#/components/schemas/MediaVersion"}, description: "Versions of the media item, newest first, with the version in service first."}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Pass back as cursor for the next page; null on the last page."}
     MediaWarning:
       type: object
       additionalProperties: false
@@ -28557,27 +28559,27 @@ components:
       properties:
         id: {type: string, description: "rvw_ for playlist and screen changes; the ad review id (arv_) for an ad creative."}
         kind: {type: string, enum: [playlist_change, screen_change, ad_creative, protected_change], description: "protected_change is a campaign, screen folder or move write that reaches a protected screen (docs/screen-scope.md)."}
-        state: {type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale]}
-        subject: {$ref: "#/components/schemas/ReviewSubject"}
-        proposer: {$ref: "#/components/schemas/ReviewProposer"}
+        state: {type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale], description: "Where the review stands in its lifecycle."}
+        subject: {$ref: "#/components/schemas/ReviewSubject", description: "The item the proposed change targets."}
+        proposer: {$ref: "#/components/schemas/ReviewProposer", description: "The agent, client, buyer or person that proposed the change."}
         note: {type: string, maxLength: 280, description: "The proposer's note, plain text. Show it literally."}
         url: {type: string, format: uri, description: "The dashboard page of this review. It carries no authority."}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-        decided_at: {type: string, format: date-time}
-        decided_by: {$ref: "#/components/schemas/ReviewDecider"}
+        created_at: {type: string, format: date-time, description: "When the change was proposed."}
+        updated_at: {type: string, format: date-time, description: "When the review last changed."}
+        decided_at: {type: string, format: date-time, description: "When the review was decided; absent while pending."}
+        decided_by: {$ref: "#/components/schemas/ReviewDecider", description: "Who decided the review; absent while pending."}
         decision_note: {type: string, maxLength: 500, description: "The reject reason or the requested changes, plain text."}
-        previous_review_id: {type: string}
-        superseded_by: {type: string}
+        previous_review_id: {type: string, description: "ID of the earlier review of the same subject that this one follows."}
+        superseded_by: {type: string, description: "ID of the newer review that replaced this one, when one did."}
         blocked_by: {type: array, items: {type: string}, description: "The playlist reviews this screen change was proposed behind. It waits while one of them is pending; blockers shows their state now."}
         blockers: {type: array, items: {$ref: "#/components/schemas/ReviewBlocker"}, description: "GET /api/reviews/{id} only: each blocked_by review as it stands now. A blocker that ended without approval no longer blocks: approving then assigns the playlist's current approved version, or answers 409 playlist_not_approved when it has none."}
         dependents: {type: array, items: {type: string}, description: "Screen changes waiting on this playlist review."}
-        impact: {$ref: "#/components/schemas/ReviewImpact"}
-        playlist_change: {$ref: "#/components/schemas/ReviewPlaylistChange"}
-        screen_change: {$ref: "#/components/schemas/ReviewScreenChange"}
+        impact: {$ref: "#/components/schemas/ReviewImpact", description: "What approving the review does to screens."}
+        playlist_change: {$ref: "#/components/schemas/ReviewPlaylistChange", description: "The proposed playlist write with its diff; present when kind is playlist_change."}
+        screen_change: {$ref: "#/components/schemas/ReviewScreenChange", description: "The proposed screen action replayed on approval; present when kind is screen_change."}
         protected_change: {$ref: "#/components/schemas/ReviewProtectedChange"}
         protected: {type: boolean, description: "Present and true on a protected_change and on a screen_change that reaches a protected screen: a second approver decides it, never the proposer or the person responsible for the proposing agent (docs/screen-scope.md). Absent otherwise."}
-        ad_creative: {$ref: "#/components/schemas/ReviewAdCreative"}
+        ad_creative: {$ref: "#/components/schemas/ReviewAdCreative", description: "The submitted ad creative under review; present when kind is ad_creative."}
         preview: {$ref: "#/components/schemas/ReviewPreview"}
     ReviewProtectedChange:
       type: object
@@ -28631,7 +28633,7 @@ components:
       additionalProperties: false
       required: [items, next_cursor, pending_count]
       properties:
-        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Review"}}
+        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Review"}, description: "Reviews that match the filters, newest first."}
         next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Pass back as cursor, with the same filters, for the next page; null on the last page."}
         pending_count: {type: integer, minimum: 0, description: "Pending reviews of every kind the caller may see, whatever the filters."}
     ReviewSummary:
@@ -30689,18 +30691,22 @@ components:
         - expires_at
       properties:
         id:
+          description: "ID of the invitation."
           type: string
         kind:
+          description: "Whether the invitee joins as a project member or as an ad buyer."
           type: string
           enum:
             - project_member
             - ad_buyer
         delivery:
+          description: "How the invitation reaches the invitee: by email or by a link the creator shares."
           type: string
           enum:
             - email
             - link
         status:
+          description: "Current stage of the invitation, from delivery through acceptance, revocation, expiry or failure."
           $ref: '#/components/schemas/InvitationStatus'
         recipient_email:
           type: string
@@ -30709,6 +30715,7 @@ components:
           maxLength: 254
           description: Visible to the owning project, which supplied it.
         project_id:
+          description: "ID of the project the invitation is to."
           type: string
         advertising:
           $ref: '#/components/schemas/InvitationAdvertising'
@@ -30717,9 +30724,11 @@ components:
         screen_scope:
           $ref: '#/components/schemas/ScreenScope'
         created_at:
+          description: "When the invitation was created."
           type: string
           format: date-time
         expires_at:
+          description: "When the invitation stops being acceptable."
           type: string
           format: date-time
     InvitationIssued:
@@ -30790,10 +30799,12 @@ components:
         - next_cursor
       properties:
         items:
+          description: "The project's invitations, ordered by invitation ID, at most 50 per page."
           type: array
           items:
             $ref: '#/components/schemas/Invitation'
         next_cursor:
+          description: "Pass back as cursor for the next page; empty on the last page."
           type: string
     OrganizationAdminInvitationCreate:
       type: object
@@ -31505,6 +31516,7 @@ components:
       required: [results, corpus_commit]
       properties:
         results:
+          description: "The matching sections, best first; empty when nothing matches."
           type: array
           maxItems: 25
           items: {$ref: '#/components/schemas/DocsSearchResult'}
@@ -31525,32 +31537,32 @@ components:
       required: [url, title, markdown, truncated, sections, corpus_commit]
       properties:
         url: {type: string, format: uri, description: "The page's address, with a #fragment when a section was read."}
-        title: {type: string}
+        title: {type: string, description: "The page's title."}
         markdown: {type: string, description: "The page or section as Markdown, at most 48 KiB."}
         truncated: {type: boolean, description: "True when the Markdown was cut; read the sections it lacks by name."}
         sections: {type: array, items: {type: string}, description: "The page's section headings, or those under the section read, in page order."}
-        corpus_commit: {type: string}
+        corpus_commit: {type: string, description: "The website commit the documentation was published from; empty when the corpus names none."}
     Capabilities:
       type: object
       additionalProperties: false
       required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, media_video_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, founding_period_ends_at, features]
       properties:
-        api_version: {type: string}
+        api_version: {type: string, description: "Version of the HTTP API this server serves."}
         protocol_version: {type: string}
-        application_compressed_bytes: {type: integer, enum: [104857600]}
-        application_expanded_bytes: {type: integer, enum: [262144000]}
+        application_compressed_bytes: {type: integer, enum: [104857600], description: "Maximum size of an application archive before extraction."}
+        application_expanded_bytes: {type: integer, enum: [262144000], description: "Maximum total size of an application's files after extraction."}
         application_package_bytes: {type: integer, enum: [272629760], description: Maximum normalized immutable webapp package size available to paired native players.}
-        application_file_count: {type: integer, enum: [5000]}
-        application_file_bytes: {type: integer, enum: [33554432]}
-        application_path_depth: {type: integer, enum: [16]}
-        application_path_bytes: {type: integer, enum: [255]}
+        application_file_count: {type: integer, enum: [5000], description: "Maximum number of files in one application."}
+        application_file_bytes: {type: integer, enum: [33554432], description: "Maximum size of one file inside an application."}
+        application_path_depth: {type: integer, enum: [16], description: "Maximum number of directory levels in an application file path."}
+        application_path_bytes: {type: integer, enum: [255], description: "Maximum length of an application file path."}
         media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies each image is at most 16383 pixels wide and 16383 tall and at most 67,108,864 pixels (8192 by 8192) in one frame, so an ultra-wide canvas such as 12000 by 540 or 9216 by 2160 uploads, and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
         media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload on the default (Standard) plan, 500000000 bytes, 500 MB; this document is unauthenticated, so it states the default plan's limits. A project's own limit is media_video_bytes on GET /api/project/capabilities: 500000000 on Standard and 1000000000 bytes, 1 GB, on every other plan and on a Standard project whose featuresets give Plus's or Premium's limits. It is a byte-only gate rejected with invalid_request before any byte is transferred. Commit verifies the same dimension limits as an image: at most 16383 pixels per edge and 67,108,864 pixels in one frame, so a 9216 by 2160 video uploads."}
-        playlist_max_pages: {type: integer, enum: [100]}
-        playlist_max_items_per_page: {type: integer, enum: [24]}
+        playlist_max_pages: {type: integer, enum: [100], description: "Maximum number of pages in one playlist."}
+        playlist_max_items_per_page: {type: integer, enum: [24], description: "Maximum number of items placed on one playlist page."}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
-        transition_max_duration_ms: {type: integer, enum: [60000]}
+        transition_max_duration_ms: {type: integer, enum: [60000], description: "Longest allowed page transition, in milliseconds."}
         screens_per_project: {type: integer, enum: [0], description: "Always 0: no plan caps screens. Removed in a later release."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
         founding_period_ends_at: {type: string, format: date-time, description: "When the founding period ends, in RFC 3339 UTC. Accounts created before it are founding accounts: their featureset gives them Premium's features and limits for as long as they exist, and no billing applies before it beyond the metering that runs today."}
@@ -31644,14 +31656,19 @@ components:
         - name
       properties:
         id:
+          description: "ID of the project."
           type: string
         features:
+          description: "Independent capability flags enabled on the project."
           $ref: '#/components/schemas/ProjectFeatures'
         feature_revision:
+          description: "Counter that advances only when one of the project's feature flags changes."
           type: integer
         revision:
+          description: "Change counter of the project."
           type: integer
         status:
+          description: "Lifecycle state of the project."
           type: string
           enum:
             - active
@@ -31669,6 +31686,7 @@ components:
           type: integer
           description: Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released.
         screen_count:
+          description: "Number of screens the project holds."
           type: integer
         content_limit_bytes:
           type: integer
@@ -31681,9 +31699,11 @@ components:
           minimum: 0
           description: The organization's remaining credit balance as a whole integer. Never negative. Nothing in the API spends it, and bandwidth, storage, agent requests, listen streams and webhook deliveries are never charged.
         created_at:
+          description: "When the project was created."
           type: string
           format: date-time
         updated_at:
+          description: "When the project was last changed."
           type: string
           format: date-time
         name:
@@ -31693,14 +31713,17 @@ components:
           format: date-time
           description: Server-maintained instant of the project's most recent durable activity touch (authenticated Player contact). Absent until the first touch. Read-only; never authorization.
         organization_id:
+          description: "ID of the organization the project belongs to."
           type: string
           minLength: 1
           maxLength: 200
         organization_name:
+          description: "Display name of the organization the project belongs to."
           type: string
           minLength: 1
           maxLength: 60
         owner_user_id:
+          description: "ID of the person who owns the project."
           type: string
         agent_changes_require_review:
           type: boolean
@@ -32066,17 +32089,17 @@ components:
           format: date-time
           description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Agent"}}}}
-    AgentSelfStatus: {type: object, additionalProperties: false, required: [agent, connection_ready], properties: {screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of this agent's membership of the project (docs/screen-scope.md). Absent for the whole project."}, person_screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of the person responsible for this agent. The agent acts on the screens both scopes allow."}, access: {$ref: "#/components/schemas/AccessLevel"}, effective_access: {$ref: "#/components/schemas/AccessLevel"}, access_limited_by: {$ref: "#/components/schemas/AccessLimitedBy"}, agent: {$ref: "#/components/schemas/Agent"}, connection_ready: {type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent.}, notes: {$ref: "#/components/schemas/NoteCounts", description: "The project's note counts. For an agent limited to screens they count the notes it can see: those about its own screens, playlists and the project."}}}
+    AgentSelfStatus: {type: object, additionalProperties: false, required: [agent, connection_ready], properties: {screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of this agent's membership of the project (docs/screen-scope.md). Absent for the whole project."}, person_screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of the person responsible for this agent. The agent acts on the screens both scopes allow."}, access: {$ref: "#/components/schemas/AccessLevel"}, effective_access: {$ref: "#/components/schemas/AccessLevel"}, access_limited_by: {$ref: "#/components/schemas/AccessLimitedBy"}, agent: {$ref: "#/components/schemas/Agent", description: "The agent installation linked to the calling project credential."}, connection_ready: {type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent.}, notes: {$ref: "#/components/schemas/NoteCounts", description: "The project's note counts. For an agent limited to screens they count the notes it can see: those about its own screens, playlists and the project."}}}
     AgentConnection: {type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: {connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_"}, name: {type: string}, agent_type: {type: string}, platform: {type: string}, version: {type: string}, install_source: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}(/[a-z0-9][a-z0-9._-]{0,63})?$", description: "Where the sign-in reported the installation came from (claude/screenrig, npm); absent when it reported none."}, status: {type: string, enum: [pending, approved, connected, denied, expired, cancelled]}, capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these."}, expires_at: {type: string, format: date-time}, created_at: {type: string, format: date-time}, flow: {type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise."}, access: {type: string, enum: [read, propose, manage], description: "The access level a device sign-in asked for."}, client_name: {type: string, description: "The OAuth client of a device sign-in."}, project_hint: {type: string, description: "The project a device sign-in suggested; the approver chooses."}, requested_from: {type: string, description: "The client address that started a device sign-in."}, existing_identity: {type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access."}}}
     AgentDisconnectRequest: {type: object, additionalProperties: false, properties: {allow_last_agent: {type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority.}}}
     ApplicationRename: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected."}}}
     ApplicationUploadDeclaration: {type: object, additionalProperties: false, required: [sha256, compressed_bytes, expanded_bytes, file_count], description: "Declares one CLI-produced tar.gz, with the metadata a streamed upload sends as headers.", properties: {name: {type: string, maxLength: 120, description: "Name of a new application, trimmed; at most 120 Unicode characters and no controls. Omitted or empty selects a generated name. A release declaration (POST /api/applications/{id}/uploads) must not carry one."}, sha256: {type: string, pattern: "^[0-9a-f]{64}$", description: SHA-256 of the archive bytes.}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600, description: Size of the archive in bytes.}, expanded_bytes: {type: integer, minimum: 1, maximum: 262144000}, file_count: {type: integer, minimum: 1, maximum: 5000}, sdk_version: {type: string, maxLength: 64}}}
     ApplicationUploadSession: {type: object, additionalProperties: false, required: [id, application_id, release_id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string, description: "Upload identifier, the receiving operation's id. Commit it with POST /api/applications/uploads/{id}/commit."}, application_id: {type: string, description: Application the upload publishes to.}, release_id: {type: string, description: "Release this upload creates. Pin it into a playlist once the operation succeeds."}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; send every field verbatim.}, expires_at: {type: string, format: date-time, description: The PUT must start before this instant.}}}
     ApplicationUploadCommit: {type: object, additionalProperties: false, required: [sha256, compressed_bytes], description: "Names the declared archive again; a commit naming other bytes is refused with invalid_request.", properties: {sha256: {type: string, pattern: "^[0-9a-f]{64}$"}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600}}}
-    Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, name: {type: string}, revision: {type: integer}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
-    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the application."}, id: {type: string, description: "ID of the application."}, name: {type: string, description: "Name of the application."}, revision: {type: integer, description: "Counter that increases with each change to the application."}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time, description: "When the application was created."}, updated_at: {type: string, format: date-time, description: "When the application record last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
+    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
-    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
+    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
       description: >-
         What a playlist is authored for: a video wall (PlaylistWallFormat) or a region (PlaylistRegionFormat), never both. A playlist without a format is an ordinary playlist that binds to any screen as the page.
@@ -33308,11 +33331,11 @@ components:
       additionalProperties: false
       required: [id, name, revision, pages]
       properties:
-        id: {type: string}
-        name: {type: string}
-        revision: {type: integer}
+        id: {type: string, description: "ID of the playlist."}
+        name: {type: string, description: "Name of the playlist."}
+        revision: {type: integer, description: "Counter that increases with each change to the playlist."}
         library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}
-        pages: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/PlaylistPageV2"}}
+        pages: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/PlaylistPageV2"}, description: "The pages the playlist plays, in order."}
         audio: {$ref: "#/components/schemas/PlaylistAudio"}
         format: {$ref: "#/components/schemas/PlaylistFormat"}
         fields: {$ref: "#/components/schemas/PlaylistTemplateFields", description: "Present on a template."}
@@ -33353,7 +33376,7 @@ components:
       properties:
         revision: {$ref: "#/components/schemas/PlaylistRevision"}
         playlist: {$ref: "#/components/schemas/PlaylistV2", description: "The playlist as it stood at this revision: its name, pages, soundtrack and format, and revision set to this one."}
-    PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}, description: "Playlists of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     PlaylistAudioWrite:
       type: object
       additionalProperties: false
@@ -33589,14 +33612,14 @@ components:
       additionalProperties: false
       required: [id, name, revision, template_revision, outdated]
       properties:
-        id: {type: string}
-        name: {type: string}
-        revision: {type: integer}
+        id: {type: string, description: "ID of the playlist made from the template."}
+        name: {type: string, description: "Name of the playlist made from the template."}
+        revision: {type: integer, description: "Current revision of the playlist made from the template."}
         template_revision: {type: integer, description: "The template revision its pages were built from."}
         outdated: {type: boolean, description: "The template has a newer revision. Changing the values (even none) rebuilds the pages from it."}
-    PlaylistInstanceList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/PlaylistInstance"}}}}
+    PlaylistInstanceList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/PlaylistInstance"}, description: "Playlists made from the template, by name, each with its template revision and whether it is outdated."}}}
     PlaylistExpandRequest: {type: object, additionalProperties: false, properties: {values: {type: object, additionalProperties: {type: string}}}}
-    PlaylistExpanded: {type: object, additionalProperties: false, required: [pages], properties: {pages: {type: array, items: {$ref: "#/components/schemas/PlaylistPageV2"}}}}
+    PlaylistExpanded: {type: object, additionalProperties: false, required: [pages], properties: {pages: {type: array, items: {$ref: "#/components/schemas/PlaylistPageV2"}, description: "The pages a playlist made from the template with the given values would hold."}}}
     PlaylistPrimitiveWrite:
       oneOf:
         - {$ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite"}
@@ -33951,14 +33974,14 @@ components:
       description: >-
         One stored revision of a campaign: the campaign as it was after a write. change says what made it: created, edited (an update or a schedule import), restored or promoted (a copy of an earlier revision, named by restored_from), or baseline (the revision the campaign held when its history began, before any write recorded one). A value this reader does not know reads as edited.
       properties:
-        revision: {type: integer, minimum: 1}
-        created_at: {type: string, format: date-time}
-        change: {type: string, enum: [created, edited, restored, promoted, baseline]}
+        revision: {type: integer, minimum: 1, description: "Revision number of the stored campaign."}
+        created_at: {type: string, format: date-time, description: "When this revision was written."}
+        change: {type: string, enum: [created, edited, restored, promoted, baseline], description: "The kind of write that produced this revision."}
         restored_from: {type: integer, minimum: 1, description: "The revision a restore or promote copied."}
         current: {type: boolean, description: "This revision is the campaign's current one."}
         author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
         campaign: {$ref: "#/components/schemas/Campaign"}
-    CampaignRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/CampaignRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    CampaignRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/CampaignRevision"}, description: "The campaign's revisions, newest first, at most 50 per page."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     CampaignPromote:
       type: object
       additionalProperties: false
@@ -33996,9 +34019,10 @@ components:
       description: >-
         What a campaign or schedule write would change. gained are the screens that would carry a level of the write they do not carry now, lost those that carry one they would no longer; a level that stays on a stack changes neither and shows in calendar.
       properties:
-        gained: {$ref: "#/components/schemas/SchedulePreviewReach"}
-        lost: {$ref: "#/components/schemas/SchedulePreviewReach"}
+        gained: {$ref: "#/components/schemas/SchedulePreviewReach", description: "Screens that would gain a level of the write: their count and the first 500 IDs."}
+        lost: {$ref: "#/components/schemas/SchedulePreviewReach", description: "Screens that would lose a level they carry now: their count and the first 500 IDs."}
         calendar:
+          description: "The affected schedule calendar as it is now and as it would be after the write."
           type: object
           additionalProperties: false
           required: [before, after]
@@ -34012,14 +34036,14 @@ components:
       description: >-
         One stored revision of a screen's playlist schedule: its whole entries list after a write (no entries: the screen had no schedule). revision is the screen's revision at the write. change is edited, restored (a copy of an earlier revision, named by restored_from) or baseline (the schedule the screen held when its history began).
       properties:
-        revision: {type: integer, minimum: 1}
-        created_at: {type: string, format: date-time}
-        change: {type: string, enum: [edited, restored, baseline]}
-        restored_from: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 1, description: "The screen's revision at the write that stored this schedule."}
+        created_at: {type: string, format: date-time, description: "When this revision of the schedule was stored."}
+        change: {type: string, enum: [edited, restored, baseline], description: "What kind of write stored this revision."}
+        restored_from: {type: integer, minimum: 1, description: "Revision whose entries this restore copied; present when change is restored."}
         current: {type: boolean, description: "The newest revision, the schedule the screen holds."}
         author: {$ref: "#/components/schemas/PlaylistRevisionAuthor"}
-        entries: {type: array, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntry"}}
-    ScreenScheduleRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ScreenScheduleRevision"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+        entries: {type: array, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntry"}, description: "The schedule's whole entries list after the write; empty when the screen had no schedule."}
+    ScreenScheduleRevisionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ScreenScheduleRevision"}, description: "The screen's playlist schedule revisions, newest first, at most 50 per page."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     ScreenPlaylistScheduleWrite:
       type: object
       additionalProperties: false
@@ -34040,7 +34064,7 @@ components:
       additionalProperties: false
       required: [entries]
       properties:
-        entries: {type: array, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntry"}}
+        entries: {type: array, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntry"}, description: "The screen's schedule entries, each naming a playlist and when it plays."}
         updated_at: {type: string, format: date-time, description: Absent when the screen has no schedule.}
         effective_playlist: {$ref: "#/components/schemas/ScreenEffectivePlaylist"}
     ScreenTakeoverWrite:
@@ -34156,18 +34180,18 @@ components:
       required: [id, name, parent_id, revision, created_at, updated_at]
       description: One screen folder. A screen sits in at most one folder (Screen.folder_id); a folder targets its screens and those of every folder inside it.
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}
-        name: {type: string, minLength: 1, maxLength: 100}
+        project_id: {type: string, description: "ID of the project that owns the folder."}
+        id: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$", description: "ID of the screen folder."}
+        name: {type: string, minLength: 1, maxLength: 100, description: "Display name of the folder."}
         parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the project root."}
         default_playlist_id: {type: string, description: "The playlist this folder's screens show when they have no playlist of their own, unless a folder nearer the screen sets one. Absent when unset."}
         protected: {type: boolean, description: "A protected folder and every folder inside it make each change that reaches their screens a review decided by a second approver (docs/screen-scope.md)."}
         screens: {type: integer, minimum: 0, description: "Live screens directly inside this folder. Present in the list."}
         levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "Present in the response of a PATCH that moved the folder or changed its default playlist."}
-        revision: {type: integer}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    ScreenFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/ScreenFolder"}}}}
+        revision: {type: integer, description: "Change counter of the folder."}
+        created_at: {type: string, format: date-time, description: "When the folder was created."}
+        updated_at: {type: string, format: date-time, description: "When the folder was last changed."}
+    ScreenFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/ScreenFolder"}, description: "Every screen folder in the project, ordered by name."}}}
     ScreenFolderCreate:
       type: object
       additionalProperties: false
@@ -34386,18 +34410,18 @@ components:
       additionalProperties: false
       required: [name, columns, valid, fingerprint, summary, rows, levels, removals]
       properties:
-        name: {type: string}
-        source: {type: string}
-        timezone: {type: string}
+        name: {type: string, description: "Name identifying the import; importing again under the same name updates its levels."}
+        source: {type: string, description: "File name the rows came from."}
+        timezone: {type: string, description: "Time zone the sheet's times are written in, unless a row's timezone column overrides it."}
         columns: {type: array, items: {type: string}, description: "The columns the sheet had."}
         ignored_columns: {type: array, items: {type: string}, description: "Headers nothing reads."}
         valid: {type: boolean, description: "No row has an error; only then can the import commit."}
-        fingerprint: {type: string}
-        summary: {$ref: "#/components/schemas/ScheduleImportSummary"}
+        fingerprint: {type: string, description: "Identifies the writes a commit would make; a commit sends the fingerprint of the preview it follows."}
+        summary: {$ref: "#/components/schemas/ScheduleImportSummary", description: "Counts of the rows, levels and writes the import would make."}
         errors: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRowError"}, description: "Problems of the whole file."}
-        rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}}
-        levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}}
-        removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}}
+        rows: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRow"}, description: "Every sheet row with its status, resolved target and content, and any errors."}
+        levels: {type: array, items: {$ref: "#/components/schemas/ScheduleImportLevel"}, description: "The levels the import makes, each with the action a commit takes on it."}
+        removals: {type: array, items: {$ref: "#/components/schemas/ScheduleImportRemoval"}, description: "Levels an earlier run of this import made whose rows are gone."}
         calendar: {$ref: "#/components/schemas/ScheduleCalendar", description: "The stacks of the screens the import changes, as they would be after a commit."}
     ScheduleImportCommitted:
       type: object
@@ -34411,9 +34435,9 @@ components:
       additionalProperties: false
       required: [subject, from, to, screens, groups]
       properties:
-        subject: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string, enum: [screen, folder, tag, campaign]}, id: {type: string}}}
-        from: {type: string, format: date-time}
-        to: {type: string, format: date-time}
+        subject: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string, enum: [screen, folder, tag, campaign]}, id: {type: string}}, description: "The screen, folder, tag or campaign whose screens the calendar covers."}
+        from: {type: string, format: date-time, description: "Start of the window the calendar covers."}
+        to: {type: string, format: date-time, description: "End of the window the calendar covers, exclusive."}
         screens: {type: integer, minimum: 0, description: Live screens in the subject.}
         groups: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScheduleCalendarGroup"}, description: Largest group first.}
         truncated: {type: boolean, description: More groups exist than the answer lists.}
@@ -34489,10 +34513,10 @@ components:
       additionalProperties: false
       required: [id, public_id, label, revision, manifest_revision, manifest_upgrade, content_access_generation, state, online, created_at, updated_at]
       properties:
-        project_id: {type: string}
-        id: {type: string}
-        public_id: {type: string}
-        label: {type: string}
+        project_id: {type: string, description: "ID of the project that owns the screen."}
+        id: {type: string, description: "ID of the screen."}
+        public_id: {type: string, description: "Credential in the screen's public Player URL; rotating it replaces that URL."}
+        label: {type: string, description: "Name the project gives the screen."}
         warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a screen write that succeeded (updateScreen, the dashboard's fields, location and playlist routes): the screen_fact_missing warning when the playlist the screen shows has an iframe or application that reads a fact the screen lacks. Absent when there is nothing to act on, and on every read."}
         levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "Only on the answer to a write that changed the screen's tags (updateScreen, the dashboard's tags route): the campaigns the screen entered or left. Absent on every read."}
         playlist_id: {type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover, a campaign that holds or a matching playlist schedule entry takes precedence; effective_playlist names what is shown."}
@@ -34545,10 +34569,10 @@ components:
             Present while this screen's paired Player cannot show the application or iframe primitives its manifest carries: a contract Player that did not declare web-content-v1 (the Apple Player never does; docs/player-compatibility.md §4.4, §10). The manifest is unchanged; the Player drops those primitives, and a page left with none. at is when the condition began. It is set once when the condition begins and removed when it ends (the Player gains the token, or its manifest no longer carries such primitives), each transition appending one project-only event, screen.applications_unsupported or screen.applications_unsupported_cleared. A paired session without web-content-v1 sets it when served application or iframe primitives. Read-only project health metadata; it does not change screen revision or manifest authority.
           properties:
             at: {type: string, format: date-time}
-        revision: {type: integer}
-        manifest_revision: {type: integer}
-        content_access_generation: {type: integer}
-        state: {type: string, enum: [pairing_pending, active, archived]}
+        revision: {type: integer, description: "Counter that increases with each change to the screen; writes use it to detect conflicts."}
+        manifest_revision: {type: integer, description: "Counter that increases each time the screen's runtime manifest is reissued."}
+        content_access_generation: {type: integer, description: "Counter that increases when the screen's Player sessions and content grants are revoked, such as by rotating the public ID."}
+        state: {type: string, enum: [pairing_pending, active, archived], description: "Lifecycle stage of the screen within the project."}
         deletable: {type: boolean, description: "True when DELETE removes this screen: no Player key is bound to it, as for a screen set up through a browser handoff (paired by cookie or still pending). False means archive is the only removal: a Player that pairs by code, native or browser, holds a key that stays bound to its screen, archived or not (docs/player-compatibility.md §5.7). Descriptive only: the delete itself decides. Absent from older servers; treat absent as false."}
         storage: {$ref: "#/components/schemas/ScreenStorage"}
         storage_shortfall: {$ref: "#/components/schemas/ScreenStorageShortfall"}
@@ -34587,8 +34611,8 @@ components:
           format: date-time
           description: Present only while state is archived and archive_reason is present. Instant the screen was archived. Read-only.
         replaced_by: {type: string, description: "Present when archive_reason is replaced: the screen this screen's device moved to. A browser that still opens this screen's public URL plays that screen. Read-only."}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time, description: "When the screen was created."}
+        updated_at: {type: string, format: date-time, description: "When the screen record last changed."}
         last_seen_at: {type: string, format: date-time, description: "Server-maintained instant of the screen's most recent authenticated Player contact (session authentication, session mint, release-grant use, or device package fetch). Absent until first contact. Read-only; never authorization."}
     HostContext:
       type: object
@@ -34912,7 +34936,7 @@ components:
         model: {type: string, minLength: 1, maxLength: 80}
         firmware: {type: string, minLength: 1, maxLength: 80}
         manufacturer: {type: string, minLength: 1, maxLength: 80}
-    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}, description: "Screens on this page, newest first, at most 500."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     ScreenManifestUpgrade:
       type: object
       additionalProperties: false
@@ -35551,7 +35575,7 @@ components:
       properties:
         capture_id: {$ref: "#/components/schemas/ScreenshotCaptureID"}
         reason: {type: string, enum: [expired, unsupported_surface, capture_failed]}
-    Event: {type: object, additionalProperties: true, required: [cursor, type, severity, message, at], properties: {cursor: {type: string}, sequence: {type: integer, description: "Project sequence. Present on project events; absent on Player log records (source=log), whose cursor is opaque (lg1_ or ev1_)."}, type: {type: string}, tag: {type: string, description: "Operation-log alias of type with each dot replaced by an underscore."}, id: {type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id."}, params: {type: object, additionalProperties: {oneOf: [{type: string, minLength: 1}, {type: number}, {type: boolean}]}, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted."}, severity: {type: string}, request_id: {type: string}, operation_id: {type: string}, message: {type: string}, actor: {$ref: "#/components/schemas/EventActor"}, agent: {$ref: "#/components/schemas/EventAgent"}, command: {$ref: "#/components/schemas/EventCommand"}, resource: {type: object, additionalProperties: true}, details: {type: object, additionalProperties: true}, at: {type: string}}}
+    Event: {type: object, additionalProperties: true, required: [cursor, type, severity, message, at], properties: {cursor: {type: string, description: "Opaque position of this event; pass it back as a cursor to page from here."}, sequence: {type: integer, description: "Project sequence. Present on project events; absent on Player log records (source=log), whose cursor is opaque (lg1_ or ev1_)."}, type: {type: string, description: "Dotted event type, such as screen.online or playlist.updated."}, tag: {type: string, description: "Operation-log alias of type with each dot replaced by an underscore."}, id: {type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id."}, params: {type: object, additionalProperties: {oneOf: [{type: string, minLength: 1}, {type: number}, {type: boolean}]}, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted."}, severity: {type: string, description: "Importance of the event, from info through warning to error."}, request_id: {type: string, description: "ID of the API request that caused the event, when one did."}, operation_id: {type: string, description: "ID of the long-running operation the event belongs to, when it has one."}, message: {type: string, description: "Human-readable summary of the event."}, actor: {$ref: "#/components/schemas/EventActor"}, agent: {$ref: "#/components/schemas/EventAgent"}, command: {$ref: "#/components/schemas/EventCommand"}, resource: {type: object, additionalProperties: true, description: "The object the event is about, carrying its type and ID."}, details: {type: object, additionalProperties: true, description: "Facts specific to the event type."}, at: {type: string, description: "When the event happened."}}}
     EventCommand:
       type: object
       additionalProperties: false
@@ -35592,7 +35616,7 @@ components:
       additionalProperties: false
       required: [items, next_cursor]
       properties:
-        items: {type: array, items: {$ref: "#/components/schemas/Event"}}
+        items: {type: array, items: {$ref: "#/components/schemas/Event"}, description: "Events or Player log records on this page, oldest first unless a newest-first page is requested."}
         next_cursor:
           oneOf: [{type: string}, {type: "null"}]
           description: >-
@@ -35602,17 +35626,17 @@ components:
       additionalProperties: false
       required: [screen_id, media_id, filename, day, play_count, last_page_id, last_manifest_revision, first_started_at, last_started_at]
       properties:
-        screen_id: {type: string}
-        media_id: {type: string}
+        screen_id: {type: string, description: "ID of the screen that reported the starts."}
+        media_id: {type: string, description: "ID of the media item that started."}
         filename: {type: string, description: "Filename enriched from project-owned media during batched projection. Empty when the reported media has no live project-owned metadata. Never client-supplied."}
         primitive: {type: string, enum: [image, video], description: "Player-reported primitive of the most recent projected start. Absent on older rows before media-neutral starts."}
         day: {type: string, format: date, description: UTC calendar day of the aggregate.}
         play_count: {type: integer, minimum: 1, description: "Reported starts counted for this screen, media, and UTC receipt day. Counts follow durable observations through a recoverable batch projection and can lag ingestion."}
-        last_page_id: {type: string}
-        last_manifest_revision: {type: string}
-        first_started_at: {type: string, format: date-time}
-        last_started_at: {type: string, format: date-time}
-    PlaybackAggregateList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaybackAggregate"}}}}
+        last_page_id: {type: string, description: "ID of the page of the most recent start counted in this row."}
+        last_manifest_revision: {type: string, description: "Manifest revision the Player reported for the most recent start counted in this row."}
+        first_started_at: {type: string, format: date-time, description: "When the earliest start counted in this row was received."}
+        last_started_at: {type: string, format: date-time, description: "When the latest start counted in this row was received."}
+    PlaybackAggregateList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaybackAggregate"}, description: "Daily playback rows, one per screen, media and UTC day, newest days first."}}}
     PlaybackAggregateCsv:
       type: string
       description: >-
@@ -35624,34 +35648,34 @@ components:
       description: >-
         One durable Player-reported start of an image, video, or application. The session authenticates screen and project; item, page, manifest, primitive and release identities are reported observations and do not authorize content access. playlist_id and playlist_revision are optional metadata enriched asynchronously from a matching screen manifest; missing metadata stays absent. Application starts carry release_id with empty media_id and primitive. primitive_id and started_at are present only when the Player reports them; started_at is clamped to [received_at - 24h, received_at + 5m]. A JSON page also names its screen, media, playlist and application as display text read when it is served; the CSV export and the xlsx and pdf reports omit those names.
       properties:
-        screen_id: {type: string}
-        playlist_id: {type: string}
+        screen_id: {type: string, description: "ID of the screen that reported the start."}
+        playlist_id: {type: string, description: "ID of the playlist the start belongs to, when it could be determined."}
         manifest_revision: {type: string, pattern: "^man_", description: "Manifest revision reported by the Player for this observation."}
         playlist_revision: {type: integer, minimum: 1, description: "Optional playlist revision enriched from matching manifest metadata without gating telemetry."}
-        page_id: {type: string}
-        primitive_id: {type: string}
-        media_id: {type: string}
-        primitive: {type: string, enum: [image, video, ""]}
+        page_id: {type: string, description: "ID of the playlist page that was showing when the item started."}
+        primitive_id: {type: string, description: "ID of the page item that started; present only when the Player reports it."}
+        media_id: {type: string, description: "ID of the media item that started; empty for an application start."}
+        primitive: {type: string, enum: [image, video, ""], description: "Kind of item that started; empty for an application start."}
         release_id: {type: string, description: "Exact application release for an application start."}
         screen_label: {type: string, description: "The screen's label when the play was read. Display text only, never an identifier or authorization; absent when the screen no longer exists."}
         media_name: {type: string, description: "The media's display name when the play was read: its source filename, else its stored filename. Display text only; absent when the media was deleted or the play carries none."}
         playlist_name: {type: string, description: "The playlist's name when the play was read. Display text only; absent when the playlist was deleted or the play carries none."}
         application_name: {type: string, description: "The name of the application that release_id belongs to, when the play was read. Display text only; absent when the application was deleted or the play is not an application start."}
-        started_at: {type: string, format: date-time}
-        received_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time, description: "When the Player says the item started, limited to a window around receipt."}
+        received_at: {type: string, format: date-time, description: "When the backend received the start report."}
     PlaybackPlayList:
       type: object
       additionalProperties: false
       required: [items, next_cursor]
       properties:
-        items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/PlaybackPlay"}}
+        items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/PlaybackPlay"}, description: "Play records on this page, oldest first unless the request asks for newest first."}
         next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as cursor for the next page; null at the end of the range.}
     PlaybackPlayCsv:
       type: string
       description: >-
         RFC 4180 CSV, CRLF records, UTF-8, with the header row screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at,manifest_revision,playlist_revision in that fixed order; an absent value is an empty cell. Times are RFC 3339 UTC. A cell beginning with =, +, -, @, tab, or carriage return is prefixed with a single quote. Content-Disposition names playback-plays.csv. A complete export ends after its last CRLF record with no trailer; a stream that fails after the header is aborted at the connection (the client sees a transport error, never a clean end), so retry from the last received_at.
     CardDataWrite: {type: object, additionalProperties: false, required: [document], properties: {document: {type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties. A string that begins with media: is a media reference, media:<id>, naming a ready, approved image in this project."}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}, ttl_seconds: {type: integer, minimum: 1, maximum: 31536000, description: "TTL from the first committed write. Mutually exclusive with expires_at. A retry preserves the original expiry. Omitting both clears expiry. Size it to the writer's schedule: when a card's document expires with no write to renew it while a screen shows the card, the card goes blank and the card_data_stale notification condition tells the project, so a job that stopped is noticed."}}}
-    CardDataEntry: {type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string}, document: {type: object, additionalProperties: true}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}, expired: {type: boolean, description: "Whether the stored document is past its expiry; runtime readers receive 404 for expired data."}}}
+    CardDataEntry: {type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string, description: "Key of the data document; a card's own data is keyed by the card's ID."}, document: {type: object, additionalProperties: true, description: "The JSON data document the card renders."}, bytes: {type: integer, description: "Size of the stored document in bytes."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored document."}, revision: {type: integer, description: "Revision of the document, increased by each write."}, created_at: {type: string, format: date-time, description: "When the document was first stored."}, updated_at: {type: string, format: date-time, description: "When the document was last written."}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}, expired: {type: boolean, description: "Whether the stored document is past its expiry; runtime readers receive 404 for expired data."}}}
     FeedDocument: {type: object, additionalProperties: true, required: [schema, fetchedAt, attribution], properties: {schema: {type: string, description: "The feed schema, for example screenrig.weather/v1."}, fetchedAt: {type: string, format: date-time, description: The last time the feed worker confirmed the document.}, attribution: {type: object, additionalProperties: false, required: [text], properties: {text: {type: string}, url: {type: string}}, description: The credit to show wherever the data shows.}}}
     FeedPending: {type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: {key: {type: string}, state: {type: string, enum: [pending]}, retry_after_seconds: {type: integer}}}
     CardDataSummary: {type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: {key: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time, description: "Absolute expiry; omitted data never expires."}}}
@@ -35736,22 +35760,22 @@ components:
       additionalProperties: false
       required: [id, name, kind, target, enabled, config, preset, settings, secrets, refresh_seconds, stale_after_seconds, revision, status, created_at, updated_at]
       properties:
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$"}
-        name: {type: string, minLength: 1, maxLength: 80}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?src_[A-Za-z0-9_-]+$", description: "ID of the data source."}
+        name: {type: string, minLength: 1, maxLength: 80, description: "Name the project gives the data source."}
         kind: {$ref: "#/components/schemas/SourceKind"}
-        target: {$ref: "#/components/schemas/SourceTarget"}
-        enabled: {type: boolean}
+        target: {$ref: "#/components/schemas/SourceTarget", description: "Where the source writes what it fetches."}
+        enabled: {type: boolean, description: "Whether the source is refreshed on its schedule."}
         config: {type: object, additionalProperties: true, description: "The kind's settings, documented per kind in /docs/sources. For a source made from a preset, what its settings expand to."}
         preset: {anyOf: [{type: string}, {type: "null"}], description: "The source preset the source was made from (GET /api/source-presets); null for a source that is not made from one."}
         settings: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "The values of the preset's fields, by field name, with the defaults of the fields left out; null without a preset."}
         secrets: {type: object, additionalProperties: {$ref: "#/components/schemas/SourceSecretView"}, description: "The secrets the source holds, by name, masked. A source made from a preset names them as the preset does."}
-        refresh_seconds: {type: integer, minimum: 30, maximum: 86400}
+        refresh_seconds: {type: integer, minimum: 30, maximum: 86400, description: "Seconds between refreshes of the source."}
         stale_after_seconds: {$ref: "#/components/schemas/SourceStaleAfter"}
-        revision: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 1, description: "Counter that increases with each change to the source; send it back to guard a write."}
         status: {$ref: "#/components/schemas/SourceStatus"}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    SourceList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Source"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+        created_at: {type: string, format: date-time, description: "When the source was created."}
+        updated_at: {type: string, format: date-time, description: "When the source was last changed."}
+    SourceList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Source"}, description: "The project's data sources on this page."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Pass back as after for the next page; null on the last page."}}}
     SourceCreate:
       description: "JSON, CSV and Sheets config may set key_template, a card data key with {screen.field.NAME} tokens. Its mapping then produces {documents:[{fields:{NAME:VALUE},document:{...}}]} instead of one document. Each output is validated against the target card. Keys are unique and outside card-instance and feed namespaces; source test previews the envelope and validates every output. Each key uses the source stale period. Missing keys are retained with their existing expiry; storage failures can leave partial writes and the next run retries."
       type: object
@@ -35840,17 +35864,17 @@ components:
       description: >-
         The room mapping of a data source that writes a document for each room or area: the rooms the source offered at its last good refresh against the screens that read them. A screen belongs to the report for a field when it has a value for it, or when its own playlist places a card whose data key is the key prefix followed by {screen.field.NAME}; a playlist it reaches through a folder, campaign or schedule level is not followed.
       properties:
-        source_id: {type: string}
+        source_id: {type: string, description: "ID of the data source this report covers."}
         room_field: {type: string, description: "The screen field that names a room; empty when the source writes no room documents."}
         room_key_prefix: {type: string, description: "A card's data key for a room is this followed by {screen.field.<room_field>}."}
-        area_field: {type: string}
-        area_key_prefix: {type: string}
+        area_field: {type: string, description: "The screen field that names an area; empty when the source writes no area documents."}
+        area_key_prefix: {type: string, description: "A card's data key for an area is this followed by {screen.field.<area_field>}."}
         rooms_as_of: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The last good refresh the room list is from; null before one."}
-        summary: {$ref: "#/components/schemas/SourceRoomsSummary"}
-        rooms: {type: array, items: {$ref: "#/components/schemas/SourceRoom"}}
-        areas: {type: array, items: {$ref: "#/components/schemas/SourceArea"}}
-        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomScreen"}}
-        warnings: {type: array, items: {type: string}}
+        summary: {$ref: "#/components/schemas/SourceRoomsSummary", description: "Counts of the report's rooms, areas and screens, including those that do not map."}
+        rooms: {type: array, items: {$ref: "#/components/schemas/SourceRoom"}, description: "Rooms the source offered at its last good refresh, each with the screens that show it."}
+        areas: {type: array, items: {$ref: "#/components/schemas/SourceArea"}, description: "Areas, the groups of rooms the source offers, each with the screens that show it."}
+        screens: {type: array, items: {$ref: "#/components/schemas/SourceRoomScreen"}, description: "Screens with a value for a room or area field, or whose playlist reads one, and how each maps."}
+        warnings: {type: array, items: {type: string}, description: "Plain-language notes on gaps in the report, such as a source that has not refreshed."}
     SourceTestRequest:
       type: object
       additionalProperties: false
@@ -35892,9 +35916,9 @@ components:
             body: {type: string, description: "The request body of a POST, at most 1 KiB of it."}
             pages: {type: integer, minimum: 1, description: "How many requests the run made to read the answer."}
     KVWrite: {type: object, additionalProperties: false, required: [value_base64], properties: {value_base64: {type: string, contentEncoding: base64, maxLength: 1398104}, content_type: {type: string, minLength: 1, maxLength: 127, default: application/octet-stream}}}
-    KVEntry: {type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, value_base64: {type: string, contentEncoding: base64}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}}}
-    KVSummary: {type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string}, updated_at: {type: string}}}
-    KVList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/KVSummary"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}]}}}
+    KVEntry: {type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: {application_id: {type: string, description: "ID of the application whose key-value store holds the entry."}, key: {type: string, description: "Key the value is stored under."}, value_base64: {type: string, contentEncoding: base64, description: "The stored value, base64-encoded."}, content_type: {type: string, description: "Media type of the stored value."}, bytes: {type: integer, description: "Size of the stored value in bytes."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored value."}, revision: {type: integer, description: "Revision of the entry, increased by each write; send it back to guard against concurrent writes."}}}
+    KVSummary: {type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: {application_id: {type: string, description: "ID of the application that owns the entry."}, key: {type: string, description: "Name of the entry within its application."}, content_type: {type: string, description: "Content type of the stored value."}, bytes: {type: integer, description: "Size of the stored value."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored value."}, revision: {type: integer, description: "Counter that rises with each write to the entry."}, created_at: {type: string, description: "When the entry was first written."}, updated_at: {type: string, description: "When the entry was last written."}}}
+    KVList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/KVSummary"}, description: "Key-value entries of the application in ascending key order."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Last returned key; pass back as after for the next page. Null on the last page."}}}
     KVWebhook:
       type: object
       additionalProperties: false
@@ -36139,8 +36163,8 @@ components:
     MediaCommit: {type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: {content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}}}
     MediaUploadSession: {type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; clients must send every field verbatim.}, expires_at: {type: string, format: date-time}}}
     MediaUploadSource: {type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: {filename: {type: string}, source_filename: {type: string}, content_type: {type: string}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, bytes: {type: integer, minimum: 1}}}
-    Media: {type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: {project_id: {type: string}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, tags: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, availability: {$ref: "#/components/schemas/MediaAvailability"}, id: {type: string}, filename: {type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension."}, source_filename: {type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups."}, upload_source: {allOf: [{$ref: '#/components/schemas/MediaUploadSource'}], readOnly: true}, primitive: {type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)."}, content_type: {type: string}, operation_id: {type: string}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, bytes: {type: integer}, width: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio."}, height: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio."}, duration_ms: {type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms."}, codecs: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec."}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged.}, folder_id: {type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. List a folder's files with GET /api/media?folder=ID. Move files with POST /api/media/move."}, revision: {type: integer}, state: {type: string, enum: [ready]}, review_state: {type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved."}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only."}}}
-    MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    Media: {type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the file; the Library project for a library item."}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, tags: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: "Tags on the file, which playlist tag selectors match."}, availability: {$ref: "#/components/schemas/MediaAvailability"}, id: {type: string, description: "ID of the media file."}, filename: {type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension."}, source_filename: {type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups."}, upload_source: {allOf: [{$ref: '#/components/schemas/MediaUploadSource'}], readOnly: true, description: "The original upload's name, type, digest and size, recorded when ingest normalized EXIF orientation."}, primitive: {type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)."}, content_type: {type: string, description: "Content type of the stored file."}, operation_id: {type: string, description: "ID of the upload or generation operation that produced the file."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored file's bytes."}, bytes: {type: integer, description: "Size of the stored file."}, width: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio."}, height: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio."}, duration_ms: {type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms."}, codecs: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec."}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged.}, folder_id: {type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. List a folder's files with GET /api/media?folder=ID. Move files with POST /api/media/move."}, revision: {type: integer, description: "Change counter of the file; update requests send it as the expected revision."}, state: {type: string, enum: [ready], description: "Whether upload processing has finished and the file can be placed on pages."}, review_state: {type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved."}, created_at: {type: string, format: date-time, description: "When the file was added to the library."}, updated_at: {type: string, format: date-time, description: "When the file was last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only."}}}
+    MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}, description: "Ready media items of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "human_available", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "human_available": {"type": "boolean", "description": "A person can join this chat on request: Education, Premium and Enterprise. Standard and Plus get documentation and AI support."}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0, "description": "Always 0: Luna answers right away on every plan. Removed in a later release."}, "docs_url": {"type": "string"}}}
     SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Ask for a person, which pauses Luna and waits for staff. It counts only where a person can join (human_available: Education, Premium and Enterprise); on Standard and Plus it is ignored and Luna answers."}}}
@@ -36734,9 +36758,9 @@ components:
         project_id: {type: string, description: "The project the notification is read through; absent on the organization routes."}
         organization_id: {type: string, description: The organization the notification belongs to.}
         project_ids: {$ref: "#/components/schemas/NotificationProjectIDs", description: "The projects the notification covers. Absent covers every project of the organization, including projects added later; an empty list covers none."}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$", description: "ID of the notification."}
         channel: {type: string, description: "email, webhook, slack, teams, pagerduty or telegram. Readers treat another value as a channel they cannot edit."}
-        description: {type: string}
+        description: {type: string, description: "Free-text label the owner gave the notification."}
         conditions: {type: array, items: {type: string}, description: NotificationCondition values.}
         screen_tags: {type: array, items: {type: string}, description: "Empty means every screen, unless audience is present."}
         audience: {$ref: "#/components/schemas/CampaignAudience", description: Present while set; it covers the screens instead of screen_tags.}
@@ -36744,7 +36768,7 @@ components:
         severity: {$ref: "#/components/schemas/NotificationSeverityOverrides", description: Present while any condition is overridden.}
         active_hours: {$ref: "#/components/schemas/NotificationActiveHours", description: "Present while set; outside is always shown."}
         reach_drop: {$ref: "#/components/schemas/NotificationReachDrop", description: Present while set.}
-        hold_minutes: {type: integer, minimum: 0, maximum: 1440}
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440, description: "Minutes a condition must last before a notice goes out."}
         recipients: {type: array, items: {type: string}, description: Email only. owner or member user_ids.}
         url: {type: string, description: "Webhook only. The receiver URL. Empty, with url_redacted true, below effective Manage."}
         url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential."}
@@ -36753,25 +36777,25 @@ components:
         headers: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/NotificationHeader"}, description: "Webhook only, present while any is set. The custom headers as name, set and hint; the values are never returned."}
         body_template: {$ref: "#/components/schemas/NotificationBodyTemplate", description: Webhook only. Present while a body template is set.}
         telegram_chat_id: {type: string, description: Telegram only. The chat messages go to.}
-        enabled: {type: boolean}
+        enabled: {type: boolean, description: "Whether the notification sends notices; false when switched off or disabled after failures."}
         snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
         unsubscribed:
           type: array
           items: {$ref: "#/components/schemas/NotificationUnsubscription"}
           description: "Email only, and only while it is not empty: the people who stopped this notification's mail with the unsubscribe link in it. They stay in recipients and get no mail from this notification until they resubscribe (the page of their link, or DELETE /api/notifications/{id}/unsubscribed/{user_id})."
-        revision: {type: integer, minimum: 1}
-        status: {type: string, enum: [active, failing, disabled]}
-        disabled_reason: {type: string, enum: [delivery_failures]}
-        disabled_at: {type: string, format: date-time}
-        failing_since: {type: string, format: date-time}
-        last_success_at: {type: string, format: date-time}
-        last_failure_at: {type: string, format: date-time}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        revision: {type: integer, minimum: 1, description: "Version number of the notification, increased by each change."}
+        status: {type: string, enum: [active, failing, disabled], description: "Delivery health, derived from whether the notification is enabled and whether sends are failing."}
+        disabled_reason: {type: string, enum: [delivery_failures], description: "Why the backend disabled the notification on its own."}
+        disabled_at: {type: string, format: date-time, description: "When the backend disabled the notification after repeated delivery failures."}
+        failing_since: {type: string, format: date-time, description: "When the current run of failed deliveries began; absent once a delivery succeeds."}
+        last_success_at: {type: string, format: date-time, description: "When a delivery of the notification last succeeded."}
+        last_failure_at: {type: string, format: date-time, description: "When a delivery of the notification last failed."}
+        created_at: {type: string, format: date-time, description: "When the notification was created."}
+        updated_at: {type: string, format: date-time, description: "When the notification last changed."}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
     ReportColumn: {type: object, additionalProperties: false, required: [key, label, type], properties: {key: {type: string}, label: {type: string}, type: {type: string, enum: [text, int, decimal, percent, hours, date, datetime]}}}
     ReportParam: {type: object, additionalProperties: false, required: [name, description], properties: {name: {type: string}, description: {type: string}}}
-    ReportKindInfo: {type: object, additionalProperties: false, required: [kind, title, description, params], properties: {kind: {type: string}, title: {type: string}, description: {type: string}, params: {type: array, items: {$ref: "#/components/schemas/ReportParam"}}}}
+    ReportKindInfo: {type: object, additionalProperties: false, required: [kind, title, description, params], properties: {kind: {type: string, description: "Name of the report kind; it is the kind segment of the report route."}, title: {type: string, description: "Display title of the report."}, description: {type: string, description: "What the report contains."}, params: {type: array, items: {$ref: "#/components/schemas/ReportParam"}, description: "Query parameters the report accepts, each with its name and meaning."}}}
     AuditActorKind: {type: string, enum: [person, agent, service_client, staff, system]}
     AuditSource: {type: string, enum: [dashboard, api, cli, mcp, staff, device, webhook, system], description: "The surface a change came through: a dashboard session, the HTTP API, the screenrig CLI, an MCP tool call, a staff member under a write lease, a signed device call, an inbound webhook, or the server itself (a worker applying an approved change)."}
     AuditActor: {type: object, additionalProperties: false, required: [kind], properties: {kind: {$ref: '#/components/schemas/AuditActorKind'}, id: {type: string}, name: {type: string}}}
@@ -36792,51 +36816,51 @@ components:
       additionalProperties: false
       required: [id, scope, at, actor, source, action, resource, changes]
       properties:
-        id: {type: string}
+        id: {type: string, description: "ID of the audit entry."}
         scope: {type: string, description: "The chain the entry belongs to: the project id, or an organization id for organization settings."}
-        project_id: {type: string}
-        organization_id: {type: string}
-        at: {type: string, format: date-time}
-        actor: {$ref: '#/components/schemas/AuditActor'}
-        approved_by: {$ref: '#/components/schemas/AuditActor'}
+        project_id: {type: string, description: "ID of the project the change belongs to; absent for organization settings."}
+        organization_id: {type: string, description: "ID of the organization of the project the change was made in."}
+        at: {type: string, format: date-time, description: "When the change was recorded."}
+        actor: {$ref: '#/components/schemas/AuditActor', description: "Who made the change; for an approved agent proposal, the proposing agent."}
+        approved_by: {$ref: '#/components/schemas/AuditActor', description: "The person who approved the change an agent proposed; absent for direct changes."}
         review_id: {type: string, description: "The review that held the change, when an agent proposed it and a person approved it."}
         source: {$ref: '#/components/schemas/AuditSource'}
         action: {type: string, pattern: '^[a-z0-9_-]+(\.[a-z0-9_-]+)*$', description: "A stable code, <resource type>.<verb>, e.g. screen.update, playlist.create, webhook.rotate_secret."}
-        resource: {$ref: '#/components/schemas/AuditResource'}
+        resource: {$ref: '#/components/schemas/AuditResource', description: "The object the change acted on, with its type, ID and name."}
         changes: {type: array, items: {$ref: '#/components/schemas/AuditFieldChange'}, description: "The field-level before and after. At most 100 changes and 16 KiB; truncated says more were made."}
-        revision: {$ref: '#/components/schemas/AuditRevision'}
-        truncated: {type: boolean}
+        revision: {$ref: '#/components/schemas/AuditRevision', description: "The revision the change produced, with its value before and after."}
+        truncated: {type: boolean, description: "True when more field changes were made than the entry's changes list holds."}
         unrecorded: {type: boolean, description: "The change was made but its service recorded no values."}
         event_sequence: {type: integer, description: "The sequence of the project event announcing the change, when it has one."}
-        request_id: {type: string}
+        request_id: {type: string, description: "ID of the API request that made the change."}
         route: {type: string, description: "The route pattern the server matched, never the request URL."}
-        method: {type: string}
-        client_ip: {type: string}
-        client: {$ref: '#/components/schemas/AuditClient'}
+        method: {type: string, description: "HTTP method of the request that made the change."}
+        client_ip: {type: string, description: "IP address the request that made the change came from."}
+        client: {$ref: '#/components/schemas/AuditClient', description: "The kind, version and platform of the client that made the request."}
         seq: {type: integer, description: "The entry's position in the chain; absent until the sealer has chained it (seconds)."}
-        prev_hash: {type: string}
+        prev_hash: {type: string, description: "Hash of the previous entry in the chain, linking this entry to it."}
         hash: {type: string, description: "sha256 over prev_hash, seq and the entry's canonical content."}
-        sealed_at: {type: string, format: date-time}
+        sealed_at: {type: string, format: date-time, description: "When the sealer added the entry to the hash chain."}
     AuditList:
       type: object
       additionalProperties: false
       required: [items, next_cursor]
       properties:
-        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/AuditEntry'}}
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/AuditEntry'}, description: "Configuration changes matching the filters, newest first."}
         next_cursor: {oneOf: [{type: string}, {type: "null"}], description: "Cursor of the last returned entry when more exist; pass it back as cursor. null at the end."}
     AuditHead:
       type: object
       additionalProperties: false
       required: [scope, seq, hash, floor_seq, floor_hash, unsealed, format]
       properties:
-        scope: {type: string}
+        scope: {type: string, description: "The chain this head describes: a project ID or an organization ID."}
         seq: {type: integer, description: "Position of the last chained entry; 0 for an empty chain."}
         hash: {type: string, description: "Hash of the last chained entry (the genesis hash for an empty chain). Keep seq:hash as an anchor."}
         floor_seq: {type: integer, description: "The last entry retention removed; the chain starts after it."}
-        floor_hash: {type: string}
-        sealed_through: {type: string, format: date-time}
+        floor_hash: {type: string, description: "Hash the retained chain starts from: the last removed entry's hash, or the genesis hash."}
+        sealed_through: {type: string, format: date-time, description: "When the chain last sealed entries; absent when the chain retains none."}
         unsealed: {type: integer, description: "Entries written and waiting to be chained (counted up to 10000)."}
-        oldest_retained_seq: {type: integer}
+        oldest_retained_seq: {type: integer, description: "Position of the oldest chained entry still retained."}
         format: {type: integer, description: "The version of the hashed form."}
     AuditProblem:
       type: object
@@ -36851,20 +36875,20 @@ components:
       additionalProperties: false
       required: [ok, scope, checked, head, problems]
       properties:
-        ok: {type: boolean}
-        scope: {type: string}
-        checked: {type: integer}
-        first_seq: {type: integer}
-        last_seq: {type: integer}
+        ok: {type: boolean, description: "True when verification found no problems in the checked range."}
+        scope: {type: string, description: "The chain that was verified: a project ID or an organization ID."}
+        checked: {type: integer, description: "Number of entries whose hashes and links this call checked."}
+        first_seq: {type: integer, description: "Position of the first entry checked; absent when none were checked."}
+        last_seq: {type: integer, description: "Position of the last entry checked; absent when none were checked."}
         next_seq: {type: integer, description: "Present when the range is longer than one call checks: pass it as from_seq."}
-        head: {$ref: '#/components/schemas/AuditHead'}
-        problems: {type: array, items: {$ref: '#/components/schemas/AuditProblem'}}
-    ReportCatalog: {type: object, additionalProperties: false, required: [items, formats], properties: {items: {type: array, items: {$ref: "#/components/schemas/ReportKindInfo"}}, formats: {type: array, items: {type: string}}}}
-    Report: {type: object, additionalProperties: false, required: [kind, title, generated_at, columns, rows, truncated], description: "One report as a table: columns says what each row member is. Rows carry more members than the columns show (ids, parent_id and depth for a folder outline). Percent columns hold 0 to 100.", properties: {kind: {type: string}, title: {type: string}, subtitle: {type: string}, generated_at: {type: string, format: date-time}, from: {type: string}, to: {type: string}, columns: {type: array, items: {$ref: "#/components/schemas/ReportColumn"}}, rows: {type: array, items: {type: object, additionalProperties: true}}, totals: {type: object, additionalProperties: true}, notes: {type: array, items: {type: string}}, truncated: {type: boolean}, prepared_for: {type: string}}}
+        head: {$ref: '#/components/schemas/AuditHead', description: "The chain head when the check ran: its last entry and retention floor."}
+        problems: {type: array, items: {$ref: '#/components/schemas/AuditProblem'}, description: "Each inconsistency found in the checked range; empty when the chain is intact."}
+    ReportCatalog: {type: object, additionalProperties: false, required: [items, formats], properties: {items: {type: array, items: {$ref: "#/components/schemas/ReportKindInfo"}, description: "The report kinds, each with its title, description and the filters it takes."}, formats: {type: array, items: {type: string}, description: "The file formats a report can be written in."}}}
+    Report: {type: object, additionalProperties: false, required: [kind, title, generated_at, columns, rows, truncated], description: "One report as a table: columns says what each row member is. Rows carry more members than the columns show (ids, parent_id and depth for a folder outline). Percent columns hold 0 to 100.", properties: {kind: {type: string, description: "Report kind this table was built for."}, title: {type: string, description: "Heading of the report."}, subtitle: {type: string, description: "Secondary heading line that qualifies the report, such as the days it covers."}, generated_at: {type: string, format: date-time, description: "When the report was built."}, from: {type: string, description: "First UTC day the report covers."}, to: {type: string, description: "Last UTC day the report covers, inclusive."}, columns: {type: array, items: {$ref: "#/components/schemas/ReportColumn"}, description: "The columns of the report, in the order every file format writes them."}, rows: {type: array, items: {type: object, additionalProperties: true}, description: "The report's rows, each holding its values by column key."}, totals: {type: object, additionalProperties: true, description: "Totals row over the whole report, by column key; absent when the report has none."}, notes: {type: array, items: {type: string}, description: "Sentences explaining how to read the report or what it leaves out."}, truncated: {type: boolean, description: "True when rows hold only the first part of the report."}, prepared_for: {type: string, description: "Name of the project the report is prepared for; it heads the PDF."}}}
     ReportSchedule: {type: object, additionalProperties: false, required: [cadence], properties: {cadence: {type: string, enum: [daily, weekly, monthly]}, weekday: {type: string, enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday], description: Weekly only; default monday.}, day_of_month: {type: integer, minimum: 1, maximum: 28, description: Monthly only; default 1.}, hour: {type: integer, minimum: 0, maximum: 23, description: "Hour of the day in timezone; default 0."}, timezone: {type: string, maxLength: 64, description: "An IANA time zone such as America/Los_Angeles; default UTC."}}}
     ReportSubscriptionRecipient: {type: object, additionalProperties: false, required: [user_id], properties: {user_id: {type: string}}}
-    ReportSubscription: {type: object, additionalProperties: false, required: [id, name, kind, filters, schedule, format, enabled, recipients, revision, created_at, updated_at], properties: {id: {type: string}, project_id: {type: string}, name: {type: string}, kind: {type: string}, filters: {type: object, additionalProperties: {type: string}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, enabled: {type: boolean}, recipients: {type: array, items: {$ref: "#/components/schemas/ReportSubscriptionRecipient"}}, next_run_at: {type: string, format: date-time, nullable: true}, last_run_at: {type: string, format: date-time, nullable: true}, last_status: {type: string, enum: ["", delivered, failed]}, last_error: {type: string, description: "Why the last run failed, in a sentence; empty after a delivery."}, last_delivered: {type: integer}, last_from: {type: string}, last_to: {type: string}, revision: {type: integer}, created_by: {type: string}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
-    ReportSubscriptionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ReportSubscription"}}}}
+    ReportSubscription: {type: object, additionalProperties: false, required: [id, name, kind, filters, schedule, format, enabled, recipients, revision, created_at, updated_at], properties: {id: {type: string, description: "ID of the report subscription."}, project_id: {type: string, description: "ID of the project the subscription belongs to."}, name: {type: string, description: "Name the project gives the subscription."}, kind: {type: string, description: "Report kind built on every run."}, filters: {type: object, additionalProperties: {type: string}, description: "Report filters applied on every run, by filter name."}, schedule: {$ref: "#/components/schemas/ReportSchedule", description: "Cadence, day and hour at which the report is built and mailed."}, format: {type: string, enum: [pdf, xlsx, csv], description: "File format the mailed report is attached in."}, enabled: {type: boolean, description: "Whether the subscription is delivered on its schedule."}, recipients: {type: array, items: {$ref: "#/components/schemas/ReportSubscriptionRecipient"}, description: "Project members the report is mailed to."}, next_run_at: {type: string, format: date-time, nullable: true, description: "When the next scheduled run is due."}, last_run_at: {type: string, format: date-time, nullable: true, description: "When the most recent run, scheduled or manual, started."}, last_status: {type: string, enum: ["", delivered, failed], description: "Outcome of the most recent run; empty before the first run."}, last_error: {type: string, description: "Why the last run failed, in a sentence; empty after a delivery."}, last_delivered: {type: integer, description: "Number of people the most recent run mailed the report to."}, last_from: {type: string, description: "First day covered by the report of the most recent run."}, last_to: {type: string, description: "Last day covered by the report of the most recent run."}, revision: {type: integer, description: "Counter that increases with each edit; edits against an older revision are refused."}, created_by: {type: string, description: "ID of the person or agent that created the subscription."}, created_at: {type: string, format: date-time, description: "When the subscription was created."}, updated_at: {type: string, format: date-time, description: "When the subscription record last changed, by an edit or a run."}}}
+    ReportSubscriptionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/ReportSubscription"}, description: "The project's scheduled reports, oldest first, at most 50."}}}
     ReportSubscriptionWrite: {type: object, additionalProperties: false, required: [name, kind, schedule, format, recipients], properties: {name: {type: string, minLength: 1, maxLength: 100}, kind: {type: string, enum: [fleet_health, uptime, publishing, alerts, alert_log, proof_of_play]}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}, description: "The report's filters other than the days (GET /api/reports lists them)."}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}, description: "user_id or email address of project members."}, enabled: {type: boolean, default: true}}}
     ReportSubscriptionPatch: {type: object, additionalProperties: false, properties: {name: {type: string, minLength: 1, maxLength: 100}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}}, enabled: {type: boolean}}}
     OrganizationNotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}}}}
@@ -36943,42 +36967,42 @@ components:
       type: array
       items: {type: string}
       description: Live projects of the organization, each named once. An empty list covers none.
-    NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}}}}
+    NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}, description: "Organization notifications that cover the project, oldest first, at most 50."}}}
     NotificationUnsubscription: {type: object, additionalProperties: false, required: [user_id, at], properties: {user_id: {type: string}, at: {type: string, format: date-time, description: When the person stopped the notification's mail.}}}
     NotificationDelivery:
       type: object
       additionalProperties: false
       required: [id, notification_id, event_id, event_type, state, attempts, created_at]
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?whd_[A-Za-z0-9_-]{16,24}$"}
-        notification_id: {type: string}
+        project_id: {type: string, description: "ID of the project the delivery belongs to."}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?whd_[A-Za-z0-9_-]{16,24}$", description: "ID of the delivery, stable across its retries."}
+        notification_id: {type: string, description: "ID of the notification that produced the delivery."}
         event_id: {type: string, description: The cursor of the event behind the delivery.}
-        event_type: {type: string}
+        event_type: {type: string, description: "Type of the event behind the delivery."}
         test: {type: boolean, description: Present and true for a POST .../test delivery.}
         body_cut: {type: boolean, description: "Present and true when a string of the body the notification's body_template rendered was longer than 65536 characters and was cut."}
         condition: {type: string, description: "A screen notice's NotificationCondition; absent for an event delivery."}
         phase: {type: string, enum: [opened, resolved], description: A screen notice's phase.}
         screen_id: {type: string, description: "The screen a notice is about; a data source's, campaign's or card's id for their conditions."}
-        screen_name: {type: string}
+        screen_name: {type: string, description: "Name the notice shows for the screen, campaign's name or card's type it is about."}
         audience_group: {type: string, description: "group_empty only: the tag or folder the notice is about, as tag:NAME or folder:sfd_ID. Each one is its own notice."}
         since: {type: string, format: date-time, description: When the notice's condition began.}
         sent_with: {type: string, description: "Email only: the delivery whose email carried this notice."}
         emailed: {type: integer, minimum: 0, description: "Email only: how many people the email reached."}
         group: {$ref: "#/components/schemas/NotificationDeliveryGroup", description: "Present on the notice that said a group of screens: the leader that opened the group and the notice that resolved it. Not on a webhook, which sends one notice per screen."}
         group_id: {type: string, description: "The group a notice belongs to, on every other notice of the group; those notices are skipped as grouped."}
-        state: {type: string, enum: [pending, succeeded, failed, skipped]}
-        attempts: {type: integer, minimum: 0}
+        state: {type: string, enum: [pending, succeeded, failed, skipped], description: "Where the delivery stands: waiting to send, sent, failed or skipped."}
+        attempts: {type: integer, minimum: 0, description: "How many send attempts the delivery has had."}
         next_attempt_at: {type: string, format: date-time, description: Present while pending.}
-        last_attempt_at: {type: string, format: date-time}
+        last_attempt_at: {type: string, format: date-time, description: "When the delivery was last attempted."}
         last_status: {type: integer, description: HTTP status of the last attempt when one was received.}
         last_error:
           type: string
           description: >-
             Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required (historical), webhook_disabled, webhook_deleted, event_expired, secret_unavailable (the signing secret or the custom headers cannot be opened; send the headers again), body_too_large (the body a template rendered is over 262144 bytes), email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, a group_empty one because a publish removed the tag or folder from the campaign's audience, or a card_data_stale one because the card's data was deleted, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
-        last_duration_ms: {type: integer, minimum: 0}
-        completed_at: {type: string, format: date-time}
-        created_at: {type: string, format: date-time}
+        last_duration_ms: {type: integer, minimum: 0, description: "How long the last attempt took, in milliseconds."}
+        completed_at: {type: string, format: date-time, description: "When the delivery reached its final state; absent while it is pending."}
+        created_at: {type: string, format: date-time, description: "When the delivery was queued."}
     NotificationDeliveryGroup:
       type: object
       additionalProperties: false
@@ -36993,7 +37017,7 @@ components:
             What the screens share: network (the last address, an IPv6 address as its /64), location (the location name), model (manufacturer and model), player (Player kind and version), tag, or many_networks (screens on three or more separate networks that fell together; the notice says how many and names no cause). Readers treat another value as an attribute they cannot name.
         value: {type: string, description: "The shared value, such as 203.0.113.7 or Store 12; for many_networks the number of networks, such as 6 networks."}
         count: {type: integer, minimum: 1, description: How many screens the notice named.}
-    NotificationDeliveryList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/NotificationDelivery"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end of the log.}}}
+    NotificationDeliveryList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/NotificationDelivery"}, description: "Deliveries of the notification, newest event first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end of the log.}}}
     NotificationDeliveryAttempt:
       type: object
       additionalProperties: false
@@ -37015,16 +37039,16 @@ components:
       required: [id, screen_id, condition, state, since, muted, attention]
       description: One screen condition while it lasts. Readers treat an unknown condition as a condition they cannot name.
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?alr_[A-Za-z0-9_-]{16,24}$"}
-        screen_id: {type: string}
-        screen_name: {type: string}
+        project_id: {type: string, description: "ID of the project the alert belongs to."}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?alr_[A-Za-z0-9_-]{16,24}$", description: "ID of the alert."}
+        screen_id: {type: string, description: "ID of the screen the alert is about."}
+        screen_name: {type: string, description: "Name of the screen the alert is about."}
         condition: {type: string, description: "A NotificationCondition other than crashing."}
-        state: {type: string, enum: [open, resolved]}
+        state: {type: string, enum: [open, resolved], description: "Whether the alert's condition is still lasting or has cleared."}
         since: {type: string, format: date-time, description: When the condition began.}
-        resolved_at: {type: string, format: date-time}
-        acknowledged_at: {type: string, format: date-time}
-        acknowledged_by: {$ref: "#/components/schemas/AlertActor"}
+        resolved_at: {type: string, format: date-time, description: "When the condition cleared."}
+        acknowledged_at: {type: string, format: date-time, description: "When someone acknowledged or snoozed the alert."}
+        acknowledged_by: {$ref: "#/components/schemas/AlertActor", description: "Who acknowledged or snoozed the alert."}
         snoozed_until: {type: string, format: date-time, description: Present on a snoozed alert; it needs attention again at this instant if still open.}
         muted: {type: boolean, description: A current mute covers the screen.}
         attention: {type: boolean, description: "Open, and not acknowledged, snoozed or muted."}
@@ -37041,7 +37065,7 @@ components:
       additionalProperties: false
       required: [items, next_cursor, counts]
       properties:
-        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Alert"}}
+        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Alert"}, description: "Alerts on this page; open alerts come first, newest first."}
         next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end.}
         counts:
           type: object
@@ -37061,14 +37085,14 @@ components:
       additionalProperties: false
       required: [id, screen_ids, tags, until, created_at]
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?amt_[A-Za-z0-9_-]{16,24}$"}
-        screen_ids: {type: array, items: {type: string}}
-        tags: {type: array, items: {type: string}}
-        until: {type: string, format: date-time}
-        note: {type: string}
-        created_by: {$ref: "#/components/schemas/AlertActor"}
-        created_at: {type: string, format: date-time}
+        project_id: {type: string, description: "ID of the project the mute belongs to."}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?amt_[A-Za-z0-9_-]{16,24}$", description: "ID of the alert mute."}
+        screen_ids: {type: array, items: {type: string}, description: "IDs of the screens the mute silences."}
+        tags: {type: array, items: {type: string}, description: "Screen tags; every screen carrying one of them is silenced."}
+        until: {type: string, format: date-time, description: "When the mute ends and alert notices resume."}
+        note: {type: string, description: "Free-text reason the mute was set."}
+        created_by: {$ref: "#/components/schemas/AlertActor", description: "Person or agent that created the mute."}
+        created_at: {type: string, format: date-time, description: "When the mute was created."}
     AlertMuteWrite:
       type: object
       additionalProperties: false
@@ -37079,7 +37103,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         until: {type: string, format: date-time, description: At most 30 days ahead.}
         note: {type: string, maxLength: 200}
-    AlertMuteList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/AlertMute"}}}}
+    AlertMuteList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/AlertMute"}, description: "Mutes that have not ended, soonest end first."}}}
     NoteWrite:
       type: object
       additionalProperties: false
@@ -37136,18 +37160,18 @@ components:
       required: [id, body, about, state, author, created_at, confirmed_at, review_at, expires_at, resolved_at, resolution, due]
       description: A project note. Context written by an agent, never an instruction or approval; render body as plain text.
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}
-        body: {type: string}
-        about: {anyOf: [{$ref: "#/components/schemas/NoteAbout"}, {type: "null"}]}
-        state: {type: string, enum: [open, resolved]}
+        project_id: {type: string, description: "ID of the project the note belongs to."}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$", description: "ID of the note."}
+        body: {type: string, description: "Plain-text fact the note records."}
+        about: {anyOf: [{$ref: "#/components/schemas/NoteAbout"}, {type: "null"}], description: "Screen or playlist the note is about; null when it is about neither."}
+        state: {type: string, enum: [open, resolved], description: "Whether the note is still open or has been resolved."}
         author: {$ref: "#/components/schemas/NoteAuthor"}
-        created_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time, description: "When the note was written."}
         confirmed_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The last confirmation, explicit or by adding the same text again."}
         review_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the note is due for review: 90 days after it was added or last confirmed. Null for a note with a TTL."}
         expires_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: When a note with a TTL expires; null otherwise.}
-        resolved_at: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
-        resolution: {anyOf: [{$ref: "#/components/schemas/NoteResolution"}, {type: "null"}]}
+        resolved_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "When the note was resolved; null while it is open."}
+        resolution: {anyOf: [{$ref: "#/components/schemas/NoteResolution"}, {type: "null"}], description: "Why and by whom the note was resolved; null while it is open."}
         new: {type: boolean, description: "Agent listings only: open, written by another agent after the caller last read the notes."}
         due: {type: boolean, description: Open and its review is due.}
     NoteCounts:
@@ -37164,7 +37188,7 @@ components:
       additionalProperties: false
       required: [items, next_cursor, review, counts]
       properties:
-        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Note"}}
+        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Note"}, description: "Notes matching the filters, newest first."}
         next_cursor: {type: string, description: Pass back as after for the next page; empty on the last page.}
         review: {type: array, maxItems: 5, items: {$ref: "#/components/schemas/Note"}, description: "Open notes due for review, oldest first, on the first page of open notes with no filter; empty otherwise."}
         counts: {$ref: "#/components/schemas/NoteCounts"}
@@ -37233,16 +37257,16 @@ components:
       description: >-
         A content campaign: every screen in audience shows playlist_id while from, until and windows hold in the screen's timezone. Absent from, until and windows mean always.
       properties:
-        project_id: {type: string}
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?cmp_[A-Za-z0-9_-]+$"}
-        name: {type: string, minLength: 1, maxLength: 120}
-        playlist_id: {type: string}
+        project_id: {type: string, description: "ID of the project that owns the campaign."}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?cmp_[A-Za-z0-9_-]+$", description: "ID of the campaign."}
+        name: {type: string, minLength: 1, maxLength: 120, description: "Display name of the campaign."}
+        playlist_id: {type: string, description: "ID of the playlist the audience's screens show while the campaign holds."}
         audience: {$ref: "#/components/schemas/CampaignAudience"}
         from: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, inclusive."}
         until: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, exclusive."}
-        windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
-        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}}
-        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}}
+        windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}, description: "Weekly day-and-time windows, in each screen's timezone, during which the campaign holds."}
+        monthly: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/LevelMonthly"}, description: "Monthly occurrences, by day of month or nth weekday, during which the campaign holds."}
+        dates: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/LevelDate"}, description: "Specific calendar dates, whole day or between start and end, on which the campaign holds."}
         except: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Civil dates, stored ascending and once each. An exception removes every occurrence its date starts, overnight tails included; it falls between from and until."}
         data: {$ref: "#/components/schemas/PageDataCondition"}
         interaction: {$ref: "#/components/schemas/LevelInteraction"}
@@ -37250,14 +37274,14 @@ components:
         displays: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 12}, description: "The outputs of a video wall it plays on; absent plays on every output."}
         start: {type: string, enum: [next_item, on_time], description: "on_time switches at the edge, interrupting the current item; next_item (default, stored absent) waits for it to end."}
         priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
-        paused: {type: boolean}
+        paused: {type: boolean, description: "Whether the campaign is paused and plays on no screen."}
         reserved: {type: boolean, description: "A reserved campaign is changed, paused, deleted or un-reserved only by a person who can approve reviews on the screens it reaches; agents and service clients get reserved_item (docs/screen-scope.md)."}
         editable: {type: boolean, description: "Present for a caller limited to screens: true when the whole audience is inside the caller's scope and the caller may change the campaign; false means it is read-only to them."}
         import: {type: string, description: "Present on a campaign a schedule import made: the import's mark and the level's key. Importing the same sheet again under the same name updates it."}
         reach: {$ref: "#/components/schemas/CampaignReach"}
-        revision: {type: integer, minimum: 1}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        revision: {type: integer, minimum: 1, description: "Revision number of the campaign, increased by each change."}
+        created_at: {type: string, format: date-time, description: "When the campaign was created."}
+        updated_at: {type: string, format: date-time, description: "When the campaign last changed."}
     CampaignReach:
       type: object
       additionalProperties: false
@@ -37269,7 +37293,7 @@ components:
         current: {type: integer, minimum: 0}
         at: {type: string, format: date-time, description: When current was counted.}
         empty_groups: {type: array, maxItems: 500, items: {type: string, pattern: "^(tag|folder):.+$"}, description: "The tag and folder leaves of the audience that matched no screen at at, as tag:NAME or folder:ID."}
-    CampaignList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Campaign"}}}}
+    CampaignList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Campaign"}, description: "The project's campaigns in precedence order, the order resolution reads them."}}}
     CampaignWrite:
       type: object
       additionalProperties: false
@@ -37321,30 +37345,30 @@ components:
       description: >-
         One campaign's standing on one screen. On a screen whose Player resolves its own stack (schedule.stack) and receives it, a campaign that holds by time stands where that stack puts it: a strip or main campaign plays in its region and a display lock on its displays; one the stack does not carry is pending or blocked (playlist_unavailable). playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. conditional: it holds by time and plays while what only the Player observes holds too (reason interaction: someone is using the screen; data: its data condition). paused. blocked: it cannot show here (reason no_default_playlist, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs) and is left out of this screen's stack, or stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition). not_in_audience.
       properties:
-        campaign_id: {type: string}
-        screen_id: {type: string}
-        screen_name: {type: string}
-        status: {type: string, enum: [playing, pending, waiting, ended, outranked, conditional, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, interaction, data, no_default_playlist, playlist_unavailable, region_not_laid_out, stack_only]}
+        campaign_id: {type: string, description: "ID of the campaign the status describes."}
+        screen_id: {type: string, description: "ID of the screen the campaign's standing is reported for."}
+        screen_name: {type: string, description: "Name of the screen the standing is reported for."}
+        status: {type: string, enum: [playing, pending, waiting, ended, outranked, conditional, paused, blocked, not_in_audience], description: "The campaign's current standing on this screen."}
+        reason: {type: string, enum: [takeover, campaign, interaction, data, no_default_playlist, playlist_unavailable, region_not_laid_out, stack_only], description: "Cause behind the standing where one applies, such as a takeover or a missing playlist."}
         by: {type: string, description: The campaign that outranks this one.}
-        next_start: {type: string, format: date-time}
+        next_start: {type: string, format: date-time, description: "When a waiting campaign next starts on this screen; present when that is within eight days."}
     CampaignScreens:
       type: object
       additionalProperties: false
       required: [campaign_id, counts, items]
       properties:
-        campaign_id: {type: string}
+        campaign_id: {type: string, description: "ID of the campaign whose audience the items list."}
         counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: "audience, then one count per status present."}
-        items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignStatus"}}
-        next_cursor: {type: string}
+        items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignStatus"}, description: "One page of the campaign's audience screens in screen ID order, each with the campaign's standing."}
+        next_cursor: {type: string, description: "Pass back as cursor for the next page; absent on the last page."}
     ScreenCampaigns:
       type: object
       additionalProperties: false
       required: [screen_id, items]
       properties:
-        screen_id: {type: string}
-        effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}]}
-        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/CampaignStatus"}}
+        screen_id: {type: string, description: "ID of the screen the campaigns are explained for."}
+        effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}], description: "The playlist the screen builds its manifest from now; null when it shows none."}
+        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/CampaignStatus"}, description: "Each campaign's standing on this screen, in precedence order."}
         at: {$ref: "#/components/schemas/ScreenExplainAt"}
     ScreenExplainAt:
       type: object
@@ -37963,14 +37987,14 @@ components:
       description: >-
         One project-scoped submission. Its own fields (id, kind, title, body, context, created_at) never change after it is written. status is open until staff respond and then the status of the latest response; agent replies reopen reports awaiting input or closed, while a "planned" report keeps its status. Responses are staff and agent replies, oldest first and at most 20, never edited or removed. Each reply also appends a feedback.responded event to the project's event stream (resource.id is the submission id; details carry response_id, status, fixed_in and author for agent replies, never the text). The submission id is never authorization: only the owning project reads it.
       properties:
-        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$"}
-        kind: {type: string, enum: [bug, feature]}
-        title: {type: string, maxLength: 120}
-        body: {type: string, maxLength: 4000}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$", description: "ID of the submission; only the owning project reads it."}
+        kind: {type: string, enum: [bug, feature], description: "Whether the submission reports a bug or requests a feature."}
+        title: {type: string, maxLength: 120, description: "Short headline the submitter gave the submission."}
+        body: {type: string, maxLength: 4000, description: "The submitter's full description of the bug or feature request."}
         context: {$ref: "#/components/schemas/FeedbackContext"}
-        created_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time, description: "When the submission was written."}
         status: {$ref: "#/components/schemas/FeedbackStatus"}
-        responses: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/FeedbackResponse"}}
+        responses: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/FeedbackResponse"}, description: "Staff and agent replies to the submission, oldest first, at most 20."}
     FeedbackStatus:
       type: string
       enum: [open, planned, waiting_on_user, fixed, declined, duplicate]
@@ -37995,7 +38019,7 @@ components:
       required: [text]
       properties:
         text: {type: string, minLength: 1, maxLength: 2000, description: Plain text; line feed and tab are the only control characters.}
-    FeedbackList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/FeedbackSubmission"}}}}
+    FeedbackList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/FeedbackSubmission"}, description: "The calling project's own submissions, newest first, at most 100."}}}
     PairingSession: {type: object, additionalProperties: true, required: [code, expires_at], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, expires_at: {type: string, format: date-time}}}
     NativePairingSession: {type: object, additionalProperties: true, required: [code, pairing_credential, expires_at], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, pairing_credential: {type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity.}, recovery: {$ref: "#/components/schemas/NativePairingRecovery"}, fleet_link: {$ref: "#/components/schemas/NativePairingFleetLink"}}}
     NativePairingRecovery:
@@ -38192,27 +38216,36 @@ components:
         - revision
       properties:
         id:
+          description: "ID of the card."
           type: string
         project_id:
+          description: "ID of the project that owns the card."
           type: string
         type:
+          description: "Card type the card is an instance of."
           type: string
         major:
+          description: "Major version of the card type the card uses."
           type: integer
           minimum: 1
         params:
+          description: "Parameter values that configure the card, validated against its card type."
           type: object
           additionalProperties: true
         data:
+          description: "The card's stored data document; null while the card has none."
           oneOf:
             - $ref: '#/components/schemas/CardDataEntry'
             - type: 'null'
         revision:
+          description: "Revision number of the card, starting at 1 and increased by each change."
           type: integer
         created_at:
+          description: "When the card was created."
           type: string
           format: date-time
         updated_at:
+          description: "When the card's parameters last changed."
           type: string
           format: date-time
     CardCreate:
@@ -38238,6 +38271,7 @@ components:
       required: [categories]
       properties:
         categories:
+          description: "Background categories in catalog order, each with its set count and a thumbnail."
           type: array
           items: {$ref: "#/components/schemas/BackgroundCategory"}
     BackgroundCategory:
@@ -38253,6 +38287,7 @@ components:
       required: [sets]
       properties:
         sets:
+          description: "Background sets that match the filters, in catalog order."
           type: array
           items: {$ref: "#/components/schemas/BackgroundSet"}
     BackgroundSet:
@@ -38273,16 +38308,17 @@ components:
       description: A BackgroundSet and all its backgrounds in catalog order.
       required: [id, name, category, category_name, style, colors, thumbnail_path, landscape_count, portrait_count, backgrounds]
       properties:
-        id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$"}
-        name: {type: string}
+        id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "ID of the background set."}
+        name: {type: string, description: "Display name of the background set."}
         category: {type: string, description: "The category id."}
-        category_name: {type: string}
-        style: {type: string}
+        category_name: {type: string, description: "Display name of the category the set belongs to."}
+        style: {type: string, description: "Short phrase describing the visual style the set's images share."}
         colors: {type: array, maxItems: 3, items: {type: string, pattern: "^#[0-9A-F]{6}$"}, description: "The set's palette, #RRGGBB."}
         thumbnail_path: {type: string, description: "Root-relative path of the set thumbnail, a 640x360 WebP."}
-        landscape_count: {type: integer, minimum: 0}
-        portrait_count: {type: integer, minimum: 0}
+        landscape_count: {type: integer, minimum: 0, description: "Number of landscape backgrounds in the set."}
+        portrait_count: {type: integer, minimum: 0, description: "Number of portrait backgrounds in the set."}
         backgrounds:
+          description: "Every background image in the set, in catalog order."
           type: array
           items: {$ref: "#/components/schemas/BackgroundImage"}
     BackgroundImage:
@@ -38304,13 +38340,14 @@ components:
       type: object
       required: [background, set]
       properties:
-        background: {$ref: "#/components/schemas/BackgroundImage"}
-        set: {$ref: "#/components/schemas/BackgroundSet"}
+        background: {$ref: "#/components/schemas/BackgroundImage", description: "The requested background image; use its ID as canvas.background.background_id."}
+        set: {$ref: "#/components/schemas/BackgroundSet", description: "The set the background belongs to."}
     CardCatalogue:
       type: object
       required: [cards]
       properties:
         cards:
+          description: "Built-in card types in the catalogue, each with its tier, layouts and served majors."
           type: array
           items: {$ref: "#/components/schemas/CardSummary"}
     CardSummary:
@@ -38329,9 +38366,9 @@ components:
       type: object
       required: [id, major, version, params_schema, data_schema, feed, tier, layouts, example]
       properties:
-        id: {type: string}
-        major: {type: integer, minimum: 1}
-        version: {type: string}
+        id: {type: string, description: "ID of the card, as placements name it."}
+        major: {type: integer, minimum: 1, description: "Major version of the card this entry describes; placements can pin a major."}
+        version: {type: string, description: "Full version of the card at this major."}
         params_schema: {type: object, additionalProperties: true, description: "Self-contained JSON Schema for placement params, with dynamic annotations."}
         data_schema: {type: object, additionalProperties: true, description: "Self-contained JSON Schema for the bound card-data document; a card without dynamic properties accepts only an empty object."}
         feed: {type: string, description: "Feed schema, or empty when the card has none."}
@@ -39563,7 +39600,7 @@ components:
       additionalProperties: false
       required: [reboot_schedule, next_reboot_at]
       properties:
-        reboot_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenRebootSchedule"}, {type: "null"}]}
+        reboot_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenRebootSchedule"}, {type: "null"}], description: "Windows in which the backend reboots the screen; null when no schedule is set."}
         next_reboot_at: {anyOf: [{type: string, format: date-time}, {type: "null"}], description: "The start of the next window the backend reboots the screen at; null with no enabled schedule."}
     ScreenDisplayOverride:
       type: object
@@ -39617,7 +39654,7 @@ components:
       additionalProperties: false
       required: [display_schedule]
       properties:
-        display_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenDisplaySchedule"}, {type: "null"}]}
+        display_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenDisplaySchedule"}, {type: "null"}], description: "Windows in which the screen's display is on; null when no schedule is set."}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
     ScreenVolumeWrite:
       type: object
