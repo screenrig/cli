@@ -515,7 +515,7 @@ export async function removeLocalAgentCredential(
     const scoped = projectConfigFor(current, resolved);
     assertProjectCredential(scoped, { ...resolved, token });
     if (current.identity_token || current.projects) {
-      const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...withoutCredential } = scoped;
+      const { token: _token, screen_provision: _provision, browser_setup: _browser, pending_writes: _writes, ...withoutCredential } = scoped;
       const next = withProjectConfig(current, resolved, { ...withoutCredential, updated_at: runtime.now().toISOString() });
       if (!accessClaims(next.token)?.projects && resolved.projectId === accessClaims(next.token)?.prj) delete next.token;
       // An access token bound to the disconnected project is spent wherever it is stored.
@@ -652,7 +652,7 @@ export async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime,
     const current = await readConfigFile(resolved.configPath, fs);
     if (!current || !sameCredential(current.identity_token, identity.identityToken, "identity")) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
     const scrub = (value: ScreenRigConfig): ScreenRigConfig => {
-      const { token: _token, token_projects: _subset, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
+      const { token: _token, token_projects: _subset, screen_provision: _provision, browser_setup: _browser, pending_writes: _writes, ...rest } = value;
       return rest;
     };
     // Revoking the identity revokes every grant it holds, so the session goes too.

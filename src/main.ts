@@ -1,6 +1,5 @@
 import { executeCommand } from "./program.js";
 import { clearResultContext, formatResultContext, resultContext } from "./project-context.js";
-import { applyCreditsLowToSuccess, observedCreditsRemaining } from "./credits.js";
 import { errorEnvelope, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { LOG_SINK_DEGRADED_CODE, logSinkDegradedWarning } from "./log/logger.js";
@@ -54,7 +53,7 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
   const explicitJson = options.includes("--json");
   const json = explicitJson || !options.includes("--human");
   try {
-    const dispatched = applyCreditsLowToSuccess(await executeCommand(runtime.argv, runtime), observedCreditsRemaining(runtime));
+    const dispatched = await executeCommand(runtime.argv, runtime);
     runtime.logger?.endRun();
     const result = applyLogSinkToSuccess(dispatched, runtime.logger?.droppedLines() ?? 0);
     if (result.output === "stream") {

@@ -47,7 +47,7 @@ production availability from the independent monitor without credentials
 ## Choose a content path
 
 - Existing file: `media upload`, then a playlist and `screen assign`.
-- Anything presentable: `media generate` as the whole page.
+- An image you made or found: `media upload`, then a playlist page that shows it.
 - Live weather, clocks, menus and boards: a built-in card (`screenrig cards list`).
   Touch, peripherals, pushed data or an exact look no card has: an application.
 - Live video or an existing web page: playlist primitives.

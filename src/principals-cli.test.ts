@@ -27,7 +27,7 @@ const TOKEN_A = access(A), IDENTITY = TOKEN_A, TOKEN_B = TOKEN_A;
 const REFRESH = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", gen: 1, exp: 4102444800 });
 const GRANT = { issuer: API, client_id: "screenrig-cli", refresh_token: REFRESH, identity: true };
 function context(id: string, name: string, organizationName = "Acme"): ProjectContext {
-  return { project: { id, name, organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: organizationName, revision: 1, status: "active", email: "contact@example.com", used_bytes: 0, reserved_bytes: 0, screen_count: 0, screen_limit: 100, content_limit_bytes: 0, credit_remaining: 0, created_at: "2026-10-04T12:00:00Z", updated_at: "2026-10-04T12:00:00Z" }, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: organizationName } };
+  return { project: { id, name, organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: organizationName, revision: 1, status: "active", email: "contact@example.com", used_bytes: 0, reserved_bytes: 0, screen_count: 0, screen_limit: 100, content_limit_bytes: 0, created_at: "2026-10-04T12:00:00Z", updated_at: "2026-10-04T12:00:00Z" }, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: organizationName } };
 }
 async function fixture(t: TestContext, config?: ScreenRigConfig) {
   const home = await testTemp("principals-cli-");
@@ -156,7 +156,7 @@ test("ambiguous enrollment keeps the exact organization and rejects a changed re
 
 test("project list and project use under a sign-in preserve both project retries", async t => {
   const config = initial();
-  config.media_generate = { idempotency_key: "first-generation-key", request_hash: "hash" };
+  config.screen_provision = { idempotency_key: "first-provision-key", label: "Lobby" };
   const f = await fixture(t, config);
   f.renews({ [B]: TOKEN_B });
   f.transport.on("GET", "/api/projects", req => {
@@ -174,8 +174,8 @@ test("project list and project use under a sign-in preserve both project retries
   assert.equal(used.code, 0, used.out);
   const saved = (await f.saved())!;
   assert.equal(saved.project_id, B); assert.equal(saved.token, TOKEN_A);
-  assert.deepEqual(saved.projects?.[A]?.media_generate, config.media_generate);
-  assert.equal(saved.projects?.[B]?.media_generate, undefined);
+  assert.deepEqual(saved.projects?.[A]?.screen_provision, config.screen_provision);
+  assert.equal(saved.projects?.[B]?.screen_provision, undefined);
   f.transport.on("GET", "/api/project", req => {
     assert.equal(req.headers?.authorization, "Bearer " + TOKEN_B);
     return { status: 200, headers: {}, body: context(B, "Lobby").project };
@@ -356,7 +356,7 @@ test("project deletion sends only exact confirmation and never archives screens 
 
 test("membership disconnect cleans only its captured project after another process selects B", async t => {
   const config = initial();
-  config.projects = { [B]: { token: TOKEN_B, project_name: "Lobby", organization_id: config.organization_id, organization_name: "Acme", media_generate: { idempotency_key: "b-generation", request_hash: "b-hash" } } };
+  config.projects = { [B]: { token: TOKEN_B, project_name: "Lobby", organization_id: config.organization_id, organization_name: "Acme", screen_provision: { idempotency_key: "b-provision", label: "Lobby" } } };
   const f = await fixture(t, config);
   f.transport.on("GET", "/api/agents/self", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true } }));
   f.transport.on("POST", "/api/agents/self/disconnect", async req => {
@@ -370,7 +370,7 @@ test("membership disconnect cleans only its captured project after another proce
   assert.equal(saved.identity_token, undefined); assert.equal(saved.project_id, B);
   assert.equal(saved.token, undefined);
   assert.equal(saved.projects?.[A]?.token, undefined);
-  assert.deepEqual(saved.projects?.[B]?.media_generate, config.projects[B]?.media_generate);
+  assert.deepEqual(saved.projects?.[B]?.screen_provision, config.projects[B]?.screen_provision);
   assert.equal(result.result.context.project.id, A);
 });
 

@@ -1,4 +1,4 @@
-import { CREDIT_HELP } from "./help-text.js";
+import { LIMITS_HELP } from "./help-text.js";
 import { commandHelp } from "./help-tree.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -3529,11 +3529,10 @@ async function withTokenConfig(
   }
 }
 
-function projectRecord(credit_remaining: number): Record<string, unknown> {
+function projectRecord(): Record<string, unknown> {
   return {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
-    credit_remaining,
     id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Office Screens",
     organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA",
@@ -3560,95 +3559,46 @@ function projectShowTransport(opts?: { header?: string; remaining?: number; low?
   transport.on("GET", "/api/project", () => ({
     status: 200,
     headers,
-    body: projectRecord(opts?.remaining ?? 5000),
+    body: projectRecord(),
   }));
   return transport;
 }
 
-test("project show reports integer credit_remaining and warns when remaining is zero", async () => {
-  const transport = memoryBackend();
-  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "true" };
+test("project show reports the token as presence and turns credit headers into no warning", async () => {
+  const transport = projectShowTransport({ header: "0", low: "true", remaining: 0 });
   // Random request IDs can contain a forbidden billing abbreviation by chance.
   const json = await withTokenConfig(transport, ["--json", "--request-id", "req_credit_remaining_fixture0001", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as {
     ok: boolean;
-    data: { credit_remaining: number; token_present: boolean };
+    data: { token_present: boolean };
     warnings: Array<{ code: string; message: string }>;
   };
   assert.equal(envelope.ok, true);
-  assert.equal(envelope.data.credit_remaining, 0);
   // ENG-5821: the credential is reported as presence, never as a token shape.
   assert.equal(envelope.data.token_present, true);
   assert.doesNotMatch(json.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|tokidAAAA/);
-  const warning = envelope.warnings.find((item) => item.code === "credits_low");
-  assert.ok(warning, json.stdout);
-  assert.match(warning.message, /\b0\b/);
-  assert.match(warning.message, /below 1000 credits/);
-  assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+  // Nothing a project does spends credit: the credit headers raise no warning.
+  assert.deepEqual(envelope.warnings, []);
 
   const human = await withTokenConfig(transport, ["--human", "project", "show"]);
   assert.equal(human.code, 0, human.stdout);
-  assert.match(human.stdout, /credit_remaining: 0/);
   assert.match(human.stdout, /^token: present$/m);
   assert.doesNotMatch(human.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|tokidAAAA/);
-  assert.match(human.stdout, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
-  assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+  assert.doesNotMatch(human.stdout, /credit|warning/i);
 });
 
-test("ScreenRig-Credits-Low decides credits_low, whatever the remaining balance", async () => {
-  const warns = async (opts: { header: string; low?: string }) => {
-    const json = await withTokenConfig(projectShowTransport({ ...opts, remaining: Number(opts.header) }), ["--json", "project", "show"]);
-    assert.equal(json.code, 0, json.stdout);
-    return (JSON.parse(json.stdout) as { warnings: Array<{ code: string }> }).warnings.some((item) => item.code === "credits_low");
-  };
-  assert.equal(await warns({ header: "0", low: "false" }), false, "a fresh free account at 0 is not low under launch terms");
-  assert.equal(await warns({ header: "500", low: "true" }), true);
-  assert.equal(await warns({ header: "5000", low: "true" }), true, "the server's verdict wins");
-  assert.equal(await warns({ header: "1000", low: "false" }), false);
-});
-
-test("remaining header 1000 does not add credits_low", async () => {
-  const transport = projectShowTransport({ header: "1000", low: "false", remaining: 0 });
+test("a credit header never becomes a warning on a failed request", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/project", () => ({
+    status: 500,
+    headers: { "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "true" },
+    body: { code: "internal", title: "Internal error", detail: "Try again.", status: 500 },
+  }));
   const json = await withTokenConfig(transport, ["--json", "project", "show"]);
-  assert.equal(json.code, 0, json.stdout);
-  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
-  assert.equal(envelope.ok, true);
-  assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
-});
-
-test("remaining header 999 adds credits_low on JSON and human output", async () => {
-  const transport = projectShowTransport({ header: "999", low: "true", remaining: 5000 });
-  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
-  assert.equal(json.code, 0, json.stdout);
-  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
-  assert.equal(envelope.ok, true);
-  const warning = envelope.warnings.find((item) => item.code === "credits_low");
-  assert.ok(warning, json.stdout);
-  assert.match(warning.message, /\b999\b/);
-  assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
-
-  const human = await withTokenConfig(transport, ["--human", "project", "show"]);
-  assert.equal(human.code, 0, human.stdout);
-  assert.match(human.stdout, /warning: Remaining prepaid credit is 999, below 1000 credits\./);
-});
-
-test("remaining header 0 on a successful command adds credits_low", async () => {
-  const transport = projectShowTransport({ header: "0", low: "true", remaining: 5000 });
-  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
-  assert.equal(json.code, 0, json.stdout);
-  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
-  const warning = envelope.warnings.find((item) => item.code === "credits_low");
-  assert.ok(warning, json.stdout);
-  assert.match(warning.message, /\b0\b/);
-});
-
-test("a project body without the credit headers does not add credits_low", async () => {
-  const transport = projectShowTransport({ remaining: 0 });
-  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
-  assert.equal(json.code, 0, json.stdout);
-  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
-  assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings?: Array<{ code: string }> };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, json.stdout);
 });
 
 function invitationRecord() {
@@ -4087,22 +4037,7 @@ test("dashboard reset-sign-in surfaces server validation, key mismatch, and rate
   await rm(limitedResult.configDir, { recursive: true, force: true });
 });
 
-test("unauthenticated version does not add credits_low", async () => {
-  const transport = memoryBackend();
-  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "0" };
-  const json = await withRuntime(["--json", "version"], transport);
-  try {
-    assert.equal(json.code, 0, json.stdout);
-    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: { version: string }; warnings: Array<{ code: string }> };
-    assert.equal(envelope.ok, true);
-    assert.equal(envelope.data.version, CLI_VERSION);
-    assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
-  } finally {
-    await rm(json.configDir, { recursive: true, force: true });
-  }
-});
-
-test("an project quota rejection explains itself and points at the remaining allowance", async () => {
+test("a storage quota rejection stops with delete-or-upgrade guidance and the usage command", async () => {
   // A custom storage ceiling is checked before the 1 GiB transport bound.
   const transport = new FakeTransport();
   transport.on("POST", "/api/media/uploads", () => ({
@@ -4137,25 +4072,20 @@ test("an project quota rejection explains itself and points at the remaining all
     };
     assert.equal(envelope.error.code, "quota_exceeded");
     assert.equal(envelope.error.status, 413);
-    assert.match(String(envelope.error.next?.command), /project show/);
-    assert.match(String(envelope.error.next?.reason), /content_limit_bytes/);
+    assert.equal(envelope.error.next?.command, "screenrig billing usage");
+    assert.match(String((envelope.error as { hint?: string }).hint), /Storage is full[\s\S]*delete media/);
+    assert.doesNotMatch(result.stdout, /credit|payment/i);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("a payment_required rejection points at remaining prepaid credit", async () => {
+test("a 402 from an older server stops the retry and names no pay command", async () => {
   const transport = new FakeTransport();
   transport.on("POST", "/api/media/uploads", () => ({
     status: 402,
     headers: { "content-type": "application/problem+json" },
-    body: {
-      type: "https://screenrig.ai/problems/payment-required",
-      title: "Prepaid credit is required",
-      status: 402,
-      detail: "Prepaid credit remaining is zero.",
-      code: "payment_required",
-    },
+    body: { type: "https://screenrig.ai/problems/payment-required", title: "Refused", status: 402, detail: "The server refused this request.", code: "payment_required" },
   }));
   const configDir = await testTemp("media-payment-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
@@ -4167,82 +4097,39 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
   const file = path.join(configDir, "pixel.png");
   await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
   try {
-    const result = await withRuntime(
-      ["--json", "media", "upload", file, "--no-transcode"],
-      transport,
-      { fs: fsLike },
-    );
+    const result = await withRuntime(["--json", "media", "upload", file, "--no-transcode"], transport, { fs: fsLike });
     assert.equal(result.code, 8, `402 maps to the Client exit code: ${result.stdout}`);
-    const envelope = JSON.parse(result.stdout) as {
-      error: { code: string; status: number; next?: { command: string; reason: string } };
-      warnings?: Array<{ code: string }>;
-    };
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; status: number; hint?: string; next?: unknown } };
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.equal(envelope.error.next?.command, "screenrig billing balance");
-    assert.match(String((envelope.error as { hint?: string }).hint), /Stop retrying/);
-    assert.doesNotMatch(String(envelope.error.next?.reason), /mcr|millicredit/);
-    assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, result.stdout);
-    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
+    assert.match(String(envelope.error.hint), /Stop retrying/);
+    assert.equal(envelope.error.next, undefined);
+    assert.doesNotMatch(result.stdout, /credit|stripe|x402|billing balance|\$/i);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("a 402 with remaining header 0 includes payment_required and credits_low", async () => {
+test("a 429 says to wait Retry-After once, and a credit header adds no warning", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/media/uploads", () => ({
-    status: 402,
+  transport.on("GET", "/api/project", () => ({
+    status: 429,
     headers: {
-      "content-type": "application/problem+json",
-      "ScreenRig-Credits-Remaining": "0",
-      "ScreenRig-Credits-Low": "true",
+      "content-type": "application/problem+json", "retry-after": "1234",
+      ratelimit: '"api-request-org";r=0;t=1234', "ratelimit-policy": '"api-request-org";q=500;w=3600',
+      "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "true",
     },
-    body: {
-      type: "https://screenrig.ai/problems/payment-required",
-      title: "Prepaid credit is required",
-      status: 402,
-      detail: "Prepaid credit remaining is zero.",
-      code: "payment_required",
-    },
+    body: { type: "https://screenrig.ai/problems/rate-limited", title: "Too many requests", status: 429, detail: "The organization's agent requests for this hour are spent.", code: "rate_limited" },
   }));
-  const configDir = await testTemp("media-payment-header-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(
-    path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
-    fsLike,
-  );
-  const file = path.join(configDir, "pixel.png");
-  await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
-  try {
-    const result = await withRuntime(
-      ["--json", "media", "upload", file, "--no-transcode"],
-      transport,
-      { fs: fsLike },
-    );
-    assert.equal(result.code, 8, result.stdout);
-    const envelope = JSON.parse(result.stdout) as {
-      ok: boolean;
-      error: { code: string; status: number; next?: { command: string } };
-      warnings?: Array<{ code: string; message: string }>;
-    };
-    assert.equal(envelope.ok, false);
-    assert.equal(envelope.error.code, "payment_required");
-    assert.equal(envelope.error.status, 402);
-    assert.equal(envelope.error.next?.command, "screenrig billing balance");
-    const warning = envelope.warnings?.find((item) => item.code === "credits_low");
-    assert.ok(warning, result.stdout);
-    assert.match(warning.message, /\b0\b/);
-    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
-
-    const human = await withRuntime(["--human", "media", "upload", file, "--no-transcode"], transport, { fs: fsLike });
-    assert.equal(human.code, 8, human.stderr);
-    assert.match(human.stderr, /payment_required/);
-    assert.match(human.stderr, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
-  } finally {
-    await rm(configDir, { recursive: true, force: true });
-  }
+  const result = await withTokenConfig(transport, ["--json", "project", "show"]);
+  assert.equal(result.code, ExitCode.RateLimited, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; retry_after_seconds?: number; hint?: string; next?: { command: string } }; warnings?: Array<{ code: string }> };
+  assert.equal(envelope.error.code, "rate_limited");
+  assert.equal(envelope.error.retry_after_seconds, 1234);
+  assert.match(String(envelope.error.hint), /Wait 1234 seconds[\s\S]*do not retry in a loop/);
+  assert.equal(envelope.error.next?.command, "screenrig billing usage");
+  assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, result.stdout);
+  assert.equal(transport.calls.length, 1, "a 429 is not retried by the client");
 });
 
 test("media upload validates transcode flags even when transcoding is off", async () => {
@@ -4345,33 +4232,18 @@ test("media upload rerun returns the existing media instead of uploading again, 
   }
 });
 
-test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
-  const documents: Array<[string, string]> = [["media generate help", CREDIT_HELP]];
-  for (const [name, text] of documents) {
-    assert.match(text, /nonnegative/, `${name} must say remaining is nonnegative`);
-    assert.match(text, /credits_low/, `${name} must name the live credits_low warning`);
-    assert.match(text, /1000 credits/, `${name} must name the live 1000-credit warning threshold`);
-    assert.match(text, /1 Jan(?:uary)? 2027|2027-01-01/, `${name} must name the 1 Jan 2027 cutoff`);
-    assert.match(text, /fails open/, `${name} must say production fails open until the cutoff`);
-    assert.match(text, /not rejected for empty\s+remaining/, `${name} must say billed work is not rejected yet`);
-    assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
-    assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
-    assert.match(text, /never stops screens or closes a project/, `${name} must not claim screens stop for empty remaining`);
-    assert.match(text, /Plus, Education, Premium and Enterprise are never refused/, `${name} must say paid plans are never refused for their balance`);
-    assert.match(text, /Downloads are free/, `${name} must say downloads are free`);
-    assert.match(text, /first 1 GB of storage is free/, `${name} must name the free 1 GB of storage`);
-    assert.doesNotMatch(text, /bandwidth|GB-month|monthly allowance/i, `${name} must not name a bandwidth charge or the retired monthly storage allowance`);
-    assert.match(text, /\$10 \/ 1M/, `${name} must name the text-input token rate`);
-    assert.match(text, /\$16 \/ 1M/, `${name} must name the image-input token rate`);
-    assert.match(text, /\$60 \/ 1M/, `${name} must name the image-output token rate`);
-    assert.match(text, /how detailed the still is/, `${name} must say quality changes how detailed the still is`);
-    assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
-    assert.doesNotMatch(text, /\$0\.06/, `${name} must not name the retired low still price`);
-    assert.doesNotMatch(text, /change the image, not the price/, `${name} must not say quality is unpriced`);
-    assert.doesNotMatch(text, /gpt-image-2/, `${name} must not name gpt-image-2 as the price`);
-    assert.doesNotMatch(text, /\$30 \/ 1M/, `${name} must not name the vendor image-output rate as the price`);
-    assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
-  }
+test("limits help states the hourly request cap, what is not counted, and the storage limit", () => {
+  const text = LIMITS_HELP;
+  assert.match(text, /Requests are never charged/);
+  assert.match(text, /500 on Standard and Plus, 2,000 on Education and Premium, 10,000 on Enterprise/);
+  assert.match(text, /429 rate_limited with retry_after_seconds/);
+  assert.match(text, /never loop/);
+  assert.match(text, /Not counted: card data and key\/value writes and deletes/);
+  assert.match(text, /listen streams/);
+  assert.match(text, /413\s+quota_exceeded/);
+  assert.match(text, /screenrig billing usage/);
+  assert.match(text, /media upload-batch/);
+  assert.doesNotMatch(text, /credit|billed|metered|402|payment|\$|monthly|per GB/i);
   assert.match(commandHelp(["feedback", "list"]).usage, /--kind <bug\|feature>/);
 
   // Maintainer AGENTS.md and README navigation do not duplicate the CLI help
@@ -4379,7 +4251,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
 
 });
 
-test("credits_low appends beside generic_filename instead of replacing it", async () => {
+test("a credit header adds no warning beside generic_filename", async () => {
   const transport = memoryBackend();
   transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "999", "ScreenRig-Credits-Low": "true" };
   const configDir = await testTemp("media-filename-credits-");
@@ -4404,7 +4276,7 @@ test("credits_low appends beside generic_filename instead of replacing it", asyn
     const envelope = JSON.parse(result.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
     assert.equal(envelope.ok, true);
     assert.ok(envelope.warnings.some((item) => item.code === "generic_filename"), result.stdout);
-    assert.ok(envelope.warnings.some((item) => item.code === "credits_low"), result.stdout);
+    assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, result.stdout);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -5330,7 +5202,7 @@ function aspectMismatchTransport(): FakeTransport {
   return transport;
 }
 
-test("screen assign emits aspect_mismatch beside credits_low from resolved playlist media", async () => {
+test("screen assign emits aspect_mismatch from resolved playlist media and ignores credit headers", async () => {
   const transport = aspectMismatchTransport();
   transport.extraResponseHeaders = { "screenrig-credits-remaining": "999", "screenrig-credits-low": "true" };
   const result = await withAuthenticatedRuntime(
@@ -5346,9 +5218,6 @@ test("screen assign emits aspect_mismatch beside credits_low from resolved playl
   assert.deepEqual(envelope.warnings, [{
     code: "aspect_mismatch",
     message: "Page page_portrait uses portrait media med_PORTRAIT on screen scr_ASPECT, whose player reported a landscape 1920x1080 surface.",
-  }, {
-    code: "credits_low",
-    message: "Remaining prepaid credit is 999, below 1000 credits.",
   }]);
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
     "GET /api/playlists/pl_ASPECT",
@@ -6608,7 +6477,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create refuses a text primitive and points at media generate and cards", async () => {
+test("playlist create refuses a text primitive and points at media upload and cards", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-text-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, settings: { XDG_CONFIG_HOME: configDir } };
@@ -6629,8 +6498,8 @@ test("playlist create refuses a text primitive and points at media generate and 
   assert.equal(result.code, ExitCode.Usage, result.stdout);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /Generate a finished still with media generate, or use a built-in card for live text/);
-  assert.equal(envelope.error.next?.command, "screenrig media generate --help");
+  assert.match(envelope.error.detail, /Upload a finished still with media upload, or use a built-in card for live text/);
+  assert.equal(envelope.error.next?.command, "screenrig media upload --help");
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -7234,11 +7103,11 @@ test("membership update carries the stored policy and scope when rows are readab
 test("every error envelope carries a hint; usage errors point at the invoked command's help", async () => {
   const transport = new FakeTransport();
   // Handler-level validation, after Commander selected the command.
-  const generate = await withRuntime(["--json", "--config", "/nonexistent/cfg.json", "media", "generate", "--prompt", "x", "--quality", "auto"], transport);
+  const generate = await withRuntime(["--json", "--config", "/nonexistent/cfg.json", "media", "list", "--primitive", "text"], transport);
   const generateError = JSON.parse(generate.stdout).error as { code: string; hint?: string; next?: { command: string; argv?: string[] } };
   assert.equal(generateError.code, "usage_error");
-  assert.match(String(generateError.hint), /screenrig media generate --help/);
-  assert.deepEqual(generateError.next?.argv, ["media", "generate", "--help"]);
+  assert.match(String(generateError.hint), /screenrig media list --help/);
+  assert.deepEqual(generateError.next?.argv, ["media", "list", "--help"]);
   // Option parsing fails before Commander selects a command; argv still names it.
   const parse = await withRuntime(["--json", "screen", "update", "scr_1", "--name", "--timezone"], transport);
   const parseError = JSON.parse(parse.stdout).error as { code: string; hint?: string; next?: { command: string } };

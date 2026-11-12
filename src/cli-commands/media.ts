@@ -1,10 +1,9 @@
 import { positiveInteger, positiveNumber, revision, reviewNoteOption } from "./options.js";
 import { handleMediaReplace, handleMediaRestore, handleMediaVersionDelete, handleMediaVersions } from "../media-versions.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaAvailability, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../handlers/media.js";
+import { handleSelectorPreview, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaAvailability, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../handlers/media.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
-import { CREDIT_HELP } from "../help-text.js";
 import { connectionIdOption } from "../connection-ids.js";
 import {
   handleMediaSyncAccountAdd, handleMediaSyncAccountAddDropbox, handleMediaSyncAccountAddGoogleDrive, handleMediaSyncAccountConnect, handleMediaSyncAccountDelete,
@@ -27,21 +26,7 @@ function syncCreateOptions(command: Command): Command {
 }
 
 export function registerMediaCommands(root: Command, bind: CommandActionBinder): void {
-  const media = root.command("media").description("Generate, upload, and manage images, videos, and soundtrack audio");
-
-  addCommandNotes(media.command("generate").description("Generate an image from a prompt")
-    .addOption(new Option("--prompt <TEXT>", "Describe the complete image to generate").conflicts("promptFile"))
-    .addOption(new Option("--prompt-file <FILE>", "Read the complete prompt from a file or stdin (-)").conflicts("prompt"))
-    .addOption(new Option("--aspect-ratio <RATIO>", "Choose the generated image aspect ratio").choices(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"]).default("16:9"))
-    .addOption(new Option("--quality <low|medium|high>", "Choose generation quality").choices(["low", "medium", "high"]).default("medium"))
-    .option("--tag <TAG>", "Set the media tag")
-    .option("--no-progress", "Suppress stderr progress")
-    .action(bind(handleMediaGenerate)), CREDIT_HELP);
-  const generate = media.commands.find((command) => command.name() === "generate")!;
-  requireOptionGroup(generate, "exactlyOne", ["--prompt", "--prompt-file"]);
-  addCommandExamples(generate,
-    'screenrig media generate --prompt "A full-screen welcome sign"',
-    'screenrig media generate --prompt-file prompt.txt --aspect-ratio 9:16');
+  const media = root.command("media").description("Upload and manage images, videos, and soundtrack audio");
 
   media.command("upload").description("Upload an image, video, or audio track")
     .argument("<file>", "Local input file")

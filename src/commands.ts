@@ -136,7 +136,6 @@ export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string,
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
     writeRecovery: recovery ?? (token ? writeRecoveries.get(runtime) : undefined),
-    creditsOwner: runtime,
     logger: loggerOf(runtime),
   });
 }

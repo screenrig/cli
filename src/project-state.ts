@@ -3,7 +3,7 @@ import { configError } from "./problems.js";
 
 const PROJECT_FIELDS = [
   "project_name", "organization_id", "organization_name",
-  "screen_provision", "browser_setup", "media_generate", "pending_writes",
+  "screen_provision", "browser_setup", "pending_writes",
 ] as const;
 
 function storedProjects(config: ScreenRigConfig): Record<string, StoredProjectState> {

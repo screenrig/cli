@@ -227,7 +227,7 @@ test("one item failing does not stop the rest: its dependents wait, the exit cod
   }
 });
 
-test("payment_required stops the run with the same command to run again; the rest waits, and a resume completes", async () => {
+test("quota_exceeded stops the run with the same command to run again; the rest waits, and a resume completes", async () => {
   const w = await world();
   try {
     await scanFiles(w);
@@ -235,16 +235,16 @@ test("payment_required stops the run with the same command to run again; the res
     w.project.intercept = (req: TransportRequest) => {
       if (req.method !== "POST" || req.path !== "/api/media/uploads") return undefined;
       declared += 1;
-      return declared > 2 ? { status: 402, headers: { "content-type": "application/problem+json" }, body: { status: 402, code: "payment_required", title: "Payment required", detail: "The project has no credit left." } } : undefined;
+      return declared > 2 ? { status: 413, headers: { "content-type": "application/problem+json" }, body: { status: 413, code: "quota_exceeded", title: "Storage limit reached", detail: "The upload would exceed the plan's storage." } } : undefined;
     };
     const result = await w.h.invoke([...APPLY, "--concurrency", "1"]);
     assert.equal(result.code, 8, result.stdout);
     assert.equal(result.json.ok, true);
     const stopped = result.json.data.stopped;
-    assert.equal(stopped.code, "payment_required");
-    assert.match(stopped.detail, /no credit left/);
+    assert.equal(stopped.code, "quota_exceeded");
+    assert.match(stopped.detail, /exceed the plan/);
     assert.match(stopped.next.command, /^screenrig migrate apply --dir \S+\/mig --concurrency 1 --no-transcode$/);
-    assert.match(stopped.next.reason, /billing balance/);
+    assert.match(stopped.next.reason, /billing usage/);
     assert.equal(result.json.data.applied.media.create, 2);
     assert.equal(result.json.data.applied.playlists.create, 0, "nothing after the stop is written");
     assert.equal(w.project.playlists.size, 0);

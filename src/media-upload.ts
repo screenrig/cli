@@ -105,7 +105,7 @@ const TRANSPORT_CEILING: UploadCeiling = {
   bytes: MAX_TRANSPORT_BYTES,
   message:
     "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig project show " +
-    "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
+    "to inspect used_bytes and any content_limit_bytes ceiling.",
 };
 
 /** The size ceiling for one upload of this content type; a video's is the project's plan limit, read before the upload is prepared. */

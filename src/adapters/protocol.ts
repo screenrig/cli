@@ -17,7 +17,6 @@ export type OperationState = "receiving" | "queued" | "running" | "succeeded" | 
 export interface Project {
   content_limit_bytes: number;
   created_at: string;
-  credit_remaining: number;
   email: string;
   feature_revision?: number;
   features?: ProjectFeatures;
@@ -1389,29 +1388,6 @@ export interface MediaRecord {
 
 /** PATCH /api/media/{id}. Replace the tag set; null or [] clears it. */
 export type MediaTagPatch = { tag: string | null } | { tags: string[] };
-
-export type MediaGenerationAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
-export type MediaGenerationQuality = "low" | "medium" | "high";
-
-/** POST /api/media/generations. prompt is required; aspect_ratio and quality have server defaults. quality changes the image and the price. */
-export interface MediaGenerationRequest {
-  prompt: string;
-  aspect_ratio?: MediaGenerationAspectRatio;
-  quality?: MediaGenerationQuality;
-  tag?: string;
-}
-
-export interface MediaGenerationUsage {
-  credits: number;
-  usd: string;
-  quality?: MediaGenerationQuality;
-}
-
-/** Built from the media generation operation's result. media.id is med_…. Never image bytes. */
-export interface MediaGeneration {
-  media: { id: string; [key: string]: unknown };
-  usage: MediaGenerationUsage;
-}
 
 export interface MediaUploadSession {
   expires_at: string;

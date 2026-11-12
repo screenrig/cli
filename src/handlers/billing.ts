@@ -2,8 +2,45 @@
 import { flagString } from "../command-input.js";
 import { requireToken } from "../client.js";
 import { ExitCode } from "../exit-codes.js";
+import { successEnvelope } from "../envelope.js";
 import { clientFor, commandHandler, humanLines, jsonBody, requirePrivateNoStore, simpleGet } from "../commands.js";
 
+
+/**
+ * What this organization's plan allows: stored bytes of the storage limit and
+ * the agent requests an hour. Requests are never charged, so there is no money
+ * or monthly meter here. `requests_per_hour` is absent from servers that have
+ * not sent it yet; the line is then left out.
+ */
+export const handleBillingUsage = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({ method: "GET", path: "/api/billing/usage" });
+  requirePrivateNoStore(response.headers, "Billing usage response");
+  const body = (response.body ?? {}) as {
+    stored_bytes?: unknown; allowance?: { storage_bytes?: unknown; requests_per_hour?: unknown };
+  };
+  const text = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value : undefined);
+  const allowance = {
+    storage_bytes: text(body.allowance?.storage_bytes),
+    requests_per_hour: text(body.allowance?.requests_per_hour),
+  };
+  const data = {
+    stored_bytes: text(body.stored_bytes),
+    allowance: Object.fromEntries(Object.entries(allowance).filter(([, value]) => value !== undefined)),
+  };
+  return {
+    envelope: successEnvelope(data, {
+      request_id: response.headers["x-request-id"] ?? client.requestId,
+      warnings: response.headers.warning ? [{ code: "server_warning", message: response.headers.warning }] : [],
+    }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Plan limits", [
+      ["storage", allowance.storage_bytes ? `${data.stored_bytes ?? "?"} of ${allowance.storage_bytes} bytes` : undefined],
+      ["agent_requests_per_hour", allowance.requests_per_hour],
+    ]),
+  };
+});
 
 /**
  * Read this project's shared balance. The withdrawal section is reported as the

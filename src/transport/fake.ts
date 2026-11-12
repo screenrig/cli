@@ -266,7 +266,6 @@ export function memoryBackend(options: {
   let project: Project = {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
-    credit_remaining: 0,
     email: "owner@example.com",
     feature_revision: 1,
     features: { advertiser: false, screens: true },

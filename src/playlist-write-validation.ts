@@ -582,8 +582,8 @@ function pageLabel(page: JsonRecord, index: number): string {
 }
 
 const PRIMITIVE_NEXT = {
-  command: "screenrig media generate --help",
-  reason: "Finished stills come from media generate; live text comes from built-in cards.",
+  command: "screenrig media upload --help",
+  reason: "A finished still is an image you upload with media upload; live text comes from built-in cards.",
 };
 
 /**
@@ -602,7 +602,7 @@ export function assertWirePages(pages: unknown[]): void {
       const wire = primitive as JsonRecord;
       const category = wire.primitive;
       if (typeof category !== "string" || !(WIRE_PRIMITIVES as readonly string[]).includes(category)) {
-        throw usageError(`${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Generate a finished still with media generate, or use a built-in card for live text.`, PRIMITIVE_NEXT);
+        throw usageError(`${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Upload a finished still with media upload, or use a built-in card for live text.`, PRIMITIVE_NEXT);
       }
       if (category === "image" || category === "video") {
         const selector = wire.selector;

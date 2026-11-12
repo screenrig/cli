@@ -124,7 +124,7 @@ export interface ApplyResult {
 }
 
 const STOP_CODES = new Set([
-  "payment_required", "quota_exceeded", "vendor_refused", "vendor_rate_limited", "vendor_unavailable", "campaign_limit_reached",
+  "quota_exceeded", "vendor_refused", "vendor_rate_limited", "vendor_unavailable", "campaign_limit_reached",
   "insufficient_access", "pending_review", "transport_error", "timeout", "not_enrolled", "unauthenticated", "session_ended", "credential_retired",
 ]);
 
@@ -147,8 +147,11 @@ function stopNext(error: CliError, rerun: string): Stopped["next"] {
   if (code === "pending_review" || code === "insufficient_access") {
     return { command: "screenrig login --access manage", reason: "migrate apply writes media, playlists, screens and campaigns, which needs Manage access that a person approves in the dashboard. Then run the same apply again." };
   }
-  if (code === "payment_required" || code === "quota_exceeded") {
-    return { command: rerun, reason: "Add credit or free storage first (screenrig billing balance, screenrig project show), then run the same apply again: it continues where it stopped." };
+  if (code === "quota_exceeded") {
+    return { command: rerun, reason: "Storage is full. Delete media the project no longer needs or move to a larger plan (screenrig billing usage shows the storage limit), then run the same apply again: it continues where it stopped." };
+  }
+  if (code === "rate_limited") {
+    return { command: rerun, reason: `The organization's hourly request cap is spent. Wait ${error.problem.retry_after_seconds ?? "the Retry-After"} seconds, then run the same apply again: it continues where it stopped.` };
   }
   if (code === "campaign_limit_reached") {
     return { command: rerun, reason: "Delete campaigns the project no longer needs (screenrig campaign list, campaign delete), then run the same apply again: only the campaigns still missing are made." };

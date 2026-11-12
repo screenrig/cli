@@ -74,16 +74,6 @@ import { isResourceID } from "./generated/resource-ids.js";
         idempotency_key: string;
         code: string;
       };
-      /**
-       * Idempotency key of a `media generate` request that has not returned a
-       * result yet, with a hash of that request. Re-running the identical
-       * command reuses the key so the server replays the original still rather
-       * than billing a second one. Cleared when a generation returns.
-       */
-      media_generate?: {
-        idempotency_key: string;
-        request_hash: string;
-      };
       /** Pending ordinary writes: hashes, keys, timestamps and command names; never payloads. */
       pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string; supersede?: string }>;
       /**
@@ -131,7 +121,7 @@ import { isResourceID } from "./generated/resource-ids.js";
 
     export type StoredProjectState = Pick<ScreenRigConfig,
       "token" | "project_name" | "organization_id" | "organization_name" |
-      "screen_provision" | "browser_setup" | "media_generate" | "pending_writes">;
+      "screen_provision" | "browser_setup" | "pending_writes">;
 
     export const DEFAULT_API_URL = "https://api.screenrig.ai";
     export const LOCAL_DEV_API_URL = "http://api.screenrig.localhost:18880";

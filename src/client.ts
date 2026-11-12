@@ -3,7 +3,6 @@ import { projectRequest } from "./project-routing.js";
 import type { WriteRecovery } from "./write-recovery.js";
 import type { NormalizedProblem } from "./envelope.js";
 import { accessLimitHint } from "./reviews.js";
-import { creditsLowWarnings, observeCreditsRemaining, parseCreditsHeaders } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
 import { REQUEST_ID_MAX, REQUEST_ID_MIN, isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
 import {
@@ -18,6 +17,7 @@ import {
   usageError,
   withOverbookingGuidance,
   withPaymentGuidance,
+  withRateLimitGuidance,
   withPlanGuidance,
   withQuotaGuidance,
   withRetryAfter,
@@ -127,6 +127,17 @@ function withAccessGuidance(problem: NormalizedProblem): NormalizedProblem {
 }
 
 /** A renewed token that is refused again means the session ended. */
+/** The guidance this CLI adds to a refusal whose server body leaves it out. */
+function withLocalGuidance(problem: NormalizedProblem, headers: Record<string, string>): NormalizedProblem {
+  return withPlanGuidance(
+    withPaymentGuidance(
+      withRateLimitGuidance(
+        withQuotaGuidance(withOverbookingGuidance(withRetryAfter(problem, parseRetryAfter(headers["retry-after"], Date.now())))),
+      ),
+    ),
+  );
+}
+
 function sessionEnded(problem: NormalizedProblem): NormalizedProblem {
   return { ...problem, code: "session_ended", title: "Session ended",
     next: { command: "screenrig login", reason: "The server refused a freshly renewed access token. Sign this installation in again." } };
@@ -145,8 +156,6 @@ export interface ApiClientOptions {
   requestIds?: RequestIds;
   idempotencyKey?: string;
   timeoutMs?: number;
-  /** When set, authenticated remaining credits are observed for the envelope warning. */
-  creditsOwner?: object;
   logger?: OperationLogger;
   writeRecovery?: WriteRecovery;
 }
@@ -193,7 +202,6 @@ export class ApiClient {
   private readonly projectId?: string;
   private readonly transport: Transport;
   private readonly timeoutMs: number;
-  private readonly creditsOwner?: object;
   private readonly logger: OperationLogger;
   private readonly writeRecovery?: WriteRecovery;
   private readonly requestedKey?: string;
@@ -206,7 +214,6 @@ export class ApiClient {
     this.auth = options.auth;
     this.projectId = options.projectId;
     this.timeoutMs = options.timeoutMs ?? 30_000;
-    this.creditsOwner = options.creditsOwner;
     this.logger = options.logger ?? loggerOf({});
     if (options.idempotencyKey && !isValidIdempotencyKey(options.idempotencyKey)) {
       throw usageError("Invalid --idempotency-key.");
@@ -301,7 +308,6 @@ export class ApiClient {
     if (pending && !retainRecoveryOnRefusal && response.status >= 400 && response.status < 500 && response.status !== 408) {
       await recovery!.clear(pending);
     }
-    const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? sentHeaders["x-request-id"];
     if (response.status >= 400) {
       const normalized = normalizeProblem(response.body, {
@@ -310,19 +316,7 @@ export class ApiClient {
         bodyText: errorBodyText(response.rawText, response.body),
       });
       const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
-      const wrapped = new CliError(
-        withPlanGuidance(
-          withPaymentGuidance(
-            withQuotaGuidance(
-              withOverbookingGuidance(
-                withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
-              ),
-            ),
-          ),
-        ),
-        undefined,
-        creditsLowWarnings(remaining),
-      );
+      const wrapped = new CliError(withLocalGuidance(problem, response.headers));
       span.error(wrapped, {
         status: response.status,
         request_id: requestId,
@@ -357,9 +351,6 @@ export class ApiClient {
         ? { content_type: response.headers["content-type"] }
         : responseSummary(response.body, req.binary === true, response.headers["content-type"])),
     });
-    if (this.creditsOwner) {
-      observeCreditsRemaining(this.creditsOwner, remaining);
-    }
     return response;
   }
 
@@ -400,7 +391,6 @@ export class ApiClient {
         response = await send();
       }
     }
-    const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
     const lengthHeader = response.headers["content-length"];
     const parsedLength = lengthHeader !== undefined ? Number(lengthHeader) : undefined;
@@ -412,19 +402,7 @@ export class ApiClient {
         bodyText: errorBodyText(response.rawText, response.problem),
       });
       const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
-      const wrapped = new CliError(
-        withPlanGuidance(
-          withPaymentGuidance(
-            withQuotaGuidance(
-              withOverbookingGuidance(
-                withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
-              ),
-            ),
-          ),
-        ),
-        undefined,
-        creditsLowWarnings(remaining),
-      );
+      const wrapped = new CliError(withLocalGuidance(problem, response.headers));
       span.error(wrapped, {
         status: response.status,
         request_id: requestId,
@@ -439,7 +417,6 @@ export class ApiClient {
       content_type: response.headers["content-type"],
       ...(byteLength !== undefined ? { byte_length: byteLength } : {}),
     });
-    if (this.creditsOwner) observeCreditsRemaining(this.creditsOwner, remaining);
     return response;
   }
 

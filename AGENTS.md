@@ -106,12 +106,13 @@ Player plays it, so applications are tried before upload.
   unchanged but does not bypass the lossy-WebP delivery policy.
 - `doctor` check status is `pass`, `warn` or `fail`; only `fail` moves the exit
   code. A missing credential is `warn` with `next.command`.
-- Playlist authoring: existing file, `media upload`; presentable page, `media
-  generate` as the whole page; live text, built-in cards; live objects,
-  playlist primitives. Never emit native `text`, `box` or `line`.
-- Server admission decides whether billed work (`media generate`) proceeds, not
-  the displayed balance; respect `payment_required`. Add no pay, Stripe or x402
-  commands.
+- Playlist authoring: existing file or an image the agent made, `media upload`;
+  live text, built-in cards; live objects, playlist primitives. Never emit native
+  `text`, `box` or `line`. screenRIG generates no images.
+- Requests are never charged. An organization's agent requests are capped per hour
+  (HTTP 429 `rate_limited` with `Retry-After`); a 429 is waited out for that long,
+  never retried in a loop (`events follow` and `support follow` included). Storage is a
+  plan limit: `quota_exceeded` (413) stops the work. Add no pay, Stripe or x402 commands.
 - Optional `log_socket` lives in the 0600 user config; there is no flag or env
   override, and a connect failure never fails the command.
 

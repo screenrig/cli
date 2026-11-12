@@ -3,7 +3,7 @@ import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handl
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger, projectSubset, reportFormatOption, reportOutputOption } from "./options.js";
-import { CREDIT_HELP } from "../help-text.js";
+import { LIMITS_HELP } from "../help-text.js";
 import { playsInstantOption } from "../playback-export.js";
 import { subcommand } from "./subcommand.js";
 
@@ -30,8 +30,8 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     .requiredOption("--name <NAME>", "Exact name from deletion-preview")
     .requiredOption("--revision <N>", "Exact revision from deletion-preview", positiveInteger("revision"))
     .option("--yes", "Confirm deletion").action(bind(handleProjectDelete));
-  addCommandNotes(project.command("show").description("Inspect your project and credits")
-    .action(bind(handleProjectShow)), CREDIT_HELP);
+  addCommandNotes(project.command("show").description("Inspect your project")
+    .action(bind(handleProjectShow)), LIMITS_HELP);
   project.command("capabilities").description("Read this project's plan, feature flags, and effective capabilities")
     .action(bind(handleProjectCapabilities));
   project.command("uptime").description("Read the project's daily screen availability over UTC days")

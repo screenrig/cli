@@ -454,20 +454,20 @@ export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: nu
 }
 
 /**
- * A custom storage ceiling, when present, is checked before the 1 GiB
- * transport bound, so `quota_exceeded` is still the limit a user meets on that
- * path. Point at the command that reports used_bytes and content_limit_bytes,
- * unless the server already supplied its own guidance.
+ * quota_exceeded (413) is the plan's storage limit, on every plan: an upload
+ * that would take the organization past it is refused and nothing stored is
+ * touched. Retrying is refused the same way, so say what frees room, unless the
+ * server already supplied its own guidance.
  */
 export function withQuotaGuidance(problem: NormalizedProblem): NormalizedProblem {
   if (problem.code !== "quota_exceeded") {
     return problem;
   }
   return withGuidance(problem, {
-    hint: "The project is at its storage limit. Delete media or applications that are no longer used (screenrig media list, then screenrig media delete ID), or upload a smaller file, then retry.",
+    hint: "Storage is full: this upload would take the organization past its plan's storage limit, and the same upload is refused the same way. Stored content keeps playing. Stop uploading, delete media or applications that are no longer used (screenrig media list, then screenrig media delete ID), or tell the user a larger plan has more storage.",
     next: {
-      command: "screenrig project show",
-      reason: "Read used_bytes and content_limit_bytes, then free space or upload a smaller file.",
+      command: "screenrig billing usage",
+      reason: "Shows the bytes stored against the plan's storage limit.",
     },
   });
 }
@@ -503,23 +503,37 @@ export function withScreenScopeGuidance(problem: NormalizedProblem): NormalizedP
   });
 }
 
-/** Both 402 codes: prepaid credit is spent, or eligible credit cannot cover this debit. */
+/** The 402 codes an older server may still send. */
 const PAYMENT_CODES = new Set(["payment_required", "insufficient_credits"]);
 
 /**
- * A 402 means this operation needs credit the project does not have. Retrying
- * the same billed operation is refused the same way, so tell the agent to stop,
- * tell the user, and carry on by other means. Do not invent a pay command.
+ * A 402 is a refusal that repeating does not change. Say so, and leave the rest
+ * to the server's own words; no pay command exists to point at.
  */
 export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProblem {
   if (!PAYMENT_CODES.has(problem.code)) {
     return problem;
   }
   return withGuidance(problem, {
-    hint: "This operation needs credit the project does not have, so retrying it is refused the same way. Stop retrying it, tell the user it was refused for lack of credit, and continue the task by other means where you can: for an image, create it with your own tools and add it with screenrig media upload. For an upload that would store more than 1 GB on Standard with no credit left, upload nothing more and ask the user to add credit or delete content to get back under 1 GB.",
+    hint: "The server refused this request and repeating it is refused the same way. Stop retrying it, tell the user, and continue the task by other means where you can.",
+  });
+}
+
+/**
+ * A 429 rate_limited is a wait, not a failure. The organization's hourly
+ * request cap (and the shorter limits on card data and exports) clears when
+ * Retry-After ends; looping on it only spends the next window.
+ */
+export function withRateLimitGuidance(problem: NormalizedProblem): NormalizedProblem {
+  if (problem.code !== "rate_limited") {
+    return problem;
+  }
+  const wait = typeof problem.retry_after_seconds === "number" ? `${problem.retry_after_seconds} seconds` : "the time Retry-After names";
+  return withGuidance(problem, {
+    hint: `A request limit was reached; nothing is charged and screens keep playing. Wait ${wait}, then run the same command once; do not retry in a loop. screenrig billing usage shows the organization's requests an hour. A listen stream (screenrig events follow) and media upload-batch use far fewer requests than polling lists and uploading one file at a time.`,
     next: {
-      command: "screenrig billing balance",
-      reason: "Shows remaining, reserved, and available credits so you can tell the user exactly what is left.",
+      command: "screenrig billing usage",
+      reason: "Shows the agent requests an hour the organization may make and the storage limit.",
     },
   });
 }
