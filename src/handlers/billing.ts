@@ -4,23 +4,21 @@ import { requireToken } from "../client.js";
 import { ExitCode } from "../exit-codes.js";
 import { successEnvelope } from "../envelope.js";
 import { formatMcrAsDollars } from "../money.js";
+import type { ProjectBillingUsage } from "../adapters/protocol.js";
 import { clientFor, commandHandler, humanLines, jsonBody, requirePrivateNoStore, simpleGet } from "../commands.js";
 
 
 /**
  * What this organization's plan allows: stored bytes of the storage limit and
- * the agent requests an hour. Requests are never charged, so there is no money
- * or monthly meter here. `requests_per_hour` is absent from servers that have
- * not sent it yet; the line is then left out.
+ * the agent requests an hour (`allowance.requests_per_hour`). Requests are never
+ * charged, so there is no money or monthly meter here.
  */
 export const handleBillingUsage = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({ method: "GET", path: "/api/billing/usage" });
   requirePrivateNoStore(response.headers, "Billing usage response");
-  const body = (response.body ?? {}) as {
-    stored_bytes?: unknown; allowance?: { storage_bytes?: unknown; requests_per_hour?: unknown };
-  };
+  const body = (response.body ?? {}) as Partial<ProjectBillingUsage>;
   const text = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value : undefined);
   const allowance = {
     storage_bytes: text(body.allowance?.storage_bytes),
