@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-ble",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.ble"
   ],
+  "requiresSources": [],
   "purpose": "A frame that watches ble receives device.event {type: ble, subscription, value_base64} for each notification of one of its subscriptions (at most 512 bytes). A subscription the frame does not hold posts nothing.",
   "host": {
     "applicationId": "app_bridge",
@@ -35,7 +36,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -57,7 +61,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -168,12 +178,22 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0014",
+    "message_id": "msg_app_devwatch_0015",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

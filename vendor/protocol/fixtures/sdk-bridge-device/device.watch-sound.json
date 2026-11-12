@@ -1,5 +1,5 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-sound",
   "kind": "device.watch",
@@ -7,6 +7,7 @@
     "device.watch",
     "device.sound"
   ],
+  "requiresSources": [],
   "purpose": "A frame that watches sound receives device.event {type: sound, dbfs}: the microphone level of the last second in dBFS, a number from -120 to 0, at most once per second. Every reading posts, changed or not, but never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted sound event: a reading that would post sooner is dropped, not deferred. No audio leaves the device.",
   "host": {
     "applicationId": "app_bridge",
@@ -35,7 +36,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -57,7 +61,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -160,12 +170,22 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {
     "protocol": "1",
-    "message_id": "msg_app_devwatch_0006",
+    "message_id": "msg_app_devwatch_0007",
     "kind": "device.watch",
     "primitive_id": "prm_bridge_0001",
     "payload": {

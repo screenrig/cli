@@ -1,10 +1,13 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-network-offline",
   "kind": "device.watch",
   "requires": [
     "device.watch"
+  ],
+  "requiresSources": [
+    "network"
   ],
   "purpose": "The state posted at the watch is the connectivity the device has then: online false when the device has no validated internet connectivity.",
   "host": {
@@ -34,7 +37,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +62,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -86,7 +98,15 @@
         "peripherals": [],
         "subscriptions": []
       },
-      "printers": []
+      "printers": [],
+      "ir": {
+        "emitter": false,
+        "receiver": false
+      },
+      "udp": {
+        "open": [],
+        "busy": []
+      }
     }
   },
   "in": {

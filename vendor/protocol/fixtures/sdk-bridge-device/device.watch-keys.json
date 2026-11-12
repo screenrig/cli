@@ -1,10 +1,13 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-keys",
   "kind": "device.watch",
   "requires": [
     "device.watch"
+  ],
+  "requiresSources": [
+    "keys"
   ],
   "purpose": "A frame that watches keys receives device.event {type: key, key} for every key-down of a hardware volume key, auto-repeat included, and the Player consumes the key press, key-ups included, instead of changing the device volume.",
   "host": {
@@ -34,7 +37,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +62,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -86,7 +98,15 @@
         "peripherals": [],
         "subscriptions": []
       },
-      "printers": []
+      "printers": [],
+      "ir": {
+        "emitter": false,
+        "receiver": false
+      },
+      "udp": {
+        "open": [],
+        "busy": []
+      }
     }
   },
   "in": {

@@ -1,10 +1,13 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch-light",
   "kind": "device.watch",
   "requires": [
     "device.watch"
+  ],
+  "requiresSources": [
+    "light"
   ],
   "purpose": "A frame that watches light receives device.event {type: light, lux} for the ambient light in lux. The first reading after the watch posts. A later reading posts only when it differs from the last posted lux by at least 10% of it (the 5% and 9% readings post nothing, the 11% reading posts) or crosses 1 lux (0.95 after 1.05 posts although it is under 10%; 0.97 after 0.95 posts nothing), and never less than 1000 ms (atMs, on the host's monotonic clock) after the last posted event: the large change at 1900 ms is dropped, not deferred. A reading that posts nothing does not move the last posted value or time. 0 lux is a reading.",
   "host": {
@@ -34,7 +37,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +62,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -86,7 +98,15 @@
         "peripherals": [],
         "subscriptions": []
       },
-      "printers": []
+      "printers": [],
+      "ir": {
+        "emitter": false,
+        "receiver": false
+      },
+      "udp": {
+        "open": [],
+        "busy": []
+      }
     }
   },
   "in": {

@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.print-chunk-too-large",
   "kind": "device.print",
   "requires": [
     "device.print"
   ],
+  "requiresSources": [],
   "purpose": "A chunk of more than 32768 bytes is refused with payload_too_large (413).",
   "host": {
     "applicationId": "app_bridge",
@@ -34,7 +35,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +60,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -159,7 +169,17 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {

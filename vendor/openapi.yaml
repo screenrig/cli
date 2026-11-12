@@ -26,7 +26,7 @@ info:
 
     Successful responses from routes that consume a disclosed fixed-window policy may include the optional RateLimit-Policy and RateLimit structured field list members when the request passes admission. Exact replays and deployments without shared admission can answer without them. Fixed-window rejections include them according to draft-ietf-httpapi-ratelimit-headers-11, an Internet-Draft rather than an RFC. Retry-After remains authoritative on 429. Fleet-global quotas, internal partition keys, concurrency capacity, and byte-budget capacity are not disclosed. Every operation with public fixed-window controls lists those controls in x-rate-limit-policies and names its optional admitted response headers in x-rate-limit-admitted-response-headers.
 
-    Runtime mutation device budgets use fresh active paired-screen authority. Active paired devices behind one address have independent device budgets, without the anonymous ten-device aggregate address ceiling. Signed session parsing alone grants no exemption: failed authorization, invalid origins and malformed payloads remain address protected. Anonymous sessions and archived evidence retain their aggregate address ceilings. Nonwaiting runtime concurrency refusal returns 429 rate_limited with Retry-After 1, a service RateLimit entry and limit_kind runtime_concurrency.
+    Runtime mutation device budgets use fresh active paired-screen authority. Active paired devices behind one address have independent device budgets, without an aggregate address ceiling. Signed session parsing alone grants no exemption: failed authorization, invalid origins and malformed payloads remain address protected. Archived evidence retains its aggregate address ceiling. Nonwaiting runtime concurrency refusal returns 429 rate_limited with Retry-After 1, a service RateLimit entry and limit_kind runtime_concurrency.
 x-api-lifecycle:
   documentVersionMeaning: Contract-document version; not a URL or product API major.
   urlMajorFamilies: [/api, /screen, /stream, /media, /website, /agentid]
@@ -3375,7 +3375,7 @@ paths:
       x-screenrig-access: read
       operationId: previewScheduleImport
       description: >-
-        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen holds (32), or more campaigns than its organization holds across its projects (100; each shared level is one). Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen holds (32), or more campaigns than its organization holds across its projects (100; each shared level is one). Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3786,7 +3786,7 @@ paths:
       x-screenrig-access: review
       operationId: updateScreen
       description: >-
-        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level, toast_level, display or kiosk. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. display sets or clears the display's idle-dark and brightness settings: display.idle {after_s, wake} darkens the glass after after_s seconds (30 to 86400) without a touch or key or, when wake lists presence, anybody in front of the screen, and a wake event (touch, presence, or both, each once) lights it at once; display.brightness {mode} is auto (the device's light sensor sets the brightness) or fixed (the default, the operator's brightness). A member you send replaces it, null clears it, a member you leave out stays, and a null display clears both. kiosk {lock} true pins the Player to the screen (Android screen pinning) and false or null releases it. The display schedule and override keep their own routes; a display member naming schedule or override is invalid_request. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). Changing any of them remints the manifest revision of a screen that shows a playlist and changes the manifest ETag of every screen; the manifest carries display.idle and display.brightness in the root display member and the lock as the root member kiosk, and screen.manifest_changed is appended; the screen reads them back as Screen.display.idle, Screen.display.brightness and Screen.kiosk. The backend stores what you send whatever the Player: a Player applies a setting only when its host capabilities declare display_power.idle, brightness.auto or kiosk_lock, and older Players ignore them. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields, location, display and kiosk included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone, wall and display are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
+        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level, toast_level, display or kiosk. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. display sets or clears the display's settings: display.idle {after_s, wake} darkens the glass after after_s seconds (30 to 86400) without a touch or key or, when wake lists presence, anybody in front of the screen, and a wake event (touch, presence, or both, each once) lights it at once; display.brightness {mode} is auto (the device's light sensor sets the brightness) or fixed (the default, the operator's brightness); display.output {mode} is auto (the display's own preferred mode) or a video mode such as 3840x2160x60p (WIDTHxHEIGHTxFPS with an optional p or i), which the Player sets on its output; display.cec {take_input} true has the Player assert HDMI-CEC active source at start and whenever display power turns on, so the TV switches to its input. A member you send replaces it, null clears it, a member you leave out stays, and a null display clears all four. A display.output other than auto needs a Player that declared the display_output.mode host capability, else 409 display_output_unsupported, and when the Player has reported the modes it can set (observation.display_output.modes) a mode outside that list is invalid_request naming display.output.mode; display.cec with take_input true needs display_power.cec_active_source, else 409 display_cec_unsupported. Clearing either always works. kiosk {lock} true pins the Player to the screen (Android screen pinning) and false or null releases it. The display schedule and override keep their own routes; a display member naming schedule or override is invalid_request. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). Changing any of them remints the manifest revision of a screen that shows a playlist and changes the manifest ETag of every screen; the manifest carries display.idle, display.brightness, display.output and display.cec in the root display member and the lock as the root member kiosk, and screen.manifest_changed is appended; the screen reads them back as Screen.display.idle, Screen.display.brightness, Screen.display.output, Screen.display.cec and Screen.kiosk. The backend stores idle, brightness and the lock whatever the Player: a Player applies a setting only when its host capabilities declare display_power.idle, brightness.auto, kiosk_lock, display_output.mode or display_power.cec_active_source, and older Players ignore them. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields, location, display and kiosk included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone, wall and display are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
       security:
         - projectBearer: []
       parameters:
@@ -3817,7 +3817,11 @@ paths:
         '403':
           $ref: '#/components/responses/ScreenScopePlays'
         '409':
-          $ref: '#/components/responses/ProtectedTarget'
+          description: "protected_target when a tags, fields, location, timezone, wall or display change reaches a screen in a protected screen folder; wall_unsupported, display_output_unsupported or display_cec_unsupported when the screen's Player did not declare display.wall, display_output.mode or display_power.cec_active_source; playlist_format_mismatch and the other conflicts of an assignment."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     delete:
@@ -4035,7 +4039,7 @@ paths:
     patch:
       operationId: patchScreenDeviceSettings
       description: >-
-        A signed-in person sets or clears a screen's idle-dark and brightness settings and its kiosk lock with updateScreen's display and kiosk members: display.idle {after_s 30 to 86400, wake touch, presence or both}, display.brightness {mode auto or fixed} and kiosk.lock. A member you send replaces it, null clears it, and a member left out stays as it is; a null display clears both. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the Player reads the settings from the manifest members display (idle, brightness) and kiosk. The body names at least one of display and kiosk and no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). On a protected screen a display change is protected_target (409). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+        A signed-in person sets or clears a screen's display settings and its kiosk lock with updateScreen's display and kiosk members: display.idle {after_s 30 to 86400, wake touch, presence or both}, display.brightness {mode auto or fixed}, display.output {mode auto or a video mode such as 3840x2160x60p}, display.cec {take_input} and kiosk.lock. A member you send replaces it, null clears it, and a member left out stays as it is; a null display clears all four. display.output other than auto and display.cec with take_input true need a Player that declared display_output.mode or display_power.cec_active_source, else 409 display_output_unsupported or display_cec_unsupported. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the Player reads the settings from the manifest members display (idle, brightness, output, cec) and kiosk. The body names at least one of display and kiosk and no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). On a protected screen a display change is protected_target (409). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
       security:
         - dashboardSession: []
       parameters:
@@ -4090,6 +4094,49 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ScreenNamePatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/OutsideScreenScope'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/timezone:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenTimezone
+      description: >-
+        A signed-in person sets or clears the screen's time zone override with updateScreen's timezone. A string must be an IANA time zone identifier such as America/Los_Angeles, else invalid_request at timezone (so is a missing timezone or one of another type); null clears the override, so the screen follows the zone its Player reports, else UTC. The answer's timezone, effective_timezone and timezone_source show the result. The screen revision moves by one; a change that moves effective_timezone remints the manifest of a screen that shows a playlist (screen.manifest_changed, addressed to the screen) and re-reads the screen's playlist schedule, campaigns, display and reboot schedules in the new zone, else the event is screen.updated. Events carry the person as their actor. A screen in a protected screen folder is protected_target (409). The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenTimezonePatch'
       responses:
         '200':
           description: The screen as stored now; ETag carries its revision.
@@ -4563,7 +4610,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have a timezone and an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, page visibility needs a timezone, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-org 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level. A new entry with paused true (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Entries already stored may stay paused, and pausing a stored entry is open on every plan.'
+      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-org 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level. A new entry with paused true (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Entries already stored may stay paused, and pausing a stored entry is open on every plan.'
       security:
         - projectBearer: []
       parameters:
@@ -5919,7 +5966,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Replaces the display schedule: enabled and 1 to 16 screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start crosses midnight owned by the start day, whole day without edges) when the display is ON; outside every window the Player puts the display to standby. Evaluated on the device in the screen timezone (required, invalid_request otherwise), so it keeps working offline: the manifest''s display member carries it. enabled false keeps the windows and leaves the display on. Re-mints the manifest, appends screen.display_changed, bumps the revision (If-Match guards it). The screen must be pairing_pending or active. A screen with no manifest yet (never minted, or no playlist) stores the schedule and its first manifest carries it; a screen without a playlist applies it once a playlist is assigned. An until-less override is re-bounded to the new schedule''s next boundary. A screen in a protected screen folder is protected_target (409).'
+      description: 'Replaces the display schedule: enabled and 1 to 16 screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start crosses midnight owned by the start day, whole day without edges) when the display is ON; outside every window the Player puts the display to standby. Evaluated on the device in the screen''s effective_timezone, so it keeps working offline: the manifest''s display member carries it. enabled false keeps the windows and leaves the display on. Re-mints the manifest, appends screen.display_changed, bumps the revision (If-Match guards it). The screen must be pairing_pending or active. A screen with no manifest yet (never minted, or no playlist) stores the schedule and its first manifest carries it; a screen without a playlist applies it once a playlist is assigned. An until-less override is re-bounded to the new schedule''s next boundary. A screen in a protected screen folder is protected_target (409).'
       security:
         - projectBearer: []
       parameters:
@@ -6067,7 +6114,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Replaces the reboot schedule: enabled and 1 to 16 screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start crosses midnight owned by the start day, whole day without edges), each 5 minutes to 24 hours long. At the start of each window in the screen timezone (required, invalid_request otherwise) the backend issues the same reboot POST /api/screens/{id}/reboot does, with source schedule in Screen.commands, screen.reboot_requested and the player.reboot details. A start inside a spring-forward gap fires at the first valid minute of the window; a window with no valid minute that day, because it lies wholly inside the gap, is skipped with screen.reboot_skipped reason window_missed (next_reboot_at shows the minute the gap ends). A fall-back repeat fires once per window per local date. A screen that is online is sent the reboot at once; an offline one keeps it queued only until its window ends (expires_at), so a late reboot never lands outside it. An occurrence never replaces a reboot a person asked for that still waits for the screen: it is skipped with screen.reboot_skipped reason reboot_pending. A timezone change cancels the scheduled reboots still waiting and moves next_reboot_at to the new zone. A reboot, scheduled or asked for, raises no screen_offline, display_disconnected or crashing alert for ten minutes after it is sent, and a notice for one of them that falls due in that time waits until the period ends plus its hold (a crashing notice is skipped as planned_reboot). enabled false keeps the windows and reboots nothing. Time windows that leave no gap, so that no start follows, are invalid_request. The screen''s host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is stored; a screen that loses it later skips each window with screen.reboot_skipped and keeps its schedule. Appends screen.reboot_schedule_changed, bumps the revision (If-Match guards it), and never re-mints the manifest. The screen must be active.'
+      description: 'Replaces the reboot schedule: enabled and 1 to 16 screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start crosses midnight owned by the start day, whole day without edges), each 5 minutes to 24 hours long. At the start of each window in the screen''s effective_timezone the backend issues the same reboot POST /api/screens/{id}/reboot does, with source schedule in Screen.commands, screen.reboot_requested and the player.reboot details. A start inside a spring-forward gap fires at the first valid minute of the window; a window with no valid minute that day, because it lies wholly inside the gap, is skipped with screen.reboot_skipped reason window_missed (next_reboot_at shows the minute the gap ends). A fall-back repeat fires once per window per local date. A screen that is online is sent the reboot at once; an offline one keeps it queued only until its window ends (expires_at), so a late reboot never lands outside it. An occurrence never replaces a reboot a person asked for that still waits for the screen: it is skipped with screen.reboot_skipped reason reboot_pending. A timezone change cancels the scheduled reboots still waiting and moves next_reboot_at to the new zone. A reboot, scheduled or asked for, raises no screen_offline, display_disconnected or crashing alert for ten minutes after it is sent, and a notice for one of them that falls due in that time waits until the period ends plus its hold (a crashing notice is skipped as planned_reboot). enabled false keeps the windows and reboots nothing. Time windows that leave no gap, so that no start follows, are invalid_request. The screen''s host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is stored; a screen that loses it later skips each window with screen.reboot_skipped and keeps its schedule. Appends screen.reboot_schedule_changed, bumps the revision (If-Match guards it), and never re-mints the manifest. The screen must be active.'
       security:
         - projectBearer: []
       parameters:
@@ -6322,7 +6369,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createCampaign
-      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; one with from, until or windows needs the screen''s timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. An organization has at most 100 campaigns across its projects (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders and paused true on a new campaign (a draft) is schedule change control, both part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402).'
+      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; from, until and windows are read in each screen''s effective_timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. An organization has at most 100 campaigns across its projects (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders and paused true on a new campaign (a draft) is schedule change control, both part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -16700,41 +16747,6 @@ paths:
           $ref: '#/components/responses/RuntimeProblem'
         default:
           $ref: '#/components/responses/RuntimeProblem'
-  /screen/sessions:
-    servers:
-      - url: https://play.screenrig.ai
-        description: Trusted player/runtime origin
-    post:
-      operationId: createAnonymousRuntimeSession
-      x-rate-limit-policies:
-        - name: runtime-session
-          quota: 60
-          windowSeconds: 60
-      x-rate-limit-admitted-response-headers:
-        - RateLimit-Policy
-        - RateLimit
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RuntimeSessionRequest'
-      responses:
-        '201':
-          description: Read-only runtime session cookie
-          headers:
-            RateLimit-Policy:
-              $ref: '#/components/headers/RateLimitPolicy'
-            RateLimit:
-              $ref: '#/components/headers/RateLimit'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RuntimeSession'
-        '404':
-          $ref: '#/components/responses/RuntimeProblem'
-        default:
-          $ref: '#/components/responses/RuntimeProblem'
   /screen/device-sessions:
     servers:
       - url: https://play.screenrig.ai
@@ -17447,7 +17459,7 @@ paths:
         description: Trusted player/runtime origin
     get:
       operationId: getRuntimeManifest
-      description: The one runtime manifest route, for every session. schemaVersion is 3. Resolved player manifest; projection is fail-safe, and invalid pages and primitives are omitted and listed in diagnostics. Adslot pages are included only for a paired session granted adslot-v1; every other session, including an anonymous public-screen viewer, receives house content with no adslot page. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment (docs/player-compatibility.md §1.4). A suspended screen is served pages [] with no diagnostics, the suspension member and a manifest revision of its own, assigned a playlist or not (§6.9). An archived screen returns problem screen_archived and must not refresh last-known-good.
+      description: The one runtime manifest route, for every session. schemaVersion is 3. Resolved player manifest; projection is fail-safe, and invalid pages and primitives are omitted and listed in diagnostics. Adslot pages are included only for a session granted adslot-v1; every other session receives house content with no adslot page. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment (docs/player-compatibility.md §1.4). A suspended screen is served pages [] with no diagnostics, the suspension member and a manifest revision of its own, assigned a playlist or not (§6.9). An archived screen returns problem screen_archived and must not refresh last-known-good.
       security:
         - runtimeCookie: []
         - nativeSessionAuthorization: []
@@ -17511,7 +17523,7 @@ paths:
         - name: runtime-report-ip
           quota: 1200
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -17594,7 +17606,7 @@ paths:
         - name: runtime-adslot-resolve-ip
           quota: 600
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -17654,7 +17666,7 @@ paths:
         - name: runtime-adslot-events-ip
           quota: 1200
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -17702,11 +17714,11 @@ paths:
         - name: runtime-observation-ip
           quota: 120
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
+      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17758,7 +17770,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports device health for the paired session''s screen. Send one on session start and every fifteen minutes, and one at once when the display connection, display power or volume changes. Every member is optional and the body is read tolerantly (docs/player-compatibility.md §1.1): unknown members are ignored, a value out of range is dropped, and an unknown display.power or network.kind reads as unknown; only a member of the wrong JSON type is 400 (a number beyond float64 range is out of range: that member is dropped). The stored value is the sanitized ScreenHealth plus server reported_at, replacing the previous report. At most one report per screen per minute (runtime-health): a 429 means drop this report and send the next one on schedule, never retry sooner than Retry-After (at least 1 second). A 400 or a server error does not spend the minute; all sessions of one screen share it. Requires a paired session holding health.write (a paired session minted before health.write existed is admitted by runtime.report); unpaired and anonymous sessions are forbidden and an archived screen answers 409 screen_archived. A report from a session older than the screen''s current content access generation is refused 401. Archive and screen recovery clear Screen.health. A backend without this route answers 404: keep playing and stop reporting health for that session. Transitions append the project-only screen.health_changed (never on GET /screen/events). Health is never authorization.'
+      description: 'Reports device health for the paired session''s screen. Send one on session start and every fifteen minutes, and one at once when the display connection, display power or volume changes. Every member is optional and the body is read tolerantly (docs/player-compatibility.md §1.1): unknown members are ignored, a value out of range is dropped, and an unknown display.power or network.kind reads as unknown; only a member of the wrong JSON type is 400 (a number beyond float64 range is out of range: that member is dropped). The stored value is the sanitized ScreenHealth plus server reported_at, replacing the previous report. At most one report per screen per minute (runtime-health): a 429 means drop this report and send the next one on schedule, never retry sooner than Retry-After (at least 1 second). A 400 or a server error does not spend the minute; all sessions of one screen share it. Requires a paired session holding health.write (a paired session minted before health.write existed is admitted by runtime.report); an archived screen answers 409 screen_archived. A report from a session older than the screen''s current content access generation is refused 401. Archive and screen recovery clear Screen.health. A backend without this route answers 404: keep playing and stop reporting health for that session. Transitions append the project-only screen.health_changed (never on GET /screen/events). Health is never authorization.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17806,11 +17818,11 @@ paths:
         - name: runtime-storage-ip
           quota: 120
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Reports native player storage, the player's storage plan, and transferred-byte accounting. Path does not name screen_id; the paired runtime session binds it. Unpaired and anonymous sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the sanitized project ScreenStorage plus server received_at, not the raw body. manifest_revision must be the screen's desired or active revision, or the response is 409 resource_conflict and nothing is stored. Excluded page ids must exist in that revision. An identical fit class does not emit screen.storage_shortfall or screen.storage_shortfall_cleared. Those events are project-only and are not delivered on GET /screen/events. Storage is never authorization or admission. ScreenPatch cannot write it. A report older than 24 hours by received_at is stale to consumers.
+      description: Reports native player storage, the player's storage plan, and transferred-byte accounting. Path does not name screen_id; the paired runtime session binds it. Native cookies are rejected; browser must not adopt header profiles. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the sanitized project ScreenStorage plus server received_at, not the raw body. manifest_revision must be the screen's desired or active revision, or the response is 409 resource_conflict and nothing is stored. Excluded page ids must exist in that revision. An identical fit class does not emit screen.storage_shortfall or screen.storage_shortfall_cleared. Those events are project-only and are not delivered on GET /screen/events. Storage is never authorization or admission. ScreenPatch cannot write it. A report older than 24 hours by received_at is stale to consumers.
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17862,12 +17874,12 @@ paths:
         - name: runtime-status-ip
           quota: 120
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Reports the status chip the paired Player shows on glass: the screenrig.overlay/v1 condition that wins its rank, or null when no chip shows. Path does not name screen_id; the paired runtime session binds it. Body is JSON RuntimeStatusWrite {observed_at, chip}; unknown members are ignored (docs/player-compatibility.md §1.1). chip must be the id of a condition in the backend's catalogue (packages/overlay/overlay.json, the file Players vendor); the upgrade notice and the start messages are not chips. A missing chip, a value of another type or an id the catalogue does not list is 400 invalid_request with errors[0].field chip, and nothing is stored. The stored value is the project ScreenStatus: level and icon are the catalogue's for chip, never the Player's, and received_at is the server receipt time. Last write wins and replaces the whole status. A report that changes none of chip, level and icon is a no-op: it keeps the stored observed_at and received_at and appends nothing. A change appends the project-only screen.status_changed with details {chip, level, icon}, never delivered on GET /screen/events. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Status is absent from GET /api/screens until the first accepted report and is cleared on identity reset, unpair, and archive. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-status): a 429 means retry no sooner than Retry-After. A backend without this route answers 404: keep playing and stop reporting status for that session. Status is never authorization or admission. The Player rules are docs/player-compatibility.md §9.5.
+        Reports the status chip the paired Player shows on glass: the screenrig.overlay/v1 condition that wins its rank, or null when no chip shows. Path does not name screen_id; the paired runtime session binds it. Body is JSON RuntimeStatusWrite {observed_at, chip}; unknown members are ignored (docs/player-compatibility.md §1.1). chip must be the id of a condition in the backend's catalogue (packages/overlay/overlay.json, the file Players vendor); the upgrade notice and the start messages are not chips. A missing chip, a value of another type or an id the catalogue does not list is 400 invalid_request with errors[0].field chip, and nothing is stored. The stored value is the project ScreenStatus: level and icon are the catalogue's for chip, never the Player's, and received_at is the server receipt time. Last write wins and replaces the whole status. A report that changes none of chip, level and icon is a no-op: it keeps the stored observed_at and received_at and appends nothing. A change appends the project-only screen.status_changed with details {chip, level, icon}, never delivered on GET /screen/events. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Status is absent from GET /api/screens until the first accepted report and is cleared on identity reset, unpair, and archive. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-status): a 429 means retry no sooner than Retry-After. A backend without this route answers 404: keep playing and stop reporting status for that session. Status is never authorization or admission. The Player rules are docs/player-compatibility.md §9.5.
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17915,11 +17927,11 @@ paths:
         - name: runtime-screen-label-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Renames the screen bound to the paired runtime session. It is the same rename as PATCH /api/screens/{id} name: the server trims screen_label and requires 1 to 120 characters without control characters, otherwise invalid_request. The rename records the same screen events, and on an assigned screen it changes the manifest screen_label and emits screen.manifest_changed to the Player. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. Anonymous and unpaired sessions are unauthorized. An archived screen is screen_archived. Prepaid remaining credit is not a gate. A Player that receives 404 treats the route as unsupported and keeps the name locally (docs/player-compatibility.md §2.5).'
+      description: 'Renames the screen bound to the paired runtime session. It is the same rename as PATCH /api/screens/{id} name: the server trims screen_label and requires 1 to 120 characters without control characters, otherwise invalid_request. The rename records the same screen events, and on an assigned screen it changes the manifest screen_label and emits screen.manifest_changed to the Player. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. An archived screen is screen_archived. Prepaid remaining credit is not a gate. A Player that receives 404 treats the route as unsupported and keeps the name locally (docs/player-compatibility.md §2.5).'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17971,11 +17983,11 @@ paths:
         - name: runtime-command-result-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'A paired Player reports how a command it was sent ended (docs/player-compatibility.md §6.5.1): done or failed, with a static cause token and an optional short detail. The command becomes done or failed in Screen.commands with done_at, cause and detail, and the project-only screen.command_result is appended. Only a sent command of the session''s screen takes a result: an id the screen does not list, or one not sent, is 404 not_found and the Player drops the report. An exact repeat of the recorded result is 202 and changes nothing; a different result for a finished command is 409 resource_conflict. A failed result requires cause. The path and body do not name the screen; the paired runtime session binds it. Auth is the runtime cookie or ScreenRig-Session. Anonymous and unpaired sessions are unauthorized; an archived screen is screen_archived. Prepaid remaining credit is not a gate.'
+      description: 'A paired Player reports how a command it was sent ended (docs/player-compatibility.md §6.5.1): done or failed, with a static cause token and an optional short detail. The command becomes done or failed in Screen.commands with done_at, cause and detail, and the project-only screen.command_result is appended. Only a sent command of the session''s screen takes a result: an id the screen does not list, or one not sent, is 404 not_found and the Player drops the report. An exact repeat of the recorded result is 202 and changes nothing; a different result for a finished command is 409 resource_conflict. A failed result requires cause. The path and body do not name the screen; the paired runtime session binds it. Auth is the runtime cookie or ScreenRig-Session. An archived screen is screen_archived. Prepaid remaining credit is not a gate.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -18032,7 +18044,7 @@ paths:
         - name: runtime-live-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -18097,7 +18109,7 @@ paths:
         - name: runtime-live-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -18162,7 +18174,7 @@ paths:
         - name: runtime-live-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -18227,7 +18239,7 @@ paths:
         - name: runtime-live-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -18288,11 +18300,11 @@ paths:
         - name: runtime-screen-playlists-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Lists the playlists the paired Player''s on-device settings menu offers for the screen: the live playlists of the screen''s project that have an approved version, alphabetical by name without regard to case, then by id. At most 500 are returned; more is true when the project has further playlists. The paired runtime session binds the project; the path names none. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. Anonymous and unpaired sessions are unauthorized. An archived screen is screen_archived. Cache-Control is private, no-store. A Player that receives 404 treats the route as unsupported and reports it like any other failure to load the list (docs/player-compatibility.md §2.6).'
+      description: 'Lists the playlists the paired Player''s on-device settings menu offers for the screen: the live playlists of the screen''s project that have an approved version, alphabetical by name without regard to case, then by id. At most 500 are returned; more is true when the project has further playlists. The paired runtime session binds the project; the path names none. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. An archived screen is screen_archived. Cache-Control is private, no-store. A Player that receives 404 treats the route as unsupported and reports it like any other failure to load the list (docs/player-compatibility.md §2.6).'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -18336,11 +18348,11 @@ paths:
         - name: runtime-screen-playlist-ip
           quota: 300
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Assigns a playlist to the screen bound to the paired runtime session. It is the same assignment as PATCH /api/screens/{id} playlist_id, made by the person at the device: no review is opened. The playlist must belong to the screen''s project and have an approved version (playlist_not_approved otherwise); a playlist that does not exist in the project is invalid_request. The assignment records the same screen events and emits screen.manifest_changed to the Player. It sets the screen''s assigned playlist; an active takeover or a matching playlist schedule entry still decides what plays. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. Anonymous and unpaired sessions are unauthorized. An archived screen is screen_archived. A Player that receives 404 treats the route as unsupported and reports it like any other failure to change the playlist (docs/player-compatibility.md §2.6).'
+      description: 'Assigns a playlist to the screen bound to the paired runtime session. It is the same assignment as PATCH /api/screens/{id} playlist_id, made by the person at the device: no review is opened. The playlist must belong to the screen''s project and have an approved version (playlist_not_approved otherwise); a playlist that does not exist in the project is invalid_request. The assignment records the same screen events and emits screen.manifest_changed to the Player. It sets the screen''s assigned playlist; an active takeover or a matching playlist schedule entry still decides what plays. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. An archived screen is screen_archived. A Player that receives 404 treats the route as unsupported and reports it like any other failure to change the playlist (docs/player-compatibility.md §2.6).'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -18392,7 +18404,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Cookie-only unpair. Archives a cookie-paired screen that has no player public-key enrollment, with archive_reason device_unpair. The device credential stays bound: a browser that still holds it mints an archived session (dark glass), and unarchive resumes it with no re-pairing (docs/player-compatibility.md §5.1). A screen that is already archived, or already gone, is success. Identity-enrolled screens return screen_archive_required; those players reset only via POST /screen/native/identity/reset. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key. Browser 204 expires the runtime, device, and pairing host cookies. Native identity-bound calls never 204. Anonymous or unpaired sessions are forbidden. Prepaid remaining credit is not a gate.'
+      description: 'Cookie-only unpair. Archives a cookie-paired screen that has no player public-key enrollment, with archive_reason device_unpair. The device credential stays bound: a browser that still holds it mints an archived session (dark glass), and unarchive resumes it with no re-pairing (docs/player-compatibility.md §5.1). A screen that is already archived, or already gone, is success. Identity-enrolled screens return screen_archive_required; those players reset only via POST /screen/native/identity/reset. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key. Browser 204 expires the runtime, device, and pairing host cookies. Native identity-bound calls never 204. Prepaid remaining credit is not a gate.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -18434,7 +18446,7 @@ paths:
         - name: release-launch-ip
           quota: 1200
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -18895,7 +18907,7 @@ paths:
       - $ref: '#/components/parameters/SecFetchDest'
     get:
       operationId: getNativeWebappPackage
-      description: Retrieves the normalized immutable package for one uploaded application release so a paired native player can retain its authorized last-known-good release across process restart and temporary network loss. The paired-device cookie, exact screen grant, manifest revision, content-access generation, release membership, and ready package metadata are checked on every request. Project tokens, anonymous runtime cookies, release cookies, external iframe primitives, and direct object-storage access never authorize package bytes.
+      description: Retrieves the normalized immutable package for one uploaded application release so a paired native player can retain its authorized last-known-good release across process restart and temporary network loss. The paired-device cookie, exact screen grant, manifest revision, content-access generation, release membership, and ready package metadata are checked on every request. Project tokens, release cookies, external iframe primitives, and direct object-storage access never authorize package bytes.
       security:
         - pairedDeviceCookie: []
         - nativeSessionAuthorization: []
@@ -19261,7 +19273,7 @@ paths:
         - name: runtime-kv-write-ip
           quota: 1200
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -19300,7 +19312,7 @@ paths:
         - name: runtime-kv-write-ip
           quota: 1200
           windowSeconds: 60
-          condition: anonymous_or_archived
+          condition: archived
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -24013,7 +24025,7 @@ paths:
       x-screenrig-access: read
       operationId: previewScheduleImportInProject
       description: >-
-        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a time zone or a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen holds (32), or more campaigns than its organization holds across its projects (100; each shared level is one). Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
+        Reads a sheet of schedule rows against the project and answers what committing it would do, writing nothing. Each row names a target (a screen by id, by the value of a screen field such as a room code, or by name; folder:NAME; tag:NAME; several separated by ; or |), content (a media file name, or playlist:NAME or a playlist id), a start and an end (a date alone as the end closes that day), and optionally timezone, days (Mon-Fri), a daily window (daily_start, daily_end), priority 0 to 100, a name and display numbers. Times are read on each screen's own clock; a timezone column converts them from another zone. Every row is checked and reports its errors by column: unknown or ambiguous screen, folder or tag, missing or ambiguous file, a file that cannot fill a screen, invalid or reversed times, an end in the past, no timing at all, a screen without a default playlist, two rows holding at once on a screen at the same priority, and more levels than a screen holds (32), or more campaigns than its organization holds across its projects (100; each shared level is one). Rows that agree on content, times, priority and name become one level: one screen is an entry of that screen's own schedule; several screens, a folder or a tag are one shared level (a campaign), which outranks a screen's own levels. The answer lists the levels with what a commit does to each (create, update, unchanged), the levels an earlier run of the same import made that the sheet no longer has (removals), the stacks of the screens as they would be (calendar), and a fingerprint to send to the commit. The sheet is JSON rows, CSV or XLSX, at most 5,000 rows. Not available to a caller limited to screens (outside_screen_scope). Schedule import is part of the Enterprise plan; a project whose plan lacks it is refused with feature_not_in_plan (402). The template is open on every plan.
       security:
         - projectBearer: []
       parameters:
@@ -33693,7 +33705,7 @@ components:
         arrangement: {type: string, enum: [row, column, grid]}
         columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
-    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}, display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "The display's idle-dark and brightness settings (display.idle, display.brightness). A member you send replaces it, null clears it, a member you leave out stays; a null display clears both. Changing either remints the manifest revision of a screen that shows a playlist, and the manifest carries them in the root display member. On a protected screen it is protected_target."}, kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "The kiosk lock (kiosk.lock). lock true pins the Player to the screen; false or null releases it. Changing it remints the manifest revision of a screen that shows a playlist, and the manifest carries it as the root member kiosk."}}}
+    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {anyOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "The screen's time zone override, an IANA identifier such as America/Los_Angeles; null clears it, so the screen follows its device's zone again. Every screen has an effective_timezone: this override, else the zone the Player reports from its operating system, else UTC. Every civil rule of the screen (page visibility and ad slots, playlist schedules, campaigns, display and reboot schedules, the manifest timezone and {screen.timezone}) is read in it. A change that moves the effective zone remints the manifest revision."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}, display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "The display's settings (display.idle, display.brightness, display.output, display.cec). A member you send replaces it, null clears it, a member you leave out stays; a null display clears all four. display.output other than auto needs a Player that declared display_output.mode and display.cec with take_input true one that declared display_power.cec_active_source, else 409 display_output_unsupported or display_cec_unsupported. Changing any remints the manifest revision of a screen that shows a playlist, and the manifest carries them in the root display member. On a protected screen it is protected_target."}, kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "The kiosk lock (kiosk.lock). lock true pins the Player to the screen; false or null releases it. Changing it remints the manifest revision of a screen that shows a playlist, and the manifest carries it as the root member kiosk."}}}
     ScreenDisplayIdle:
       type: object
       additionalProperties: false
@@ -33711,6 +33723,22 @@ components:
         display.brightness: auto maps the device's ambient light to the window brightness; fixed (the default) keeps the operator's brightness. Applied by a Player that declares the host capability brightness.auto, which it declares only when the device has a light sensor.
       properties:
         mode: {type: string, enum: [auto, fixed]}
+    ScreenDisplayOutput:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: >-
+        display.output: the video output mode the Player sets on its output. mode is auto (the display's own preferred mode) or WIDTHxHEIGHTxFPS with an optional p or i, as BrightSign names a mode, for example 3840x2160x60p or 1920x1080x59.94i. Applied by a Player that declares the host capability display_output.mode, which reports the modes it can set in observation.display_output.modes; a mode outside that list is refused. A Player may reboot to apply a mode, applies it once, and reports the mode it reached in observation.display_output.mode.
+      properties:
+        mode: {type: string, maxLength: 24, pattern: "^(auto|[1-9][0-9]{1,4}x[1-9][0-9]{1,4}x[1-9][0-9]{0,2}(\\.[0-9]{1,3})?[pi]?)$", examples: [auto, 3840x2160x60p, 1920x1080x59.94i]}
+    ScreenDisplayCEC:
+      type: object
+      additionalProperties: false
+      required: [take_input]
+      description: >-
+        display.cec: take_input true has the Player assert HDMI-CEC active source (One Touch Play) at start and whenever display power turns on, so the TV switches to the Player's input; false leaves the input alone (the default). Applied by a Player that declares the host capability display_power.cec_active_source.
+      properties:
+        take_input: {type: boolean}
     ScreenDisplayPatch:
       type: object
       additionalProperties: false
@@ -33718,6 +33746,8 @@ components:
       properties:
         idle: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayIdle"}, {type: "null"}], description: "Sets display.idle; null turns idle-dark off (the default)."}
         brightness: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayBrightness"}, {type: "null"}], description: "Sets display.brightness; null clears it (fixed)."}
+        output: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayOutput"}, {type: "null"}], description: "Sets display.output; null clears it (the Player keeps its own mode)."}
+        cec: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayCEC"}, {type: "null"}], description: "Sets display.cec; null clears it (the Player does not assert active source)."}
     ScreenKioskPatch:
       type: object
       additionalProperties: false
@@ -33798,7 +33828,7 @@ components:
       description: >-
         A change of a screen's idle-dark and brightness settings and kiosk lock (patchScreenDeviceSettings). The body names at least one of the two members and no other.
       properties:
-        display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "display.idle and display.brightness, as updateScreen's display: a member you send replaces it, null clears it, a member you leave out stays; a null display clears both. Changing either remints the manifest revision of a screen that shows a playlist. On a protected screen it is protected_target."}
+        display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "display.idle, display.brightness, display.output and display.cec, as updateScreen's display: a member you send replaces it, null clears it, a member you leave out stays; a null display clears all four. Changing any remints the manifest revision of a screen that shows a playlist. On a protected screen it is protected_target."}
         kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "kiosk.lock, as updateScreen's kiosk: lock true pins the Player to the screen, false or null releases it."}
     ScreenNamePatch:
       type: object
@@ -33808,6 +33838,14 @@ components:
         A screen's new name (patchScreenName). The body has no other member.
       properties:
         name: {type: string, minLength: 1, maxLength: 120, description: "The screen's name, trimmed; 1 to 120 characters after trimming, without control characters."}
+    ScreenTimezonePatch:
+      type: object
+      additionalProperties: false
+      required: [timezone]
+      description: >-
+        A screen's time zone override (patchScreenTimezone). The body has no other member.
+      properties:
+        timezone: {anyOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "An IANA time zone identifier such as America/Los_Angeles, or null to clear the override so the screen follows its device's zone, else UTC."}
     ScreenPlaylistPatch:
       type: object
       additionalProperties: false
@@ -34461,9 +34499,10 @@ components:
         commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first; GET /api/screens/{id}/commands lists every one). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
         suspension: {$ref: "#/components/schemas/ScreenSuspension"}
         stack_status: {$ref: "#/components/schemas/ScreenStackStatus"}
-        timezone: {type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone."}
-        effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
-        timezone_source: {type: string, enum: [screen, device, unknown]}
+        timezone: {type: string, description: "The owner's time zone override (IANA). Absent when unset; the screen then follows its device's zone. Set with ScreenPatch timezone, cleared with timezone null."}
+        effective_timezone: {type: string, description: "The IANA zone every civil rule of the screen is read in: page visibility and ad slots, playlist schedules, campaigns, display and reboot schedules, the manifest timezone and {screen.timezone}. It is timezone when set, else the zone the screen's Player reports from its operating system (host.timezone), else UTC. Read-only."}
+        ad_quiet_slots: {type: array, items: {type: string}, description: "The ad slots nothing can fill on this screen: no seller VAST tag and, on a screen opted in to advertising, no direct campaign that has not ended and no active, pending or paused invited campaign that names the screen and the slot. The screen's manifest leaves their adslot pages out so its Player stops asking; a campaign, tag or opt-in that could fill one brings it back. Absent when none. Read-only."}
+        timezone_source: {type: string, enum: [screen, device, default], description: "Where effective_timezone comes from: screen (the timezone override), device (the Player's reported zone) or default (UTC: no override and no reported zone). Read-only."}
         wall: {$ref: "#/components/schemas/ScreenWall", description: "The video wall the screen's Player lays out. Absent when none. Set by ScreenPatch; changing it remints the manifest revision."}
         folder_id: {type: string, description: "The screen folder holding this screen (GET /api/screen-folders); absent at the project root. Move screens with POST /api/screens/move."}
         tags: {$ref: "#/components/schemas/ScreenTags"}
@@ -34507,7 +34546,7 @@ components:
         online:
           type: boolean
           description: >-
-            True iff at least one paired GET /screen/events stream for this screen is currently connected, including a short reconnect window matching the EventSource retry of 3000ms. A paired session mint and a paired GET /screen/manifest also hold the screen online for that same window, so a restarting player reads online before its stream reconnects. Anonymous and unpaired sessions may hold events.read and do not count. Always present: false until the first paired runtime connect, and false for pairing_pending screens that have never connected. An archived screen whose player stays connected remains online, so archive and unarchive responses report live presence. Derived from live paired traffic, not a player heartbeat or presence.write report. Read-only on the project API; ScreenPatch, pairing bodies, session bodies, and the runtime manifest body cannot write it. Presence transitions are debounced project events, not this flag: screen.offline is appended once the presence lease has been expired for 60 seconds, and screen.online when a paired events stream connects while the last written transition is offline or none. A reconnect inside those 60 seconds writes neither. Both carry details.last_online_at, are project-only (never on the runtime stream), and are exempt from the listen-stream event meter.
+            True iff at least one paired GET /screen/events stream for this screen is currently connected, including a short reconnect window matching the EventSource retry of 3000ms. A paired session mint and a paired GET /screen/manifest also hold the screen online for that same window, so a restarting player reads online before its stream reconnects. Always present: false until the first paired runtime connect, and false for pairing_pending screens that have never connected. An archived screen whose player stays connected remains online, so archive and unarchive responses report live presence. Derived from live paired traffic, not a player heartbeat or presence.write report. Read-only on the project API; ScreenPatch, pairing bodies, session bodies, and the runtime manifest body cannot write it. Presence transitions are debounced project events, not this flag: screen.offline is appended once the presence lease has been expired for 60 seconds, and screen.online when a paired events stream connects while the last written transition is offline or none. A reconnect inside those 60 seconds writes neither. Both carry details.last_online_at, are project-only (never on the runtime stream), and are exempt from the listen-stream event meter.
         last_online_at:
           type: string
           format: date-time
@@ -34552,7 +34591,7 @@ components:
         host_version: {type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form."}
         timezone: {type: string, maxLength: 64, description: "Device IANA timezone hint. Used for effective card clock diagnostics when the screen has no explicit timezone."}
         device: {$ref: "#/components/schemas/HostDevice"}
-        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8), volume (the Player applies a remote volume from the manifest volume member and player.volume, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
+        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8), volume (the Player applies a remote volume from the manifest volume member and player.volume, docs/player-compatibility.md §6.5), display_output.mode (the Player sets display.output.mode on its video output and reports the modes it can set in the observation's display_output.modes, docs/player-compatibility.md §6.5), display_power.cec_active_source (the Player sends HDMI-CEC Image View On and Active Source at start and whenever display power turns on, when display.cec.take_input is true, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
     HostDevice:
       type: object
       additionalProperties: false
@@ -34728,7 +34767,7 @@ components:
       type: object
       additionalProperties: false
       required: [type, entries]
-      description: Replaces each screen's playlist schedule with the same entries (ScreenPlaylistScheduleWrite). Entry ids are assigned once before fan-out. A screen without a timezone or without a default playlist fails alone with invalid_request.
+      description: Replaces each screen's playlist schedule with the same entries (ScreenPlaylistScheduleWrite). Entry ids are assigned once before fan-out. A screen without a default playlist fails alone with invalid_request.
       properties:
         type: {type: string, enum: [set_playlist_schedule]}
         entries: {type: array, minItems: 1, maxItems: 32, items: {$ref: "#/components/schemas/ScreenScheduleEntryWrite"}}
@@ -34767,7 +34806,7 @@ components:
       type: object
       additionalProperties: false
       required: [type, enabled, windows]
-      description: Replaces each screen's display schedule (ScreenDisplayScheduleWrite), normalized once before fan-out. A screen without a timezone fails alone with invalid_request.
+      description: Replaces each screen's display schedule (ScreenDisplayScheduleWrite), normalized once before fan-out.
       properties:
         type: {type: string, enum: [set_display_schedule]}
         enabled: {type: boolean}
@@ -34783,7 +34822,7 @@ components:
       type: object
       additionalProperties: false
       required: [type, enabled, windows]
-      description: Replaces each screen's reboot schedule (ScreenRebootScheduleWrite), normalized once before fan-out. Manage access only. A screen without a timezone fails alone with invalid_request, and one whose Player did not declare reboot with reboot_unsupported.
+      description: Replaces each screen's reboot schedule (ScreenRebootScheduleWrite), normalized once before fan-out. Manage access only. A screen whose Player did not declare reboot fails alone with reboot_unsupported.
       properties:
         type: {type: string, enum: [set_reboot_schedule]}
         enabled: {type: boolean}
@@ -34911,6 +34950,15 @@ components:
       properties:
         observed_at: {type: string, format: date-time, description: Player clock at the observation. Last write wins; an identical surfaces tuple ignores a later timestamp.}
         surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        display_output: {$ref: "#/components/schemas/ScreenObservationDisplayOutput"}
+    ScreenObservationDisplayOutput:
+      type: object
+      additionalProperties: false
+      description: >-
+        The video output of a Player that declares the host capability display_output.mode. mode is the mode in force (auto or a mode such as 3840x2160x60p) and modes the modes it can set now, at most 256, each a mode string; an entry that is not one is dropped. The backend checks a requested display.output.mode against modes (a non-empty list). Absent when the Player does not report it; each observation replaces the whole value.
+      properties:
+        mode: {type: string, maxLength: 24}
+        modes: {type: array, maxItems: 256, items: {type: string, maxLength: 24}}
     ScreenObservationSurface:
       type: object
       additionalProperties: false
@@ -34930,6 +34978,7 @@ components:
       properties:
         observed_at: {type: string, format: date-time}
         surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}}
+        display_output: {$ref: "#/components/schemas/ScreenObservationDisplayOutput"}
     RuntimeObservationWrite:
       type: object
       additionalProperties: true
@@ -34939,6 +34988,13 @@ components:
       properties:
         observed_at: {type: string, format: date-time}
         surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        display_output:
+          type: object
+          additionalProperties: true
+          description: "The video output of a Player that declares display_output.mode (docs/player-compatibility.md §6.5): mode is the mode in force (auto or a mode string) and modes the modes it can set, at most 256; an entry that is not a mode string is dropped, and a display_output with nothing usable is not stored. A different display_output is a new observation. Send it in every observation: each one replaces the stored value."
+          properties:
+            mode: {type: string, maxLength: 24}
+            modes: {type: array, maxItems: 256, items: {type: string, maxLength: 24}}
     RuntimeObservationSurfaceWrite:
       type: object
       additionalProperties: true
@@ -37253,13 +37309,13 @@ components:
       additionalProperties: false
       required: [campaign_id, screen_id, status]
       description: >-
-        One campaign's standing on one screen. On a screen whose Player resolves its own stack (schedule.stack) and receives it, a campaign that holds by time stands where that stack puts it: a strip or main campaign plays in its region and a display lock on its displays; one the stack does not carry is pending or blocked (playlist_unavailable). playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. conditional: it holds by time and plays while what only the Player observes holds too (reason interaction: someone is using the screen; data: its data condition). paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs) and is left out of this screen's stack, or stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition). not_in_audience.
+        One campaign's standing on one screen. On a screen whose Player resolves its own stack (schedule.stack) and receives it, a campaign that holds by time stands where that stack puts it: a strip or main campaign plays in its region and a display lock on its displays; one the stack does not carry is pending or blocked (playlist_unavailable). playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. conditional: it holds by time and plays while what only the Player observes holds too (reason interaction: someone is using the screen; data: its data condition). paused. blocked: it cannot show here (reason no_default_playlist, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen, region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs) and is left out of this screen's stack, or stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition). not_in_audience.
       properties:
         campaign_id: {type: string}
         screen_id: {type: string}
         screen_name: {type: string}
         status: {type: string, enum: [playing, pending, waiting, ended, outranked, conditional, paused, blocked, not_in_audience]}
-        reason: {type: string, enum: [takeover, campaign, interaction, data, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only]}
+        reason: {type: string, enum: [takeover, campaign, interaction, data, no_default_playlist, playlist_unavailable, region_not_laid_out, stack_only]}
         by: {type: string, description: The campaign that outranks this one.}
         next_start: {type: string, format: date-time}
     CampaignScreens:
@@ -37288,8 +37344,8 @@ components:
         What the screen shows at instant and why, from the resolver the boundary sweep runs. The screen's takeover, playlist schedule and the project's campaigns are read as they are now, not as they were then. A campaign whose playlist is missing or unapproved is skipped, as the sweep skips it. On a screen whose Player resolves its own stack (schedule.stack) the verdicts read that stack, and not_judged says so (player_stack).
       properties:
         instant: {type: string, format: date-time, description: "The explained instant, in UTC."}
-        timezone: {type: string, description: "The screen's timezone, when it has one."}
-        local: {type: string, description: "The instant on the screen's clock, civil YYYY-MM-DDTHH:MM; absent without a usable timezone."}
+        timezone: {type: string, description: "The screen's effective_timezone, which local reads the instant in."}
+        local: {type: string, description: "The instant on the screen's clock (its effective_timezone), civil YYYY-MM-DDTHH:MM."}
         effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}], description: "The playlist at instant; until is the next instant it changes."}
         verdicts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScreenVerdict"}, description: "The takeover, then every campaign in precedence order, then every playlist schedule entry in order."}
         timeline: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/ScreenTimelineSegment"}, description: "With to: the spans from instant to to in which the playlist does not change."}
@@ -37306,7 +37362,7 @@ components:
         id: {type: string, description: "The campaign id or the schedule entry id; absent for a takeover."}
         playlist_id: {type: string}
         verdict: {type: string, enum: [won, outranked, not_started, ended, outside_hours, conditional, off]}
-        reason: {type: string, enum: [interaction, data, paused, not_in_audience, no_default_playlist, no_timezone, playlist_unavailable, region_not_laid_out, stack_only], description: "What a conditional candidate waits on (interaction: someone using the screen; data: its data condition), or why an off candidate does not apply. playlist_unavailable: the playlist is missing or unapproved or, on a screen whose Player resolves its own stack, the stack it receives does not carry the level (the sweep has yet to issue it, or its playlist cannot be shown here). region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs). stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition."}
+        reason: {type: string, enum: [interaction, data, paused, not_in_audience, no_default_playlist, playlist_unavailable, region_not_laid_out, stack_only], description: "What a conditional candidate waits on (interaction: someone using the screen; data: its data condition), or why an off candidate does not apply. playlist_unavailable: the playlist is missing or unapproved or, on a screen whose Player resolves its own stack, the stack it receives does not carry the level (the sweep has yet to issue it, or its playlist cannot be shown here). region_not_laid_out: it is laid out on no display of this screen (its strip fits none of the displays it targets, or its display lock names none of the screen's outputs). stack_only: the screen's Player does not resolve its own stack, and only one that does honors a region, a display lock, interaction or a data condition."}
         by:
           type: object
           additionalProperties: false
@@ -38077,15 +38133,6 @@ components:
     BrowserLinkClaimRequest: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-?[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$"}}}
     BrowserLinkClaimScreen: {type: object, additionalProperties: false, required: [id, public_id, state, public_url], properties: {id: {type: string}, public_id: {type: string}, state: {type: string, enum: [pairing_pending]}, public_url: {type: string, format: uri, pattern: "^[^#]+$"}}}
     BrowserLinkClaim: {type: object, additionalProperties: false, required: [session_id, status, screen], properties: {session_id: {type: string, pattern: "^blink_"}, status: {type: string, enum: [claimed]}, screen: {$ref: "#/components/schemas/BrowserLinkClaimScreen"}}}
-    RuntimeSessionRequest:
-      type: object
-      additionalProperties: true
-      required: [public_id]
-      description: Anonymous viewer mint. Unknown members are ignored (docs/player-compatibility.md §1.1).
-      properties:
-        public_id: {type: string}
-        playback: {$ref: "#/components/schemas/PlaybackHandshake"}
-        player: {$ref: "#/components/schemas/PlayerIdentity"}
     DeviceSessionRequest:
       type: object
       additionalProperties: true
@@ -39523,7 +39570,7 @@ components:
       additionalProperties: false
       required: [requested, source]
       description: >-
-        Display power state. requested is what the screen should show now: the active override, else the enabled display schedule evaluated in the screen timezone, else on (source override, schedule, or default); until is when that next changes, when known. reported is the Player's latest health display (power, connected, reported_at, stale after 35 minutes). idle and brightness are the screen's display.idle and display.brightness settings (set by ScreenPatch). Absent when the screen has no schedule, no override, no idle or brightness setting, and no reported display.
+        Display power state. requested is what the screen should show now: the active override, else the enabled display schedule evaluated in the screen timezone, else on (source override, schedule, or default); until is when that next changes, when known. reported is the Player's latest health display (power, connected, reported_at, stale after 35 minutes). idle and brightness are the screen's display.idle and display.brightness settings, and output and cec its display.output and display.cec settings (all set by ScreenPatch). Absent when the screen has no schedule, no override, no display setting, and no reported display.
       properties:
         requested: {type: string, enum: [on, off]}
         source: {type: string, enum: [override, schedule, default]}
@@ -39532,6 +39579,8 @@ components:
         override: {$ref: "#/components/schemas/ScreenDisplayOverride"}
         idle: {$ref: "#/components/schemas/ScreenDisplayIdle"}
         brightness: {$ref: "#/components/schemas/ScreenDisplayBrightness"}
+        output: {$ref: "#/components/schemas/ScreenDisplayOutput"}
+        cec: {$ref: "#/components/schemas/ScreenDisplayCEC"}
         reported: {$ref: "#/components/schemas/ScreenDisplayReported"}
         control:
           type: string
@@ -39625,7 +39674,7 @@ components:
       type: object
       additionalProperties: true
       description: >-
-        The screen's display control, evaluated on the device (docs/player-compatibility.md §6.5): the power schedule and override, the idle-dark setting and the brightness mode. Omitted when the screen has none; then the display stays on at the operator's brightness. Unknown members are ignored.
+        The screen's display control, evaluated on the device (docs/player-compatibility.md §6.5): the power schedule and override, the idle-dark setting, the brightness mode, the output mode and CEC input switching. Omitted when the screen has none; then the display stays on at the operator's brightness. Unknown members are ignored.
       properties:
         idle:
           type: object
@@ -39642,6 +39691,20 @@ components:
           description: "display.brightness: auto follows the device's light sensor, fixed keeps the operator's brightness; any other mode reads as fixed. A Player that does not declare brightness.auto ignores it."
           properties:
             mode: {type: string}
+        output:
+          type: object
+          additionalProperties: true
+          required: [mode]
+          description: "display.output: auto keeps the display's own preferred mode, any other mode is WIDTHxHEIGHTxFPS with an optional p or i (3840x2160x60p) that the Player sets on its output, once, when it differs from the mode it applied (it may reboot to apply it). A mode the Player cannot read, or cannot set, is left unapplied and logged; observation.display_output.mode keeps reporting the mode in force. A Player that does not declare display_output.mode ignores it."
+          properties:
+            mode: {type: string}
+        cec:
+          type: object
+          additionalProperties: true
+          required: [take_input]
+          description: "display.cec: with take_input true the Player asserts HDMI-CEC active source (One Touch Play) at start and whenever display power turns on, so the TV switches to the Player's input. A Player that does not declare display_power.cec_active_source ignores it."
+          properties:
+            take_input: {type: boolean}
         schedule:
           type: object
           additionalProperties: true
@@ -39844,7 +39907,7 @@ components:
         trace_id: {type: string}
         retryable: {type: boolean, description: "Present on every 5xx problem response and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable."}
         action: {type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present when the registry defines one. A reader applies the status default to a class it does not know."}
-        server_time: {type: string, format: date-time, description: "Present on every Player-facing problem response: the server clock (RFC 3339 UTC) when the response was produced. A Player measures its clock offset from this value; on proof_clock_skew it re-signs with that offset."}
+        server_time: {type: string, format: date-time, description: "Present on every Player-facing problem response: the server clock (RFC 3339 UTC) when the response was produced. A Player measures its clock offset from this value; on proof_clock_skew it re-signs with that offset. The advertising routes (/screen/adslots/*, /screen/ad-decisions/*) give it to the millisecond, as their successful answers do; the others to the second."}
         player_kind: {type: string, description: "Present on upgrade_required: the version floor that failed, a player kind such as web or shell:<kind> such as shell:tizen (docs/player-compatibility.md §6.1)."}
         min_supported: {type: string, description: "Present on upgrade_required for a version floor: the minimum supported YY.MM.N version for player_kind."}
         required_compat: {type: array, items: {type: string}, description: "Present on upgrade_required for the required-token floor (SCREENRIG__RUNTIME__COMPAT_REQUIRED, docs/player-compatibility.md §14): the required compat tokens this mint would not be granted. player_kind is the mint's player kind when a player was sent."}
@@ -40104,6 +40167,8 @@ x-problem-codes:
   - play_page_unsupported
   - identify_unsupported
   - volume_unsupported
+  - display_output_unsupported
+  - display_cec_unsupported
   - page_not_on_screen
   - live_unsupported
   - live_unavailable

@@ -1,10 +1,18 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.watch",
   "kind": "device.watch",
   "requires": [
-    "device.watch"
+    "device.watch",
+    "device.display"
+  ],
+  "requiresSources": [
+    "display",
+    "keys",
+    "light",
+    "network",
+    "presence"
   ],
   "purpose": "device.watch is a notification: the host never replies. events is the full set of event types the frame wants now, a subset of display, presence, keys, light and network. From then on, for this frame's current context, the host posts device.event {type, ...} for each: display {on, brightness} when the effective display state changes for any reason; presence when the device sees movement; key {key} for every key-down of a hardware volume key, auto-repeat included, which the Player consumes (key-ups too) instead of changing the device volume; light {lux} when the ambient light changes; network {online} when the device's validated connectivity changes, and once at the watch itself with the current state. Triggers are applied in order.",
   "host": {
@@ -34,7 +42,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +67,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -86,7 +103,15 @@
         "peripherals": [],
         "subscriptions": []
       },
-      "printers": []
+      "printers": [],
+      "ir": {
+        "emitter": false,
+        "receiver": false
+      },
+      "udp": {
+        "open": [],
+        "busy": []
+      }
     }
   },
   "in": {

@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.print",
   "kind": "device.print",
   "requires": [
     "device.print"
   ],
+  "requiresSources": [],
   "purpose": "A job of one chunk is a device.print with seq 0, last true, format (escpos or pdf), total_bytes (the length of the job) and data_base64, and the optional printer (a printers id; the default printer when absent). The ack means the printer, or its spooler, has the job. The job identifier is the sender's: 8 to 64 of A-Z a-z 0-9 _ - (these fixtures use the request's message id).",
   "host": {
     "applicationId": "app_bridge",
@@ -34,7 +35,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +60,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -159,7 +169,17 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {

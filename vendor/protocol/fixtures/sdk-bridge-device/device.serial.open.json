@@ -1,11 +1,12 @@
 {
-  "fixtureVersion": 1,
+  "fixtureVersion": 2,
   "contractVersion": "screenrig.sdk-bridge/v1",
   "name": "device.serial.open",
   "kind": "device.serial.open",
   "requires": [
     "device.serial"
   ],
+  "requiresSources": [],
   "purpose": "device.serial.open opens a port with its line settings and is acknowledged with {handle}: the host-chosen identifier (8 to 64 of A-Z a-z 0-9 _ -) every later message about the port carries. port and baud_rate (an integer from 50 to 4000000) are required; data_bits (5, 6, 7 or 8), stop_bits (1 or 2), parity (none, even, odd) and flow_control (none, hardware) default to 8, 1, none and none. Opening a port does not start data events: the frame watches serial for that.",
   "host": {
     "applicationId": "app_bridge",
@@ -34,7 +35,10 @@
       "device.serial": true,
       "device.gpio": true,
       "device.ble": true,
-      "device.print": true
+      "device.print": true,
+      "device.ir": true,
+      "device.udp": true,
+      "device.hdmi_input": true
     },
     "features": [
       "ready",
@@ -56,7 +60,13 @@
       "device.serial",
       "device.gpio",
       "device.ble",
-      "device.print"
+      "device.print",
+      "device.gpio.pull",
+      "device.gpio.idle",
+      "device.ir",
+      "device.ir.send",
+      "device.udp",
+      "device.hdmi_input"
     ],
     "display": {
       "on": true,
@@ -159,7 +169,17 @@
           ],
           "failing": true
         }
-      ]
+      ],
+      "ir": {
+        "emitter": true,
+        "receiver": true
+      },
+      "udp": {
+        "open": [],
+        "busy": [
+          9100
+        ]
+      }
     }
   },
   "in": {
