@@ -727,6 +727,8 @@ test("agent status reports granted capabilities and capability denials give repl
   assert.deepEqual(JSON.parse(status.stdout).data.agent.capabilities, ["advertising"]);
   const human = await withAuthenticatedRuntime(["agent", "status", "--human"], transport);
   assert.match(human.stdout, /capabilities: advertising/);
+  assert.doesNotMatch(human.stdout, /credit|metered/i, "human output prints no credit counter");
+  assert.equal(JSON.parse(status.stdout).data.agent.metered_credits, 0, "JSON passes the member through");
   transport.on("GET", "/api/screens", () => ({
     status: 403, headers: { "content-type": "application/problem+json" },
     body: { code: "forbidden", title: "Forbidden", status: 403, detail: "This agent credential lacks the screens capability." },
@@ -2692,6 +2694,91 @@ test("media generate is not a command", async () => {
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+test("billing balance prints dollars and never credits, and keeps the raw mcr members in JSON", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/billing/balance", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: {
+      wallet_revision: 3, remaining_mcr: "125000000", reserved_mcr: "10000000", available_mcr: "115000000",
+      sources: { nonredeemable: { remaining_mcr: "0", reserved_mcr: "0" }, purchased: { remaining_mcr: "0", reserved_mcr: "0" }, ad_earned: { remaining_mcr: "125000000", reserved_mcr: "0" } },
+      withdrawal: { allowed: false, eligible_earned_mcr: "150000", rails_available: false, unavailable_reason: "financial_rails_unavailable", blockers: [] },
+    },
+  }));
+  const json = await withTokenConfig(transport, ["--json", "billing", "balance"]);
+  assert.equal(json.code, 0, json.stdout);
+  const data = (JSON.parse(json.stdout) as { data: { remaining_mcr: string; withdrawal: { eligible_earned_mcr: string } } }).data;
+  assert.equal(data.remaining_mcr, "125000000");
+  assert.equal(data.withdrawal.eligible_earned_mcr, "150000");
+  const human = await withTokenConfig(transport, ["--human", "billing", "balance"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /^remaining: \$12\.50$/m);
+  assert.match(human.stdout, /^reserved: \$1\.00$/m);
+  assert.match(human.stdout, /^available: \$11\.50$/m);
+  assert.match(human.stdout, /^payable_earnings: \$0\.015$/m);
+  assert.match(human.stdout, /card or x402 machine payment/);
+  assert.match(human.stdout, /Payouts start 1 January 2027/);
+  assert.doesNotMatch(human.stdout, /credit|wallet|prepaid|mcr/i);
+});
+
+test("billing statement prints each entry in dollars and keeps the raw JSON", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/billing/statement", () => ({
+    status: 200,
+    headers: {},
+    body: {
+      entries: [
+        { sequence: 7, journal_id: "j7", kind: "ad_spend", amount_mcr: "-12345678", amount_credits: "-1234.5678", amount_usd: "1.2345678", occurred_at: "2026-11-10T12:00:00Z" },
+        { sequence: 8, journal_id: "j8", kind: "ad_earning", amount_mcr: "10000000", amount_credits: "10000", amount_usd: "1", occurred_at: "2026-11-10T13:00:00Z", category: "ads" },
+      ],
+      next_cursor: "",
+    },
+  }));
+  const json = await withTokenConfig(transport, ["--json", "billing", "statement"]);
+  assert.match(json.stdout, /"amount_mcr":"-12345678"/);
+  const human = await withTokenConfig(transport, ["--human", "billing", "statement"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /7  2026-11-10T12:00:00Z  ad_spend  -\$1\.2345678/);
+  assert.match(human.stdout, /8  2026-11-10T13:00:00Z  ad_earning  \$1\.00  ads/);
+  assert.doesNotMatch(human.stdout, /credit|mcr|wallet/i);
+});
+
+test("ads reports print dollars for the money members and keep the raw members in JSON", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/advertising/reports/spend", () => ({
+    status: 200, headers: { "cache-control": "private, no-store" },
+    body: { campaign_id: "cmp_X", spent_mcr: "25000000", reserved_mcr: "500000", completed: 3, unbillable: 0, pending: 1 },
+  }));
+  transport.on("GET", "/api/advertising/reports/delivery", () => ({
+    status: 200, headers: { "cache-control": "private, no-store" },
+    body: {
+      gross_mcr: "20000000", fee_mcr: "3000000", net_mcr: "17000000", completed: 2, interrupted: 0, unbillable: 0,
+      rows: [{ screen_id: "scr_A", slot_id: "slt_A", reservation_id: "res_A", gross_mcr: "10000000", fee_mcr: "1500000", net_mcr: "8500000", completed_at: "2026-11-10T12:00:00Z" }],
+    },
+  }));
+  const spendJson = await withTokenConfig(transport, ["--json", "ads", "reports", "spend", "--campaign-id", "cmp_X"]);
+  assert.match(spendJson.stdout, /"spent_mcr":"25000000"/);
+  const spend = await withTokenConfig(transport, ["--human", "ads", "reports", "spend", "--campaign-id", "cmp_X"]);
+  assert.match(spend.stdout, /^spent: \$2\.50$/m);
+  assert.match(spend.stdout, /^reserved: \$0\.05$/m);
+  assert.doesNotMatch(spend.stdout, /mcr|credit/i);
+  const delivery = await withTokenConfig(transport, ["--human", "ads", "reports", "delivery", "--from", "2026-11-01T00:00:00Z", "--to", "2026-11-11T00:00:00Z"]);
+  assert.match(delivery.stdout, /^gross: \$2\.00$/m);
+  assert.match(delivery.stdout, /^fee: \$0\.30$/m);
+  assert.match(delivery.stdout, /^net: \$1\.70$/m);
+  assert.match(delivery.stdout, /gross=\$1\.00 fee=\$0\.15 net=\$0\.85/);
+  assert.doesNotMatch(delivery.stdout, /mcr|credit/i);
+  assert.match(commandHelp(["ads", "reports", "delivery"]).usage, /net earnings in dollars[\s\S]*Payouts start 1 January 2027/);
+  assert.doesNotMatch(commandHelp(["ads", "reports", "delivery"]).usage, /credit|balance|wallet/i);
+});
+
+test("no customer-facing help names credits, a credit balance, a wallet or a prepaid balance", () => {
+  for (const path of [["ads", "reports", "spend"], ["ads", "reports", "delivery"], ["ads", "direct", "create"], ["ads", "network", "rate"], ["ads", "campaigns", "create"], ["ads", "campaigns", "activate"], ["billing"], ["billing", "balance"], ["billing", "statement"], ["billing", "usage"], ["project", "show"]]) {
+    const usage = commandHelp(path).usage;
+    assert.doesNotMatch(usage, /\bcredits?\b|wallet|prepaid|millicredit/i, path.join(" "));
+  }
+});
+
 test("doctor requires Node.js 22.11 or newer", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(process.versions, "node")!;
   try {
@@ -4234,9 +4321,9 @@ test("a 402 from an older server stops the retry and names no pay command", asyn
     const envelope = JSON.parse(result.stdout) as { error: { code: string; status: number; hint?: string; next?: unknown } };
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.match(String(envelope.error.hint), /Stop retrying/);
+    assert.match(String(envelope.error.hint), /card or x402 machine payment, in US dollars/);
     assert.equal(envelope.error.next, undefined);
-    assert.doesNotMatch(result.stdout, /credit|stripe|x402|billing balance|\$/i);
+    assert.doesNotMatch(result.stdout, /credit|wallet|prepaid|billing balance|mcr/i);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

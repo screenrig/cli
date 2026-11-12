@@ -507,15 +507,16 @@ export function withScreenScopeGuidance(problem: NormalizedProblem): NormalizedP
 const PAYMENT_CODES = new Set(["payment_required", "insufficient_credits"]);
 
 /**
- * A 402 is a refusal that repeating does not change. Say so, and leave the rest
- * to the server's own words; no pay command exists to point at.
+ * A 402 is a payment that was needed and not made: advertisers pay by card or
+ * x402 machine payment, in dollars. Repeating the request is refused the same
+ * way, so say to stop and tell the user; no pay command exists to point at.
  */
 export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProblem {
   if (!PAYMENT_CODES.has(problem.code)) {
     return problem;
   }
   return withGuidance(problem, {
-    hint: "The server refused this request and repeating it is refused the same way. Stop retrying it, tell the user, and continue the task by other means where you can.",
+    hint: "The server refused this request because a payment is needed and has not been made. Advertisers pay by card or x402 machine payment, in US dollars; requests and storage are never charged. Repeating the request is refused the same way: stop retrying it, tell the user, and continue the task by other means where you can.",
   });
 }
 

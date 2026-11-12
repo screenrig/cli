@@ -11,6 +11,7 @@ import { ExitCode } from "../exit-codes.js";
 import { usageError } from "../problems.js";
 import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
+import { formatMcrAsDollars, moneyLabel } from "../money.js";
 import { adsListOption, clientFor, commandHandler, humanLines, jsonBody, playbackFormat, reportFileOf, requireFlagValue, requirePrivateNoStore, resolveDownloadOutput, simpleGet, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
@@ -44,7 +45,7 @@ export async function adsMutation(
 export function plugged(key: string, value: unknown): Record<string, unknown> {
   return value === undefined ? {} : { [key]: value };
 }
-/** mcr amounts travel as canonical decimal strings in both directions. */
+/** Money travels as canonical decimal mcr strings (10,000,000 mcr is $1) in both directions. */
 export function adsNetworkRateBody(args: ParsedArgs): Record<string, unknown> {
   return { rate_mcr_per_15s: flagString(args.flags, "rate-mcr-per-15s") };
 }
@@ -420,7 +421,7 @@ export const handleAdsCampaignsCreate = commandHandler(async (args, runtime, res
     method: "POST",
     path: "/api/advertising/campaigns",
     body: await campaignDraft(args.positionals[3], runtime),
-    human: "Campaign draft created. A draft reserves no credits and cannot deliver until an accepted quote activates it.",
+    human: "Campaign draft created. A draft reserves no money and cannot deliver until an accepted quote activates it.",
   }));
 
 export const handleAdsCampaignsShow = commandHandler(async (args, runtime, resolved) => {
@@ -475,7 +476,7 @@ export const handleAdsCampaignsActivate = commandHandler(async (args, runtime, r
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/activate`,
     body: { quote_id: flagString(args.flags, "quote-id") },
     ifMatch: flagString(args.flags, "expect-rev"),
-    human: "Campaign activation accepted the quote. No wallet debit happens here: a per-occurrence hold is placed when the runtime resolves a play and it settles only on the verified completion. Activation is not proof that a screen displayed anything.",
+    human: "Campaign activation accepted the quote. Nothing is charged here: a per-occurrence hold is placed when the runtime resolves a play and it settles only on the verified completion. Activation is not proof that a screen displayed anything.",
   });
 });
 
@@ -509,7 +510,7 @@ export const handleAdsCampaignsAcceptRates = commandHandler(async (args, runtime
     path: `/api/advertising/campaigns/${encodeURIComponent(id)}/accept-rates`,
     body: { quote_id: flagString(args.flags, "quote-id") },
     ifMatch: flagString(args.flags, "expect-rev"),
-    human: `Accepted the fresh quote for campaign ${id}. Delivery resumes only if every other blocker, such as review or funds, is also clear.`,
+    human: `Accepted the fresh quote for campaign ${id}. Delivery resumes only if every other blocker, such as review or payment, is also clear.`,
   });
 });
 
@@ -566,11 +567,17 @@ export const handleAdsReviewsReject = commandHandler(async (args, runtime, resol
  * sends it (a decimal mcr string), a missing field is simply absent, and the
  * whole body stays in the JSON envelope unchanged.
  */
+/** A report member as a person reads it: money in dollars, everything else as sent. */
+function humanValue(field: string, value: unknown): string | undefined {
+  if (field.endsWith("_mcr")) return formatMcrAsDollars(value);
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+}
+
 export function reportLines(title: string, body: unknown, fields: readonly string[], rows?: readonly string[]): string {
   const record = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
   const lines = humanLines(title, fields.map((field) => {
     const value = record[field];
-    return [field, typeof value === "string" || typeof value === "number" ? String(value) : undefined] as [string, string | undefined];
+    return [moneyLabel(field), humanValue(field, value)] as [string, string | undefined];
   })).split("\n");
   const rowValues = rows ? record.rows : undefined;
   if (!rows || !Array.isArray(rowValues)) {
@@ -580,7 +587,7 @@ export function reportLines(title: string, body: unknown, fields: readonly strin
   for (const value of rowValues) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const row = value as Record<string, unknown>;
-    lines.push(`  ${rows.map((field) => `${field}=${typeof row[field] === "string" || typeof row[field] === "number" ? String(row[field]) : ""}`).join(" ")}`);
+    lines.push(`  ${rows.map((field) => `${moneyLabel(field)}=${humanValue(field, row[field]) ?? ""}`).join(" ")}`);
   }
   return lines.join("\n");
 }

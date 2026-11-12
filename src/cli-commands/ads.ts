@@ -8,7 +8,7 @@ import { playsInstantOption } from "../playback-export.js";
 /**
  * Advertising commands. Buyer operations act through invited memberships;
  * seller operations act on the calling project's own network and inventory. No
- * command here mutates a wallet: a draft is not spending, and a campaign only
+ * command here charges anyone: a draft is not spending, and a campaign only
  * becomes deliverable through an explicitly accepted, unexpired quote.
  */
 export function registerAdsCommands(root: Command, bind: CommandActionBinder): void {
@@ -28,10 +28,10 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--name <NAME>", "Network display name")
     .action(bind(handleAdsNetworkCreate));
   const rate = network.command("rate").description("Set the network default rate per 15 seconds")
-    .requiredOption("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate per 15 seconds of completed playback", positiveInteger("rate-mcr-per-15s"))
+    .requiredOption("--rate-mcr-per-15s <MCR>", "Rate per 15 seconds of completed playback, a positive integer in mcr (10,000,000 mcr is $1)", positiveInteger("rate-mcr-per-15s"))
     .requiredOption("--expect-rev <REVISION>", "Current network revision (required)", revision)
     .action(bind(handleAdsNetworkRate));
-  addCommandNotes(rate, "Changing the effective rate for accepted inventory pauses every affected campaign with price_change_pending. Each buyer must accept a fresh quote before delivery resumes; a top-up, schedule tick, or ordinary resume cannot supply that consent.");
+  addCommandNotes(rate, "Changing the effective rate for accepted inventory pauses every affected campaign with price_change_pending. Each buyer must accept a fresh quote before delivery resumes; a payment, schedule tick, or ordinary resume cannot supply that consent.");
 
   const inventory = ads.command("inventory").description("Opt this project's screens in or out of advertising and describe them");
   inventory.command("list").description("List this seller project's advertising inventory")
@@ -48,7 +48,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--placement <TEXT>", "Physical placement of this screen at the venue")
     .option("--expect-rev <REVISION>", "Override the precondition with this inventory revision", revision)
     .option("--public-description <TEXT>", "Public description shown to invited buyers")
-    .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override per 15 seconds").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
+    .addOption(new Option("--rate-mcr-per-15s <MCR>", "Rate override per 15 seconds, a positive integer in mcr (10,000,000 mcr is $1)").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
     .addOption(new Option("--clear-rate", "Remove this screen's rate override and inherit the project default").conflicts("rateMcrPer15s"))
     .addOption(new Option("--impressions-per-hour <N>", "Estimated impressions this screen delivers per hour (0 or more)").argParser(nonnegativeNumber("impressions-per-hour")).conflicts("clearImpressionsPerHour"))
     .addOption(new Option("--clear-impressions-per-hour", "Remove this screen's impressions estimate").conflicts("impressionsPerHour"))
@@ -75,7 +75,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
       : new Option("--accepted-media <KINDS>", "Comma-separated accepted media: image, video"))
     .option("--max-image-duration-ms <MS>", "Longest accepted image duration", positiveInteger("max-image-duration-ms"))
     .option("--max-video-duration-ms <MS>", "Longest accepted finite video duration", positiveInteger("max-video-duration-ms"))
-    .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override for this slot").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
+    .addOption(new Option("--rate-mcr-per-15s <MCR>", "Rate override for this slot, a positive integer in mcr (10,000,000 mcr is $1)").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
     .addOption(new Option("--clear-rate", "Remove this slot's rate override and inherit the screen or project rate").conflicts("rateMcrPer15s"))
     .addOption(create
       ? new Option("--vast-tag-url <URL>", VAST_HELP).argParser(vastTagUrl)
@@ -155,11 +155,11 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--expect-rev <REVISION>", "Campaign revision the fresh quote priced (required)", revision)
     .action(bind(handleAdsCampaignsAcceptRates));
   for (const command of [campaignCreate, campaignUpdate]) {
-    addCommandNotes(command, "The draft JSON needs name, daily_cap_mcr, lifetime_cap_mcr, flight_start and flight_end (RFC 3339), and networks: [{\"seller_project_id\", \"screen_ids\": [...], \"slot_ids\": [...], \"creative_ids\": [...]}], one per seller network this buyer was admitted to. A saved draft authorizes nothing: no credits are reserved and no ad can play until an accepted, unexpired quote activates it. The draft chooses the image display duration (`image_duration_ms`, 5000–30000 ms, ten seconds when omitted) and an optional per-play price ceiling (`max_play_price_mcr`, a decimal mcr string; omit it for no extra ceiling). Money fields are decimal mcr strings, never numbers. An optional `category` (the values are listed under ads direct create) keeps competitors apart: two ads of one category never play in the same ad break on a screen.");
+    addCommandNotes(command, "The draft JSON needs name, daily_cap_mcr, lifetime_cap_mcr, flight_start and flight_end (RFC 3339), and networks: [{\"seller_project_id\", \"screen_ids\": [...], \"slot_ids\": [...], \"creative_ids\": [...]}], one per seller network this buyer was admitted to. A saved draft authorizes nothing: no money is reserved and no ad can play until an accepted, unexpired quote activates it. The draft chooses the image display duration (`image_duration_ms`, 5000–30000 ms, ten seconds when omitted) and an optional per-play price ceiling (`max_play_price_mcr`, a decimal mcr string; omit it for no extra ceiling). Money fields are decimal mcr strings, never numbers: 10,000,000 mcr is $1, so 1000000000 is $100. Advertisers pay by card or x402 machine payment. An optional `category` (the values are listed under ads direct create) keeps competitors apart: two ads of one category never play in the same ad break on a screen.");
   }
   addCommandNotes(campaignPreview, "Preview is the acceptance artifact: it prices the current inventory and rates and spends, reserves, and activates nothing. The quote is revision-checked against the campaign revision the CLI just read, or the one you pass with --expect-rev. Rates can change before activation: accept the quote you were shown, never a silent replacement.");
-  addCommandNotes(campaignActivate, "Activation requires explicit acceptance of this exact quote. It atomically checks ownership, current invitation authority, quote expiry, and pricing revisions; no wallet debit or seller revenue happens just from accepting terms.");
-  addCommandNotes(campaignAcceptRates, "Only the buyer's explicit acceptance resumes a campaign paused by a seller rate change. A top-up, price ceiling, schedule tick, or ordinary resume cannot supply that consent, and a stale quote is rejected rather than accepted at another price.");
+  addCommandNotes(campaignActivate, "Activation requires explicit acceptance of this exact quote. It atomically checks ownership, current invitation authority, quote expiry, and pricing revisions; no charge or seller earning happens just from accepting terms.");
+  addCommandNotes(campaignAcceptRates, "Only the buyer's explicit acceptance resumes a campaign paused by a seller rate change. A payment, price ceiling, schedule tick, or ordinary resume cannot supply that consent, and a stale quote is rejected rather than accepted at another price.");
   addCommandNotes(campaignPause, "Pausing stops new reservations. Already-started valid plays normally finish and settle at their reserved price.");
 
   const direct = ads.command("direct").description("Run direct campaigns for outside advertisers on this project's own ad slots");
@@ -250,6 +250,6 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .addOption(reportOutputOption("ad-fill.FORMAT"))
     .action(bind(handleAdsReportsFill));
   addCommandNotes(reportFill, "Fill statistics count this project's ad-slot occurrences over up to 35 days: how many were filled by direct campaigns, marketplace campaigns and the slot's VAST tag, how many stayed unfilled and why (no_demand, ineligible, separated, capped), the fill_rate, and the same by day.");
-  addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings; estimated_impressions appears when a screen carries an impressions estimate.");
-  addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this project's own delivery, with one row per completed occurrence. Normal project costs consume the shared balance. estimated_impressions appears when a screen carries an impressions estimate.");
+  addCommandNotes(reportSpend, "A buyer report shows this project's own spend and campaign evidence, never a seller's other earnings or project-wide usage. Human output shows dollars; JSON keeps decimal mcr strings (10,000,000 mcr is $1); estimated_impressions appears when a screen carries an impressions estimate.");
+  addCommandNotes(reportDelivery, "A seller report shows gross ad earnings, the serving fee, and net earnings in dollars for this project's own delivery, with one row per completed occurrence; JSON keeps decimal mcr strings. Payouts start 1 January 2027. estimated_impressions appears when a screen carries an impressions estimate.");
 }

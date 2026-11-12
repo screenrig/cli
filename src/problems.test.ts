@@ -114,9 +114,9 @@ test("a 402 from an older server says to stop and tell the user, and names no pa
   for (const code of ["payment_required", "insufficient_credits"]) {
     const problem = withPaymentGuidance({ ...PAYMENT_BASE, code });
     assert.equal(problem.next, undefined, code);
-    assert.match(problem.hint ?? "", /Stop retrying/, code);
-    assert.match(problem.hint ?? "", /tell the user/, code);
-    assert.doesNotMatch(problem.hint ?? "", /credit|mcr|millicredit|kCr|stripe|x402|buy|purchase|top.?up|\$/i, code);
+    assert.match(problem.hint ?? "", /Advertisers pay by card or x402 machine payment, in US dollars/, code);
+    assert.match(problem.hint ?? "", /stop retrying it, tell the user/, code);
+    assert.doesNotMatch(problem.hint ?? "", /credit|wallet|prepaid|balance|mcr|millicredit|kCr|top.?up/i, code);
   }
 });
 
