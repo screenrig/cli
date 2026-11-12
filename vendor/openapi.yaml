@@ -2452,7 +2452,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 2 or more displays (a video wall) is part of Plus; a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2510,7 +2510,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format (2 or more displays) other than the playlist's own is part of Plus. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2545,7 +2545,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format (2 or more displays) other than the playlist's own is part of Plus. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -3738,7 +3738,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — set_playlist_schedule with a displays lock (Video walls) is part of Plus; reboot schedules, the clearing actions and one-off commands are open on every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — set_playlist_schedule with a lock to display 3 or beyond (Video walls) is part of Plus, a lock to display 2 or lower is open on every plan; reboot schedules, the clearing actions and one-off commands are open on every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -3785,7 +3785,7 @@ paths:
       x-screenrig-access: review
       operationId: updateScreen
       description: >-
-        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level, toast_level, display or kiosk. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's video wall (an object) or clears it (null). Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared). fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. display sets or clears the display's settings: display.idle {after_s, wake} darkens the glass after after_s seconds (30 to 86400) without a touch or key or, when wake lists presence, anybody in front of the screen, and a wake event (touch, presence, or both, each once) lights it at once; display.brightness {mode} is auto (the device's light sensor sets the brightness) or fixed (the default, the operator's brightness); display.output {mode} is auto (the display's own preferred mode) or a video mode such as 3840x2160x60p (WIDTHxHEIGHTxFPS with an optional p or i), which the Player sets on its output; display.cec {take_input} true has the Player assert HDMI-CEC active source at start and whenever display power turns on, so the TV switches to its input. A member you send replaces it, null clears it, a member you leave out stays, and a null display clears all four. A display.output other than auto needs a Player that declared the display_output.mode host capability, else 409 display_output_unsupported, and when the Player has reported the modes it can set (observation.display_output.modes) a mode outside that list is invalid_request naming display.output.mode; display.cec with take_input true needs display_power.cec_active_source, else 409 display_cec_unsupported. Clearing either always works. kiosk {lock} true pins the Player to the screen (Android screen pinning) and false or null releases it. The display schedule and override keep their own routes; a display member naming schedule or override is invalid_request. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). Changing any of them remints the manifest revision of a screen that shows a playlist and changes the manifest ETag of every screen; the manifest carries display.idle, display.brightness, display.output and display.cec in the root display member and the lock as the root member kiosk, and screen.manifest_changed is appended; the screen reads them back as Screen.display.idle, Screen.display.brightness, Screen.display.output, Screen.display.cec and Screen.kiosk. The backend stores idle, brightness and the lock whatever the Player: a Player applies a setting only when its host capabilities declare display_power.idle, brightness.auto, kiosk_lock, display_output.mode or display_power.cec_active_source, and older Players ignore them. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields, location, display and kiosk included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone, wall and display are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
+        Updates the screen's name, playlist_id, timezone, wall, tags, fields, location, log_level, toast_level, display or kiosk. A tag change answers levels: the campaigns the screen enters or leaves, with each campaign's reach before and after. wall sets the screen's wall (an object of one to twelve outputs; arrangement defaults to row) or clears it (null). Setting one needs a Player that declared the display.wall host capability for two or more outputs, or display.rotate for one (a single screen turned by rotation), else 409 wall_unsupported. Changing it remints the manifest revision and appends screen.updated with details.wall (the wall object, or null once cleared); a Player that sets its own wall (PUT /screen/wall) adds details.source player. fields merges into the screen's own values (a string sets a field, null removes it, a null fields clears every field) and location sets where the screen is (null clears it). Changing either remints the manifest revision of a screen that shows a playlist, so its card placements expand their {screen.…} tokens again, and appends screen.updated with details.fields (the complete new object, {} once cleared) or details.location (the new object, or null once cleared). A name or value the grammar refuses, or a thirty-third field, is invalid_request naming it. log_level (debug, info, warn, error) and toast_level (info, alert, error) set the lowest level the Player generates or shows, and null clears each; any other value is invalid_request. Changing either remints the manifest revision, which carries them as the root member verbosity. display sets or clears the display's settings: display.idle {after_s, wake} darkens the glass after after_s seconds (30 to 86400) without a touch or key or, when wake lists presence, anybody in front of the screen, and a wake event (touch, presence, or both, each once) lights it at once; display.brightness {mode} is auto (the device's light sensor sets the brightness) or fixed (the default, the operator's brightness); display.output {mode} is auto (the display's own preferred mode) or a video mode such as 3840x2160x60p (WIDTHxHEIGHTxFPS with an optional p or i), which the Player sets on its output; display.cec {take_input} true has the Player assert HDMI-CEC active source at start and whenever display power turns on, so the TV switches to its input. A member you send replaces it, null clears it, a member you leave out stays, and a null display clears all four. A display.output other than auto needs a Player that declared the display_output.mode host capability, else 409 display_output_unsupported, and when the Player has reported the modes it can set (observation.display_output.modes) a mode outside that list is invalid_request naming display.output.mode; display.cec with take_input true needs display_power.cec_active_source, else 409 display_cec_unsupported. Clearing either always works. kiosk {lock} true pins the Player to the screen (Android screen pinning) and false or null releases it. The display schedule and override keep their own routes; a display member naming schedule or override is invalid_request. A value out of range or of the wrong type is invalid_request naming the path (display.idle.after_s). Changing any of them remints the manifest revision of a screen that shows a playlist and changes the manifest ETag of every screen; the manifest carries display.idle, display.brightness, display.output and display.cec in the root display member and the lock as the root member kiosk, and screen.manifest_changed is appended; the screen reads them back as Screen.display.idle, Screen.display.brightness, Screen.display.output, Screen.display.cec and Screen.kiosk. The backend stores idle, brightness and the lock whatever the Player: a Player applies a setting only when its host capabilities declare display_power.idle, brightness.auto, kiosk_lock, display_output.mode or display_power.cec_active_source, and older Players ignore them. Assigning a playlist whose format does not match the screen's wall is 409 playlist_format_mismatch. Under Propose access a patch of playlist_id alone becomes a review (202 pending_review); any other field, wall, fields, location, display and kiosk included, is insufficient_access. A playlist with no approved version is playlist_not_approved. When the playlist the screen then shows has an iframe src or application params that read a screen token the screen lacks, the answer carries a screen_fact_missing warning (warnings, PlaylistWarning) and the screen's manifest leaves that primitive out. On a protected screen playlist_id is a review decided by a second approver (202 pending_review) at every access level and is sent alone (invalid_request with name); tags, fields, location, timezone, wall and display are protected_target (409), also beside playlist_id. Rename stays live. Clearing playlist_id (null) on an archived screen is 409 screen_archived.
       security:
         - projectBearer: []
       parameters:
@@ -3808,7 +3808,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Screen'
         '402':
-          description: 'feature_not_in_plan — Video walls are part of Plus: setting a wall other than the screen''s own needs it, null clears it in every plan. A wall of more than 3 outputs other than the screen''s own is part of Enterprise (large_walls). The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — A wall of 2 outputs or fewer is open on every plan. A wall of 3 outputs other than the screen''s own is part of Plus (video_walls), null clears a wall in every plan. A wall of more than 3 outputs other than the screen''s own is part of Enterprise (large_walls). The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -4372,7 +4372,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: replaceScreen
-      description: 'Moves the device paired as another screen of the project onto this one and archives that screen, so this screen keeps its name, tags, timezone, playlist, schedules, takeover, display schedule and override, video wall, comments and history on new hardware. The device''s public key (or browser credential) now opens this screen, which takes the replacement''s host and Player; its health, status, storage, observation and queued commands start over. The key this screen held retires with the recovery grace window: it may still mint for fifteen minutes, then is refused (key_retired). Nothing is unbound. The replaced screen is archived with archive_reason replaced and keeps no binding or host. Both screens advance content_access_generation, so every session either held ends; the device receives a player.reload addressed to the screen it left (details.reason replaced, valid for 24 hours) and mints again as this screen. Both screens must be active with a paired Player (a pairing_pending screen or an unpaired replacement is resource_conflict, an archived one screen_archived); with names another screen of the project (invalid_request; another project''s screen is not_found); a screen with a video wall needs a replacement Player that declared display.wall (wall_unsupported). If-Match is optional and checks this screen''s revision. Emits the project event screen.replaced (details.from_screen_id) and no screen.archived. An exact Idempotency-Key retry returns this same answer for twenty-four hours. A caller limited to screens (docs/screen-scope.md) needs the screen and with inside its scope (outside_screen_scope; nothing is archived). A replace where either screen is protected is protected_target.'
+      description: 'Moves the device paired as another screen of the project onto this one and archives that screen, so this screen keeps its name, tags, timezone, playlist, schedules, takeover, display schedule and override, video wall, comments and history on new hardware. The device''s public key (or browser credential) now opens this screen, which takes the replacement''s host and Player; its health, status, storage, observation and queued commands start over. The key this screen held retires with the recovery grace window: it may still mint for fifteen minutes, then is refused (key_retired). Nothing is unbound. The replaced screen is archived with archive_reason replaced and keeps no binding or host. Both screens advance content_access_generation, so every session either held ends; the device receives a player.reload addressed to the screen it left (details.reason replaced, valid for 24 hours) and mints again as this screen. Both screens must be active with a paired Player (a pairing_pending screen or an unpaired replacement is resource_conflict, an archived one screen_archived); with names another screen of the project (invalid_request; another project''s screen is not_found); a screen with a wall needs a replacement Player that declared the capability its wall needs, display.wall for two or more outputs and display.rotate for one (wall_unsupported). If-Match is optional and checks this screen''s revision. Emits the project event screen.replaced (details.from_screen_id) and no screen.archived. An exact Idempotency-Key retry returns this same answer for twenty-four hours. A caller limited to screens (docs/screen-scope.md) needs the screen and with inside its scope (outside_screen_scope; nothing is archived). A replace where either screen is protected is protected_target.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4653,7 +4653,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 2 or beyond of a video wall (displays) other than the screen's stored entry is part of Plus. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 3 or beyond of a video wall (displays) other than the screen's stored entry is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -6392,7 +6392,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) are part of the Premium plan and schedule change control (a paused draft) of the Enterprise plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Plus. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) are part of the Premium plan and schedule change control (a paused draft) of the Enterprise plan. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -6495,7 +6495,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Campaign'
         '402':
-          description: "feature_not_in_plan — Changing or resuming a campaign is part of the Plus plan (campaigns); pausing it, clearing its reserved flag and a body that keeps what is stored stay open in every plan. Protected folders (reserved true) are part of the Premium plan. Setting displays other than the campaign's own is part of Plus; null clears it in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Changing or resuming a campaign is part of the Plus plan (campaigns); pausing it, clearing its reserved flag and a body that keeps what is stored stay open in every plan. Protected folders (reserved true) are part of the Premium plan. Setting a displays lock to display 3 or beyond other than the campaign's own is part of Plus (video_walls); a lock to display 2 or lower and null are open in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -15099,6 +15099,39 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       security: []
+  /api/canva/publishes:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: contribute
+      operationId: publishCanvaDesign
+      description: >-
+        The screenRIG for Canva app's Publish: the files Canva exported for a design (one PNG or JPG per page, or one MP4) become media of the project. Each file is fetched from its url, which must be an https address on canva.com or a subdomain of it (any other address is invalid_request at files[i].url and nothing is fetched), under every upload rule: the plan's video byte limit, the dimension limits, the organization's plan storage. The first publish of a design page creates its media, named "<title> - page N.png" (or .jpg, or "<title>.mp4" for a video). A later publish of the same design in the same project replaces that media's file in place: the media keeps its id, so every playlist and schedule naming it plays the new page, and the replaced file stays in its version history (listMediaVersions). A page whose bytes are those already in service is unchanged. A page's media that was deleted, or that is now another kind of file, is created again. Pages of the design that this publish does not name are left as they are. Under effective Propose the new media and the replacements wait for review (status pending_review). The answer is the publish's operation: poll getOperation. A succeeded operation's result is CanvaPublishResult ({design_id, items}); every created or replaced media item is ready to play. A failed operation's error names the page that was refused; pages stored before it are kept, and publishing again finds them unchanged.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanvaPublish'
+      responses:
+        '202':
+          description: The publish was recorded; its operation (kind canva.publish) carries the outcome.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/dropbox/callback:
     get:
       operationId: completeDropboxConsent
@@ -17726,7 +17759,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player driving a video wall reports one per output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Native cookies are rejected; browser must not adopt header profiles.  Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
+      description: 'Reports the playback surface the paired player used for the last resolveLayout. Path does not name screen_id; the paired runtime session binds it. Body is JSON ScreenObservation: observed_at plus one to twelve surfaces; a Player that declares display.wall or display.rotate reports one per output, also for a single output, id = the output name. Numbers are device-independent pixels and the device pixel ratio next to that layout surface, not canvas author size and not encoded screenshot size. They are range-checked only and are never proven hardware or authorization. Last write wins and replaces the whole surfaces array. An identical surfaces tuple (id, width, height, pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a later observed_at on the same tuple is ignored. Native cookies are rejected; browser must not adopt header profiles.  Observation is absent from GET /api/screens until the first accepted report. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-observation): a 429 means retry no sooner than Retry-After.'
       security:
         - pairedRuntimeCookie: []
         - nativeSessionAuthorization: []
@@ -17966,6 +17999,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RuntimeScreenLabel'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/wall:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    put:
+      operationId: putRuntimeScreenWall
+      x-rate-limit-policies:
+        - name: runtime-screen-wall
+          quota: 30
+          windowSeconds: 60
+        - name: runtime-screen-wall-ip
+          quota: 300
+          windowSeconds: 60
+          condition: archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Sets the wall of the screen bound to the paired runtime session: the layout of its outputs that an operator chose on the glass (docs/player-compatibility.md §6.8). It is the same write as PATCH /api/screens/{id} wall (the same normalization, capability check, manifest reminting and screen events), limited to one or two outputs: one output is a rotated single screen, two are a pair. A wall of one output needs a Player that declared display.rotate and a wall of two display.wall, else 409 wall_unsupported. More than two outputs, wall null and a body without wall are invalid_request (the owner sets a larger wall or clears one). The write needs no plan feature and is not held by a protected screen folder. Its screen.updated or screen.manifest_changed event carries details.source player beside details.wall. A wall the screen already has changes nothing: 200 with the stored wall, no event, no new screen revision and no new manifest. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. An archived screen is screen_archived. A Player that receives 404 treats the route as unsupported and keeps its layout locally (docs/player-compatibility.md §6.8).'
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeScreenWallWrite'
+      responses:
+        '200':
+          description: Wall set, or already the screen's. wall is the stored wall.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeScreenWall'
         '400':
           $ref: '#/components/responses/RuntimeProblem'
         '401':
@@ -20242,7 +20331,7 @@ paths:
     post:
       operationId: approveDashboardOAuthAuthorization
       description: >-
-        Approves a connected app for one of the person's projects after a fresh proof (kind oauth_authorization_approval, subject the authorization id): it creates the app's agent identity (agent type mcp_client, the person responsible), its membership and its grant with the chosen access (read or manage; omitted keeps the requested level, which defaults to read) and capabilities (a subset of the requested), and answers the redirect_uri, carrying code, state and iss, that the page navigates to. The code is valid for 60 seconds. A member limited to screens does not connect agents, issue credentials or manage the project's people: outside_screen_scope (ask the project owner).
+        Approves a connected app for one of the person's projects after a fresh proof (kind oauth_authorization_approval, subject the authorization id): it creates the app's agent identity (agent type mcp_client, the person responsible), its membership and its grant with the chosen access (read or manage; omitted keeps the requested level, which defaults to read) and capabilities (a subset of the requested), with identity access when the application asked for it and the person gives it, and answers the redirect_uri, carrying code, state and iss, that the page navigates to. The code is valid for 60 seconds. A member limited to screens does not connect agents, issue credentials or manage the project's people: outside_screen_scope (ask the project owner).
       security:
         - dashboardSession: []
       parameters:
@@ -23826,7 +23915,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 2 or more displays (a video wall) is part of Plus; a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Plus (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -24416,7 +24505,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: 'feature_not_in_plan — set_playlist_schedule with a displays lock (Video walls) is part of Plus; reboot schedules, the clearing actions and one-off commands are open on every plan. The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — set_playlist_schedule with a lock to display 3 or beyond (Video walls) is part of Plus, a lock to display 2 or lower is open on every plan; reboot schedules, the clearing actions and one-off commands are open on every plan. The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -24548,7 +24637,7 @@ paths:
         '202':
           $ref: '#/components/responses/PendingReview'
         '402':
-          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) are part of the Premium plan and schedule change control (a paused draft) of the Enterprise plan. A campaign that locks a playlist to display 2 or beyond of a video wall (displays) is part of Plus. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) are part of the Premium plan and schedule change control (a paused draft) of the Enterprise plan. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -28265,6 +28354,45 @@ components:
         page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}
         page: {$ref: "#/components/schemas/PlaylistPageWriteV2", description: "The page an add or replace writes, as the proposer sent it."}
         before: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "An add's neighbour: the page it goes in front of."}
+    CanvaPublish:
+      type: object
+      additionalProperties: false
+      required: [design_id, files]
+      description: A Canva design's exported files, as the screenRIG for Canva app received them on Publish.
+      properties:
+        design_id: {type: string, minLength: 1, maxLength: 128, description: "The Canva design id. With the project, it names the media each page became."}
+        title: {type: string, maxLength: 255, description: "The design's title, used for the media filenames; empty is Canva design."}
+        files:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: "One file per design page (pages unique), or exactly one video/mp4 file (page 1)."
+          items:
+            type: object
+            additionalProperties: false
+            required: [url, page, content_type]
+            properties:
+              url: {type: string, format: uri, maxLength: 4096, description: "The export file's https address on canva.com or a subdomain of it."}
+              page: {type: integer, minimum: 1, maximum: 100, description: "The design page the file is (1 for a video)."}
+              content_type: {type: string, enum: [image/png, image/jpeg, video/mp4]}
+    CanvaPublishResult:
+      type: object
+      additionalProperties: false
+      required: [design_id, items]
+      description: The result of a succeeded canva.publish operation.
+      properties:
+        design_id: {type: string}
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [page, media_id, version, status]
+            properties:
+              page: {type: integer, minimum: 1}
+              media_id: {type: string}
+              version: {type: integer, minimum: 1, description: "The media version the page is now (listMediaVersions), or the one it becomes once its review is approved."}
+              status: {type: string, enum: [created, replaced, unchanged, pending_review], description: "created: new media. replaced: the page's media has its new file under the same id. unchanged: the media already carries these bytes. pending_review: under Propose, the new media or replacement waits for a person's review."}
     MediaReplace:
       type: object
       additionalProperties: false
@@ -29730,6 +29858,7 @@ components:
         required: {type: boolean, description: "That organization requires single sign-on: password sign-in is refused for the domain, and so is passkey sign-in except for its break-glass admins."}
         provider_name: {type: string, description: "The connection's display name. Present when sso is true."}
         account: {type: boolean, description: "A live person holds the address, verified or not. False offers signup."}
+        password: {type: boolean, description: "Present and true when the person who holds the address has a password and no passkey: the entry page shows them its password form, which it otherwise hides. Absent for everyone else and where single sign-on is required."}
     SSOStartRequest:
       type: object
       additionalProperties: false
@@ -30556,6 +30685,10 @@ components:
           enum: [read, propose, manage]
           description: >-
             The access level a device sign-in or a connected app is approved with (Read only, Propose or Manage); omitted keeps the level asked for. Ignored for other connections. A person who cannot approve reviews may not approve Manage (403 approver_required).
+        identity:
+          type: boolean
+          description: >-
+            Connected-app approval only, and only when the authorization's identity_requested is true: gives the application identity access at the approved level (Propose reads), so it can list and create the person's projects and manage organizations and service clients. Omitted or false leaves it with the one project. True for an application that did not ask is invalid_request.
     InvitationKind:
       type: string
       enum:
@@ -31755,6 +31888,21 @@ components:
       description: The stored screen name, the value the manifest carries as screen_label.
       properties:
         screen_label: {type: string, minLength: 1, maxLength: 120}
+    RuntimeScreenWallWrite:
+      type: object
+      additionalProperties: true
+      required: [wall]
+      description: >-
+        The PUT /screen/wall body. wall is a ScreenWallWrite of one or two outputs; the server refuses more outputs and null. Unknown members of the body are ignored (docs/player-compatibility.md §1.1).
+      properties:
+        wall: {$ref: "#/components/schemas/ScreenWallWrite", description: "The layout the glass has: one or two outputs."}
+    RuntimeScreenWall:
+      type: object
+      additionalProperties: true
+      required: [wall]
+      description: The stored wall, the value the manifest carries as wall (with span).
+      properties:
+        wall: {$ref: "#/components/schemas/ScreenWall"}
     RuntimeScreenPlaylistWrite:
       type: object
       additionalProperties: true
@@ -31803,16 +31951,17 @@ components:
     OAuthAuthorization:
       type: object
       additionalProperties: false
-      required: [id, client_name, client_registered, redirect_host, access, capabilities, created_at, expires_at]
+      required: [id, client_name, client_registered, redirect_host, access, capabilities, identity_requested, created_at, expires_at]
       properties:
         id: {type: string, pattern: "^oaz_"}
         client_name: {type: string, description: "As the client's metadata declares it; show it as plain text."}
         client_domain: {type: string, description: "The host the client's metadata was fetched from, or a registered client's domain."}
         client_registered: {type: boolean, description: "A client registered by screenRIG rather than identified by a metadata document."}
         redirect_host: {type: string}
-        resource: {type: string, enum: [mcp, staff_mcp], description: "What the application connects to: mcp, the project MCP, or staff_mcp, read-only staff analytics that only screenRIG staff can approve (always Read only; capabilities do not apply)."}
+        resource: {type: string, enum: [mcp, staff_mcp, api], description: "What the application connects to: mcp, the project MCP; api, the project API (a registered application such as screenRIG for Canva, which never gets identity access); or staff_mcp, read-only staff analytics that only screenRIG staff can approve (always Read only; capabilities do not apply)."}
         access: {type: string, enum: [read, propose, manage], description: "The level the application asked for."}
         capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, minItems: 1, uniqueItems: true}
+        identity_requested: {type: boolean, description: "The application asked for identity access (the identity scope): the consent page offers it, off unless the person turns it on."}
         requested_from: {type: string}
         created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
@@ -32099,7 +32248,7 @@ components:
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the application."}, id: {type: string, description: "ID of the application."}, name: {type: string, description: "Name of the application."}, revision: {type: integer, description: "Counter that increases with each change to the application."}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time, description: "When the application was created."}, updated_at: {type: string, format: date-time, description: "When the application record last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
     ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
-    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
+    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}. A succeeded canva.publish carries design_id and items (CanvaPublishResult)."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
       description: >-
         What a playlist is authored for: a video wall (PlaylistWallFormat) or a region (PlaylistRegionFormat), never both. A playlist without a format is an ordinary playlist that binds to any screen as the page.
@@ -33732,13 +33881,24 @@ components:
       additionalProperties: false
       required: [outputs, arrangement]
       description: >-
-        The video wall a screen's Player lays out: two to twelve outputs that show one canvas. Setting it needs a Player that declared the display.wall host capability (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans it.
+        How a screen's Player lays out its outputs: one to twelve. Two or more outputs show one canvas (a video wall) and need a Player that declared the display.wall host capability; one output is a single screen turned by rotation and needs display.rotate (docs/player-compatibility.md §6.5, §6.8). A playlist with a format spans a wall of two or more outputs. arrangement is row for one output. A wall of one or two outputs needs no plan feature; three or more need video_walls and more than three large_walls.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right, then top to bottom."}
+        outputs: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right, then top to bottom."}
         arrangement: {type: string, enum: [row, column, grid]}
         columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
         rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
-    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {anyOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "The screen's time zone override, an IANA identifier such as America/Los_Angeles; null clears it, so the screen follows its device's zone again. Every screen has an effective_timezone: this override, else the zone the Player reports from its operating system, else UTC. Every civil rule of the screen (page visibility and ad slots, playlist schedules, campaigns, display and reboot schedules, the manifest timezone and {screen.timezone}) is read in it. A change that moves the effective zone remints the manifest revision."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWall"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}, display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "The display's settings (display.idle, display.brightness, display.output, display.cec). A member you send replaces it, null clears it, a member you leave out stays; a null display clears all four. display.output other than auto needs a Player that declared display_output.mode and display.cec with take_input true one that declared display_power.cec_active_source, else 409 display_output_unsupported or display_cec_unsupported. Changing any remints the manifest revision of a screen that shows a playlist, and the manifest carries them in the root display member. On a protected screen it is protected_target."}, kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "The kiosk lock (kiosk.lock). lock true pins the Player to the screen; false or null releases it. Changing it remints the manifest revision of a screen that shows a playlist, and the manifest carries it as the root member kiosk."}}}
+    ScreenWallWrite:
+      type: object
+      additionalProperties: false
+      required: [outputs]
+      description: >-
+        The wall a write sets (PATCH /api/screens/{id}, PUT /screen/wall): a ScreenWall whose arrangement may be left out and is then row (and must be row for one output). The capability and plan rules are ScreenWall's.
+      properties:
+        outputs: {type: array, minItems: 1, maxItems: 12, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}, description: "Output names as the Player reports them (observation surface ids), in physical order: left to right, then top to bottom."}
+        arrangement: {type: string, enum: [row, column, grid], default: row}
+        columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid. Required for arrangement grid and not allowed otherwise; the outputs divide into at least 2 rows. Echoed for a grid only."}
+        rotation: {type: integer, enum: [0, 90, 180, 270], default: 0, description: "Clockwise degrees applied to every output; 90 and 270 mean portrait panels."}
+    ScreenPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 120}, playlist_id: {anyOf: [{type: string, minLength: 1}, {type: "null"}], description: "The screen default: a playlist id assigns it; null clears it; omission preserves it. Takeovers, campaigns, schedules and inherited folder defaults retain precedence. Without effective content the paired Player shows its idle display."}, timezone: {anyOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "The screen's time zone override, an IANA identifier such as America/Los_Angeles; null clears it, so the screen follows its device's zone again. Every screen has an effective_timezone: this override, else the zone the Player reports from its operating system, else UTC. Every civil rule of the screen (page visibility and ad slots, playlist schedules, campaigns, display and reboot schedules, the manifest timezone and {screen.timezone}) is read in it. A change that moves the effective zone remints the manifest revision."}, wall: {anyOf: [{$ref: "#/components/schemas/ScreenWallWrite"}, {type: "null"}], description: "The screen's video wall; null clears it. Setting one needs a Player that declared the display.wall host capability, else 409 wall_unsupported. Changing it remints the manifest revision."}, tags: {$ref: "#/components/schemas/ScreenTags"}, fields: {anyOf: [{type: object, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}}, {type: "null"}], description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields. Changing the fields remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens."}, location: {anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}], description: "Where the screen is; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token."}, log_level: {anyOf: [{type: string, enum: [debug, info, warn, error]}, {type: "null"}], description: "The lowest log level the screen's Player generates: it writes no log line below it, and error lines are always generated; null clears it (the Player's default). Changing it remints the manifest revision, which carries it as verbosity.logLevel."}, toast_level: {anyOf: [{type: string, enum: [info, alert, error]}, {type: "null"}], description: "The lowest toast level the screen's Player shows: it shows no toast below it, and error toasts are always shown; null clears it (every toast shows). Changing it remints the manifest revision, which carries it as verbosity.toastLevel."}, display: {anyOf: [{$ref: "#/components/schemas/ScreenDisplayPatch"}, {type: "null"}], description: "The display's settings (display.idle, display.brightness, display.output, display.cec). A member you send replaces it, null clears it, a member you leave out stays; a null display clears all four. display.output other than auto needs a Player that declared display_output.mode and display.cec with take_input true one that declared display_power.cec_active_source, else 409 display_output_unsupported or display_cec_unsupported. Changing any remints the manifest revision of a screen that shows a playlist, and the manifest carries them in the root display member. On a protected screen it is protected_target."}, kiosk: {anyOf: [{$ref: "#/components/schemas/ScreenKioskPatch"}, {type: "null"}], description: "The kiosk lock (kiosk.lock). lock true pins the Player to the screen; false or null releases it. Changing it remints the manifest revision of a screen that shows a playlist, and the manifest carries it as the root member kiosk."}}}
     ScreenDisplayIdle:
       type: object
       additionalProperties: false
@@ -34625,7 +34785,7 @@ components:
         host_version: {type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form."}
         timezone: {type: string, maxLength: 64, description: "Device IANA timezone hint. Used for effective card clock diagnostics when the screen has no explicit timezone."}
         device: {$ref: "#/components/schemas/HostDevice"}
-        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out its outputs as a video wall, docs/player-compatibility.md §6.8), volume (the Player applies a remote volume from the manifest volume member and player.volume, docs/player-compatibility.md §6.5), display_output.mode (the Player sets display.output.mode on its video output and reports the modes it can set in the observation's display_output.modes, docs/player-compatibility.md §6.5), display_power.cec_active_source (the Player sends HDMI-CEC Image View On and Active Source at start and whenever display power turns on, when display.cec.take_input is true, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
+        capabilities: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40}, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), advance.video_end (the Player ends a media_end page that holds images beside its one video when the video ends, docs/player-compatibility.md §6.5), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5), display_power.idle (the Player darkens its glass after display.idle.after_s seconds without use and lights it on a wake event, docs/player-compatibility.md §6.5), brightness.auto (the device has a light sensor and the Player follows it when display.brightness.mode is auto, docs/player-compatibility.md §6.5), kiosk_lock (the Player can pin itself to the screen when kiosk.lock is on, docs/player-compatibility.md §6.5), display.wall (the Player can lay out two or more outputs as a video wall, docs/player-compatibility.md §6.8), display.rotate (the Player can lay out and rotate a single output, docs/player-compatibility.md §6.8), volume (the Player applies a remote volume from the manifest volume member and player.volume, docs/player-compatibility.md §6.5), display_output.mode (the Player sets display.output.mode on its video output and reports the modes it can set in the observation's display_output.modes, docs/player-compatibility.md §6.5), display_power.cec_active_source (the Player sends HDMI-CEC Image View On and Active Source at start and whenever display power turns on, when display.cec.take_input is true, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported."}
     HostDevice:
       type: object
       additionalProperties: false
@@ -34983,7 +35143,7 @@ components:
         Player-reported playback surface. Absent on Screen until the first accepted PUT /screen/observation. Read-only on the project API; ScreenPatch, PairScreen, pairing bodies, session bodies, canvas, runtime manifest, and POST /screen/reports cannot write it.
       properties:
         observed_at: {type: string, format: date-time, description: Player clock at the observation. Last write wins; an identical surfaces tuple ignores a later timestamp.}
-        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/ScreenObservationSurface"}, description: "One to twelve surfaces; a Player that declares display.wall or display.rotate reports one per output, also for a single output, id = the output name."}
         display_output: {$ref: "#/components/schemas/ScreenObservationDisplayOutput"}
     ScreenObservationDisplayOutput:
       type: object
@@ -35021,7 +35181,7 @@ components:
         The PUT /screen/observation body. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the project ScreenObservation.
       properties:
         observed_at: {type: string, format: date-time}
-        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to twelve surfaces; a Player driving a video wall reports one per output, id = the output name."}
+        surfaces: {type: array, minItems: 1, maxItems: 12, items: {$ref: "#/components/schemas/RuntimeObservationSurfaceWrite"}, description: "One to twelve surfaces; a Player that declares display.wall or display.rotate reports one per output, also for a single output, id = the output name."}
         display_output:
           type: object
           additionalProperties: true
@@ -39694,12 +39854,12 @@ components:
       additionalProperties: true
       required: [outputs, arrangement, rotation, span]
       description: >-
-        The screen's video wall as its Player lays it out (docs/player-compatibility.md §6.8). Emitted only when the screen has a wall. Unknown members are ignored.
+        The screen's wall as its Player lays it out (docs/player-compatibility.md §6.8). Emitted only when the screen has a wall. Unknown members are ignored.
       properties:
-        outputs: {type: array, minItems: 2, maxItems: 12, items: {type: string}, description: "Output names in physical order: left to right, then top to bottom."}
+        outputs: {type: array, minItems: 1, maxItems: 12, items: {type: string}, description: "Output names in physical order: left to right, then top to bottom."}
         arrangement: {type: string, enum: [row, column, grid]}
         rotation: {type: integer, enum: [0, 90, 180, 270], description: "Clockwise degrees applied to every output."}
-        span: {type: boolean, description: "true when the manifest's playlist has a format (it then matches the wall). false is an ordinary playlist that every output mirrors."}
+        span: {type: boolean, description: "true when the manifest's playlist has a format (it then matches the wall). false is an ordinary playlist that every output mirrors, and always the case for one output."}
         columns: {type: integer, minimum: 2, maximum: 6, description: "Outputs per row of a grid; present for arrangement grid only."}
     RuntimeVerbosity:
       type: object
