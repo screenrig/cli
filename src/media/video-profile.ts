@@ -5,7 +5,8 @@ export type SignagePreset = "signage-1080p30" | "signage-4k30";
 export interface VideoOptions {
   codec: "h264" | "hevc";
   maxFps: number;
-  maxEdge: number;
+  /** An explicit `--max-edge`: both edges within it. Absent: the 1920x1080 default box, or the preset's. */
+  maxEdge?: number;
   preset?: SignagePreset;
   noAudio?: boolean;
 }
@@ -35,15 +36,26 @@ const HEVC_LEVELS = [
   { name: "5.2", id: 156, frame: 8912896, rate: 1069547520 },
 ] as const;
 export const MAX_VIDEO_PIXELS = 3840 * 2160;
+/** The largest `--max-edge`: 4K is asked for with it or with `--preset signage-4k30`. */
+export const MAX_VIDEO_EDGE = 3840;
+/** The default box: a 1080p screen never decodes more than it shows. */
+const DEFAULT_BOX = { longEdge: 1920, shortEdge: 1080, pixels: 1920 * 1080 };
 
 export function videoBounds(options: VideoOptions): { longEdge: number; shortEdge: number; pixels: number; fps: number } {
-  const fullHd = options.preset === "signage-1080p30";
-  return {
-    longEdge: Math.min(options.maxEdge, fullHd ? 1920 : 3840),
-    shortEdge: Math.min(options.maxEdge, options.preset ? (fullHd ? 1080 : 2160) : 3840),
-    pixels: fullHd ? 1920 * 1080 : MAX_VIDEO_PIXELS,
-    fps: Math.min(options.maxFps, options.preset ? 30 : options.maxFps),
-  };
+  if (options.preset) {
+    const fullHd = options.preset === "signage-1080p30";
+    const edge = options.maxEdge ?? MAX_VIDEO_EDGE;
+    return {
+      longEdge: Math.min(edge, fullHd ? 1920 : 3840),
+      shortEdge: Math.min(edge, fullHd ? 1080 : 2160),
+      pixels: fullHd ? 1920 * 1080 : MAX_VIDEO_PIXELS,
+      fps: Math.min(options.maxFps, 30),
+    };
+  }
+  // An explicit --max-edge bounds both edges, within 3840x2160 worth of pixels.
+  const box = options.maxEdge === undefined ? DEFAULT_BOX
+    : { longEdge: options.maxEdge, shortEdge: options.maxEdge, pixels: MAX_VIDEO_PIXELS };
+  return { ...box, fps: options.maxFps };
 }
 
 /** Preserve orientation/aspect; bound both axes and total pixels before encoding. */

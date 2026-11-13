@@ -18,7 +18,7 @@ import {
 import { silentProgressReporter, type ProgressReporter } from "./progress.js";
 import { readWebpContainer } from "./webp.js";
 import type { LocalSpan } from "../log/types.js";
-import { planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
+import { MAX_VIDEO_EDGE, planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
 import { inspectH264Passthrough } from "./video-inspection.js";
 
 function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): ProgressReporter {
@@ -54,11 +54,12 @@ function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): Prog
 /**
  * Delivery targets for signage and kiosk playback.
  *
- * Both dimensions are bounded by MAX_EDGE, so a portrait source is capped the
- * same way a landscape source is. Aspect ratio is preserved and sources smaller
- * than the bound are never upscaled.
+ * An image fits both edges within `--max-edge`, MAX_EDGE by default, so a
+ * portrait source is capped the same way a landscape source is. A video fits
+ * 1920x1080 by default (video-profile.ts). Aspect ratio is preserved and
+ * sources smaller than the bound are never upscaled.
  */
-export const MAX_EDGE = 3840;
+export const MAX_EDGE = MAX_VIDEO_EDGE;
 export const DEFAULT_MAX_FPS = 30;
 export const DEFAULT_WEBP_QUALITY = 90;
 
@@ -68,9 +69,15 @@ export interface TranscodeOptions {
   codec: TranscodeCodec;
   maxFps: number;
   webpQuality: number;
-  maxEdge: number;
+  /** An explicit `--max-edge`; absent is MAX_EDGE for images and the 1920x1080 box for video. */
+  maxEdge?: number;
   preset?: SignagePreset;
   noAudio?: boolean;
+}
+
+/** The edge an image is bounded to. */
+function imageMaxEdge(options: TranscodeOptions): number {
+  return options.maxEdge ?? MAX_EDGE;
 }
 
 /**
@@ -193,10 +200,10 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
   if (!probe.hasVideo) {
     // ffmpeg has no animated-WebP demuxer, so a valid animated WebP probes empty.
     if (sourceWebp?.animated) {
-      if (sourceWebp.width > options.maxEdge || sourceWebp.height > options.maxEdge) {
+      if (sourceWebp.width > imageMaxEdge(options) || sourceWebp.height > imageMaxEdge(options)) {
         throw usageError(
           `${path.basename(filePath)} is an animated WebP of ${sourceWebp.width}x${sourceWebp.height}, ` +
-            `which exceeds the ${options.maxEdge}px bound, and ffmpeg cannot decode animated WebP to resize it. ` +
+            `which exceeds the ${imageMaxEdge(options)}px bound, and ffmpeg cannot decode animated WebP to resize it. ` +
             "Supply the original source, or add --no-transcode to upload it unchanged.",
         );
       }
@@ -213,7 +220,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
         filename: path.basename(filePath),
         contentType: "image/webp",
         passthrough: true,
-        reason: `source is already an animated WebP within ${options.maxEdge}px on both edges`,
+        reason: `source is already an animated WebP within ${imageMaxEdge(options)}px on both edges`,
         stage: "image",
         sourceBytes,
         outputBytes: sourceBytes,
@@ -342,14 +349,14 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     // so with both sizes, because nothing else in the envelope shows the source.
     const resized =
       kind === "image" &&
-      (probe.displayWidth > options.maxEdge || probe.displayHeight > options.maxEdge) &&
+      (probe.displayWidth > imageMaxEdge(options) || probe.displayHeight > imageMaxEdge(options)) &&
       (finalWidth !== probe.displayWidth || finalHeight !== probe.displayHeight)
         ? {
             sourceWidth: probe.displayWidth,
             sourceHeight: probe.displayHeight,
             width: finalWidth,
             height: finalHeight,
-            maxEdge: options.maxEdge,
+            maxEdge: imageMaxEdge(options),
           }
         : undefined;
     if (!measured) {
@@ -592,10 +599,10 @@ function passthroughReason(
   if (sourceWebp?.lossless) {
     return undefined;
   }
-  if (probe.displayWidth > options.maxEdge || probe.displayHeight > options.maxEdge) {
+  if (probe.displayWidth > imageMaxEdge(options) || probe.displayHeight > imageMaxEdge(options)) {
     return undefined;
   }
-  return `source is already WebP within ${options.maxEdge}px on both edges`;
+  return `source is already WebP within ${imageMaxEdge(options)}px on both edges`;
 }
 
 interface EncodePlan {
@@ -780,7 +787,7 @@ function planVideo(
   }
 
   const delivery = planVideoDelivery(probe, options);
-  const { filter, warnings } = videoFilterChain(toolchain, probe, options.maxEdge, delivery);
+  const { filter, warnings } = videoFilterChain(toolchain, probe, MAX_VIDEO_EDGE, delivery);
   const { rate, gop } = encodeTiming(probe, delivery.fps);
   const size = delivery;
 
@@ -917,9 +924,9 @@ function planImageFfmpeg(
   output: string,
   animated: boolean,
 ): EncodePlan {
-  const size = boundedSize(probe.displayWidth, probe.displayHeight, options.maxEdge);
+  const size = boundedSize(probe.displayWidth, probe.displayHeight, imageMaxEdge(options));
   const scale =
-    `scale=w='min(${options.maxEdge},iw)':h='min(${options.maxEdge},ih)'` +
+    `scale=w='min(${imageMaxEdge(options)},iw)':h='min(${imageMaxEdge(options)},ih)'` +
     ":force_original_aspect_ratio=decrease";
 
   // libwebp_anim writes inter-frame differences, so an animation encoded with it
@@ -949,7 +956,7 @@ function planImageFfmpeg(
     args,
     target: animated ? "animated WebP" : "WebP",
     reason: `converted to ${animated ? "animated " : ""}WebP quality ${options.webpQuality}, bounded to ${
-      options.maxEdge
+      imageMaxEdge(options)
     }px on both edges`,
     progressDurationSeconds: animated ? probe.durationSeconds : 0,
     outputWidth: size.width,
@@ -965,7 +972,7 @@ function planImageCwebp(
   input: string,
   output: string,
 ): EncodePlan {
-  const size = boundedImageSize(probe.displayWidth, probe.displayHeight, options.maxEdge);
+  const size = boundedImageSize(probe.displayWidth, probe.displayHeight, imageMaxEdge(options));
   const needsResize = size.width !== probe.displayWidth || size.height !== probe.displayHeight;
   // Match `cwebp -q N -alpha_q 100 INPUT -o OUTPUT`. Never `-lossless`.
   const args = ["-q", String(options.webpQuality), "-alpha_q", "100"];
@@ -978,7 +985,7 @@ function planImageCwebp(
     command: cwebp.cwebp,
     args,
     target: "WebP",
-    reason: `converted to WebP quality ${options.webpQuality} with cwebp, bounded to ${options.maxEdge}px on both edges`,
+    reason: `converted to WebP quality ${options.webpQuality} with cwebp, bounded to ${imageMaxEdge(options)}px on both edges`,
     progressDurationSeconds: 0,
     outputWidth: size.width,
     outputHeight: size.height,

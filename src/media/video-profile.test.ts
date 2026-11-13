@@ -5,7 +5,7 @@ import { transcodeOptionsFromArgs } from "../commands.js";
 import { parseProbePayload } from "./ffmpeg.js";
 import { boundedVideoSize, planVideoDelivery, validateVideoOutput, videoLevel, type VideoOptions } from "./video-profile.js";
 
-const defaults: VideoOptions = { codec: "h264", maxFps: 30, maxEdge: 3840 };
+const defaults: VideoOptions = { codec: "h264", maxFps: 30 };
 function probe(video: Record<string, unknown> = {}, audio: Record<string, unknown> | false = {}) {
   return parseProbePayload(JSON.stringify({
     streams: [{ codec_type: "video", codec_name: "h264", codec_tag_string: "avc1", profile: "High", level: 42,
@@ -30,8 +30,27 @@ for (const [name, width, height, preset, expected] of [
   });
 }
 
-test("default video pixel budget prevents a 3840-square decode surface", () => {
-  const size = boundedVideoSize(3840, 3840, defaults);
+for (const [name, width, height, expected] of [
+  ["4K landscape", 3840, 2160, [1920, 1080]],
+  ["4K portrait", 2160, 3840, [1080, 1920]],
+  ["square", 4000, 4000, [1080, 1080]],
+  ["ultrawide", 6000, 1000, [1920, 320]],
+  ["1080p unchanged", 1920, 1080, [1920, 1080]],
+  ["no upscale", 1280, 720, [1280, 720]],
+] as const) {
+  test(`default video fits 1920x1080: ${name}`, () => {
+    assert.deepEqual(boundedVideoSize(width, height, defaults), { width: expected[0], height: expected[1] });
+  });
+}
+
+test("the default delivers a 4K60 source as 1080p at the one 30 fps rate, level 4.2", () => {
+  const result = planVideoDelivery(probe({ width: 3840, height: 2160, avg_frame_rate: "60/1" }), defaults);
+  assert.deepEqual([result.width, result.height, result.fps, result.level], [1920, 1080, 30, "4.2"]);
+});
+
+test("--max-edge 3840 keeps 4K, within a 3840x2160 pixel budget that prevents a 3840-square decode surface", () => {
+  assert.deepEqual(boundedVideoSize(3840, 2160, { ...defaults, maxEdge: 3840 }), { width: 3840, height: 2160 });
+  const size = boundedVideoSize(3840, 3840, { ...defaults, maxEdge: 3840 });
   assert.equal(size.width, 2880);
   assert.equal(size.height, 2880);
   assert.ok(size.width * size.height <= 3840 * 2160);
@@ -110,4 +129,7 @@ test("signage flags parse without consuming positional files", () => {
   assert.equal(options.preset, "signage-1080p30");
   assert.equal(options.noAudio, true);
   assert.equal(options.codec, "h264");
+  assert.equal(options.maxEdge, undefined, "no --max-edge leaves the 1920x1080 default to the video profile");
+  assert.equal(options.maxFps, 30);
+  assert.equal(transcodeOptionsFromArgs(parseArgv(["media", "upload", "clip.mov", "--max-edge", "3840"])).maxEdge, 3840);
 });

@@ -658,15 +658,16 @@ export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
   if (!(maxFps > 0) || maxFps > 240) {
     throw usageError("--max-fps must be greater than 0 and at most 240.");
   }
-  const maxEdge = flagNumber(args.flags, "max-edge") ?? MAX_EDGE;
-  if (!Number.isInteger(maxEdge) || maxEdge < 16 || maxEdge > MAX_EDGE) {
+  // An absent --max-edge stays absent: video then fits 1920x1080 and images MAX_EDGE.
+  const maxEdge = flagNumber(args.flags, "max-edge");
+  if (maxEdge !== undefined && (!Number.isInteger(maxEdge) || maxEdge < 16 || maxEdge > MAX_EDGE)) {
     throw usageError(`--max-edge must be a whole number between 16 and ${MAX_EDGE}.`);
   }
   const webpQuality = flagNumber(args.flags, "webp-quality") ?? DEFAULT_WEBP_QUALITY;
   if (!Number.isInteger(webpQuality) || webpQuality < 1 || webpQuality > 100) {
     throw usageError("--webp-quality must be a whole number between 1 and 100.");
   }
-  return { codec, maxFps, maxEdge, webpQuality,
+  return { codec, maxFps, ...(maxEdge !== undefined ? { maxEdge } : {}), webpQuality,
     preset: preset === "signage-1080p30" || preset === "signage-4k30" ? preset : undefined, noAudio };
 }
 

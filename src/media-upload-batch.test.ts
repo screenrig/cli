@@ -23,7 +23,7 @@ import {
   writeUploadBatchStateAtomic,
 } from "./media-upload-batch.js";
 import { silentProgressReporter } from "./media/progress.js";
-import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, MAX_EDGE } from "./media/transcode.js";
+import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY } from "./media/transcode.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, listPage } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
@@ -35,7 +35,6 @@ const TOKEN = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAA
 const DEFAULT_TRANSCODE = {
   codec: DEFAULT_CODEC,
   maxFps: DEFAULT_MAX_FPS,
-  maxEdge: MAX_EDGE,
   webpQuality: DEFAULT_WEBP_QUALITY,
 } as const;
 

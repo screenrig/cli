@@ -31,7 +31,6 @@ import {
   isAnimated,
   isHdr,
   MAX_AUDIO_BYTES,
-  MAX_EDGE,
   summarizeFfmpegError,
   transcodeForUpload,
   type TranscodeOptions,
@@ -44,7 +43,6 @@ const DEFAULT_OPTIONS: TranscodeOptions = {
   codec: DEFAULT_CODEC,
   maxFps: DEFAULT_MAX_FPS,
   webpQuality: DEFAULT_WEBP_QUALITY,
-  maxEdge: MAX_EDGE,
 };
 
 /** The Standard plan's video limit, which every video source here is held to. */
@@ -484,7 +482,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
   await writeFile(source, Buffer.alloc(2048, 3));
   const { runtime, calls, stderr } = fakeRuntime({
     probe: probeJson({ width: 6000, height: 2400, avg_frame_rate: "60/1" }),
-    outputProbe: encodedVideoProbe({ width: 3840, height: 1536, level: 51 }),
+    outputProbe: encodedVideoProbe({ width: 1920, height: 768, level: 42 }),
     progressSeconds: [3, 6, 9],
   });
   const seen: string[] = [];
@@ -510,8 +508,8 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.equal(result.contentType, "video/mp4");
     assert.equal(result.filename, "clip.mp4");
     assert.equal(result.passthrough, false);
-    assert.equal(result.width, 3840);
-    assert.equal(result.height, 1536);
+    assert.equal(result.width, 1920, "the default fits 1920x1080");
+    assert.equal(result.height, 768);
     assert.ok(result.durationMs >= 0);
     assert.equal((await stat(result.filePath)).size, 4096);
 
@@ -522,7 +520,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.equal(DEFAULT_CODEC, "h264", "the default stays H.264");
     assert.equal(valueAfter("-c:v"), "libx264");
     assert.equal(valueAfter("-profile:v"), "high");
-    assert.equal(valueAfter("-level:v"), "5.1");
+    assert.equal(valueAfter("-level:v"), "4.2");
     assert.equal(valueAfter("-crf"), "23");
     assert.equal(valueAfter("-refs"), "2");
     assert.match(String(valueAfter("-x264-params")), /colorprim=bt709:transfer=bt709:colormatrix=bt709/);
@@ -532,7 +530,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.equal(valueAfter("-r"), "30");
     assert.equal(valueAfter("-c:a"), "aac");
     assert.equal(valueAfter("-colorspace"), "bt709");
-    assert.equal(valueAfter("-vf"), "scale=w=3840:h=1536,setsar=1");
+    assert.equal(valueAfter("-vf"), "scale=w=1920:h=768,setsar=1");
     assert.ok(args.includes("-progress") && args.includes("pipe:1"));
     assert.ok(args.includes("-nostdin"));
 
@@ -559,7 +557,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   await writeFile(source, Buffer.alloc(2048, 3));
   const { runtime, calls } = fakeRuntime({
     probe: probeJson({ width: 6000, height: 2400, avg_frame_rate: "60/1" }),
-    outputProbe: encodedVideoProbe({ width: 3840, height: 1536, codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 153 }),
+    outputProbe: encodedVideoProbe({ width: 1920, height: 768, codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 153 }),
     progressSeconds: [6],
   });
 
@@ -571,8 +569,8 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
 
   try {
     assert.equal(result.contentType, "video/mp4");
-    assert.equal(result.width, 3840);
-    assert.equal(result.height, 1536);
+    assert.equal(result.width, 1920);
+    assert.equal(result.height, 768);
     const args = encodeCall(calls)?.args ?? [];
     const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
     assert.equal(valueAfter("-c:v"), "libx265");
@@ -590,6 +588,35 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("4K is an opt-in: --max-edge 3840 and --preset signage-4k30 keep a 4K source at 4K", async () => {
+  for (const [name, options, width, height] of [
+    ["--max-edge 3840", { ...DEFAULT_OPTIONS, maxEdge: 3840 }, 3840, 2160],
+    ["--preset signage-4k30", { ...DEFAULT_OPTIONS, preset: "signage-4k30" as const }, 3840, 2160],
+    ["default", DEFAULT_OPTIONS, 1920, 1080],
+  ] as const) {
+    resetFfmpegToolchainCache();
+    const dir = await testTemp("transcode-4k-");
+    const source = path.join(dir, "clip.mov");
+    await writeFile(source, Buffer.alloc(2048, 3));
+    const { runtime, calls } = fakeRuntime({
+      probe: probeJson({ width: 3840, height: 2160, avg_frame_rate: "60/1" }),
+      outputProbe: encodedVideoProbe({ width, height, level: width === 3840 ? 51 : 42 }),
+      progressSeconds: [6],
+    });
+    const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source, options });
+    try {
+      const args = encodeCall(calls)?.args ?? [];
+      const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
+      assert.equal(valueAfter("-vf"), `scale=w=${width}:h=${height},setsar=1`, name);
+      assert.equal(valueAfter("-r"), "30", name);
+      assert.deepEqual([result.width, result.height], [width, height], name);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+    }
   }
 });
 
@@ -1239,7 +1266,7 @@ test("reported dimensions are measured from the output, not predicted from the p
     outputProbe: encodedVideoProbe({ width: 3840, height: 2158, level: 51 }),
     progressSeconds: [6],
   });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: DEFAULT_OPTIONS, videoBytes: STANDARD_VIDEO_BYTES });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: { ...DEFAULT_OPTIONS, maxEdge: 3840 }, videoBytes: STANDARD_VIDEO_BYTES });
   try {
     assert.notDeepEqual(boundedSize(3841, 2160, 3840), { width: 3840, height: 2158 });
     assert.equal(result.width, 3840);
