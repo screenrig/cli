@@ -41,7 +41,6 @@ import { createMemoryLogger } from "../log/logger.js";
 
 const DEFAULT_OPTIONS: TranscodeOptions = {
   codec: DEFAULT_CODEC,
-  maxFps: DEFAULT_MAX_FPS,
   webpQuality: DEFAULT_WEBP_QUALITY,
 };
 
@@ -557,7 +556,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   await writeFile(source, Buffer.alloc(2048, 3));
   const { runtime, calls } = fakeRuntime({
     probe: probeJson({ width: 6000, height: 2400, avg_frame_rate: "60/1" }),
-    outputProbe: encodedVideoProbe({ width: 1920, height: 768, codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 153 }),
+    outputProbe: encodedVideoProbe({ width: 1920, height: 768, codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 123 }),
     progressSeconds: [6],
   });
 
@@ -581,7 +580,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
     assert.equal(valueAfter("-movflags"), "+faststart");
     assert.equal(valueAfter("-r"), "30");
     assert.match(String(valueAfter("-x265-params")), /min-keyint=60/);
-    assert.match(String(valueAfter("-x265-params")), /level-idc=5.1:colorprim=bt709:transfer=bt709:colormatrix=bt709/);
+    assert.match(String(valueAfter("-x265-params")), /level-idc=4.1:colorprim=bt709:transfer=bt709:colormatrix=bt709/);
     assert.doesNotMatch(String(valueAfter("-x265-params")), /output-depth/);
     assert.match(result.reason, /H\.265/);
     assert.doesNotMatch(result.reason, /faststart/);
@@ -591,27 +590,38 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   }
 });
 
-test("4K is an opt-in: --max-edge 3840 and --preset signage-4k30 keep a 4K source at 4K", async () => {
-  for (const [name, options, width, height] of [
-    ["--max-edge 3840", { ...DEFAULT_OPTIONS, maxEdge: 3840 }, 3840, 2160],
-    ["--preset signage-4k30", { ...DEFAULT_OPTIONS, preset: "signage-4k30" as const }, 3840, 2160],
-    ["default", DEFAULT_OPTIONS, 1920, 1080],
+test("1080p30 H.264 is the default; 1080p60, 4K30 and HEVC are opt-ins, each at one constant rate", async () => {
+  assert.equal(DEFAULT_MAX_FPS, 30, "the one default rate stays 30 fps");
+  assert.equal(DEFAULT_CODEC, "h264");
+  for (const [name, options, width, height, rate, level] of [
+    ["default", DEFAULT_OPTIONS, 1920, 1080, "30", "4.2"],
+    ["--preset signage-1080p60", { ...DEFAULT_OPTIONS, preset: "signage-1080p60" as const }, 1920, 1080, "60", "4.2"],
+    ["--preset signage-1080p60 --codec hevc", { ...DEFAULT_OPTIONS, preset: "signage-1080p60" as const, codec: "hevc" as const }, 1920, 1080, "60", "4.1"],
+    ["--preset signage-4k30", { ...DEFAULT_OPTIONS, preset: "signage-4k30" as const }, 3840, 2160, "30", "5.1"],
+    ["--preset signage-4k30 --codec hevc", { ...DEFAULT_OPTIONS, preset: "signage-4k30" as const, codec: "hevc" as const }, 3840, 2160, "30", "5.1"],
+    ["--max-edge 3840", { ...DEFAULT_OPTIONS, maxEdge: 3840 }, 3840, 2160, "30", "5.1"],
   ] as const) {
     resetFfmpegToolchainCache();
-    const dir = await testTemp("transcode-4k-");
+    const dir = await testTemp("transcode-profile-");
     const source = path.join(dir, "clip.mov");
     await writeFile(source, Buffer.alloc(2048, 3));
+    const hevc = options.codec === "hevc";
+    const levelId = Math.round(Number(level) * (hevc ? 30 : 10));
     const { runtime, calls } = fakeRuntime({
-      probe: probeJson({ width: 3840, height: 2160, avg_frame_rate: "60/1" }),
-      outputProbe: encodedVideoProbe({ width, height, level: width === 3840 ? 51 : 42 }),
+      probe: probeJson({ width: 3840, height: 2160, avg_frame_rate: "30000/1001" }),
+      outputProbe: encodedVideoProbe({ width, height, level: levelId, avg_frame_rate: `${rate}/1`, r_frame_rate: `${rate}/1`,
+        ...(hevc ? { codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main" } : {}) }),
       progressSeconds: [6],
     });
-    const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source, options });
+    const result = await transcodeForUpload({ videoBytes: STANDARD_VIDEO_BYTES, runtime, filePath: source, options })
+      .catch((error: unknown) => { throw new Error(`${name}: ${String(error)}`); });
     try {
       const args = encodeCall(calls)?.args ?? [];
       const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
+      assert.equal(valueAfter("-c:v"), hevc ? "libx265" : "libx264", name);
       assert.equal(valueAfter("-vf"), `scale=w=${width}:h=${height},setsar=1`, name);
-      assert.equal(valueAfter("-r"), "30", name);
+      assert.equal(valueAfter("-r"), rate, name);
+      assert.equal(valueAfter("-level:v"), level, name);
       assert.deepEqual([result.width, result.height], [width, height], name);
     } finally {
       await rm(dir, { recursive: true, force: true });

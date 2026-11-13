@@ -26,7 +26,8 @@ import { FetchTransport } from "./transport/http.js";
 import { quotedRevision } from "./if-match.js";
 import { downloadReportFile, reportFileResult, reportFormat, wantsReportFile, type ReportFormat } from "./report-export.js";
 import { createProgressReporter, silentProgressReporter, type ProgressReporter } from "./media/progress.js";
-import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, MAX_EDGE, type TranscodeCodec, type TranscodeOptions } from "./media/transcode.js";
+import { DEFAULT_CODEC, DEFAULT_WEBP_QUALITY, MAX_EDGE, type TranscodeCodec, type TranscodeOptions } from "./media/transcode.js";
+import { SIGNAGE_PRESETS, type SignagePreset } from "./media/video-profile.js";
 import { NotesApi, resourceNoteLines, resourceNotesWarning, type NoteAboutType, type NoteList } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
 
@@ -628,8 +629,8 @@ export function aggregateDays(from: string | undefined, to: string | undefined, 
 /** Flags that shape the pre-upload transcode. */
 export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
   const preset = flagString(args.flags, "preset");
-  if (args.flags.preset !== undefined && preset !== "signage-1080p30" && preset !== "signage-4k30") {
-    throw usageError("--preset accepts signage-1080p30 or signage-4k30.");
+  if (args.flags.preset !== undefined && !SIGNAGE_PRESETS.includes(preset as SignagePreset)) {
+    throw usageError(`--preset accepts ${SIGNAGE_PRESETS.join(", ")}.`);
   }
   if (args.flags["no-audio"] !== undefined && args.flags["no-audio"] !== true) throw usageError("--no-audio takes no value.");
   const noAudio = flagBool(args.flags, "no-audio");
@@ -654,11 +655,12 @@ export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
     }
   }
 
-  const maxFps = flagNumber(args.flags, "max-fps") ?? DEFAULT_MAX_FPS;
-  if (!(maxFps > 0) || maxFps > 240) {
+  // Absent limits stay absent: video then fits 1920x1080 at 30 fps (or the preset's size and
+  // rate) and images MAX_EDGE.
+  const maxFps = flagNumber(args.flags, "max-fps");
+  if (maxFps !== undefined && (!(maxFps > 0) || maxFps > 240)) {
     throw usageError("--max-fps must be greater than 0 and at most 240.");
   }
-  // An absent --max-edge stays absent: video then fits 1920x1080 and images MAX_EDGE.
   const maxEdge = flagNumber(args.flags, "max-edge");
   if (maxEdge !== undefined && (!Number.isInteger(maxEdge) || maxEdge < 16 || maxEdge > MAX_EDGE)) {
     throw usageError(`--max-edge must be a whole number between 16 and ${MAX_EDGE}.`);
@@ -667,8 +669,8 @@ export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
   if (!Number.isInteger(webpQuality) || webpQuality < 1 || webpQuality > 100) {
     throw usageError("--webp-quality must be a whole number between 1 and 100.");
   }
-  return { codec, maxFps, ...(maxEdge !== undefined ? { maxEdge } : {}), webpQuality,
-    preset: preset === "signage-1080p30" || preset === "signage-4k30" ? preset : undefined, noAudio };
+  return { codec, ...(maxFps !== undefined ? { maxFps } : {}), ...(maxEdge !== undefined ? { maxEdge } : {}), webpQuality,
+    preset: preset as SignagePreset | undefined, noAudio };
 }
 
 export function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressReporter {

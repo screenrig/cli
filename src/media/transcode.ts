@@ -18,7 +18,7 @@ import {
 import { silentProgressReporter, type ProgressReporter } from "./progress.js";
 import { readWebpContainer } from "./webp.js";
 import type { LocalSpan } from "../log/types.js";
-import { MAX_VIDEO_EDGE, planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
+import { DEFAULT_MAX_FPS, MAX_VIDEO_EDGE, planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
 import { inspectH264Passthrough } from "./video-inspection.js";
 
 function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): ProgressReporter {
@@ -60,14 +60,15 @@ function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): Prog
  * sources smaller than the bound are never upscaled.
  */
 export const MAX_EDGE = MAX_VIDEO_EDGE;
-export const DEFAULT_MAX_FPS = 30;
 export const DEFAULT_WEBP_QUALITY = 90;
+export { DEFAULT_MAX_FPS };
 
 export type TranscodeCodec = "hevc" | "h264";
 
 export interface TranscodeOptions {
   codec: TranscodeCodec;
-  maxFps: number;
+  /** An explicit `--max-fps`; absent is DEFAULT_MAX_FPS, or the preset's rate. */
+  maxFps?: number;
   webpQuality: number;
   /** An explicit `--max-edge`; absent is MAX_EDGE for images and the 1920x1080 box for video. */
   maxEdge?: number;

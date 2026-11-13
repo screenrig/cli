@@ -1,10 +1,12 @@
 import { usageError } from "../problems.js";
 import type { MediaProbe } from "./ffmpeg.js";
 
-export type SignagePreset = "signage-1080p30" | "signage-4k30";
+export const SIGNAGE_PRESETS = ["signage-1080p30", "signage-1080p60", "signage-4k30"] as const;
+export type SignagePreset = (typeof SIGNAGE_PRESETS)[number];
 export interface VideoOptions {
   codec: "h264" | "hevc";
-  maxFps: number;
+  /** An explicit `--max-fps`. Absent: DEFAULT_MAX_FPS, or the preset's rate. */
+  maxFps?: number;
   /** An explicit `--max-edge`: both edges within it. Absent: the 1920x1080 default box, or the preset's. */
   maxEdge?: number;
   preset?: SignagePreset;
@@ -23,7 +25,8 @@ export interface VideoDelivery {
 // Pixel/throughput limits from FFmpeg's H.264 and HEVC level tables:
 // https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/h264_levels.c
 // https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/h265_profile_level.c
-// Keep the existing 4.2/5.1 floors, which accommodate the 8M rate / 16M VBV.
+// The floors, H.264 4.2 and HEVC 4.1, are the lowest that hold the 8M rate / 16M VBV
+// (HEVC 4.0's 12 Mbit CPB does not); both carry 1080p60.
 // AVC allows four DPB frames for fast preset references plus B-frame reordering.
 // Higher source rates must fit 5.2 or fail.
 const AVC_LEVELS = [
@@ -32,30 +35,39 @@ const AVC_LEVELS = [
   { name: "5.2", id: 52, frame: 36864, rate: 2073600, dpb: 184320 },
 ] as const;
 const HEVC_LEVELS = [
+  { name: "4.1", id: 123, frame: 2228224, rate: 133693440 },
   { name: "5.1", id: 153, frame: 8912896, rate: 534773760 },
   { name: "5.2", id: 156, frame: 8912896, rate: 1069547520 },
 ] as const;
 export const MAX_VIDEO_PIXELS = 3840 * 2160;
 /** The largest `--max-edge`: 4K is asked for with it or with `--preset signage-4k30`. */
 export const MAX_VIDEO_EDGE = 3840;
+/** The one output rate of a video without --max-fps or a preset. */
+export const DEFAULT_MAX_FPS = 30;
 /** The default box: a 1080p screen never decodes more than it shows. */
 const DEFAULT_BOX = { longEdge: 1920, shortEdge: 1080, pixels: 1920 * 1080 };
+const PRESETS: Record<SignagePreset, { longEdge: number; shortEdge: number; pixels: number; fps: number }> = {
+  "signage-1080p30": { ...DEFAULT_BOX, fps: 30 },
+  "signage-1080p60": { ...DEFAULT_BOX, fps: 60 },
+  "signage-4k30": { longEdge: 3840, shortEdge: 2160, pixels: MAX_VIDEO_PIXELS, fps: 30 },
+};
 
 export function videoBounds(options: VideoOptions): { longEdge: number; shortEdge: number; pixels: number; fps: number } {
   if (options.preset) {
-    const fullHd = options.preset === "signage-1080p30";
+    // --max-edge and --max-fps tighten a preset but never enlarge it.
+    const preset = PRESETS[options.preset];
     const edge = options.maxEdge ?? MAX_VIDEO_EDGE;
     return {
-      longEdge: Math.min(edge, fullHd ? 1920 : 3840),
-      shortEdge: Math.min(edge, fullHd ? 1080 : 2160),
-      pixels: fullHd ? 1920 * 1080 : MAX_VIDEO_PIXELS,
-      fps: Math.min(options.maxFps, 30),
+      longEdge: Math.min(edge, preset.longEdge),
+      shortEdge: Math.min(edge, preset.shortEdge),
+      pixels: preset.pixels,
+      fps: Math.min(options.maxFps ?? preset.fps, preset.fps),
     };
   }
   // An explicit --max-edge bounds both edges, within 3840x2160 worth of pixels.
   const box = options.maxEdge === undefined ? DEFAULT_BOX
     : { longEdge: options.maxEdge, shortEdge: options.maxEdge, pixels: MAX_VIDEO_PIXELS };
-  return { ...box, fps: options.maxFps };
+  return { ...box, fps: options.maxFps ?? DEFAULT_MAX_FPS };
 }
 
 /** Preserve orientation/aspect; bound both axes and total pixels before encoding. */

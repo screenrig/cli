@@ -5,7 +5,7 @@ import { transcodeOptionsFromArgs } from "../commands.js";
 import { parseProbePayload } from "./ffmpeg.js";
 import { boundedVideoSize, planVideoDelivery, validateVideoOutput, videoLevel, type VideoOptions } from "./video-profile.js";
 
-const defaults: VideoOptions = { codec: "h264", maxFps: 30 };
+const defaults: VideoOptions = { codec: "h264" };
 function probe(video: Record<string, unknown> = {}, audio: Record<string, unknown> | false = {}) {
   return parseProbePayload(JSON.stringify({
     streams: [{ codec_type: "video", codec_name: "h264", codec_tag_string: "avc1", profile: "High", level: 42,
@@ -65,6 +65,24 @@ test("explicit limits can tighten but never enlarge a preset", () => {
   assert.equal(planVideoDelivery(probe(), { ...defaults, preset: "signage-4k30", maxFps: 24 }).fps, 24);
 });
 
+test("each preset is one size and one constant rate, in H.264 and in HEVC", () => {
+  for (const [preset, width, height, fps, h264, hevc] of [
+    ["signage-1080p30", 1920, 1080, 30, "4.2", "4.1"],
+    ["signage-1080p60", 1920, 1080, 60, "4.2", "4.1"],
+    ["signage-4k30", 3840, 2160, 30, "5.1", "5.1"],
+  ] as const) {
+    for (const source of ["24000/1001", "30/1", "50/1", "60/1"]) {
+      for (const [codec, level] of [["h264", h264], ["hevc", hevc]] as const) {
+        const result = planVideoDelivery(probe({ width: 3840, height: 2160, avg_frame_rate: source }), { ...defaults, codec, preset });
+        assert.deepEqual([result.width, result.height, result.fps, result.level], [width, height, fps, level], `${preset} ${codec} ${source}`);
+      }
+    }
+  }
+  // --max-fps tightens 1080p60 but never lifts a 30 fps preset.
+  assert.equal(planVideoDelivery(probe(), { ...defaults, preset: "signage-1080p60", maxFps: 30 }).fps, 30);
+  assert.equal(planVideoDelivery(probe(), { ...defaults, preset: "signage-4k30", maxFps: 60 }).fps, 30);
+});
+
 test("every source frame rate is delivered at the one preset rate", () => {
   for (const source of ["24000/1001", "25/1", "30000/1001", "30/1", "50/1", "60/1"]) {
     const result = planVideoDelivery(probe({ width: 1920, height: 1080, avg_frame_rate: source }),
@@ -86,7 +104,10 @@ test("H.264 level fits macroblocks, throughput and four DPB frames", () => {
   assert.throws(() => videoLevel("h264", 10000, 2, 1), /supported codec levels/);
 });
 
-test("HEVC levels retain the existing VBV-compatible floor and reject excess throughput", () => {
+test("HEVC levels start at the VBV-compatible 4.1 floor and reject excess throughput", () => {
+  assert.equal(videoLevel("hevc", 1920, 1080, 30).level, "4.1");
+  assert.equal(videoLevel("hevc", 1920, 1080, 60).level, "4.1");
+  assert.equal(videoLevel("hevc", 1080, 1920, 60).level, "4.1");
   assert.equal(videoLevel("hevc", 3840, 2160, 30).level, "5.1");
   assert.equal(videoLevel("hevc", 3840, 2160, 120).level, "5.2");
   assert.throws(() => videoLevel("hevc", 3840, 2160, 240), /supported codec levels/);
@@ -114,7 +135,7 @@ test("output read-back rejects stale levels and invalid delivery fields", () => 
 
 test("silent delivery rejects unexpected audio; absent HEVC scan metadata stays unknown", () => {
   const options = { ...defaults, codec: "hevc" as const, noAudio: true };
-  const source = probe({ codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 153, field_order: "unknown" }, false);
+  const source = probe({ codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 123, field_order: "unknown" }, false);
   const delivery = planVideoDelivery(source, options);
   validateVideoOutput(source, delivery, options);
   assert.equal(source.fieldOrder, "", "the probe normalizes unavailable fields; the envelope reports unknown");
@@ -130,6 +151,7 @@ test("signage flags parse without consuming positional files", () => {
   assert.equal(options.noAudio, true);
   assert.equal(options.codec, "h264");
   assert.equal(options.maxEdge, undefined, "no --max-edge leaves the 1920x1080 default to the video profile");
-  assert.equal(options.maxFps, 30);
+  assert.equal(options.maxFps, undefined, "no --max-fps leaves 30 fps, or the preset's rate, to the video profile");
+  assert.equal(transcodeOptionsFromArgs(parseArgv(["media", "upload", "clip.mov", "--preset", "signage-1080p60", "--codec", "hevc"])).preset, "signage-1080p60");
   assert.equal(transcodeOptionsFromArgs(parseArgv(["media", "upload", "clip.mov", "--max-edge", "3840"])).maxEdge, 3840);
 });

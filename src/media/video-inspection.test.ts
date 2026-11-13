@@ -7,12 +7,11 @@ import { testTemp } from "../test-temp.js";
 import { prepareMediaUpload } from "../media-upload.js";
 import type { CliRuntime, RunProcessRequest } from "../runtime.js";
 import { parseProbePayload, resetFfmpegToolchainCache } from "./ffmpeg.js";
-import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, transcodeForUpload, type TranscodeOptions } from "./transcode.js";
+import { DEFAULT_CODEC, DEFAULT_WEBP_QUALITY, transcodeForUpload, type TranscodeOptions } from "./transcode.js";
 import { H264HeaderInspection, VideoPacketInspection } from "./video-inspection.js";
 
 const DEFAULT_OPTIONS: TranscodeOptions = {
   codec: DEFAULT_CODEC,
-  maxFps: DEFAULT_MAX_FPS,
   webpQuality: DEFAULT_WEBP_QUALITY,
 };
 

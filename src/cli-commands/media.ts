@@ -3,6 +3,7 @@ import { handleMediaReplace, handleMediaRestore, handleMediaVersionDelete, handl
 import type { CommandActionBinder } from "./types.js";
 import { handleSelectorPreview, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaAvailability, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../handlers/media.js";
 import { type Command, Option } from "commander";
+import { SIGNAGE_PRESETS } from "../media/video-profile.js";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { connectionIdOption } from "../connection-ids.js";
 import {
@@ -37,11 +38,11 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
     .addOption(new Option("--codec <h264|hevc>", "Choose the video codec").choices(["h264", "hevc"]).default("h264").conflicts(["transcode"]))
-    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
+    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30, or the preset's)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
     .addOption(new Option("--max-edge <PIXELS>", "Fit both edges of a video or image within PIXELS, up to 3840 (default: video fits 1920x1080, images 3840; --max-edge 3840 keeps 4K video)").argParser(positiveInteger("max-edge")).conflicts(["transcode"]))
     .addOption(new Option("--webp-quality <1-100>", "Set WebP quality").argParser(positiveInteger("webp-quality")).conflicts(["transcode"]))
     .option("--no-progress", "Suppress stderr progress")
-    .addOption(new Option("--preset <PRESET>", "Choose a transcoding preset").choices(["signage-1080p30", "signage-4k30"]).conflicts(["transcode"]))
+    .addOption(new Option("--preset <PRESET>", "Video size and one constant rate: signage-1080p30, signage-1080p60 or signage-4k30 (default: fit 1920x1080 at 30 fps)").choices([...SIGNAGE_PRESETS]).conflicts(["transcode"]))
     .addOption(new Option("--no-audio", "Remove the audio track when transcoding").conflicts(["transcode"]))
     .action(bind(handleMediaUpload));
 
@@ -55,11 +56,11 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
     .addOption(new Option("--codec <h264|hevc>", "Choose the video codec").choices(["h264", "hevc"]).default("h264").conflicts(["transcode"]))
-    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
+    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30, or the preset's)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
     .addOption(new Option("--max-edge <PIXELS>", "Fit both edges of a video or image within PIXELS, up to 3840 (default: video fits 1920x1080, images 3840; --max-edge 3840 keeps 4K video)").argParser(positiveInteger("max-edge")).conflicts(["transcode"]))
     .addOption(new Option("--webp-quality <1-100>", "Set WebP quality").argParser(positiveInteger("webp-quality")).conflicts(["transcode"]))
     .option("--no-progress", "Suppress stderr progress")
-    .addOption(new Option("--preset <PRESET>", "Choose a transcoding preset").choices(["signage-1080p30", "signage-4k30"]).conflicts(["transcode"]))
+    .addOption(new Option("--preset <PRESET>", "Video size and one constant rate: signage-1080p30, signage-1080p60 or signage-4k30 (default: fit 1920x1080 at 30 fps)").choices([...SIGNAGE_PRESETS]).conflicts(["transcode"]))
     .addOption(new Option("--no-audio", "Remove the audio track when transcoding").conflicts(["transcode"]))
     .action(bind(handleMediaReplace));
 
@@ -92,10 +93,10 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--no-progress", "Suppress stderr progress")
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .addOption(new Option("--codec <h264|hevc>", "Choose the video codec").choices(["h264", "hevc"]).default("h264").conflicts(["transcode"]))
-    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
+    .addOption(new Option("--max-fps <N>", "Constant output frame rate; every video is encoded at exactly this rate (default 30, or the preset's)").argParser(positiveNumber("max-fps")).conflicts(["transcode"]))
     .addOption(new Option("--max-edge <PIXELS>", "Fit both edges of a video or image within PIXELS, up to 3840 (default: video fits 1920x1080, images 3840; --max-edge 3840 keeps 4K video)").argParser(positiveInteger("max-edge")).conflicts(["transcode"]))
     .addOption(new Option("--webp-quality <1-100>", "Set WebP quality").argParser(positiveInteger("webp-quality")).conflicts(["transcode"]))
-    .addOption(new Option("--preset <PRESET>", "Choose a transcoding preset").choices(["signage-1080p30", "signage-4k30"]).conflicts(["transcode"]))
+    .addOption(new Option("--preset <PRESET>", "Video size and one constant rate: signage-1080p30, signage-1080p60 or signage-4k30 (default: fit 1920x1080 at 30 fps)").choices([...SIGNAGE_PRESETS]).conflicts(["transcode"]))
     .addOption(new Option("--no-audio", "Remove the audio track when transcoding").conflicts(["transcode"]))
     .action(bind(handleMediaUploadBatch));
 
