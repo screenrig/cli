@@ -1545,7 +1545,7 @@ paths:
     get:
       operationId: oauthAuthorize
       description: >-
-        OAuth 2.0 authorization endpoint for connected apps (MCP clients). client_id is a client ID metadata document URL (https, port 443, fetched with no redirects, 64 KiB and 5 seconds at most, public addresses only) or a registered client id. The request is validated in order: the client, the exact redirect_uri (an http loopback redirect of 127.0.0.1, [::1] or localhost matches on any port), response_type code, code_challenge with code_challenge_method S256, resource (https://api.<domain>/mcp, another MCP resource whose protected resource metadata names this server, or absent), then scope (access:read, the default, access:propose, access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error redirects to the redirect_uri with error, error_description, state and iss (RFC 9207). Success answers 303 to the dashboard consent page, where a person chooses the project, the access level (Read only by default, Propose or Manage) and the capabilities; approval redirects with code, state and iss. 30 requests per client address per minute.
+        OAuth 2.0 authorization endpoint for connected apps (MCP clients). client_id is a client ID metadata document URL (https, port 443, fetched with no redirects, 64 KiB and 5 seconds at most, public addresses only) or a registered client id. The request is validated in order: the client, the exact redirect_uri (an http loopback redirect of 127.0.0.1, [::1] or localhost matches on any port), response_type code, code_challenge with code_challenge_method S256, resource (https://api.<domain>/mcp, another MCP resource whose protected resource metadata names this server, or absent), then scope (access:read, the default, access:propose, access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error redirects to the redirect_uri with error, error_description, state and iss (RFC 9207). Success answers 303 to the dashboard consent page, where a person chooses the project, the access level (starting at the level the application asked for, or Propose when the person cannot give Manage; Read only, Propose or Manage) and the capabilities; approval redirects with code, state and iss. 30 requests per client address per minute.
       security: []
       parameters:
         - {name: client_id, in: query, required: true, schema: {type: string}}
@@ -17606,7 +17606,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Report unavailable capture with an empty body. Players send unsupported_surface or capture_failed. Any other non-empty value is recorded as capture_failed, never refused (docs/player-compatibility.md §1.1). Only the current pending capture may fail. No pixels or partial image are stored; screen.screenshot_failed carries this reason and status becomes unavailable.
+          description: Report unavailable capture with an empty body. Players send unsupported_surface, capture_failed or not_on_glass (the Player's activity is not visible, for example because another app is in front). Any other non-empty value is recorded as capture_failed, never refused (docs/player-compatibility.md §1.1). Only the current pending capture may fail. No pixels or partial image are stored; screen.screenshot_failed carries this reason and status becomes unavailable.
       requestBody:
         required: false
         description: Raw still WebP for success; empty when ScreenRig-Capture-Failure is supplied.
@@ -35684,7 +35684,7 @@ components:
       properties:
         capture_id: {$ref: "#/components/schemas/ScreenshotCaptureID"}
         state: {type: string, enum: [idle, pending, ready, timed_out, unavailable]}
-        reason: {type: string, enum: [unsupported_surface, capture_failed], description: Present when state is unavailable.}
+        reason: {type: string, enum: [unsupported_surface, capture_failed, not_on_glass], description: "Present when state is unavailable. not_on_glass means the Player's activity is not visible; bring the Player to the foreground before requesting another capture."}
         display:
           $ref: "#/components/schemas/ScreenDisplayReported"
           description: "On unavailable or timed_out: the latest reported health display at read time, not a capture-time sample or proof of the failure's cause. Absent when no display telemetry exists. A stale report does not establish current power."
@@ -35734,7 +35734,7 @@ components:
       description: details object on a durable screen.screenshot_failed event.
       properties:
         capture_id: {$ref: "#/components/schemas/ScreenshotCaptureID"}
-        reason: {type: string, enum: [expired, unsupported_surface, capture_failed]}
+        reason: {type: string, enum: [expired, unsupported_surface, capture_failed, not_on_glass]}
     Event: {type: object, additionalProperties: true, required: [cursor, type, severity, message, at], properties: {cursor: {type: string, description: "Opaque position of this event; pass it back as a cursor to page from here."}, sequence: {type: integer, description: "Project sequence. Present on project events; absent on Player log records (source=log), whose cursor is opaque (lg1_ or ev1_)."}, type: {type: string, description: "Dotted event type, such as screen.online or playlist.updated."}, tag: {type: string, description: "Operation-log alias of type with each dot replaced by an underscore."}, id: {type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id."}, params: {type: object, additionalProperties: {oneOf: [{type: string, minLength: 1}, {type: number}, {type: boolean}]}, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted."}, severity: {type: string, description: "Importance of the event, from info through warning to error."}, request_id: {type: string, description: "ID of the API request that caused the event, when one did."}, operation_id: {type: string, description: "ID of the long-running operation the event belongs to, when it has one."}, message: {type: string, description: "Human-readable summary of the event."}, actor: {$ref: "#/components/schemas/EventActor"}, agent: {$ref: "#/components/schemas/EventAgent"}, command: {$ref: "#/components/schemas/EventCommand"}, resource: {type: object, additionalProperties: true, description: "The object the event is about, carrying its type and ID."}, details: {type: object, additionalProperties: true, description: "Facts specific to the event type."}, at: {type: string, description: "When the event happened."}}}
     EventCommand:
       type: object
@@ -39457,6 +39457,15 @@ components:
             charging: {type: boolean}
             source: {type: string, enum: [ac, usb, wireless, dock, none], description: "What powers the device: none is running on the battery (unplugged). A value this backend does not know is dropped."}
             temperature_c: {type: number, minimum: -50, maximum: 150, description: The battery's own temperature in degrees Celsius.}
+        power:
+          type: object
+          additionalProperties: true
+          description: "The board's power supply, from the Raspberry Pi firmware throttle flags. Send it only on a board that reports them. under_voltage is the supply below its limit now; throttled is the ARM frequency capped, the board throttled or its soft temperature limit reached now; the since_boot members say the same has occurred since the board booted."
+          properties:
+            under_voltage: {type: boolean}
+            throttled: {type: boolean}
+            under_voltage_since_boot: {type: boolean}
+            throttled_since_boot: {type: boolean}
         crashes_24h: {type: integer, minimum: 0, maximum: 1000000, description: Player crashes in the rolling last 24 hours.}
         renderer_restarts_24h: {type: integer, minimum: 0, maximum: 1000000, description: Renderer or web-view restarts in the rolling last 24 hours.}
     ScreenHealth:
@@ -39464,7 +39473,7 @@ components:
       additionalProperties: false
       required: [reported_at, stale]
       description: >-
-        The latest device health report (PUT /screen/health), sanitized, with server reported_at. A member the Player did not send is absent. stale is true when reported_at is more than 35 minutes old; stale health is still shown, never deleted; archive and screen recovery clear it. Transitions append the project-only screen.health_changed with details.changes, a list of {change, ...}: display_disconnected, display_reconnected, display_power (from, to), temperature_high (at or above 80 °C), temperature_normal (below 75 °C again), on_battery (battery.source became none; level_percent when reported) and plugged_in (any other source again; source), crash_spike and renderer_restart_spike (the 24-hour count rose by 3 or more since the last spike event; crashes_24h or renderer_restarts_24h and previous). battery is present only when the device reports one; the backend reads nothing from it but battery.source for the on_battery condition and infers no cause. Read-only; never authorization.
+        The latest device health report (PUT /screen/health), sanitized, with server reported_at. A member the Player did not send is absent. stale is true when reported_at is more than 35 minutes old; stale health is still shown, never deleted; archive and screen recovery clear it. Transitions append the project-only screen.health_changed with details.changes, a list of {change, ...}: display_disconnected, display_reconnected, display_power (from, to), temperature_high (at or above 80 °C), temperature_normal (below 75 °C again), on_battery (battery.source became none; level_percent when reported) and plugged_in (any other source again; source), crash_spike and renderer_restart_spike (the 24-hour count rose by 3 or more since the last spike event; crashes_24h or renderer_restarts_24h and previous). battery is present only when the device reports one; the backend reads nothing from it but battery.source for the on_battery condition and infers no cause. power is present only when the board reports its power supply; the backend infers nothing from it. Read-only; never authorization.
       properties:
         reported_at: {type: string, format: date-time}
         stale: {type: boolean}
@@ -39477,6 +39486,7 @@ components:
         volume: {type: object, additionalProperties: false, required: [level, muted, hardware], properties: {level: {type: integer, minimum: 0, maximum: 100}, muted: {type: boolean}, hardware: {type: boolean}}}
         network: {type: object, additionalProperties: false, properties: {kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}, wifi_rssi_dbm: {type: integer}}}
         battery: {type: object, additionalProperties: false, properties: {level_percent: {type: number, minimum: 0, maximum: 100}, charging: {type: boolean}, source: {type: string, enum: [ac, usb, wireless, dock, none]}, temperature_c: {type: number}}}
+        power: {type: object, additionalProperties: false, properties: {under_voltage: {type: boolean}, throttled: {type: boolean}, under_voltage_since_boot: {type: boolean}, throttled_since_boot: {type: boolean}}}
         crashes_24h: {type: integer, minimum: 0}
         renderer_restarts_24h: {type: integer, minimum: 0}
     ScreenOutage:

@@ -355,6 +355,33 @@ test("screen screenshot names capture_failed when the Player could not capture",
   }
 });
 
+test("screen screenshot explains when the Player is not visible without retrying capture", async () => {
+  const configDir = await testTemp("screenshot-not-on-glass-");
+  const cwdDir = await testTemp("screenshot-not-on-glass-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  const display = { power: "on", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false };
+  const transport = screenshotTransport({ statuses: [{ state: "unavailable", reason: "not_on_glass", capture_id: CAPTURE_ID, display }] });
+  try {
+    const result = await withRuntime(
+      ["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
+      transport,
+      { fs: fsLike, configDir, cwdDir },
+    );
+    assert.equal(result.code, ExitCode.Conflict, result.stdout);
+    const { error } = JSON.parse(result.stdout);
+    assert.equal(error.code, "screenshot_unavailable");
+    assert.match(error.detail, /Player is not visible.*another app may be in front.*not_on_glass/);
+    assert.match(error.hint, /Bring the Player to the foreground.*new screenshot/);
+    assert.deepEqual(error.display, display);
+    assert.equal(transport.calls.filter((call) => call.method === "POST" && call.path.endsWith("/screenshot")).length, 1);
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/screenshot/status")).length, 1);
+    assert.equal(transport.calls.some((call) => call.binary), false);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
 test("failed screenshots retain reported display context without claiming it caused the failure", async (t) => {
   for (const display of [
     { power: "off", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false },

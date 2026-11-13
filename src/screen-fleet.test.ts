@@ -474,6 +474,37 @@ test("fleet screenshot failures retain each screen's reported display context", 
   }
 });
 
+test("fleet screenshots distinguish a covered Player from capture failure without retrying", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  const display = { power: "off", connected: true, reported_at: "2026-08-14T16:59:00Z", stale: false };
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, (req) => ({
+    status: 202, headers: {}, body: { capture_id: `shot_${req.path.split("/")[3]!.slice(4, 20)}`, expires_at: "2026-08-14T17:00:30Z" },
+  }));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, (req) => {
+    const id = req.path.split("/")[3]!;
+    return { status: 200, headers: {}, body: { state: "unavailable", reason: id === A ? "not_on_glass" : "capture_failed", ...(id === A ? { display } : {}), capture_id: `shot_${id.slice(4, 20)}` } };
+  });
+  const result = await cli(["--json", "screen", "screenshot", A, B, "--output", "shots"], transport, env);
+  assert.equal(result.code, ExitCode.Conflict, result.stdout);
+  assert.equal(result.envelope.data.failed, 2);
+  for (const item of result.envelope.data.results) {
+    assert.equal(item.status, "failed");
+    assert.equal(item.problem.code, "screenshot_unavailable");
+    if (item.screen_id === A) {
+      assert.match(item.problem.detail, /Player is not visible.*another app may be in front.*not_on_glass/);
+      assert.match(item.problem.hint, /Bring the Player to the foreground.*new screenshot when the display is on/);
+      assert.deepEqual(item.problem.display, display);
+    } else {
+      assert.match(item.problem.detail, /unavailable: capture_failed/);
+      assert.equal(item.problem.hint, "Run screen screenshot again; every run requests a new capture.");
+    }
+  }
+  assert.equal(transport.calls.filter((call) => call.method === "POST").length, 2);
+  assert.equal(transport.calls.filter((call) => call.path.endsWith("/screenshot/status")).length, 2);
+  assert.equal(transport.calls.some((call) => call.binary), false);
+});
+
 test("screen screenshot --tag fans out client-side with bounded concurrency into a directory", async () => {
   const env = await enrolled();
   const inFlight = { now: 0, max: 0 };

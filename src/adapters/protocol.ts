@@ -1333,7 +1333,7 @@ export interface ScreenScreenshotStatus {
   frame?: ScreenScreenshotFrame;
   height?: number;
   /** Present when state is unavailable. */
-  reason?: "unsupported_surface" | "capture_failed";
+  reason?: "unsupported_surface" | "capture_failed" | "not_on_glass";
   sha256?: string;
   state: ScreenScreenshotState;
   width?: number;

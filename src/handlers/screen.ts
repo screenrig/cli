@@ -1236,12 +1236,13 @@ export function toastWriteFromArgs(args: ParsedArgs): ScreenToastWrite {
   return body;
 }
 
-export type ScreenshotFailure = "timed_out" | "unsupported_surface" | "capture_failed" | "unavailable" | "deadline" | "offline";
+export type ScreenshotFailure = "timed_out" | "unsupported_surface" | "not_on_glass" | "capture_failed" | "unavailable" | "deadline" | "offline";
 
 export const SCREENSHOT_FAILURE_DETAIL: Record<ScreenshotFailure, string> = {
   timed_out: "The Player did not upload the screenshot before the request expired (timed_out).",
   unsupported_surface: "The Player cannot capture the page it is showing now (unavailable: unsupported_surface).",
   capture_failed: "The Player tried to capture its screen and failed (unavailable: capture_failed).",
+  not_on_glass: "The Player is not visible; another app may be in front (unavailable: not_on_glass).",
   unavailable: "The Player reported the screenshot as unavailable.",
   deadline: "No screenshot arrived before --timeout; the Player may still upload it (pending).",
   offline: "The screen is offline, so its Player cannot take a screenshot.",
@@ -1251,6 +1252,7 @@ export const SCREENSHOT_FAILURE_HINT: Record<ScreenshotFailure, string> = {
   timed_out: "Check the screen is online with screenrig screen show ID, then run screen screenshot again; every run requests a new capture.",
   unsupported_surface: "Capture again while the screen shows an image, video or application page; screenrig screen show ID shows what it plays.",
   capture_failed: "Run screen screenshot again; every run requests a new capture.",
+  not_on_glass: "Bring the Player to the foreground, then request a new screenshot.",
   unavailable: "Run screen screenshot again; every run requests a new capture.",
   deadline: "Run screen screenshot again with a larger --timeout; every run requests a new capture.",
   offline: "Bring the Player back online (screenrig screen show ID shows last_online_at), then run screen screenshot again.",
@@ -1263,7 +1265,9 @@ export function screenshotUnavailable(requestId: string, failure: ScreenshotFail
     : SCREENSHOT_FAILURE_DETAIL[failure];
   if (display?.power) detail += ` The Player last reported display power ${display.power} at ${display.reported_at}${display.stale ? " (stale report)" : ""}.`;
   const hint = display && !display.stale && (display.power === "off" || display.power === "standby")
-    ? "Request a new screenshot when the display is on."
+    ? failure === "not_on_glass"
+      ? "Bring the Player to the foreground, then request a new screenshot when the display is on."
+      : "Request a new screenshot when the display is on."
     : SCREENSHOT_FAILURE_HINT[failure];
   return new CliError(
     makeProblem("screenshot_unavailable", "Screenshot is not available", 409, detail, {
@@ -1276,7 +1280,7 @@ export function screenshotUnavailable(requestId: string, failure: ScreenshotFail
 
 export function screenshotFailure(status: ScreenScreenshotStatus): ScreenshotFailure {
   if (status.state === "timed_out") return "timed_out";
-  return status.reason === "unsupported_surface" || status.reason === "capture_failed" ? status.reason : "unavailable";
+  return status.reason === "unsupported_surface" || status.reason === "capture_failed" || status.reason === "not_on_glass" ? status.reason : "unavailable";
 }
 
 export async function resolveScreenshotOutput(cwd: string, id: string, flags: ParsedArgs["flags"]): Promise<string> {
