@@ -31698,7 +31698,7 @@ components:
         transition_max_duration_ms: {type: integer, enum: [60000], description: "Longest allowed page transition, in milliseconds."}
         screens_per_project: {type: integer, enum: [0], description: "Always 0: no plan caps screens. Removed in a later release."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
-        founding_period_ends_at: {type: string, format: date-time, description: "When the founding period ends, in RFC 3339 UTC. Accounts created before it are founding accounts: their featureset gives them Premium's features and limits for as long as they exist, and no billing applies before it beyond the metering that runs today."}
+        founding_period_ends_at: {type: string, format: date-time, description: "When the founding period ends, in RFC 3339 UTC. Accounts created before it are founding accounts: their featureset gives them Plus's features and limits for as long as they exist, and no billing applies before it beyond the metering that runs today."}
         features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
     WebsiteSetupCode:
       type: object
