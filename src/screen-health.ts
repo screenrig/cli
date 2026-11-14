@@ -69,6 +69,13 @@ export function healthLines(health: ScreenHealth | undefined): string[] {
   const network = health.network;
   if (network) {
     add("network", [network.kind, number(network.wifi_rssi_dbm) ? `${network.wifi_rssi_dbm} dBm` : undefined].filter(Boolean).join(", "));
+    // Where to find the device on its own network: its host name and each interface's local addresses.
+    if (typeof network.hostname === "string") add("hostname", network.hostname);
+    for (const entry of Array.isArray(network.interfaces) ? network.interfaces : []) {
+      if (typeof entry?.name !== "string" || !Array.isArray(entry.addresses)) continue;
+      const kind = typeof entry.kind === "string" && entry.kind !== "unknown" ? ` (${entry.kind})` : "";
+      add(`address ${entry.name}${kind}`, entry.addresses.filter((address): address is string => typeof address === "string").join(", "));
+    }
   }
   const battery = health.battery;
   if (battery) {
