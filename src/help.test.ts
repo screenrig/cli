@@ -337,6 +337,8 @@ test("root help is compact and every command is discoverable through immediate c
     "screen reboot-schedule show",
     "screen reboot-schedule set",
     "screen reboot-schedule clear",
+    "screen network show",
+    "screen network set",
     "screen volume",
     "webhooks create",
     "webhooks list",

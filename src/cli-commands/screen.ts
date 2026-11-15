@@ -12,6 +12,8 @@ import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOpt
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
 import { liveFrameIntervalOption } from "../screen-live-frame.js";
 import { rebootWindowOption, untilOption } from "../screen-display.js";
+import { handleScreenNetworkSet, handleScreenNetworkShow } from "../handlers/screen-network.js";
+import { networkAddressOption, networkDnsOption, networkGatewayOption, networkRollbackOption, wifiNameOption } from "../screen-network.js";
 import { volumeLevelOption } from "../screen-volume.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
@@ -456,7 +458,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "The Player checks for the newest Player release now and installs it where its\n  platform lets the Player update itself (a web Player updates its service worker,\n  then reloads). done with cause up_to_date means the newest release already runs;\n  updated means a release was installed. A Player installed from a store or managed\n  by a device manager does not declare the capability and updates through that channel.",
     ["screenrig screen update-software scr_LOBBY", "screenrig screen update-software scr_LOBBY --expires-in 2h", "screenrig screen update-software --tag Lobby --yes"]);
 
-  const commandGroup = screen.command("command").description("Manage the commands asked of a screen (reboot, reload, clear-cache, restart-app, update-software)");
+  const commandGroup = screen.command("command").description("Manage the commands asked of a screen (reboot, reload, clear-cache, restart-app, update-software, network set)");
   commandGroup.command("cancel").description("Cancel a command still queued for an offline screen")
     .argument("<id>", "Screen identifier")
     .argument("<command_id>", "Command id: an entry of commands in screen show, or the reboot_id, reload_id or command_id of the request's answer")
@@ -546,6 +548,30 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   requireOptionGroup(volume, "atLeastOne", ["--level", "--mute", "--unmute"]);
   addCommandNotes(volume, "Volume:\n  Sets the screen's level (0 to 100), its mute, or both. --mute keeps the\n  level, so --unmute restores it. Only a Player that declares the volume\n  capability applies it; any other screen is refused with volume_unsupported\n  (exit 5) and nothing is recorded. A screen in a protected screen folder is\n  refused with protected_target (exit 5); one protected screen in a fleet\n  selection refuses the whole fleet request. An offline screen applies the\n  request from its next manifest. A change made later in the Player's settings\n  menu wins until the next request. screen show: Volume reported is what the\n  Player reached (device volume, or the Player's own gain). A video plays its\n  audio, at this volume, only when its page sets sound (playlist page add\n  --sound). At most 10 volume changes per screen per minute.");
   addCommandExamples(volume, "screenrig screen volume scr_LOBBY --level 40", "screenrig screen volume scr_LOBBY --mute", "screenrig screen volume --tag Lobby --level 25 --unmute");
+  const networkGroup = screen.command("network").description("Show a screen's network, or change its connection and IPv4 addressing remotely with an automatic rollback");
+  networkGroup.command("show").description("Show a screen's network as its Player reports it and the latest network change")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenNetworkShow));
+  const networkSet = subcommand(networkGroup, "set").description("Change one screen's connection (Wi-Fi or Ethernet) and IPv4 addressing; the device restores its old settings unless it reaches screenRIG again")
+    .argument("<id>", "Screen identifier")
+    .addOption(new Option("--wifi <NAME>", "Route over this Wi-Fi network (1 to 32 bytes)").argParser(wifiNameOption).conflicts(["ethernet"]))
+    .addOption(new Option("--ethernet", "Route over the network cable").conflicts(["wifi"]))
+    .option("--hidden", "The Wi-Fi network does not broadcast its name (with --wifi)")
+    .option("--password-file <FILE>", "Read the Wi-Fi password from this file, or - for stdin (never an argument); 8 to 63 printable ASCII characters or 64 hex digits; leave it out for an open network (with --wifi)")
+    .addOption(new Option("--dhcp", "Take the address from the network (automatic addressing)").conflicts(["address"]))
+    .addOption(new Option("--address <ADDRESS/PREFIX>", "A fixed IPv4 address and prefix length from 8 to 30, such as 192.168.1.50/24 (needs --gateway)").argParser(networkAddressOption).conflicts(["dhcp"]))
+    .addOption(new Option("--gateway <ADDRESS>", "The gateway of the fixed address: another host of its network").argParser(networkGatewayOption))
+    .addOption(new Option("--dns <ADDRESSES>", "Up to three DNS servers, separated by commas, such as 192.168.1.1,1.1.1.1 (with --address)").argParser(networkDnsOption))
+    .addOption(new Option("--rollback-after <SECONDS>", "How long the device has to reach screenRIG on the new settings before it restores the old ones: 60 to 600 seconds (default 180)").argParser(networkRollbackOption))
+    .option("--expires-in <DURATION>", "How long the change waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 1h)", expiresInOption)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision", revision)
+    .action(bind(handleScreenNetworkSet));
+  requireOptionGroup(networkSet, "exactlyOne", ["--wifi", "--ethernet"]);
+  requireOptionGroup(networkSet, "exactlyOne", ["--dhcp", "--address"]);
+  requireOptionGroup(networkSet, "together", ["--address", "--gateway"]);
+  requireOptionGroup(networkSet, "requires", ["--dns", "--address"]);
+  requireOptionGroup(networkSet, "requires", ["--hidden", "--wifi"]);
+  requireOptionGroup(networkSet, "requires", ["--password-file", "--wifi"]);
   const update = screen.commands.find(command => command.name() === "update")!;
   // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
   requireOptionGroup(update, "requires", ["--location-name", "--location"]);
