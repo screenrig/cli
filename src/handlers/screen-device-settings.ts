@@ -15,11 +15,16 @@ import {
 } from "../screen-device-settings.js";
 
 /** The one request a screen write sends: PATCH /api/screens/{id} with a ScreenPatch, or a sub-route of the screen. */
-interface ScreenWrite { method: "PATCH" | "PUT" | "DELETE"; route?: string; body?: unknown }
+interface ScreenWrite {
+  method: "PATCH" | "PUT" | "DELETE"; route?: string; body?: unknown;
+  /** Default true: an Idempotency-Key, with the saved recovery entry that fingerprints the body. false for a body that holds a secret. */
+  idempotent?: boolean;
+}
 
 /**
  * One write to a single screen: the id is the positional after the command's
- * own words, the revision guard is optional and the write is replay-safe. The
+ * own words, the revision guard is optional and the write is replay-safe unless
+ * it says otherwise. The
  * server owns the range and type checks.
  */
 async function writeScreen(
@@ -35,7 +40,7 @@ async function writeScreen(
     response = await client.call({
       method: write.method,
       path: `/api/screens/${encodeURIComponent(id)}${write.route ?? ""}`,
-      idempotent: true,
+      idempotent: write.idempotent ?? true,
       headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
       ...(write.body === undefined ? {} : { body: write.body }),
     });
@@ -95,11 +100,13 @@ export const handleScreenKioskLock = commandHandler(async (args, runtime, resolv
 }, true);
 
 // The PIN is read from a file or stdin, checked here, and sent only in the request body; no output, error or log carries it.
+// The write is not idempotent: a saved recovery entry would keep a SHA-256 of the body in the config file, and a PIN has too few digits to survive that.
+// An ambiguous failure is rerun after screen show, and a repeat sets the same PIN.
 export const handleScreenMenuPinSet = commandHandler(async (args, runtime, resolved) => {
   const file = flagString(args.flags, "pin-file");
   if (file === undefined) throw usageError("screen menu-pin set requires --pin-file FILE, or - for stdin.");
   const body = menuPinWrite(await readAuthoringText(file, runtime, MENU_PIN_INPUT_MAX_BYTES));
-  return writeScreen(args, runtime, resolved, "screen menu-pin set", { method: "PUT", route: "/menu-pin", body }, (id) =>
+  return writeScreen(args, runtime, resolved, "screen menu-pin set", { method: "PUT", route: "/menu-pin", body, idempotent: false }, (id) =>
     `Settings menu PIN set on ${id}; the screen applies it when it next connects`, menuPinProblem);
 }, true);
 
