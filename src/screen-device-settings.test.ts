@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import type { Screen } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help-tree.js";
+import { createMemoryLogger } from "./log/logger.js";
 import { run } from "./main.js";
 import { type CliRuntime } from "./runtime.js";
 import { displayLines } from "./screen-display.js";
 import {
   brightnessPatch, displayCecPatch, displayIdleAfterOption, displayIdlePatch, displayIdleWakeOption, displayOutputModeOption, displayOutputObservationLines, displayOutputPatch,
-  displaySettingsLines, kioskLines, kioskLockPatch,
+  displaySettingsLines, kioskLines, kioskLockPatch, menuPinFileOption, menuPinLines, menuPinWrite,
 } from "./screen-device-settings.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
@@ -334,4 +335,206 @@ test("display and kiosk lines name only what the screen carries", () => {
   ]);
   assert.deepEqual(kioskLines(undefined), []);
   assert.deepEqual(kioskLines({ lock: true }), ["Kiosk lock: on"]);
+});
+
+// ---- screen menu-pin ---------------------------------------------------------------------------
+
+// Eight digits that are no part of the clock, an id, a revision or the test token.
+const PIN = "73519462";
+const PLAIN = "scr_PLAINAAAAAAAAAAAAAAAAA";
+
+function pinFleet(): FakeTransport {
+  const transport = memoryBackend({ now: () => NOW });
+  const base = { label: "Lobby", state: "active", online: true, revision: 3, manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z" };
+  transport.putScreen!({ ...base, id: LOBBY, public_id: `pub_${LOBBY}`, host: { platform: "android", capabilities: ["menu_pin"] } } as unknown as Screen);
+  transport.putScreen!({ ...base, id: PLAIN, public_id: `pub_${PLAIN}`, host: { platform: "web", capabilities: [] } } as unknown as Screen);
+  return transport;
+}
+
+/** The runtime's stderr and stdin and its operation log too: the places a PIN could leak to. */
+async function pinCli(argv: string[], transport: FakeTransport, env: Env, stdin?: string) {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const out = collect(stdout);
+  const err = collect(stderr);
+  const { logger, events } = createMemoryLogger({ command: ["screen", "menu-pin"], now: () => NOW });
+  const runtime: CliRuntime = {
+    argv, settings: env.fs.settings, stdout, stderr, now: () => NOW, sleep: async () => undefined,
+    homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport, logger,
+    ...(stdin === undefined ? {} : { stdin: Readable.from([Buffer.from(stdin)]), isStdinTty: () => false }),
+  };
+  const code = await run(runtime);
+  stdout.end();
+  stderr.end();
+  const text = await out;
+  const errText = await err;
+  let envelope: Envelope = { ok: false };
+  try { envelope = JSON.parse(text) as Envelope; } catch { /* human */ }
+  return { code, stdout: text, stderr: errText, envelope, everything: `${text}\n${errText}\n${JSON.stringify(events)}` };
+}
+
+const pinWrites = (transport: FakeTransport) => transport.calls.filter((call) => call.path.endsWith("/menu-pin"));
+
+test("the PIN is 4 to 8 digits with one trailing line break dropped, and a refusal never repeats it", () => {
+  for (const text of ["1234", "12345678", `${PIN}\n`, `${PIN}\r\n`, "0000"]) assert.deepEqual(menuPinWrite(text), { pin: text.replace(/\r?\n$/, "") });
+  for (const text of ["", "\n", "123", "123456789", "12 34", "1234\n\n", " 1234", "12a4", "١٢٣٤", `${PIN}x`, `${PIN}9`, `${PIN}\nmore`]) {
+    assert.throws(() => menuPinWrite(text), (error: Error) => /must be 4 to 8 digits/.test(error.message) && !error.message.includes(PIN), JSON.stringify(text));
+  }
+  assert.equal(menuPinFileOption("pin.txt"), "pin.txt");
+  assert.equal(menuPinFileOption("-"), "-");
+  assert.equal(menuPinFileOption("./4821"), "./4821");
+  for (const value of ["1234", PIN, "0"]) {
+    assert.throws(() => menuPinFileOption(value), (error: Error) => /takes a file name, or - for stdin, never the PIN itself/.test(error.message) && !error.message.includes(value));
+  }
+});
+
+test("screen menu-pin set reads the PIN from a file or stdin and sends it only in the body", async () => {
+  const env = await enrolled();
+  const transport = pinFleet();
+  await writeFile(path.join(env.cwd, "pin.txt"), `${PIN}\n`);
+  const fromFile = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, "--pin-file", "pin.txt", "--expect-rev", "3"], transport, env);
+  assert.equal(fromFile.code, ExitCode.Success, fromFile.stdout + fromFile.stderr);
+  const put = pinWrites(transport).at(-1)!;
+  assert.equal(put.method, "PUT");
+  assert.equal(put.path, `/api/screens/${LOBBY}/menu-pin`);
+  assert.deepEqual(put.body, { pin: PIN });
+  assert.equal(put.headers?.["if-match"], '"3"');
+  assert.ok(put.headers?.["idempotency-key"], "the write is replay-safe");
+  assert.equal(fromFile.envelope.data.menu_pin.requested.set, true);
+  assert.match(fromFile.envelope.data.menu_pin.requested.menu_pin_id, /^pin_/);
+  assert.ok(!fromFile.everything.includes(PIN), "no output, error or log event carries the PIN");
+
+  await writeFile(path.join(env.cwd, "crlf.txt"), `${PIN}\r\n`);
+  const crlf = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, "--pin-file", "crlf.txt"], transport, env);
+  assert.equal(crlf.code, ExitCode.Success, crlf.stdout + crlf.stderr);
+  assert.deepEqual(pinWrites(transport).at(-1)!.body, { pin: PIN });
+  assert.equal(pinWrites(transport).at(-1)!.headers?.["if-match"], undefined);
+
+  const piped = await pinCli(["--human", "screen", "menu-pin", "set", LOBBY, "--pin-file", "-"], transport, env, `${PIN}\n`);
+  assert.equal(piped.code, ExitCode.Success, piped.stdout + piped.stderr);
+  assert.deepEqual(pinWrites(transport).at(-1)!.body, { pin: PIN });
+  assert.match(piped.stdout, new RegExp(`^Settings menu PIN set on ${LOBBY}; the screen applies it when it next connects$`, "m"));
+  assert.match(piped.stdout, /^revision: 6$/m);
+  assert.ok(!piped.everything.includes(PIN));
+  assert.ok(!(await pinCli(["--json", "screen", "show", LOBBY], transport, env)).everything.includes(PIN), "screen show never has it either");
+});
+
+test("screen menu-pin set refuses a PIN typed as an argument, a bad length or a bad file, and sends nothing", async () => {
+  const env = await enrolled();
+  const transport = pinFleet();
+  await writeFile(path.join(env.cwd, "pin.txt"), PIN);
+  await writeFile(path.join(env.cwd, "bad.txt"), `${PIN}9`);
+  await writeFile(path.join(env.cwd, "short.txt"), "123\n");
+  await writeFile(path.join(env.cwd, "text.txt"), `${PIN}x\n`);
+  await writeFile(path.join(env.cwd, "two.txt"), `${PIN}\n${PIN}\n`);
+  await writeFile(path.join(env.cwd, "empty.txt"), "");
+  await writeFile(path.join(env.cwd, "big.txt"), "1".repeat(200));
+  const attempts: Array<[string[], string | undefined, RegExp]> = [
+    [["--pin-file", PIN], undefined, /--pin-file takes a file name, or - for stdin, never the PIN itself/],
+    [[`--pin-file=${PIN}`], undefined, /--pin-file takes a file name/],
+    [["--pin", PIN], undefined, /requires --pin-file/],
+    [["--pin", PIN, "--pin-file", "pin.txt"], undefined, /does not accept --pin\./],
+    [[`--pin=${PIN}`, "--pin-file", "pin.txt"], undefined, /does not accept --pin\./],
+    [["--pin-file", "pin.txt", PIN], undefined, /does not accept extra arguments/],
+    [[], undefined, /requires --pin-file/],
+    [["--pin-file", "bad.txt"], undefined, /must be 4 to 8 digits/],
+    [["--pin-file", "short.txt"], undefined, /must be 4 to 8 digits/],
+    [["--pin-file", "text.txt"], undefined, /must be 4 to 8 digits/],
+    [["--pin-file", "two.txt"], undefined, /must be 4 to 8 digits/],
+    [["--pin-file", "empty.txt"], undefined, /must be 4 to 8 digits/],
+    [["--pin-file", "big.txt"], undefined, /size limit/],
+    [["--pin-file", "-"], `${PIN}9\n`, /must be 4 to 8 digits/],
+    [["--pin-file", "-"], "12ab", /must be 4 to 8 digits/],
+    [["--pin-file", "missing.txt"], undefined, /missing\.txt does not exist/],
+  ];
+  for (const [flags, stdin, message] of attempts) {
+    const refused = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, ...flags], transport, env, stdin);
+    assert.equal(refused.code, ExitCode.Usage, `${flags.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error?.detail ?? "", message, flags.join(" "));
+    assert.ok(!refused.everything.includes(PIN), `${flags.join(" ")}: a refusal never repeats the PIN`);
+  }
+  assert.equal(pinWrites(transport).length, 0, "no request reached the server");
+  const noTty = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, "--pin-file", "-"], transport, env);
+  assert.equal(noTty.code, ExitCode.Usage);
+  assert.match(noTty.envelope.error?.detail ?? "", /Pipe input when using '-'/);
+});
+
+test("screen menu-pin set explains a screen without the capability, a bad PIN from the server and a stale revision", async () => {
+  const env = await enrolled();
+  const transport = pinFleet();
+  const unsupported = await pinCli(["--json", "screen", "menu-pin", "set", PLAIN, "--pin-file", "-"], transport, env, `${PIN}\n`);
+  assert.equal(unsupported.code, ExitCode.Conflict, unsupported.stdout);
+  assert.equal(unsupported.envelope.error?.code, "menu_pin_unsupported");
+  assert.equal(unsupported.envelope.error?.next?.command, `screenrig screen show ${PLAIN}`);
+  assert.ok(!unsupported.everything.includes(PIN));
+  assert.equal((await pinCli(["--json", "screen", "show", PLAIN], transport, env)).envelope.data.menu_pin, undefined, "nothing was recorded");
+
+  const stale = await pinCli(["--json", "screen", "menu-pin", "clear", LOBBY, "--expect-rev", "1"], transport, env);
+  assert.equal(stale.code, ExitCode.Precondition, stale.stdout);
+  assert.equal(stale.envelope.error?.code, "revision_conflict");
+});
+
+test("screen menu-pin clear sends DELETE with no body and says the screen applies it when it next connects", async () => {
+  const env = await enrolled();
+  const transport = pinFleet();
+  const cleared = await pinCli(["--json", "screen", "menu-pin", "clear", LOBBY, "--expect-rev", "3"], transport, env);
+  assert.equal(cleared.code, ExitCode.Success, cleared.stdout + cleared.stderr);
+  const call = pinWrites(transport).at(-1)!;
+  assert.equal(call.method, "DELETE");
+  assert.equal(call.path, `/api/screens/${LOBBY}/menu-pin`);
+  assert.equal(call.body, undefined);
+  assert.equal(call.headers?.["if-match"], '"3"');
+  assert.ok(call.headers?.["idempotency-key"]);
+  assert.equal(cleared.envelope.data.menu_pin.requested.set, false);
+  const human = await pinCli(["--human", "screen", "menu-pin", "clear", LOBBY], transport, env);
+  assert.match(human.stdout, new RegExp(`^Settings menu PIN removed on ${LOBBY}; the screen applies it when it next connects, and its wrong-PIN lockout ends$`, "m"));
+  const unsupported = await pinCli(["--json", "screen", "menu-pin", "clear", PLAIN], transport, env);
+  assert.equal(unsupported.envelope.error?.code, "menu_pin_unsupported");
+  const noId = await pinCli(["--json", "screen", "menu-pin", "clear"], transport, env);
+  assert.equal(noId.code, ExitCode.Usage);
+});
+
+test("screen show prints one Settings menu PIN line: set or not set, who changed it and when, and a change still waiting", () => {
+  assert.deepEqual(menuPinLines(undefined), []);
+  assert.deepEqual(menuPinLines({}), []);
+  assert.deepEqual(menuPinLines({ reported: { set: false, reported_at: "2026-08-14T16:55:00Z", stale: false } }), ["Settings menu PIN: not set"]);
+  assert.deepEqual(menuPinLines({ reported: { set: true, changed_by: "device", changed_at: "2026-08-14T12:00:00Z", reported_at: "2026-08-14T16:55:00Z", stale: false } }),
+    ["Settings menu PIN: set (on the screen, 2026-08-14T12:00:00Z)"]);
+  assert.deepEqual(menuPinLines({ reported: { set: true, changed_by: "remote", changed_at: "2026-08-14T13:00:00Z", reported_at: "2026-08-14T16:55:00Z", stale: true } }),
+    ["Settings menu PIN: set (remotely, 2026-08-14T13:00:00Z; stale: no report for over 35 minutes)"]);
+  const requested = { menu_pin_id: "pin_SECRETIDAAAAAAAA", set: true, set_at: "2026-08-14T15:00:00Z" };
+  const waiting = menuPinLines({ requested });
+  assert.deepEqual(waiting, ["Settings menu PIN: a new PIN requested 2026-08-14T15:00:00Z, waiting for the screen to apply it"]);
+  assert.deepEqual(menuPinLines({ requested: { ...requested, set: false }, reported: { set: true, changed_by: "device", changed_at: "2026-08-14T12:00:00Z", reported_at: "2026-08-14T16:55:00Z", stale: false } }),
+    ["Settings menu PIN: removal requested 2026-08-14T15:00:00Z, waiting for the screen to apply it (the screen last reported set)"], "a change before the request has not applied it");
+  assert.deepEqual(menuPinLines({ requested, reported: { set: true, changed_by: "remote", changed_at: "2026-08-14T15:00:20Z", reported_at: "2026-08-14T16:55:00Z", stale: false } }),
+    ["Settings menu PIN: set (remotely, 2026-08-14T15:00:20Z)"], "applied: the report shows the change");
+  assert.deepEqual(menuPinLines({ requested, reported: { set: false, changed_by: "device", changed_at: "2026-08-14T15:30:00Z", reported_at: "2026-08-14T16:55:00Z", stale: false } }),
+    ["Settings menu PIN: not set (on the screen, 2026-08-14T15:30:00Z)"], "a change made on the device after the request wins");
+  assert.ok(![...waiting, ...menuPinLines({ requested })].join("\n").includes("pin_SECRETIDAAAAAAAA"), "the request's id is never printed");
+});
+
+test("screen show carries Settings menu PIN only when the screen has the state, and --json leaves the PIN out", async () => {
+  const env = await enrolled();
+  const plain = await cli(["--human", "screen", "show", LOBBY], seeded(), env);
+  assert.doesNotMatch(plain.stdout, /Settings menu PIN/);
+  const transport = seeded({ menu_pin: { reported: { set: true, changed_by: "device", changed_at: "2026-08-14T12:00:00Z", reported_at: "2026-08-14T16:55:00Z", stale: false } } });
+  const human = await cli(["--human", "screen", "show", LOBBY], transport, env);
+  assert.match(human.stdout, /^Settings menu PIN: set \(on the screen, 2026-08-14T12:00:00Z\)$/m);
+  const json = await cli(["--json", "screen", "show", LOBBY], transport, env);
+  assert.equal(json.envelope.data.menu_pin.reported.set, true);
+});
+
+test("screen menu-pin help names the PIN file, the stdin form and the recovery use, and never takes the PIN as an argument", () => {
+  const set = commandHelp(["screen", "menu-pin", "set"]);
+  assert.deepEqual(set.arguments.map((argument) => argument.name), ["id"]);
+  assert.deepEqual(set.options.map((option) => option.name).filter((name) => name !== "--help"), ["--pin-file", "--expect-rev"]);
+  assert.deepEqual(set.options.filter((option) => option.required).map((option) => option.name), ["--pin-file"]);
+  assert.match(set.options.find((option) => option.name === "--pin-file")?.description ?? "", /or - for stdin \(never an argument\)/);
+  assert.ok(set.examples.length > 0 && set.notes.length > 0);
+  assert.match(set.usage, /menu_pin_unsupported/);
+  const clear = commandHelp(["screen", "menu-pin", "clear"]);
+  assert.deepEqual(clear.options.map((option) => option.name).filter((name) => name !== "--help"), ["--expect-rev"]);
+  assert.match(clear.usage, /forgotten PIN is recovered[\s\S]*wrong-PIN lockout/);
+  assert.equal(commandHelp(["screen", "menu-pin"]).kind, "group");
 });

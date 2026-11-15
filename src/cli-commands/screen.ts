@@ -5,8 +5,8 @@ import type { CommandHandler } from "../commands.js";
 import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
 import { calendarInstantOption } from "../change-control.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenClearCache, handleScreenRestartApp, handleScreenUpdateSoftware, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenRebootScheduleShow, handleScreenRebootScheduleSet, handleScreenRebootScheduleClear, handleScreenVolume, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../handlers/screen.js";
-import { handleScreenBrightness, handleScreenDisplayCec, handleScreenDisplayIdle, handleScreenDisplayOutput, handleScreenKioskLock } from "../handlers/screen-device-settings.js";
-import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption, displayOutputModeOption } from "../screen-device-settings.js";
+import { handleScreenBrightness, handleScreenDisplayCec, handleScreenDisplayIdle, handleScreenDisplayOutput, handleScreenKioskLock, handleScreenMenuPinClear, handleScreenMenuPinSet } from "../handlers/screen-device-settings.js";
+import { DISPLAY_BRIGHTNESS_MODES, displayIdleAfterOption, displayIdleWakeOption, displayOutputModeOption, menuPinFileOption } from "../screen-device-settings.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, MAINTENANCE, suspendMessageOption, type MaintenanceSpec } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
@@ -183,6 +183,17 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenKioskLock));
   requireOptionGroup(kioskLock, "exactlyOne", ["--on", "--off"]);
+
+  const menuPin = screen.command("menu-pin").description("Set or remove the PIN that opens a screen's settings menu on the device");
+  subcommand(menuPin, "set").description("Set or change a screen's settings menu PIN from a file or stdin")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--pin-file <FILE>", "Read the PIN (4 to 8 digits) from this file, or - for stdin (never an argument)", menuPinFileOption)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenMenuPinSet));
+  menuPin.command("clear").description("Remove a screen's settings menu PIN, such as one that was forgotten")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenMenuPinClear));
 
   screen.command("archive").description("Archive a screen")
     .argument("<id>", "Screen identifier")

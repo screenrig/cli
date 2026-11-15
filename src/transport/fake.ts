@@ -1296,7 +1296,6 @@ export function memoryBackend(options: {
   }
   transport.on("POST", /^\/api\/screens\/[^/]+\/play-page$/, (req): TransportResponse => {
     const screen = screenOf(req);
-    const problem = (status: number, code: string, detail: string): TransportResponse => ({ status, headers: { "content-type": "application/problem+json" }, body: controlProblem(status, code, detail) });
     if (!screen) return problem(404, "not_found", "Resource was not found.");
     if (screen.state === "archived") return problem(409, "screen_archived", "screen is archived");
     if (screen.state !== "active") return problem(409, "resource_conflict", "screen is not active");
@@ -1357,6 +1356,31 @@ export function memoryBackend(options: {
     if (key) commandReplaysByKey.set(key, answer);
     return answer;
   });
+
+  // Settings menu PIN (docs/player-compatibility.md §6.5): the Player must declare
+  // the menu_pin capability; the backend keeps no PIN, only the latest request's id,
+  // whether a PIN was set and when. The reported state stays whatever a test seeded.
+  let menuPinSequence = 0;
+  const menuPinRoute = (req: TransportRequest, set: boolean): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "Resource was not found.");
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    const key = req.headers?.["idempotency-key"] ? `menu-pin:${screen.id}:${req.headers["idempotency-key"]}` : undefined;
+    if (key && commandReplaysByKey.has(key)) return commandReplaysByKey.get(key)!;
+    if (set && !/^[0-9]{4,8}$/.test(String((req.body as { pin?: unknown } | undefined)?.pin ?? ""))) return refusal(400, "invalid_request", "pin: must be 4 to 8 digits");
+    if (screen.state === "archived") return refusal(409, "screen_archived", "screen is archived");
+    if (screen.state !== "active") return refusal(409, "resource_conflict", "screen is not active");
+    if (!(screen.host?.capabilities ?? []).includes("menu_pin")) return refusal(409, "menu_pin_unsupported", "The screen's Player does not declare the menu_pin capability.");
+    const requested = { menu_pin_id: `pin_FAKE${String(++menuPinSequence).padStart(8, "0")}`, set, set_at: clock().toISOString() };
+    const next = { ...screen, menu_pin: { ...screen.menu_pin, requested }, revision: screen.revision + 1 };
+    screens.set(screen.id, next);
+    const answer = screenAnswer(next);
+    if (key) commandReplaysByKey.set(key, answer);
+    return answer;
+  };
+  transport.on("PUT", /^\/api\/screens\/[^/]+\/menu-pin$/, (req) => menuPinRoute(req, true));
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/menu-pin$/, (req) => menuPinRoute(req, false));
 
   // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.

@@ -40,13 +40,14 @@ import type { OperationLogger } from "./log/types.js";
  * account the client secret of the customer's own Entra app, a media sync
  * create the sharing link of the folder it reads, and a connection the client
  * secret or service account key of the customer's own application and, once
- * made, the one-time consent link of a person's consent.
+ * made, the one-time consent link of a person's consent, and a screen's
+ * settings menu PIN write the PIN itself.
  */
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
   return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers|sources|connections|media-sync-accounts|media-syncs)(?:\/|$)/.test(path)
     || /^\/api\/(?:applications|cards)\/[^/]+\/kv-webhooks(?:\/|$)/.test(path)
-    || /^\/api\/screens\/[^/]+\/link$/.test(path);
+    || /^\/api\/screens\/[^/]+\/(?:link|menu-pin)$/.test(path);
 }
 
 /** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */

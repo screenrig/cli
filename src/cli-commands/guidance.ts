@@ -219,6 +219,8 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "screen display-output": ["scr_SCREEN --mode 3840x2160x60p", "scr_SCREEN --mode auto --expect-rev 4", "scr_SCREEN --clear"],
     "screen display-cec": ["scr_SCREEN --on", "scr_SCREEN --off --expect-rev 4", "scr_SCREEN --clear"],
     "screen kiosk-lock": ["scr_SCREEN --on", "scr_SCREEN --off --expect-rev 4"],
+    "screen menu-pin set": ["scr_SCREEN --pin-file pin.txt", "scr_SCREEN --pin-file - --expect-rev 4"],
+    "screen menu-pin clear": ["scr_SCREEN", "scr_SCREEN --expect-rev 4"],
     "screen move": ["scr_AAA scr_BBB --folder sfd_NORTH", "sfd_CAFES --folder sfd_NORTH", "scr_AAA sfd_CAFES --root", 'scr_AAA --folder sfd_NORTH --note "Lobby refit"'],
     "screen folder list": [""], "screen folder show": ["sfd_NORTH"],
     "screen folder create": ["--name North", "--name Cafes --parent sfd_NORTH --default-playlist-id pl_PLAYLIST", '--name Cafes --parent sfd_NORTH --note "New cafe wing"'],

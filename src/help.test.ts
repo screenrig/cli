@@ -247,6 +247,8 @@ test("root help is compact and every command is discoverable through immediate c
     "screen display-output",
     "screen display-cec",
     "screen kiosk-lock",
+    "screen menu-pin set",
+    "screen menu-pin clear",
     "screen archive",
     "screen unarchive",
     "screen delete",
