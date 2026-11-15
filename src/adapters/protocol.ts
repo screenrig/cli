@@ -644,11 +644,24 @@ export interface ScreenHealth {
   temperature_c?: number;
   display?: { connected?: boolean; power?: "on" | "off" | "standby" | "unknown" };
   volume?: { level?: number; muted?: boolean; hardware?: boolean };
-  network?: { kind?: "ethernet" | "wifi" | "cellular" | "unknown"; wifi_rssi_dbm?: number };
+  /** kind and wifi_rssi_dbm are the default route's; hostname and interfaces, where the Player reports them, locate the device on its own network. */
+  network?: {
+    kind?: "ethernet" | "wifi" | "cellular" | "unknown";
+    wifi_rssi_dbm?: number;
+    hostname?: string;
+    interfaces?: ScreenHealthInterface[];
+  };
   /** Present only when the device reports a battery. source none means it runs on the battery (unplugged). */
   battery?: ScreenBattery;
   crashes_24h?: number;
   renderer_restarts_24h?: number;
+}
+
+/** Screen.health.network.interfaces[]: an interface's IPv4 and global or unique-local IPv6 addresses. */
+export interface ScreenHealthInterface {
+  name: string;
+  kind: "ethernet" | "wifi" | "cellular" | "tunnel" | "unknown";
+  addresses: string[];
 }
 
 /** Screen.health.battery. The backend reads nothing from it but source, for the on_battery condition. */

@@ -1781,7 +1781,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Creates a new project and its first agent through explicit bundled-CLI enrollment, even when the contact address already belongs to a person or project. The contact email stays unverified and grants no authority; malformed addresses return invalid_request. Queues an enrollment invitation in the same transaction. project_name is optional; omission uses a readable two-word name. Exact idempotent replay precedes rate limits. Persist the permanent credential before reporting success; its replay envelope expires at issuance_expires_at and later retries return credential_issuance_expired. The idempotency record lasts 24 hours.
+      description: Creates a new project and its first agent through explicit bundled-CLI enrollment, even when the contact address already belongs to a person or project. The contact email stays unverified and grants no authority; malformed addresses return invalid_request. Queues an enrollment invitation in the same transaction. project_name is optional; omission uses a readable two-word name. organization_name is optional; omitted, or sent as the placeholder Screens, the organization is named after the contact address (a company domain, else the person's part of the address), and after a project_name sent alone. Exact idempotent replay precedes rate limits. Persist the permanent credential before reporting success; its replay envelope expires at issuance_expires_at and later retries return credential_issuance_expired. The idempotency record lasts 24 hours.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -28966,7 +28966,7 @@ components:
           description: Expected project ID. The server refuses the action if the current credential or cookie session targets another project; browser clients send the page's project ID.
         empty_only:
           type: boolean
-          description: Require an empty Screens project in the deletion transaction, including content, other agents or members, work and correspondence. The CLI additionally requires its saved enrollment provenance before using this cleanup guard. Omission keeps explicit member deletion.
+          description: Require an empty project still under the name enrollment gave it in the deletion transaction, including content, other agents or members, work and correspondence. The CLI additionally requires its saved enrollment provenance before using this cleanup guard. Omission keeps explicit member deletion.
         name:
           $ref: '#/components/schemas/ProjectName'
         revision:
@@ -39446,8 +39446,20 @@ components:
           type: object
           additionalProperties: true
           properties:
-            kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}
+            kind: {type: string, enum: [ethernet, wifi, cellular, unknown], description: The interface of the default route.}
             wifi_rssi_dbm: {type: integer, minimum: -150, maximum: 0}
+            hostname: {type: string, maxLength: 253, description: "The device's host name as the operating system reports it (a Raspberry Pi appliance's is screenrig- and six hex digits). Letters, digits, inner hyphens and dots; anything else is dropped."}
+            interfaces:
+              type: array
+              description: "The network interfaces that hold a usable address, so a person can find the device on its network. Send only IPv4 and global or unique-local IPv6 addresses of interfaces that are up; leave out loopback and link-local. An element that is not an object, has no usable name or holds no usable address is dropped alone; at most 8 interfaces and 8 addresses each are kept."
+              items:
+                type: object
+                additionalProperties: true
+                required: [name, kind, addresses]
+                properties:
+                  name: {type: string, pattern: "^[A-Za-z0-9_.:@-]{1,15}$", description: "The operating system's interface name, like eth0 or wlan0."}
+                  kind: {type: string, enum: [ethernet, wifi, cellular, tunnel, unknown], description: "tunnel is a VPN or other virtual link. A value this backend does not know reads as unknown."}
+                  addresses: {type: array, items: {type: string, maxLength: 64}, description: "Address literals without prefix length or zone. Loopback, link-local, multicast and unspecified addresses are dropped."}
         battery:
           type: object
           additionalProperties: true
@@ -39484,11 +39496,28 @@ components:
         temperature_c: {type: number}
         display: {type: object, additionalProperties: false, properties: {connected: {type: boolean}, power: {type: string, enum: [on, off, standby, unknown]}}}
         volume: {type: object, additionalProperties: false, required: [level, muted, hardware], properties: {level: {type: integer, minimum: 0, maximum: 100}, muted: {type: boolean}, hardware: {type: boolean}}}
-        network: {type: object, additionalProperties: false, properties: {kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}, wifi_rssi_dbm: {type: integer}}}
+        network:
+          type: object
+          additionalProperties: false
+          description: "kind and wifi_rssi_dbm describe the default route. hostname and interfaces are the device's name and local addresses where its Player reports them (the Linux and Raspberry Pi Player); the health history keeps neither."
+          properties:
+            kind: {type: string, enum: [ethernet, wifi, cellular, unknown]}
+            wifi_rssi_dbm: {type: integer}
+            hostname: {type: string}
+            interfaces: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/ScreenHealthInterface"}}
         battery: {type: object, additionalProperties: false, properties: {level_percent: {type: number, minimum: 0, maximum: 100}, charging: {type: boolean}, source: {type: string, enum: [ac, usb, wireless, dock, none]}, temperature_c: {type: number}}}
         power: {type: object, additionalProperties: false, properties: {under_voltage: {type: boolean}, throttled: {type: boolean}, under_voltage_since_boot: {type: boolean}, throttled_since_boot: {type: boolean}}}
         crashes_24h: {type: integer, minimum: 0}
         renderer_restarts_24h: {type: integer, minimum: 0}
+    ScreenHealthInterface:
+      type: object
+      additionalProperties: false
+      required: [name, kind, addresses]
+      description: One network interface of the device with its local addresses (IPv4, global and unique-local IPv6), as the Player last reported it. A local address is not a credential and grants nothing.
+      properties:
+        name: {type: string}
+        kind: {type: string, enum: [ethernet, wifi, cellular, tunnel, unknown]}
+        addresses: {type: array, minItems: 1, maxItems: 8, items: {type: string}}
     ScreenOutage:
       type: object
       additionalProperties: false
