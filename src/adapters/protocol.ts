@@ -834,6 +834,42 @@ export interface ScreenMaintenanceAccepted {
   state: ScreenCommandDelivery;
 }
 
+/** The 202 answer of POST /api/screens/{id}/network. */
+export interface ScreenNetworkAccepted {
+  command_id: string;
+  command: "network";
+  expires_at: string;
+  state: ScreenCommandDelivery;
+}
+
+/** The addressing of ScreenNetworkWrite and ScreenNetworkChange: automatic (DHCP), or manual with address, prefix, gateway and up to three DNS servers. */
+export interface ScreenNetworkIPv4 {
+  mode: "automatic" | "manual";
+  address?: string;
+  prefix?: number;
+  gateway?: string;
+  dns?: string[];
+}
+
+/** The body of POST /api/screens/{id}/network. The Wi-Fi password is write-only: it is never returned. */
+export interface ScreenNetworkWrite {
+  connection: "ethernet" | "wifi";
+  wifi?: { ssid: string; hidden?: boolean; password?: string };
+  ipv4: ScreenNetworkIPv4;
+  /** 60 to 600 seconds (default 180). */
+  rollback_after_s?: number;
+  /** 60 to 86400 seconds (default 3600). */
+  expires_in_s?: number;
+}
+
+/** What a network command asks for, in Screen.commands[].network. Never the password: password_set says one was given. */
+export interface ScreenNetworkChange {
+  connection: "ethernet" | "wifi";
+  wifi?: { ssid: string; hidden: boolean; password_set: boolean };
+  ipv4: ScreenNetworkIPv4;
+  rollback_after_s: number;
+}
+
 /** The optional body of POST /api/screens/{id}/reboot, /reload, /clear-cache, /restart-app and /update: how long the command stays actionable, 60 to 86400 seconds (default 86400). */
 export interface ScreenCommandWrite {
   expires_in_s?: number;
@@ -848,7 +884,7 @@ export interface ScreenCommandWrite {
  */
 export interface ScreenCommand {
   id: string;
-  type: "reboot" | "reload" | ScreenMaintenanceCommand;
+  type: "reboot" | "reload" | ScreenMaintenanceCommand | "network";
   state: "queued" | "sent" | "done" | "failed" | "expired" | "cancelled" | "superseded";
   requested_at: string;
   expires_at: string;
@@ -858,6 +894,8 @@ export interface ScreenCommand {
   source?: "schedule";
   cause?: string;
   detail?: string;
+  /** A network command: what it asks for. */
+  network?: ScreenNetworkChange;
 }
 
 /** Screen.glass: the backend's conclusions about the picture. Readers keep a member and a verdict they do not know. */

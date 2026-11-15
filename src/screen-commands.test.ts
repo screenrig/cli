@@ -791,5 +791,5 @@ test("help names each new command's arguments, required options and the parity u
     assert.ok(help.examples.length >= 3, name);
   }
   assert.match(commandHelp(["screen", "reboot"]).usage, /an offline screen holds\s+it queued \(state queued\) and is sent it when it comes online, for 24 hours by\s+default/);
-  assert.match(commandHelp(["screen", "show"]).usage, /data\.commands lists the screen's recent commands[\s\S]*clear_cache, restart_app and update[\s\S]*CAUSE column[\s\S]*data\.suspension[\s\S]*data\.replaced_by/);
+  assert.match(commandHelp(["screen", "show"]).usage, /data\.commands lists the screen's recent commands[\s\S]*clear_cache, restart_app, update and network[\s\S]*CAUSE column[\s\S]*data\.suspension[\s\S]*data\.replaced_by/);
 });

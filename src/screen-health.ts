@@ -36,6 +36,24 @@ export function screenHealthIssues(screen: Screen | undefined): string[] {
   return healthIssues(screen?.health);
 }
 
+/**
+ * The `network`, `hostname` and `address` lines of a health report: the default route's kind and Wi-Fi
+ * signal, then where to find the device on its own network (its host name and each interface's local addresses).
+ */
+export function networkLines(network: ScreenHealth["network"]): string[] {
+  if (!network) return [];
+  const lines: string[] = [];
+  const add = (key: string, value: string | undefined) => { if (value) lines.push(`${key}: ${value}`); };
+  add("network", [network.kind, number(network.wifi_rssi_dbm) ? `${network.wifi_rssi_dbm} dBm` : undefined].filter(Boolean).join(", "));
+  if (typeof network.hostname === "string") add("hostname", network.hostname);
+  for (const entry of Array.isArray(network.interfaces) ? network.interfaces : []) {
+    if (typeof entry?.name !== "string" || !Array.isArray(entry.addresses)) continue;
+    const kind = typeof entry.kind === "string" && entry.kind !== "unknown" ? ` (${entry.kind})` : "";
+    add(`address ${entry.name}${kind}`, entry.addresses.filter((address): address is string => typeof address === "string").join(", "));
+  }
+  return lines;
+}
+
 /** The compact `Health` block of `screen show --human`; nothing when the Player never reported. */
 export function healthLines(health: ScreenHealth | undefined): string[] {
   if (!health || typeof health !== "object" || typeof health.reported_at !== "string") return [];
@@ -66,17 +84,7 @@ export function healthLines(health: ScreenHealth | undefined): string[] {
       display.power ? `power ${display.power}` : undefined,
     ].filter(Boolean).join(", "));
   }
-  const network = health.network;
-  if (network) {
-    add("network", [network.kind, number(network.wifi_rssi_dbm) ? `${network.wifi_rssi_dbm} dBm` : undefined].filter(Boolean).join(", "));
-    // Where to find the device on its own network: its host name and each interface's local addresses.
-    if (typeof network.hostname === "string") add("hostname", network.hostname);
-    for (const entry of Array.isArray(network.interfaces) ? network.interfaces : []) {
-      if (typeof entry?.name !== "string" || !Array.isArray(entry.addresses)) continue;
-      const kind = typeof entry.kind === "string" && entry.kind !== "unknown" ? ` (${entry.kind})` : "";
-      add(`address ${entry.name}${kind}`, entry.addresses.filter((address): address is string => typeof address === "string").join(", "));
-    }
-  }
+  lines.push(...networkLines(health.network));
   const battery = health.battery;
   if (battery) {
     add("battery", [

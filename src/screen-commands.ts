@@ -5,8 +5,8 @@ import { plainText } from "./reviews.js";
 import { wallProblem } from "./screen-wall.js";
 
 /**
- * Queued reboots, reloads, cache clears, app restarts and updates, identify,
- * suspend and replace (backend docs/player-compatibility.md §5.7, §6.3,
+ * Queued reboots, reloads, cache clears, app restarts and updates, network
+ * changes (screen-network.ts), identify, suspend and replace (backend docs/player-compatibility.md §5.7, §6.3,
  * §6.3.2, §6.5, §6.5.1 and §6.9). Local checks
  * mirror ScreenCommandWrite, ScreenIdentifyWrite and ScreenSuspendWrite so a bad
  * value fails before any request; the server stays authoritative.
@@ -72,7 +72,7 @@ export function suspendMessageOption(value: string): string {
 }
 
 /** A server date-time that is safe to print: RFC 3339 shaped and parseable. */
-function instant(value: unknown): string | undefined {
+export function instant(value: unknown): string | undefined {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})$/i.test(value) && !Number.isNaN(Date.parse(value))
     ? value
     : undefined;
@@ -121,14 +121,14 @@ export function commandResultText(kind: string, result: { state?: unknown; expir
 }
 
 const COMMAND_STATES = new Set(["queued", "sent", "done", "failed", "expired", "cancelled", "superseded"]);
-const COMMAND_TYPES = new Set(["reboot", "reload", "clear_cache", "restart_app", "update"]);
-const COMMAND_ID = /^[A-Za-z0-9_-]{8,64}$/;
-const COMMAND_CAUSE = /^[a-z0-9_]{1,40}$/;
+const COMMAND_TYPES = new Set(["reboot", "reload", "clear_cache", "restart_app", "update", "network"]);
+export const COMMAND_ID = /^[A-Za-z0-9_-]{8,64}$/;
+export const COMMAND_CAUSE = /^[a-z0-9_]{1,40}$/;
 const COMMAND_DETAIL_MAX = 200;
 
 /**
  * The `Commands` block of screen show: the screen's recent reboots, reloads,
- * cache clears, app restarts and updates, oldest first, as the server lists
+ * cache clears, app restarts, updates and network changes, oldest first, as the server lists
  * them. Only token-shaped types, states, ids and causes and RFC 3339 times are
  * printed; the cause the Player reported joins the table as a CAUSE column and
  * its short detail follows as a line of text with control characters turned to
