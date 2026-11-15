@@ -161,7 +161,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   const displayOutput = screen.command("display-output").description("Set the video mode a screen's Player sets on its output, or clear it")
     .argument("<id>", "Screen identifier")
-    .option("--mode <MODE>", "auto (the display's own preferred mode) or WIDTHxHEIGHTxFPS with an optional p or i, such as 3840x2160x60p", displayOutputModeOption)
+    .option("--mode <MODE>", "auto (the display's own preferred mode, at most 1920x1080x60p on a Raspberry Pi) or WIDTHxHEIGHTxFPS with an optional p or i, such as 3840x2160x60p", displayOutputModeOption)
     .addOption(new Option("--clear", "Remove the setting").conflicts("mode"))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenDisplayOutput));
