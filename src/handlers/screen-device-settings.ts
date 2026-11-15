@@ -1,4 +1,4 @@
-// Command handlers for screen display-idle, brightness and kiosk-lock, loaded on demand.
+// Command handlers for screen display-idle, brightness, kiosk-lock and menu-pin, loaded on demand.
 import type { ParsedArgs } from "../command-input.js";
 import { flagBool, flagString } from "../command-input.js";
 import { requireToken } from "../client.js";
@@ -9,27 +9,39 @@ import { usageError } from "../problems.js";
 import { playlistAnswerWarnings, withoutAnswerWarnings } from "../playlist-warnings.js";
 import type { CliRuntime } from "../runtime.js";
 import type { Screen, ScreenPatch } from "../adapters/protocol.js";
-import { brightnessPatch, displayCecPatch, displayIdlePatch, displayIdleText, displayOutputPatch, kioskLockPatch } from "../screen-device-settings.js";
+import { readAuthoringText } from "../authoring-input.js";
+import {
+  brightnessPatch, displayCecPatch, displayIdlePatch, displayIdleText, displayOutputPatch, kioskLockPatch, MENU_PIN_INPUT_MAX_BYTES, menuPinProblem, menuPinWrite,
+} from "../screen-device-settings.js";
+
+/** The one request a screen write sends: PATCH /api/screens/{id} with a ScreenPatch, or a sub-route of the screen. */
+interface ScreenWrite { method: "PATCH" | "PUT" | "DELETE"; route?: string; body?: unknown }
 
 /**
- * One ScreenPatch carrying only the device setting asked for: a member left
- * out stays as it is, so the other display member and every other screen
- * field are untouched. The server owns the range and type checks.
+ * One write to a single screen: the id is the positional after the command's
+ * own words, the revision guard is optional and the write is replay-safe. The
+ * server owns the range and type checks.
  */
-async function patchDeviceSetting(
-  args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, command: string, patch: ScreenPatch, title: (id: string) => string,
+async function writeScreen(
+  args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, command: string, write: ScreenWrite, title: (id: string) => string,
+  refusal?: (error: unknown, id: string) => unknown,
 ): Promise<CommandResult> {
-  const id = args.positionals[2];
+  const id = args.positionals[command.split(" ").length];
   if (!id) throw usageError(`${command} requires <id>.`);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const ifMatch = flagString(args.flags, "expect-rev");
-  const response = await client.call({
-    method: "PATCH",
-    path: `/api/screens/${encodeURIComponent(id)}`,
-    idempotent: true,
-    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
-    body: patch,
-  });
+  let response;
+  try {
+    response = await client.call({
+      method: write.method,
+      path: `/api/screens/${encodeURIComponent(id)}${write.route ?? ""}`,
+      idempotent: true,
+      headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+      ...(write.body === undefined ? {} : { body: write.body }),
+    });
+  } catch (error) {
+    throw refusal ? refusal(error, id) : error;
+  }
   const revision = (response.body as Screen | undefined)?.revision;
   const lifted = playlistAnswerWarnings(response.body);
   return {
@@ -37,6 +49,17 @@ async function patchDeviceSetting(
     exitCode: ExitCode.Success,
     human: [title(id), ...(revision !== undefined ? [`revision: ${revision}`] : []), ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
+}
+
+/**
+ * One ScreenPatch carrying only the device setting asked for: a member left
+ * out stays as it is, so the other display member and every other screen
+ * field are untouched.
+ */
+function patchDeviceSetting(
+  args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, command: string, patch: ScreenPatch, title: (id: string) => string,
+): Promise<CommandResult> {
+  return writeScreen(args, runtime, resolved, command, { method: "PATCH", body: patch }, title);
 }
 
 export const handleScreenDisplayIdle = commandHandler(async (args, runtime, resolved) => {
@@ -70,3 +93,16 @@ export const handleScreenKioskLock = commandHandler(async (args, runtime, resolv
   return patchDeviceSetting(args, runtime, resolved, "screen kiosk-lock", patch,
     (id) => (patch.kiosk?.lock ? `Locked kiosk on ${id}: the Player pins itself to the screen` : `Released the kiosk lock on ${id}`));
 }, true);
+
+// The PIN is read from a file or stdin, checked here, and sent only in the request body; no output, error or log carries it.
+export const handleScreenMenuPinSet = commandHandler(async (args, runtime, resolved) => {
+  const file = flagString(args.flags, "pin-file");
+  if (file === undefined) throw usageError("screen menu-pin set requires --pin-file FILE, or - for stdin.");
+  const body = menuPinWrite(await readAuthoringText(file, runtime, MENU_PIN_INPUT_MAX_BYTES));
+  return writeScreen(args, runtime, resolved, "screen menu-pin set", { method: "PUT", route: "/menu-pin", body }, (id) =>
+    `Settings menu PIN set on ${id}; the screen applies it when it next connects`, menuPinProblem);
+}, true);
+
+export const handleScreenMenuPinClear = commandHandler(async (args, runtime, resolved) =>
+  writeScreen(args, runtime, resolved, "screen menu-pin clear", { method: "DELETE", route: "/menu-pin" }, (id) =>
+    `Settings menu PIN removed on ${id}; the screen applies it when it next connects, and its wrong-PIN lockout ends`, menuPinProblem), true);

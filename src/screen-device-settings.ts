@@ -1,5 +1,5 @@
-import type { ScreenDisplay, ScreenDisplayBrightness, ScreenDisplayIdle, ScreenKiosk, ScreenObservationDisplayOutput, ScreenPatch } from "./adapters/protocol.js";
-import { usageError } from "./problems.js";
+import type { ScreenDisplay, ScreenDisplayBrightness, ScreenDisplayIdle, ScreenKiosk, ScreenMenuPin, ScreenMenuPinWrite, ScreenObservationDisplayOutput, ScreenPatch } from "./adapters/protocol.js";
+import { CliError, usageError } from "./problems.js";
 
 /** display.idle.after_s bounds (vendor/openapi.yaml ScreenDisplayIdle). */
 export const DISPLAY_IDLE_AFTER_MIN_S = 30;
@@ -109,4 +109,74 @@ export function displayOutputObservationLines(reported: ScreenObservationDisplay
 /** The `Kiosk lock` line of screen show: the lock appears on a screen only while it is on. */
 export function kioskLines(kiosk: ScreenKiosk | undefined): string[] {
   return kiosk && typeof kiosk.lock === "boolean" ? [`Kiosk lock: ${kiosk.lock ? "on" : "off"}`] : [];
+}
+
+/** The longest PIN file or stdin the CLI reads: a PIN is at most 8 digits plus a line break. */
+export const MENU_PIN_INPUT_MAX_BYTES = 64;
+
+/**
+ * --pin-file FILE|-: a file name or `-`. A value of only digits is refused with
+ * a fixed message, since it is the PIN typed where a file name goes and would
+ * otherwise reach history, the process list and an error naming a missing file.
+ */
+export function menuPinFileOption(value: string): string {
+  if (/^[0-9]+$/.test(value)) {
+    throw usageError("--pin-file takes a file name, or - for stdin, never the PIN itself. Put the PIN in a file or pipe it in.");
+  }
+  return value;
+}
+
+/** The body of PUT /api/screens/{id}/menu-pin from the text of the PIN file: one trailing line break is dropped, then 4 to 8 digits are required. */
+export function menuPinWrite(text: string): ScreenMenuPinWrite {
+  const pin = text.replace(/\r?\n$/, "");
+  if (!/^[0-9]{4,8}$/.test(pin)) {
+    throw usageError("The PIN must be 4 to 8 digits (0 to 9) and nothing else: no spaces, other characters or extra lines. A single trailing line break is fine.");
+  }
+  return { pin };
+}
+
+/** 409 menu_pin_unsupported: only a Player that declares the menu_pin capability keeps a PIN. Nothing was recorded. */
+export function menuPinProblem(error: unknown, id: string): unknown {
+  if (!(error instanceof CliError) || error.problem.next) return error;
+  if (error.problem.code === "menu_pin_unsupported") {
+    return new CliError({
+      ...error.problem,
+      next: { command: `screenrig screen show ${id}`, reason: "Check host.capabilities for menu_pin. Update the Player and run the command again, or set the PIN in the Player's own settings menu." },
+    }, error.exitCode, error.warnings);
+  }
+  return error;
+}
+
+/**
+ * The `Settings menu PIN` line of screen show: only set or not set, who changed
+ * it and when, never the PIN or the request's id. A remote change the Player has
+ * not reported applying yet says it is waiting.
+ */
+export function menuPinLines(menuPin: ScreenMenuPin | undefined): string[] {
+  if (!menuPin || typeof menuPin !== "object") return [];
+  const requested = menuPin.requested && typeof menuPin.requested === "object" && typeof menuPin.requested.set === "boolean" && typeof menuPin.requested.set_at === "string" ? menuPin.requested : undefined;
+  const reported = menuPin.reported && typeof menuPin.reported === "object" && typeof menuPin.reported.set === "boolean" ? menuPin.reported : undefined;
+  if (!requested && !reported) return [];
+  const state = (on: boolean) => (on ? "set" : "not set");
+  if (requested && !menuPinApplied(requested, reported)) {
+    const wait = `${requested.set ? "a new PIN" : "removal"} requested ${requested.set_at}, waiting for the screen to apply it`;
+    return [`Settings menu PIN: ${wait}${reported ? ` (the screen last reported ${state(reported.set)})` : ""}`];
+  }
+  if (!reported) return [];
+  const changed = reported.changed_by === "device" || reported.changed_by === "remote"
+    ? `${reported.changed_by === "device" ? "on the screen" : "remotely"}${typeof reported.changed_at === "string" ? `, ${reported.changed_at}` : ""}`
+    : undefined;
+  const notes = [changed, reported.stale ? "stale: no report for over 35 minutes" : undefined].filter(Boolean);
+  return [`Settings menu PIN: ${state(reported.set)}${notes.length ? ` (${notes.join("; ")})` : ""}`];
+}
+
+/**
+ * Whether the Player's report shows a change made at or after the request (a
+ * change made on the device after it wins). Without a change time, a remote
+ * change that leaves the PIN as requested counts as applied.
+ */
+function menuPinApplied(requested: { set: boolean; set_at: string }, reported: ScreenMenuPin["reported"]): boolean {
+  if (!reported || (reported.changed_by !== "device" && reported.changed_by !== "remote")) return false;
+  if (typeof reported.changed_at !== "string") return reported.changed_by === "remote" && reported.set === requested.set;
+  return Date.parse(reported.changed_at) >= Date.parse(requested.set_at);
 }

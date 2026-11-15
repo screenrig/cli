@@ -222,6 +222,8 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "screen kiosk-lock": ["scr_SCREEN --on", "scr_SCREEN --off --expect-rev 4"],
     "screen network show": ["scr_SCREEN"],
     "screen network set": ["scr_SCREEN --wifi Lobby --password-file wifi-password.txt --dhcp", "scr_SCREEN --wifi Lobby --hidden --password-file - --address 192.168.1.50/24 --gateway 192.168.1.1 --dns 192.168.1.1,1.1.1.1", "scr_SCREEN --ethernet --dhcp --rollback-after 300", "scr_SCREEN --ethernet --address 10.0.4.20/24 --gateway 10.0.4.1 --expires-in 2h --expect-rev 4"],
+    "screen menu-pin set": ["scr_SCREEN --pin-file pin.txt", "scr_SCREEN --pin-file - --expect-rev 4"],
+    "screen menu-pin clear": ["scr_SCREEN", "scr_SCREEN --expect-rev 4"],
     "screen move": ["scr_AAA scr_BBB --folder sfd_NORTH", "sfd_CAFES --folder sfd_NORTH", "scr_AAA sfd_CAFES --root", 'scr_AAA --folder sfd_NORTH --note "Lobby refit"'],
     "screen folder list": [""], "screen folder show": ["sfd_NORTH"],
     "screen folder create": ["--name North", "--name Cafes --parent sfd_NORTH --default-playlist-id pl_PLAYLIST", '--name Cafes --parent sfd_NORTH --note "New cafe wing"'],

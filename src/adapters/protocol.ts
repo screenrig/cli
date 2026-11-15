@@ -788,6 +788,37 @@ export interface ScreenVolumeWrite {
   muted?: boolean;
 }
 
+/** Screen.menu_pin.requested: the latest remote change to the settings menu PIN. Never the PIN. */
+export interface ScreenMenuPinRequested {
+  menu_pin_id: string;
+  /** true a PIN was set, false it was removed. */
+  set: boolean;
+  set_at: string;
+}
+
+/** Screen.menu_pin.reported: what the Player last reported about its settings menu PIN. */
+export interface ScreenMenuPinReported {
+  set: boolean;
+  /** Whether the last change was made on the device or applied from a remote change. */
+  changed_by?: "device" | "remote";
+  changed_at?: string;
+  reported_at: string;
+  /** No report for over 35 minutes. */
+  stale: boolean;
+}
+
+/** Screen.menu_pin: the remote request and the Player's report; absent when the screen has neither. */
+export interface ScreenMenuPin {
+  requested?: ScreenMenuPinRequested;
+  reported?: ScreenMenuPinReported;
+}
+
+/** The body of PUT /api/screens/{id}/menu-pin. */
+export interface ScreenMenuPinWrite {
+  /** 4 to 8 digits. Never stored or returned by the backend. */
+  pin: string;
+}
+
 export interface ScreenDisplayScheduleView {
   display_schedule: ScreenDisplaySchedule | null;
   display?: ScreenDisplay;
@@ -1147,6 +1178,8 @@ export interface Screen {
   health?: ScreenHealth;
   display?: ScreenDisplay;
   volume?: ScreenVolume;
+  /** The settings menu PIN request and the Player's report; never the PIN. */
+  menu_pin?: ScreenMenuPin;
   /** The kiosk lock; present only while it is on. Set by ScreenPatch. */
   kiosk?: ScreenKiosk;
   /** The windows in which the backend reboots the screen. Present while one is set. Read-only: screen reboot-schedule set and clear change it. */
