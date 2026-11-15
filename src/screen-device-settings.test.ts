@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
@@ -9,6 +10,7 @@ import { ExitCode } from "./exit-codes.js";
 import { commandHelp } from "./help-tree.js";
 import { createMemoryLogger } from "./log/logger.js";
 import { run } from "./main.js";
+import { networkError } from "./problems.js";
 import { type CliRuntime } from "./runtime.js";
 import { displayLines } from "./screen-display.js";
 import {
@@ -399,7 +401,7 @@ test("screen menu-pin set reads the PIN from a file or stdin and sends it only i
   assert.equal(put.path, `/api/screens/${LOBBY}/menu-pin`);
   assert.deepEqual(put.body, { pin: PIN });
   assert.equal(put.headers?.["if-match"], '"3"');
-  assert.ok(put.headers?.["idempotency-key"], "the write is replay-safe");
+  assert.equal(put.headers?.["idempotency-key"], undefined, "a PIN write keeps no replay key");
   assert.equal(fromFile.envelope.data.menu_pin.requested.set, true);
   assert.match(fromFile.envelope.data.menu_pin.requested.menu_pin_id, /^pin_/);
   assert.ok(!fromFile.everything.includes(PIN), "no output, error or log event carries the PIN");
@@ -417,6 +419,31 @@ test("screen menu-pin set reads the PIN from a file or stdin and sends it only i
   assert.match(piped.stdout, /^revision: 6$/m);
   assert.ok(!piped.everything.includes(PIN));
   assert.ok(!(await pinCli(["--json", "screen", "show", LOBBY], transport, env)).everything.includes(PIN), "screen show never has it either");
+});
+
+test("screen menu-pin set leaves the PIN and any hash of it out of the saved config", async () => {
+  const env = await enrolled();
+  const transport = pinFleet();
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  for (const [stdin, flags] of [[`${PIN}\n`, ["--idempotency-key", "retry-key-menu-pin-1"]], [`${PIN}\n`, []]] as const) {
+    const set = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, "--pin-file", "-", ...flags], transport, env, stdin);
+    assert.equal(set.code, ExitCode.Success, set.stdout + set.stderr);
+  }
+  const failing = pinFleet();
+  const reach = failing.request.bind(failing);
+  failing.request = async (req) => { if (req.method === "PUT" && req.path.endsWith("/menu-pin")) throw networkError("The CLI could not reach the API."); return reach(req); };
+  const failed = await pinCli(["--json", "screen", "menu-pin", "set", LOBBY, "--pin-file", "-"], failing, env, `${PIN}\n`);
+  assert.notEqual(failed.code, ExitCode.Success);
+  assert.ok(!failed.everything.includes(PIN));
+  const config = await readFile(path.join(env.fs.homedir(), "screenrig", "config.json"), "utf8");
+  assert.ok(!config.includes(PIN), "the config never holds the PIN");
+  assert.ok(!config.includes("pending_writes") && !config.includes("idempotency_key"), "no recovery entry is saved for the write");
+  for (const body of [{ pin: PIN }, PIN]) {
+    for (const text of [JSON.stringify(body), `${JSON.stringify(body)}\n`, typeof body === "string" ? body : ""]) {
+      assert.ok(!config.includes(sha(text)), "nor any hash of a body that holds it");
+    }
+  }
+  assert.ok(pinWrites(transport).every((call) => call.headers?.["idempotency-key"] === undefined));
 });
 
 test("screen menu-pin set refuses a PIN typed as an argument, a bad length or a bad file, and sends nothing", async () => {
