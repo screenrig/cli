@@ -189,17 +189,30 @@ export function withoutDates(existing: unknown): JSONObject | undefined {
   return rest.windows !== undefined || rest.data !== undefined || rest.enabled === false ? rest : undefined;
 }
 
+const CARD_INSTANCE = /^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$/;
+
+/**
+ * A stored primitive, or container item, without the members an authored page refuses: resolved media, a card's
+ * derived feed and type, and the major and params a card instance owns. Everything else stays as stored.
+ */
+function authoringMembers(primitive: JSONObject): JSONObject {
+  const { resolved_media: _resolved, ...rest } = primitive;
+  if (rest.primitive === "card") {
+    delete rest.feed;
+    delete rest.type;
+    if (typeof rest.card === "string" && CARD_INSTANCE.test(rest.card)) { delete rest.major; delete rest.params; }
+  }
+  if (rest.primitive === "container" && Array.isArray(rest.items)) rest.items = rest.items.map((item) => isObject(item) ? authoringMembers(item) : item);
+  return rest;
+}
+
 /** The authoring form of a stored page: what the server resolved is not sent back, nor are the comments an agent attached. */
 export function authoringPage(stored: JSONObject): JSONObject {
   const page: JSONObject = {};
   for (const [key, value] of Object.entries(stored)) {
     if (key === "comments") continue;
     page[key] = key === "primitives" && Array.isArray(value)
-      ? value.map((primitive) => {
-        if (!isObject(primitive)) return primitive;
-        const { resolved_media: _resolved, ...rest } = primitive;
-        return rest;
-      })
+      ? value.map((primitive) => isObject(primitive) ? authoringMembers(primitive) : primitive)
       : value;
   }
   return page;
