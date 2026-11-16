@@ -462,8 +462,8 @@ export function normalizePlaylistForBundle(
     page.primitives.forEach((primitiveValue, primitiveIndex) => {
       const primitive = record(primitiveValue, `Playlist.pages[${pageIndex}].primitives[${primitiveIndex}]`);
       const category = primitive.primitive;
-      if (category === "card") {
-        throw usageError("Playlist bundles do not carry card instances or their data. Use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
+      if (category === "card" || category === "container") {
+        throw usageError("Playlist bundles do not carry cards, containers, card instances or their data. Use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
       }
       if (category === "application") {
         if (!options.skipApplications) {

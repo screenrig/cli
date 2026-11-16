@@ -51,6 +51,8 @@ production availability from the independent monitor without credentials
 - Live weather, clocks, menus and boards: a built-in card (`screenrig cards list`).
   Touch, peripherals, pushed data or an exact look no card has: an application.
 - Live video or an existing web page: playlist primitives.
+- A side panel or L-bar that turns between cards and images, by the clock or with the clip a
+  page's video plays: a `container` primitive (`screenrig playlist validate --help`).
 - Building an application: `screenrig app dev DIRECTORY` serves it in a local Player harness
   (capabilities, device events, stored values, the page timer, and simulated GPIO with pull and idle
   levels, infrared, loopback UDP sockets, serial, Bluetooth, printers and the HDMI input permission),

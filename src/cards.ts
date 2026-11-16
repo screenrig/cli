@@ -4,6 +4,7 @@ import type { ApiClient } from "./client.js";
 import { usageError } from "./problems.js";
 import { flagBool, flagString, type ParsedArgs } from "./command-input.js";
 import { SCREEN_LOCATION_TOKEN, screenKeyPlaceholder, screenTextPlaceholders } from "./screen-facts.js";
+import { flatPrimitives, PAGE_VIDEO_DATA_KEY } from "./playlist-write-validation.js";
 
 type Schema = Record<string, any>;
 export interface CardDetails {
@@ -140,7 +141,9 @@ function screenFactParams(card: CardDetails, params: unknown, field: string): un
 export async function validatePlaylistCards(client: ApiClient, playlist: { pages: any[] }): Promise<void> {
   const cards = new Map<string, CardDetails>();
   for (const [pageIndex, page] of playlist.pages.entries()) {
-    for (const [index, item] of (page.primitives ?? []).entries()) {
+    // A container's card items are checked as card primitives are.
+    for (const { primitive, at } of flatPrimitives(page.primitives)) {
+      const item: any = primitive;
       if (item.primitive !== "card") continue;
       if (typeof item.card === "string" && /^(?:(?:stage|qa|development)_)?crd_/.test(item.card)) continue;
       const id = cardId(item.card);
@@ -151,12 +154,13 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
       }
       if (item.major !== undefined && item.major !== card.major) continue;
       if (typeof item.layout === "string" && Array.isArray(card.layouts) && !card.layouts.includes(item.layout)) {
-        throw usageError(`pages[${pageIndex}].primitives[${index}].layout: card ${id} (${card.tier} tier) takes ${card.layouts.length ? card.layouts.join(", ") : "no layout"}, not ${item.layout}.`);
+        throw usageError(`pages[${pageIndex}].${at}.layout: card ${id} (${card.tier} tier) takes ${card.layouts.length ? card.layouts.join(", ") : "no layout"}, not ${item.layout}.`);
       }
       const schema = structuredClone(card.params_schema);
-      const field = `pages[${pageIndex}].primitives[${index}].params`;
+      const field = `pages[${pageIndex}].${at}.params`;
       if (item.data !== undefined) {
-        cardDataKeyTemplate(item.data);
+        // {page.video} is the page video's now-playing record, which names no stored document.
+        if (item.data !== PAGE_VIDEO_DATA_KEY) cardDataKeyTemplate(item.data);
         const dynamic = Object.keys(cardProperties(card).dynamic);
         for (const name of dynamic) {
           if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic and comes from the bound data document; leave it out of params, or use a card instance (card create, then card data put crd_ID).`);
