@@ -7,7 +7,38 @@ import { hasScreenToken, screenTemplateRefusal, screenTokenStandIn } from "./scr
 interface JsonRecord { [key: string]: unknown }
 
 /** The playlist wire's closed primitive kinds. */
-const WIRE_PRIMITIVES = ["image", "video", "iframe", "application", "stream", "card"] as const;
+const WIRE_PRIMITIVES = ["image", "video", "iframe", "application", "stream", "card", "container"] as const;
+
+/** The reserved data key of the page video's now-playing record, which the Player keeps itself and no stored document holds. */
+export const PAGE_VIDEO_DATA_KEY = "{page.video}";
+
+/** A container's items (cards and images), as written; empty for any other primitive. */
+export function containerItems(primitive: unknown): JsonRecord[] {
+  if (!primitive || typeof primitive !== "object" || Array.isArray(primitive)) return [];
+  const owner = primitive as JsonRecord;
+  if (owner.primitive !== "container" || !Array.isArray(owner.items)) return [];
+  return owner.items.filter((item): item is JsonRecord => !!item && typeof item === "object" && !Array.isArray(item));
+}
+
+/**
+ * A page's primitives with each container's items after it, and where each sits
+ * (`primitives[1]`, `primitives[1].items[0]`): what a walk that collects media,
+ * card data keys or card params reads. An item is a card or image body without rect or layer.
+ */
+export function flatPrimitives(primitives: unknown): Array<{ primitive: JsonRecord; at: string }> {
+  if (!Array.isArray(primitives)) return [];
+  const out: Array<{ primitive: JsonRecord; at: string }> = [];
+  const isRecord = (value: unknown): value is JsonRecord => !!value && typeof value === "object" && !Array.isArray(value);
+  for (const [index, value] of primitives.entries()) {
+    if (!isRecord(value)) continue;
+    out.push({ primitive: value, at: `primitives[${index}]` });
+    if (value.primitive !== "container" || !Array.isArray(value.items)) continue;
+    for (const [itemIndex, item] of value.items.entries()) {
+      if (isRecord(item)) out.push({ primitive: item, at: `primitives[${index}].items[${itemIndex}]` });
+    }
+  }
+  return out;
+}
 
 const PLAYLIST_TRANSITION_TYPES = [
   "crossfade",
@@ -192,8 +223,8 @@ function validateVisibility(value: unknown, name: string): void {
     const dataName = `${name}.data`;
     const data = record(visibility.data, dataName);
     exact(data, ["key", "path", "equals"], dataName);
-    // Each screen fills its weather key or its own field tokens in a data key.
-    if (data.key !== SCREEN_WEATHER_KEY) {
+    // Each screen fills its weather key or its own field tokens in a data key; the Player keeps the page video's record itself.
+    if (data.key !== SCREEN_WEATHER_KEY && data.key !== PAGE_VIDEO_DATA_KEY) {
       const key = string(data, "key", dataName, 256).replace(/\{screen\.field\.[a-z0-9_]{1,32}\}/g, "x");
       if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
     }
@@ -517,6 +548,7 @@ export function validatePlaylistWrite(
       number(primitive, "layer", primitiveName, { integer: true, min: 0, max: 1024 });
       if (primitive.enter !== undefined) validateEnter(primitive.enter, `${primitiveName}.enter`);
       if (primitive.primitive === "application") throw usageError("Playlist bundles do not support application primitives.");
+      if (primitive.primitive === "container") throw usageError("Playlist bundles do not support container primitives.");
       if (primitive.primitive === "iframe") {
         exact(primitive, ["id", "primitive", "src", "title", "reload_s", "fallback_src", "navigation_allowlist", "rect", "layer", "content_fit", "enter", "motion"], primitiveName);
         validateIframe({
@@ -612,6 +644,13 @@ export function assertWirePages(pages: unknown[]): void {
         }
       } else if ("selector" in wire) {
         throw usageError(`${label} primitives[${primitiveIndex}] ${category} does not take a selector.`);
+      }
+      if (category !== "container" || !Array.isArray(wire.items)) continue;
+      for (const [itemIndex, item] of wire.items.entries()) {
+        const kind = item && typeof item === "object" && !Array.isArray(item) ? (item as JsonRecord).primitive : undefined;
+        if (kind !== "card" && kind !== "image") {
+          throw usageError(`${label} primitives[${primitiveIndex}].items[${itemIndex}].primitive must be card or image: a container holds cards and images.`);
+        }
       }
     }
   }

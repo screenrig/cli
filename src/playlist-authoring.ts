@@ -25,6 +25,42 @@ function object(value: unknown): RecordValue {
 /** Preserve authored selectors; strip only fields the backend derives on reads. */
 const CARD_INSTANCE_UID = /^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$/;
 
+/**
+ * A stored primitive as a write takes it, edited in place: the members the
+ * server derives on reads are removed, from a container's items too.
+ */
+function authoringPrimitive(primitive: RecordValue): RecordValue {
+  // Reads report controller on every primitive; writes accept it only as
+  // true on an application.
+  if (primitive.primitive !== "application" || primitive.controller !== true) delete primitive.controller;
+  if (["image", "video", "stream"].includes(primitive.primitive)) {
+    delete primitive.resolved_media;
+    // Omit the server-inserted false default without changing selector behavior.
+    if (primitive.selector?.by === "id" && primitive.selector.one_at_a_time === false) delete primitive.selector.one_at_a_time;
+  }
+  if (primitive.primitive === "card") {
+    delete primitive.feed;
+    delete primitive.resolved_media;
+    // The instance owns type, major and params. A placement may select a
+    // separate keyed document; preserve that selection during read/edit/write.
+    if (typeof primitive.card === "string" && CARD_INSTANCE_UID.test(primitive.card)) {
+      for (const member of ["type", "major", "params"]) delete primitive[member];
+      if (primitive.data === primitive.card) delete primitive.data;
+      // The server derives rect and layer for every layout but free; leaving
+      // them would turn an edit of layout or anchor into a stale-rect refusal.
+      if (typeof primitive.layout === "string" && primitive.layout !== "free") {
+        delete primitive.rect;
+        delete primitive.layer;
+      }
+    }
+  }
+  // A container's items are card and image bodies, stored with what their primitives store.
+  if (primitive.primitive === "container" && Array.isArray(primitive.items)) {
+    for (const item of primitive.items) authoringPrimitive(object(item));
+  }
+  return primitive;
+}
+
 export function editablePlaylist(value: unknown): RecordValue {
   const resource = object(value);
   // PUT replaces the whole document, so a soundtrack read here must be written
@@ -49,33 +85,7 @@ export function editablePlaylist(value: unknown): RecordValue {
     // The server resolves max_ms for media_end and audio_end pages; a read value is not authoring input.
     if (page.advance?.mode === "media_end" || page.advance?.mode === "audio_end") delete page.advance.max_ms;
     if (!Array.isArray(page.primitives)) throw usageError("Playlist primitives are missing.");
-    for (const primitive of page.primitives) {
-      object(primitive);
-      // Reads report controller on every primitive; writes accept it only as
-      // true on an application.
-      if (primitive.primitive !== "application" || primitive.controller !== true) delete primitive.controller;
-      if (["image", "video", "stream"].includes(primitive.primitive)) {
-        delete primitive.resolved_media;
-        // Omit the server-inserted false default without changing selector behavior.
-        if (primitive.selector?.by === "id" && primitive.selector.one_at_a_time === false) delete primitive.selector.one_at_a_time;
-      }
-      if (primitive.primitive === "card") {
-        delete primitive.feed;
-        delete primitive.resolved_media;
-        // The instance owns type, major and params. A placement may select a
-        // separate keyed document; preserve that selection during read/edit/write.
-        if (typeof primitive.card === "string" && CARD_INSTANCE_UID.test(primitive.card)) {
-          for (const member of ["type", "major", "params"]) delete primitive[member];
-          if (primitive.data === primitive.card) delete primitive.data;
-          // The server derives rect and layer for every layout but free; leaving
-          // them would turn an edit of layout or anchor into a stale-rect refusal.
-          if (typeof primitive.layout === "string" && primitive.layout !== "free") {
-            delete primitive.rect;
-            delete primitive.layer;
-          }
-        }
-      }
-    }
+    for (const primitive of page.primitives) authoringPrimitive(object(primitive));
   }
   assertPlaylistValid(document);
   return document;

@@ -8,6 +8,7 @@ import { cardUid, validatePlaylistCards } from "./cards.js";
 import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
+import { flatPrimitives } from "./playlist-write-validation.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { manifestUpgradeOf } from "./screen-manifest-upgrade.js";
 import { pendingReviewOf, reviewNoteHeaders } from "./reviews.js";
@@ -30,7 +31,7 @@ interface Journal {
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 async function savedCardRevisions(client: ApiClient, document: any): Promise<Pick<Resource, "id" | "revision">[]> {
   const ids = new Set<string>();
-  for (const page of document.pages ?? []) for (const item of page.primitives ?? []) {
+  for (const page of document.pages ?? []) for (const { primitive: item } of flatPrimitives(page.primitives)) {
     if (item.primitive === "card" && typeof item.card === "string" && /^(?:(?:stage|qa|development)_)?crd_/.test(item.card)) ids.add(cardUid(item.card));
   }
   const cards: Pick<Resource, "id" | "revision">[] = [];

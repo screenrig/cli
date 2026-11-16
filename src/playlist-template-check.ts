@@ -1,3 +1,5 @@
+import { flatPrimitives } from "./playlist-write-validation.js";
+
 type JSONObject = Record<string, unknown>;
 const isObject = (value: unknown): value is JSONObject => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -27,8 +29,7 @@ export function withFieldStandIns(document: unknown): unknown {
   const copy = structuredClone(document) as JSONObject;
   for (const page of Array.isArray(copy.pages) ? copy.pages : []) {
     if (!isObject(page)) continue;
-    for (const primitive of Array.isArray(page.primitives) ? page.primitives : []) {
-      if (!isObject(primitive)) continue;
+    for (const { primitive } of flatPrimitives(page.primitives)) {
       const selector = primitive.selector;
       if ((primitive.primitive === "image" || primitive.primitive === "video") && isObject(selector) && selector.by === "id"
         && typeof selector.media_id === "string" && WHOLE_TOKEN.test(selector.media_id)) selector.media_id = "med_template_field";
@@ -61,6 +62,29 @@ export function templateIssues(document: unknown): TemplateIssue[] {
   const issues: TemplateIssue[] = [];
   const uses: Use[] = [];
   const stray = (path: string) => issues.push({ path, message: SITES });
+  // One primitive or container item; a container's items are scanned apart from it.
+  const scanPrimitive = (primitive: JSONObject, path: string): void => {
+    const kind = primitive.primitive;
+    for (const [key, value] of Object.entries(primitive)) {
+      const keyPath = `${path}/${key}`;
+      if (key === "items" && kind === "container") continue;
+      if (key === "params" && kind === "card") {
+        stringsUnder(value, keyPath, (text, at) => { for (const match of text.matchAll(TOKEN)) uses.push({ name: match[1]!, site: "card", path: at }); });
+      } else if (key === "selector" && (kind === "image" || kind === "video") && isObject(value)) {
+        for (const [member, item] of Object.entries(value)) {
+          const whole = typeof item === "string" ? WHOLE_TOKEN.exec(item) : null;
+          if (whole && member === "media_id" && value.by === "id") uses.push({ name: whole[1]!, site: kind, path: `${keyPath}/media_id` });
+          else stringsUnder(item, `${keyPath}/${member}`, (text, at) => { if (new RegExp(TOKEN.source).test(text)) stray(at); });
+        }
+      } else if (key === "src" && kind === "iframe" && typeof value === "string") {
+        const whole = WHOLE_TOKEN.exec(value);
+        if (whole) uses.push({ name: whole[1]!, site: "iframe", path: keyPath });
+        else if (new RegExp(TOKEN.source).test(value)) issues.push({ path: keyPath, message: "an iframe src takes a url field only as the whole address" });
+      } else {
+        stringsUnder(value, keyPath, (text, at) => { if (text.includes("{field.") && new RegExp(TOKEN.source).test(text)) stray(at); });
+      }
+    }
+  };
   const pages = Array.isArray(doc.pages) ? doc.pages : [];
   pages.forEach((page, pageIndex) => {
     if (!isObject(page)) return;
@@ -71,26 +95,12 @@ export function templateIssues(document: unknown): TemplateIssue[] {
     (Array.isArray(page.primitives) ? page.primitives : []).forEach((primitive, index) => {
       if (!isObject(primitive)) return;
       const path = `${pagePath}/primitives/${index}`;
-      const kind = primitive.primitive;
       const before = uses.length;
-      for (const [key, value] of Object.entries(primitive)) {
-        const keyPath = `${path}/${key}`;
-        if (key === "params" && kind === "card") {
-          stringsUnder(value, keyPath, (text, at) => { for (const match of text.matchAll(TOKEN)) uses.push({ name: match[1]!, site: "card", path: at }); });
-        } else if (key === "selector" && (kind === "image" || kind === "video") && isObject(value)) {
-          for (const [member, item] of Object.entries(value)) {
-            const whole = typeof item === "string" ? WHOLE_TOKEN.exec(item) : null;
-            if (whole && member === "media_id" && value.by === "id") uses.push({ name: whole[1]!, site: kind, path: `${keyPath}/media_id` });
-            else stringsUnder(item, `${keyPath}/${member}`, (text, at) => { if (new RegExp(TOKEN.source).test(text)) stray(at); });
-          }
-        } else if (key === "src" && kind === "iframe" && typeof value === "string") {
-          const whole = WHOLE_TOKEN.exec(value);
-          if (whole) uses.push({ name: whole[1]!, site: "iframe", path: keyPath });
-          else if (new RegExp(TOKEN.source).test(value)) issues.push({ path: keyPath, message: "an iframe src takes a url field only as the whole address" });
-        } else {
-          stringsUnder(value, keyPath, (text, at) => { if (text.includes("{field.") && new RegExp(TOKEN.source).test(text)) stray(at); });
-        }
-      }
+      scanPrimitive(primitive, path);
+      // A container's items read fields as primitives do; its lock covers them.
+      (primitive.primitive === "container" && Array.isArray(primitive.items) ? primitive.items : []).forEach((item, itemIndex) => {
+        if (isObject(item)) scanPrimitive(item, `${path}/items/${itemIndex}`);
+      });
       if (primitive.locked === true && uses.length > before) issues.push({ path: `${path}/locked`, message: "a locked primitive cannot read a field: locked elements are the template's fixed content" });
     });
   });

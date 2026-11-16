@@ -280,6 +280,21 @@ const LAYOUTS = ["full", "free", "center", "wide", "header", "footer", "corner",
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const EDGES = ["top", "bottom", "left", "right"];
 
+const MAX_PRIMITIVES = 24;
+const MAX_CONTAINERS = 4;
+/** What a container is not: it fits no content of its own, is no controller and has no motion; each item fits its own content. */
+const CONTAINER_REFUSED = ["content_fit", "controller", "motion"];
+
+/** The shape of a card's layout and anchor, which a placement and a container item share; undefined when valid. */
+function cardLayoutIssue(card: ObjectValue): { member: "layout" | "anchor"; message: string } | undefined {
+  const layout = card.layout;
+  const anchors = layout === "corner" || layout === "chip" ? CORNERS : layout === "strip" ? EDGES : [];
+  if (typeof layout !== "string" || !LAYOUTS.includes(layout)) return { member: "layout", message: `is required and must be one of ${LAYOUTS.join(", ")}` };
+  if (anchors.length === 0 && Object.hasOwn(card, "anchor")) return { member: "anchor", message: `is not allowed for layout ${layout}` };
+  if (anchors.length > 0 && !anchors.includes(card.anchor as string)) return { member: "anchor", message: `is required for layout ${layout} and must be one of ${anchors.join(", ")}` };
+  return undefined;
+}
+
 const RESERVED_LAUNCH_PARAMS = ["ticket", "policy"];
 
 /** An application's launch params beyond their schema: the launch URL sets ticket and policy itself, and a value has no control character (server validateLaunchParams). Returns the text members. */
@@ -385,7 +400,9 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const mode = object(page.advance).mode;
     const primitives = array(page.primitives).map(object);
     const ids = new Set<unknown>();
-    let controllers = 0, web = 0, streams = 0;
+    let controllers = 0, web = 0, streams = 0, containers = 0, counted = primitives.length;
+    // The turn paths of the containers that follow the page's video, which then needs exactly one.
+    const videoTurns: string[] = [];
     // The slots cards hold, with the displays each holder covers: two cards conflict only when their frames
     // share a display. A card without displays covers every display of the playlist format.
     const mainCards: Frame[] = [];
@@ -481,10 +498,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         // Placement shape. The card's tier, the strip edges (a header takes the top edge's normal strip slot and a footer the
         // bottom edge's; a strip's presence is server knowledge) and the derived rect and layer stay server checks.
         const layout = primitive.layout;
-        const anchors = layout === "corner" || layout === "chip" ? CORNERS : layout === "strip" ? EDGES : [];
-        if (typeof layout !== "string" || !LAYOUTS.includes(layout)) fail(`${itemPath}/layout`, `is required and must be one of ${LAYOUTS.join(", ")}`);
-        else if (anchors.length === 0 && Object.hasOwn(primitive, "anchor")) fail(`${itemPath}/anchor`, `is not allowed for layout ${layout}`);
-        else if (anchors.length > 0 && !anchors.includes(primitive.anchor as string)) fail(`${itemPath}/anchor`, `is required for layout ${layout} and must be one of ${anchors.join(", ")}`);
+        const layoutIssue = cardLayoutIssue(primitive);
+        if (layoutIssue !== undefined) fail(`${itemPath}/${layoutIssue.member}`, layoutIssue.message);
         if (layout === "free") {
           if (Object.hasOwn(primitive, "displays")) fail(`${itemPath}/displays`, "is not allowed for layout free");
           if (!Object.hasOwn(primitive, "rect")) fail(`${itemPath}/rect`, "is required for layout free");
@@ -502,6 +517,33 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
           if (takes(corners.get(primitive.anchor), frame)) fail(`${itemPath}/anchor`, "a page holds one corner or chip card per corner");
           corners.set(primitive.anchor, [...corners.get(primitive.anchor) ?? [], frame]);
         }
+      }
+      if (primitive.primitive === "container") {
+        containers++;
+        if (containers > MAX_CONTAINERS) fail(itemPath, `a page holds at most ${MAX_CONTAINERS} containers`);
+        for (const key of CONTAINER_REFUSED) if (Object.hasOwn(primitive, key)) fail(`${itemPath}/${key}`, "is not allowed on a container: each item fits its own content");
+        const turn = object(primitive.turn), turnPath = `${itemPath}/turn`;
+        if (turn.on === "clock") {
+          for (const key of ["match", "no_match"]) if (Object.hasOwn(turn, key)) fail(`${turnPath}/${key}`, "is allowed only with on video");
+        }
+        if (turn.on === "video") videoTurns.push(`${turnPath}/on`);
+        if (typeof turn.every_ms === "number" && typeof turn.offset_ms === "number" && turn.offset_ms >= turn.every_ms) fail(`${turnPath}/offset_ms`, "must be less than every_ms");
+        const items = array(primitive.items).map(object);
+        counted += items.length;
+        let plain = 0;
+        for (const [childIndex, child] of items.entries()) {
+          const childPath = `${itemPath}/items/${childIndex}`;
+          if (ids.has(child.id)) fail(`${childPath}/id`, "must be unique within the page, across primitives and container items");
+          ids.add(child.id);
+          if (!Object.hasOwn(child, "when")) plain++;
+          if (child.primitive === "image") {
+            if (object(child.selector).by !== "id") fail(`${childPath}/selector/by`, "must be id: a container's image item shows one media object");
+          } else if (child.primitive === "card") {
+            const layoutIssue = cardLayoutIssue(child);
+            if (layoutIssue !== undefined) fail(`${childPath}/${layoutIssue.member}`, layoutIssue.message);
+          } else if (typeof child.primitive === "string") fail(`${childPath}/primitive`, "must be card or image: a container holds cards and images");
+        }
+        if (items.length > 0 && plain === 0) fail(`${itemPath}/items`, "must hold at least one item without when");
       }
       if (Object.hasOwn(primitive, "motion")) {
         const motionType = object(primitive.motion).type;
@@ -526,6 +568,9 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (mode === "media_end" && primitive.primitive === "video" && primitive.loop === true) fail(`${itemPath}/loop`, "must be false for media_end");
       }
     }
+    // A container and each of its items count toward the page's 24 primitives.
+    if (counted > MAX_PRIMITIVES) fail(`${path}/primitives`, `must contain at most ${MAX_PRIMITIVES} primitives, counting each container and each of its items`);
+    if (videoTurns.length > 0 && primitives.filter((primitive) => primitive.primitive === "video").length !== 1) fail(videoTurns[0]!, "video needs exactly one video primitive on the page");
     if (mode === "application" && controllers !== 1) fail(`${path}/primitives`, "application advance requires exactly one controller application");
     if (streams > 1) fail(`${path}/primitives`, "must contain at most one stream primitive");
     if (web > 2) fail(`${path}/primitives`, "must contain at most two application or iframe primitives");
