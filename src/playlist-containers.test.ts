@@ -184,3 +184,22 @@ test("a playlist bundle carries no container, and its page conditions may read {
   validatePlaylistWrite(bundle([video], { enabled: true, data: { key: "{page.video}", path: "/lap", equals: 1 } }), media);
   assert.throws(() => validatePlaylistWrite(bundle([video, { ...lbar().pages[0].primitives[3] }]), media), /Playlist bundles do not support container primitives/);
 });
+
+test("a page edit drops a top-level card's derived feed and type and an instance's major and params, and keeps the rest", () => {
+  const stored = {
+    id: "p", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 400 }, advance: { mode: "duration", after_ms: 8000 },
+    comments: [{ id: "c1" }],
+    primitives: [
+      { id: "wx", primitive: "card", card: "weather", major: 1, params: { units: "metric" }, feed: "feed:weather:1,2", layout: "full", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill", controller: false },
+      { id: "room", primitive: "card", card: "crd_room", type: "room", major: 2, params: { title: "Room" }, data: "crd_room", layout: "corner", anchor: "top-left", rect: { x: 0, y: 0, width: 400, height: 300 }, layer: 10, content_fit: "fill", controller: false },
+      { id: "pic", primitive: "image", selector: { by: "id", media_id: "med_pic", one_at_a_time: false }, resolved_media: [{ media_id: "med_pic" }], rect: { x: 0, y: 0, width: 10, height: 10 }, layer: 1, content_fit: "contain", controller: false },
+    ],
+  };
+  const page = authoringPage(structuredClone(stored) as Doc);
+  assert.equal(page.comments, undefined);
+  assert.deepEqual(page.primitives, [
+    { id: "wx", primitive: "card", card: "weather", major: 1, params: { units: "metric" }, layout: "full", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill", controller: false },
+    { id: "room", primitive: "card", card: "crd_room", data: "crd_room", layout: "corner", anchor: "top-left", rect: { x: 0, y: 0, width: 400, height: 300 }, layer: 10, content_fit: "fill", controller: false },
+    { id: "pic", primitive: "image", selector: { by: "id", media_id: "med_pic", one_at_a_time: false }, rect: { x: 0, y: 0, width: 10, height: 10 }, layer: 1, content_fit: "contain", controller: false },
+  ]);
+});

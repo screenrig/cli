@@ -17,7 +17,7 @@ export const CONTAINER_HELP = " A container primitive {id, primitive: container,
   " turn.on clock steps through the items without when every every_ms (1000 to 3600000; offset_ms, below every_ms, shifts the steps). turn.on video follows the page's one video primitive:" +
   " match tag (the default) shows the first item that shares a tag with the playing file's media tags, match index the item at the file's position, and no_match clock (the default), hold or hide applies when nothing matches." +
   " min_ms (0 to 60000) keeps an item on at least that long. transition is cut (the default) or fade, with duration_ms 0 to 2000." +
-  " A card item is a card primitive's card, major, params, data, layout and anchor, with no rect, layer or content_fit; an image item is a selector by id with optional alt and content_fit." +
+  " A card item is a card primitive's card, major, params, data, layout (required, as on a card primitive) and anchor, with no rect, layer or content_fit; an image item is a selector by id with optional alt and content_fit." +
   " Each item has its own id, unique across the page's primitives and items, optional tags (1 to 8 of letters and digits) and optional when {data: {key, path?, equals?}}, which shows that item instead of the others while it holds; at least one item has no when." +
   " A container takes no content_fit, controller or motion; a page holds at most 4, and the container and each of its items count toward the page's 24 primitives." +
   " The data key {page.video} is the page video's now-playing record (primitive_id, media_id, name, tags, index, count, lap, duration_ms, started_at_ms): a card's data, a when.data key or a page's visibility.data key may name it." +
