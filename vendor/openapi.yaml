@@ -30669,7 +30669,7 @@ components:
         proof:
           $ref: '#/components/schemas/DashboardProof'
           description: >-
-            Required, except that approving or denying an agent connection accepts an omitted proof when the session signed in within the last hour. A session older than that answers reauthentication_required and the caller sends a proof.
+            Required. A request without one answers reauthentication_required.
         capabilities:
           type: array
           minItems: 1

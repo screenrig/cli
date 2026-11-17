@@ -3670,7 +3670,7 @@
         return;
       }
       const opaque = isOpaqueOrigin(event.origin);
-      if (event.origin === this.nativeParentOrigin) {
+      if (event.origin === this.nativeParentOrigin || this.nativeParentOrigin === "qrc:" && event.origin === "null") {
       } else if (opaque) {
         if (!this.allowOpaqueNativeParent) {
           throw new SdkValidationError("untrusted_origin", "Opaque parent is not allowed for this application origin");
