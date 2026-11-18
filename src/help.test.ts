@@ -60,7 +60,6 @@ test("root help is compact and every command is discoverable through immediate c
     "project use",
     "project moves",
     "project move",
-    "project transfer-owner",
     "project deletion-preview",
     "project delete",
     "project show",

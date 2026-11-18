@@ -67,7 +67,6 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "project use": ["prj_PROJECT"],
     "project moves": [""],
     "project move": ["--organization-id org_ORGANIZATION"],
-    "project transfer-owner": ["--user-id usr_PERSON"],
     "project deletion-preview": [""],
     "project delete": ['--name "Screens" --revision 1 --yes'],
     "project show": [""],

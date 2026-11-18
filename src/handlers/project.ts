@@ -28,7 +28,6 @@ export const handleProjectCreate = commandHandler(projectCreate);
 export const handleProjectUse = commandHandler(projectUse, false);
 export const handleProjectMoves = commandHandler(projectMoves);
 export const handleProjectMove = commandHandler(projectMove);
-export const handleProjectOwnerTransfer = commandHandler(projectOwnerTransfer);
 export const handleProjectDeletionPreview = commandHandler(projectDeletionPreview);
 export const handleProjectDelete = commandHandler(projectDelete);
 
@@ -149,12 +148,6 @@ export async function projectMove(args: ParsedArgs, runtime: CliRuntime, resolve
   const id = flagString(args.flags, "organization-id");
   if (!id) throw usageError("project move requires --organization-id from project moves.");
   return projectLifecycleWrite(args, runtime, resolved, "POST", "/api/project/move", { organization_id: id });
-}
-
-export async function projectOwnerTransfer(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
-  const id = flagString(args.flags, "user-id");
-  if (!id) throw usageError("project transfer-owner requires --user-id for an existing verified project member.");
-  return projectLifecycleWrite(args, runtime, resolved, "PUT", "/api/project/owner", { user_id: id });
 }
 
 export async function projectDeletionPreview(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {

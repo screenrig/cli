@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete, handleProjectUptime, handleProjectHealthTrend, handleProjectExport } from "../handlers/project.js";
+import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectDeletionPreview, handleProjectDelete, handleProjectUptime, handleProjectHealthTrend, handleProjectExport } from "../handlers/project.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger, projectSubset, reportFormatOption, reportOutputOption } from "./options.js";
@@ -23,8 +23,6 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
   project.command("moves").description("List destinations permitted for this project's owner").action(bind(handleProjectMoves));
   project.command("move").description("Move this project, carrying its screens to the destination payer")
     .requiredOption("--organization-id <ID>", "Destination from project moves").action(bind(handleProjectMove));
-  project.command("transfer-owner").description("Transfer ownership to an existing verified project member")
-    .requiredOption("--user-id <ID>", "Verified person's ID").action(bind(handleProjectOwnerTransfer));
   project.command("deletion-preview").description("Read deletion conditions, archived devices, name and revision").action(bind(handleProjectDeletionPreview));
   project.command("delete").description("Delete an eligible project and email its members")
     .requiredOption("--name <NAME>", "Exact name from deletion-preview")
