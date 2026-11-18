@@ -97,11 +97,9 @@ paths:
       - $ref: '#/components/parameters/ProjectTarget'
   /api/project/owner:
     put:
-      x-screenrig-access: write
-      operationId: transferProjectOwnerAgent
-      description: The owner transfers ownership to a verified existing project member; this grants no new membership. The new owner's membership leaves any screen_scope and upload_scope, so the new owner reaches the whole project. A dashboard session of an admin of the project's organization who is a member transfers ownership the same way, from whoever owns the project; an organization admin who is not a member uses PUT /api/organizations/{org_id}/projects/{project_id}/owner.
+      operationId: transferProjectOwner
+      description: People only, after fresh proof (proof, kind project_owner_change bound to the project id); agents and bearer credentials have no route. The owner transfers ownership to a verified existing project member; this grants no new membership. The new owner's membership leaves any screen_scope and upload_scope, so the new owner reaches the whole project. A dashboard session of an admin of the project's organization who is a member transfers ownership the same way, from whoever owns the project; an organization admin who is not a member uses PUT /api/organizations/{org_id}/projects/{project_id}/owner.
       security:
-        - projectBearer: []
         - dashboardSession: []
       responses:
         '200':
@@ -703,9 +701,6 @@ paths:
       x-rate-limit-policies:
         - name: sign-in-reset-ip
           quota: 10
-          windowSeconds: 3600
-        - name: sign-in-reset-fleet
-          quota: 200
           windowSeconds: 3600
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
@@ -5850,6 +5845,135 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/menu-pin:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    put:
+      x-screenrig-access: write
+      operationId: setScreenMenuPin
+      x-rate-limit-policies:
+        - name: menu-pin-org
+          quota: 600
+          windowSeconds: 60
+        - name: menu-pin-screen
+          quota: 10
+          windowSeconds: 60
+        - name: menu-pin-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Sets the screen''s settings menu PIN (docs/player-compatibility.md §6.5): 4 to 8 digits that must be typed on the device to open the Player''s settings menu. It is the same single PIN that can be set, changed and removed in the Player''s own settings; the last change the Player applies wins. The backend keeps no PIN: it stores the PBKDF2 verifier the Player checks against under a new menu_pin_id (Screen.menu_pin.requested shows only menu_pin_id, set and set_at), re-mints the manifest (its menuPin member carries the change, so an offline Player applies it from its next manifest), appends the project-only screen.menu_pin_changed (details menu_pin_id and set) and bumps the screen revision (If-Match guards it). No read returns the PIN or its verifier. Applying a PIN clears the Player''s lockout. What the Player holds is reported back in its health menu_pin (Screen.menu_pin.reported). The screen must be active (an archived screen answers screen_archived, a pairing_pending one resource_conflict) and its host hint must declare the menu_pin capability, else 409 menu_pin_unsupported and nothing is recorded. A pin that is not 4 to 8 digits is invalid_request. A protected screen folder does not hold it. Repeating the same idempotency key with different PIN digits is idempotency_mismatch; an exact retry returns the original result without applying the PIN again.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenMenuPinWrite'
+      responses:
+        '200':
+          description: Screen with its menu PIN state.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: "menu_pin_unsupported when the screen's host did not declare the menu_pin capability, or the other conflicts of the operation."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: clearScreenMenuPin
+      x-rate-limit-policies:
+        - name: menu-pin-org
+          quota: 600
+          windowSeconds: 60
+        - name: menu-pin-screen
+          quota: 10
+          windowSeconds: 60
+        - name: menu-pin-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Removes the screen''s settings menu PIN, whether it was set remotely or on the device, so the Player''s settings menu opens without one. It is how a forgotten PIN is recovered: it works while the Player shows its PIN prompt or is locked out after wrong PINs, and clears that lockout. Every removal is a new change under a new menu_pin_id (Screen.menu_pin.requested set false), carried by the manifest''s menuPin, so an offline Player removes the PIN when it next connects; it appends screen.menu_pin_changed (set false) and bumps the screen revision. Same refusals as PUT.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: Screen with its menu PIN state.
+          headers:
+            ETag:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: "menu_pin_unsupported when the screen's host did not declare the menu_pin capability, or the other conflicts of the operation."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
   /api/screens/{id}/volume:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -17085,7 +17209,7 @@ paths:
           in: query
           required: false
           schema: {type: string, enum: [markdown]}
-      description: Read-only setup instructions. Without code, the owning browser-link cookie supplies status. With code, returns public-only instructions, using generic 404 for invalid or expired codes. Accept text/markdown or format=markdown selects Markdown for the public code form. No provisioning URL or token is returned.
+      description: Read-only setup instructions. Without code, the owning browser-link cookie supplies status. With code, returns public-only instructions, using generic 404 for invalid or expired codes; an address whose invalid or expired codes number more than 20 in 10 minutes gets 429 with Retry-After until the window passes, and a code that resolves never counts. Accept text/markdown or format=markdown selects Markdown for the public code form. No provisioning URL or token is returned.
       security:
         - browserLinkCookie: []
         - {}
@@ -17116,6 +17240,17 @@ paths:
           $ref: '#/components/responses/Problem'
         '410':
           $ref: '#/components/responses/Problem'
+        '429':
+          description: Too many invalid or expired setup codes from this address. Noindex HTML, or Markdown by the same selection as 200.
+          headers:
+            Retry-After: {required: true, schema: {type: integer, minimum: 1}}
+          content:
+            text/html:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
         default:
           $ref: '#/components/responses/Problem'
   /screen/native/pairing-sessions:
@@ -23512,35 +23647,6 @@ paths:
                 $ref: '#/components/schemas/ProjectDeletionPreview'
         default:
           $ref: '#/components/responses/Problem'
-  /api/projects/{project_id}/project/owner:
-    parameters:
-      - name: project_id
-        in: path
-        required: true
-        schema:
-          type: string
-    put:
-      x-screenrig-access: write
-      operationId: transferProjectOwnerAgentInProject
-      description: The owner transfers ownership to a verified existing project member; this grants no new membership. The new owner's membership leaves any screen_scope and upload_scope, so the new owner reaches the whole project.
-      security:
-        - projectBearer: []
-      responses:
-        '200':
-          description: Project lifecycle result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectContext'
-        default:
-          $ref: '#/components/responses/Problem'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProjectOwnerTransfer'
-      parameters: []
   /api/projects/{project_id}/project/move:
     parameters:
       - name: project_id
@@ -28980,6 +29086,7 @@ components:
       additionalProperties: false
       required:
         - user_id
+        - proof
       properties:
         project_id:
           type: string
@@ -28990,6 +29097,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind project_owner_change for the project id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
     ProjectMove:
       type: object
       additionalProperties: false
@@ -29226,6 +29334,7 @@ components:
       additionalProperties: false
       required:
         - admin_user_ids
+        - proof
       properties:
         admin_user_ids:
           type: array
@@ -29235,6 +29344,7 @@ components:
             type: string
             minLength: 1
             maxLength: 200
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind organization_admins_change for the organization id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
     OrganizationGuestPolicyMode:
       type: string
       enum:
@@ -29406,12 +29516,14 @@ components:
       additionalProperties: false
       required:
         - user_id
+        - proof
       properties:
         user_id:
           type: string
           minLength: 1
           maxLength: 200
           description: The new owner. A verified, active person who is a member of the project or a home member of the organization.
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind project_owner_change for the project id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
     OrganizationProjectOwner:
       type: object
       additionalProperties: false
@@ -30162,7 +30274,7 @@ components:
         country: {type: string, pattern: "^[A-Z]{2}$", description: "ISO 3166-1 country code; retained separately from timezone."}
         screen_range: {type: string, enum: ["1_10", "11_50", "51_250", "251_plus", unknown]}
         organization: {type: string, enum: [small_mid, large_corporation, agency_network]}
-        budget: {type: string, enum: [under_2995, "2995_19994", "19995_plus", unknown], description: "Self-reported annual signage budget in USD."}
+        budget: {type: string, enum: [under_2995, "2995_20000", "over_20000", unknown], description: "Self-reported annual signage budget in USD."}
         timezone: {type: string, maxLength: 100, description: "IANA timezone, or empty when browser detection is unavailable; scheduling requires explicit timezone."}
         source: {$ref: "#/components/schemas/DemoSource"}
         flow_id: {type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", description: "Random nonsecret analytics attempt ID, never authorization."}
@@ -30545,10 +30657,12 @@ components:
             - identity_provider_change
             - sso_policy_change
             - scim_change
+            - organization_admins_change
+            - project_owner_change
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens); a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens). kind organization_admins_change requires the organization id (an organization admin naming or inviting admins). kind project_owner_change requires the project id (handing a project to another owner). For these organization and project kinds a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -30947,6 +31061,7 @@ components:
       additionalProperties: false
       required:
         - emails
+        - proof
       properties:
         emails:
           type: array
@@ -30957,6 +31072,7 @@ components:
             format: email
             minLength: 3
             maxLength: 254
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind organization_admins_change for the organization id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
     OrganizationAdminInvitation:
       type: object
       additionalProperties: false
@@ -34692,6 +34808,7 @@ components:
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
         volume: {$ref: "#/components/schemas/ScreenVolume"}
+        menu_pin: {$ref: "#/components/schemas/ScreenMenuPin"}
         kiosk: {$ref: "#/components/schemas/ScreenKiosk"}
         reboot_schedule: {$ref: "#/components/schemas/ScreenRebootSchedule"}
         next_reboot_at: {type: string, format: date-time, description: "The start of the next window the backend reboots the screen at (PUT /api/screens/{id}/reboot-schedule); on a day a spring-forward gap swallows a whole window it is the minute the gap ends, and that occurrence is skipped (screen.reboot_skipped, window_missed). Absent while the screen has no enabled reboot schedule, and while it is archived. Read-only."}
@@ -38710,6 +38827,7 @@ components:
         volume: {$ref: "#/components/schemas/RuntimeVolume"}
         verbosity: {$ref: "#/components/schemas/RuntimeVerbosity"}
         kiosk: {$ref: "#/components/schemas/RuntimeKiosk"}
+        menuPin: {$ref: "#/components/schemas/RuntimeMenuPin"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
         suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
         stack: {$ref: "#/components/schemas/RuntimeStack"}
@@ -39697,6 +39815,14 @@ components:
             level: {type: integer, minimum: 0, maximum: 100}
             muted: {type: boolean}
             hardware: {type: boolean, description: "true when the level reaches the device or panel output, false (the default) when it is the Player's own gain."}
+        menu_pin:
+          type: object
+          additionalProperties: true
+          description: "The settings menu PIN as the Player holds it, never the PIN: set says whether one is set, changed_by whether its last change was made on the device or applied from the manifest's menuPin (remote), changed_at when. Without set the member is dropped; an unknown changed_by or an unreadable changed_at drops alone."
+          properties:
+            set: {type: boolean}
+            changed_by: {type: string, enum: [device, remote]}
+            changed_at: {type: string, format: date-time}
         network:
           type: object
           additionalProperties: true
@@ -39751,6 +39877,7 @@ components:
         temperature_c: {type: number}
         display: {type: object, additionalProperties: false, properties: {connected: {type: boolean}, power: {type: string, enum: [on, off, standby, unknown]}}}
         volume: {type: object, additionalProperties: false, required: [level, muted, hardware], properties: {level: {type: integer, minimum: 0, maximum: 100}, muted: {type: boolean}, hardware: {type: boolean}}}
+        menu_pin: {type: object, additionalProperties: false, required: [set], properties: {set: {type: boolean}, changed_by: {type: string, enum: [device, remote]}, changed_at: {type: string, format: date-time}}}
         network:
           type: object
           additionalProperties: false
@@ -40110,6 +40237,36 @@ components:
       properties:
         display_schedule: {anyOf: [{$ref: "#/components/schemas/ScreenDisplaySchedule"}, {type: "null"}], description: "Windows in which the screen's display is on; null when no schedule is set."}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
+    ScreenMenuPinWrite:
+      type: object
+      additionalProperties: false
+      required: [pin]
+      properties:
+        pin: {type: string, pattern: "^[0-9]{4,8}$", writeOnly: true, description: "The PIN, 4 to 8 digits. Never stored or returned: the backend keeps only the verifier the Player checks against."}
+    ScreenMenuPin:
+      type: object
+      additionalProperties: false
+      description: >-
+        The settings menu PIN, never the PIN or its verifier. requested is the latest remote change (PUT or DELETE /api/screens/{id}/menu-pin); reported is what the Player last reported in its health menu_pin: whether a PIN is set, whether its last change was made on the device or applied from a remote change, and when (stale after 35 minutes). A change made on the device after the request wins. Absent when the screen has no request and its Player reports no menu_pin.
+      properties:
+        requested:
+          type: object
+          additionalProperties: false
+          required: [menu_pin_id, set, set_at]
+          properties:
+            menu_pin_id: {type: string, pattern: "^pin_[A-Za-z0-9_-]{8,64}$", description: "A Player applies each menu_pin_id at most once, from the manifest's menuPin."}
+            set: {type: boolean, description: "true a PIN was set, false it was removed."}
+            set_at: {type: string, format: date-time}
+        reported:
+          type: object
+          additionalProperties: false
+          required: [set, reported_at, stale]
+          properties:
+            set: {type: boolean}
+            changed_by: {type: string, enum: [device, remote]}
+            changed_at: {type: string, format: date-time}
+            reported_at: {type: string, format: date-time}
+            stale: {type: boolean}
     ScreenVolumeWrite:
       type: object
       additionalProperties: false
@@ -40223,6 +40380,18 @@ components:
             overrideId: {type: string}
             power: {type: string, enum: [on, off]}
             until: {type: string, format: date-time}
+    RuntimeMenuPin:
+      type: object
+      additionalProperties: true
+      required: [menuPinId, set]
+      description: >-
+        The screen's latest remote settings menu PIN change (docs/player-compatibility.md §6.5). Emitted only when a change exists and the Player declared the menu_pin host capability. The Player applies each menuPinId once, then remembers it: set true installs the verifier (PBKDF2-HMAC-SHA256 of the PIN's digits as UTF-8 with salt and iterations, 32 bytes) as its PIN, replacing any, and set false removes the PIN; either clears the lockout. A change is never carried as the PIN. Unknown members are ignored.
+      properties:
+        menuPinId: {type: string}
+        set: {type: boolean}
+        salt: {type: string, description: "Base64 of 16 random bytes. Present when set is true."}
+        verifier: {type: string, description: "Base64 of the 32-byte PBKDF2-HMAC-SHA256 key. Present when set is true."}
+        iterations: {type: integer, minimum: 100000, description: "PBKDF2 iterations (120000). Present when set is true."}
     RuntimeVolume:
       type: object
       additionalProperties: true
@@ -40668,6 +40837,7 @@ x-problem-codes:
   - play_page_unsupported
   - identify_unsupported
   - volume_unsupported
+  - menu_pin_unsupported
   - display_output_unsupported
   - display_cec_unsupported
   - page_not_on_screen
