@@ -427,7 +427,7 @@ async function main(): Promise<void> {
     backend.putScreen!({
       id: "scr_DISPLAYAAAAAAAAAAAAAAAA", public_id: "pub_display", label: "Display", state: "active", online: true, revision: 1,
       manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", tags: ["Hall"],
-      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec", "volume"] },
+      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec", "volume", "network.configure"] },
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
     const bothScreens = await run("screen", "list");
@@ -452,6 +452,19 @@ async function main(): Promise<void> {
     const fleetVolume = await run("screen", "volume", "--tag", "Hall", "--unmute");
     assert.equal((fleetVolume.data as { action?: string; succeeded?: number }).action, "volume");
     assert.equal((fleetVolume.data as { succeeded?: number }).succeeded, 1);
+    // A network change: the Wi-Fi password comes from a file and never reaches the stored command or any read.
+    const wifiPassword = path.join(temp, "wifi-password.txt");
+    await writeFile(wifiPassword, "correct horse battery\n");
+    const networkChange = await run("screen", "network", "set", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--wifi", "Lobby", "--password-file", wifiPassword, "--address", "192.168.1.50/24", "--gateway", "192.168.1.1", "--rollback-after", "120");
+    assert.match(String((networkChange.data as { command_id?: string }).command_id), /^cmd_/);
+    assert.equal((networkChange.data as { command?: string }).command, "network");
+    const networkRead = await run("screen", "network", "show", "scr_DISPLAYAAAAAAAAAAAAAAAA");
+    const networkDetail = networkRead.data as { change?: { state?: string; network?: { wifi?: { ssid?: string; password_set?: boolean }; rollback_after_s?: number } } };
+    assert.equal(networkDetail.change?.state, "sent");
+    assert.equal(networkDetail.change?.network?.wifi?.ssid, "Lobby");
+    assert.equal(networkDetail.change?.network?.wifi?.password_set, true);
+    assert.equal(networkDetail.change?.network?.rollback_after_s, 120);
+    assert.equal(JSON.stringify(networkRead).includes("correct horse battery"), false, "the network read never carries the password");
     const hours = path.join(temp, "hours.json");
     await writeFile(hours, JSON.stringify({ enabled: true, windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "07:00", end: "19:00" }] }));
     await run("screen", "display-schedule", "set", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--file", hours);

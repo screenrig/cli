@@ -23,6 +23,9 @@ import type {
   ScreenCommand,
   ScreenMaintenanceAccepted,
   ScreenMaintenanceCommand,
+  ScreenNetworkAccepted,
+  ScreenNetworkChange,
+  ScreenNetworkWrite,
   ScreenPatch,
 } from "../adapters/protocol.js";
 import type {
@@ -1210,13 +1213,14 @@ export function memoryBackend(options: {
     }
     return { seconds: value };
   };
-  const issueCommand = (screen: Screen, type: ScreenCommand["type"], seconds: number): CommandAnswer => {
+  const issueCommand = (screen: Screen, type: ScreenCommand["type"], seconds: number, extra: Partial<ScreenCommand> = {}): CommandAnswer => {
     const now = clock();
     const state = screen.online ? "sent" : "queued";
     const command: ScreenCommand = {
       id: `${type === "reboot" ? "rbt" : type === "reload" ? "rld" : "cmd"}_${String(++commandSequence).padStart(8, "0")}`,
       type, state, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + seconds * 1000).toISOString(),
       ...(state === "sent" ? { sent_at: now.toISOString() } : {}),
+      ...extra,
     };
     const kept = (screen.commands ?? []).map((item): ScreenCommand => (item.type === type && item.state === "queued" ? { ...item, state: "superseded" } : item));
     screens.set(screen.id, { ...screen, commands: [...kept, command].slice(-10) });
@@ -1294,6 +1298,44 @@ export function memoryBackend(options: {
       return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
     });
   }
+  // Remote network settings (§6.5.2): maintenance's refusals with the network.configure
+  // capability, a one-hour default lifetime, and the Wi-Fi password kept out of the stored command.
+  transport.on("POST", /^\/api\/screens\/[^/]+\/network$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "Resource was not found.");
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    const key = req.headers?.["idempotency-key"] ? `network:${screen.id}:${req.headers["idempotency-key"]}` : undefined;
+    if (key && commandReplays.has(key)) return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: commandReplays.get(key) };
+    const body = (req.body ?? {}) as ScreenNetworkWrite;
+    const invalid = (field: string, why: string) => refusal(400, "invalid_request", `${field}: ${why}`);
+    if (body.connection !== "ethernet" && body.connection !== "wifi") return invalid("connection", "must be ethernet or wifi");
+    if (body.connection === "wifi" && typeof body.wifi?.ssid !== "string") return invalid("wifi.ssid", "is required for connection wifi");
+    if (body.connection === "ethernet" && body.wifi !== undefined) return invalid("wifi", "is refused for connection ethernet");
+    if (body.ipv4?.mode !== "automatic" && body.ipv4?.mode !== "manual") return invalid("ipv4.mode", "must be automatic or manual");
+    if (body.ipv4.mode === "manual" && (typeof body.ipv4.address !== "string" || typeof body.ipv4.gateway !== "string" || typeof body.ipv4.prefix !== "number")) {
+      return invalid("ipv4", "manual needs address, prefix and gateway");
+    }
+    const rollback = body.rollback_after_s ?? 180;
+    if (!Number.isInteger(rollback) || rollback < 60 || rollback > 600) return invalid("rollback_after_s", "must be between 60 and 600 seconds");
+    const expires = body.expires_in_s ?? 3_600;
+    if (!Number.isInteger(expires) || expires < 60 || expires > 86_400) return invalid("expires_in_s", "must be between 60 and 86400 seconds");
+    if (screen.state === "archived") return refusal(409, "screen_archived", "screen is archived");
+    if (screen.state !== "active") return refusal(409, "resource_conflict", "screen is not active");
+    if (!(screen.host?.capabilities ?? []).includes("network.configure")) {
+      return refusal(409, "network_unsupported", "The screen's Player does not declare the network.configure capability.");
+    }
+    const network: ScreenNetworkChange = {
+      connection: body.connection,
+      ...(body.wifi ? { wifi: { ssid: body.wifi.ssid, hidden: body.wifi.hidden === true, password_set: typeof body.wifi.password === "string" && body.wifi.password !== "" } } : {}),
+      ipv4: body.ipv4,
+      rollback_after_s: rollback,
+    };
+    const issued = issueCommand(screen, "network", expires, { network });
+    const accepted: ScreenNetworkAccepted = { command_id: issued.id, command: "network", expires_at: issued.expires_at, state: issued.state };
+    if (key) commandReplays.set(key, accepted);
+    return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: accepted };
+  });
   transport.on("POST", /^\/api\/screens\/[^/]+\/play-page$/, (req): TransportResponse => {
     const screen = screenOf(req);
     const problem = (status: number, code: string, detail: string): TransportResponse => ({ status, headers: { "content-type": "application/problem+json" }, body: controlProblem(status, code, detail) });

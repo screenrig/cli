@@ -11,6 +11,7 @@ import { instantInZone, assignmentLine, scheduleEntries, scheduleTableLines, scr
 import { wallFromFlags, wallLine, wallProblem } from "../screen-wall.js";
 import { displayOutputObservationLines, kioskLines } from "../screen-device-settings.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "../screen-facts.js";
+import { networkSummaryLines } from "../screen-network.js";
 import { volumeLines, volumeProblem, volumeText, volumeWrite } from "../screen-volume.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, displayWarnings, playPageProblem, rebootProblem, rebootScheduleLines, rebootScheduleProblem, rebootScheduleWrite, rebootWindowList } from "../screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, MAINTENANCE, maintenanceProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines, type MaintenanceSpec } from "../screen-commands.js";
@@ -588,6 +589,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...kioskLines(screen?.kiosk),
       ...rebootScheduleLines(screen?.reboot_schedule, screen?.next_reboot_at, screen?.effective_timezone),
       ...healthLines(screen?.health),
+      ...networkSummaryLines(screen),
       ...outageLines(screen),
       ...commandLines(screen),
       ...notes.lines,
