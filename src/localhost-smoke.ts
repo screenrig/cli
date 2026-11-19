@@ -427,7 +427,7 @@ async function main(): Promise<void> {
     backend.putScreen!({
       id: "scr_DISPLAYAAAAAAAAAAAAAAAA", public_id: "pub_display", label: "Display", state: "active", online: true, revision: 1,
       manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", tags: ["Hall"],
-      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec", "volume", "network.configure"] },
+      host: { platform: "linux", capabilities: ["reboot", "identify", "display_power.cec", "volume", "network.configure"] },
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
     const bothScreens = await run("screen", "list");
