@@ -2025,6 +2025,7 @@ paths:
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
           description: Applications
@@ -2413,6 +2414,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/LibraryQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit200'
       responses:
         '200':
           description: Playlists with the adslot page union.
@@ -3102,6 +3104,7 @@ paths:
         - $ref: '#/components/parameters/ScreenNearQuery'
         - $ref: '#/components/parameters/ScreenFolderQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
           description: Screens
@@ -3980,6 +3983,119 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '403':
           $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/position:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenPosition
+      description: >-
+        A signed-in person places a screen on the project's custom map (getScreenMap), or takes it off: an object with floor_id, x and y sets the position and null clears it. x runs from 0 at the map's left edge to its width and y from 0 at its top edge to its height, in the map's own units. A project that shows the geographic map, a floor_id that is not a floor of the map, or a point outside it is invalid_request at position.MEMBER. The screen revision moves by one and the event carries details.position; no manifest changes, since no Player reads a position. Placing a screen needs the screen_map plan feature (feature_not_in_plan); clearing does not. If-Match carries the screen revision and is required. The dashboard session only: agents place a screen on the geographic map by setting its location.
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenPositionPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '402':
+          description: feature_not_in_plan — placing a screen on a custom map needs the screen map (Premium).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/ScreenScopePlays'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/project/screen-map:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    get:
+      operationId: getScreenMap
+      description: >-
+        The map the dashboard draws the project's screens on. A project has one: the geographic map (kind geographic), where a screen sits at its location, or a custom map (kind custom), a coordinate space of the project's own with a width, a height and one to fifty floors, each an image of the media library drawn over the whole space. A project that never set one has the geographic map at revision 1. Open on every plan. The dashboard session only.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's screen map; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted map revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMap'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putScreenMap
+      description: >-
+        Replaces the project's screen map. kind geographic switches to the geographic map and keeps the custom map's size, floors and every screen's position, so switching back restores them. kind custom carries the whole custom map: width and height above 0 and at most 1,000,000 in the project's own units, and 1 to 50 floors, each a name of 1 to 60 characters, unique without regard to case, and the media_id of a ready image of the project. A floor with an id keeps it and one without is new; a floor left out is removed. Screens placed on a removed floor, or outside a map that shrank, lose their position, and unplaced_screens counts them. A custom map needs the screen_map plan feature (feature_not_in_plan); switching to the geographic map does not. If-Match carries the map revision and is required. A session limited to some screens is refused (screen_scope_denied). The dashboard session only.
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The map's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenMapWrite'
+      responses:
+        '200':
+          description: The map as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted map revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenMap'
+        '402':
+          description: feature_not_in_plan — a custom map needs the screen map (Premium).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/screens/{id}/verbosity:
@@ -13322,6 +13438,7 @@ paths:
         - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/LibraryQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit1000'
       responses:
         '200':
           description: Media
@@ -20883,6 +21000,41 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/dashboard/playlists:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardPlaylistIndex
+      description: The dashboard's index of playlists. One page of rows without their pages, searched, filtered and ordered by the server, so the Playlists page and a playlist picker cost the same whatever the project holds. Each row carries screens, how many of the caller's pairing_pending and active screens hold the playlist as a default, in a schedule entry, in a takeover or as what is showing now; a caller limited to screens counts its own. The first page (a request without after) also carries total, the rows across all pages under the same q, template, ids and use, and use_counts, the rows under the same q, template and ids that are active (pages, and a screen holds it), inactive (pages, and no screen holds it) and empty (no pages). The playlists themselves are GET /api/playlists and GET /api/playlists/{id}.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/LibraryQuery'
+        - {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the playlists whose name contains the text, ignoring case, and the playlist whose ID the text is. A search without sort is answered in name order."}
+        - {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name"]}, description: "name orders by name, ignoring case and reading a run of digits as a number, and -name reverses it. Omitted is newest first, or name with q."}
+        - {name: use, in: query, required: false, schema: {type: string, enum: [active, inactive, empty]}, description: "Keeps the playlists of one use."}
+        - {name: template, in: query, required: false, schema: {type: boolean, default: false}, description: "true keeps only the playlists that declare fields."}
+        - {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated playlist IDs, at most 200: keeps only those. An ID that names no listed playlist is absent from the answer."}
+        - {name: after, in: query, required: false, schema: {type: string, maxLength: 2048}, description: "next_cursor of the previous page of the same list, with the same filters and sort. A value that is not such a cursor is invalid_request."}
+        - $ref: '#/components/parameters/ListLimit200'
+      responses:
+        '200':
+          description: One page of the index.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardPlaylistIndex'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/summary:
     servers:
       - url: https://screenrig.ai
@@ -21675,7 +21827,7 @@ paths:
           $ref: '#/components/responses/Problem'
     post:
       operationId: enrollReseller
-      description: An admin of an organization makes it a reseller at once. The caller must be a signed-in person with a verified email address (cookie sessions only; agents and service clients never hold reseller authority) and an admin of the organization named by organization_id; anyone else gets 404 not_found. The reseller starts at 2000 basis points of list price (20%) effective now and is pending review, boarding up to 10 current customers (customer_limit) until screenRIG reviews it. The organization must be live, not already a reseller, not a customer of a reseller and not on the staff or promo plan (409 reseller_conflict, the detail names the reason). Appends reseller.enrolled to the organization audit.
+      description: An admin of an organization makes it a reseller at once. Enrollment opens on 1 January 2027; before then every caller is answered 409 reseller_conflict, whose detail states the date. The caller must be a signed-in person with a verified email address (cookie sessions only; agents and service clients never hold reseller authority) and an admin of the organization named by organization_id; anyone else gets 404 not_found. The reseller starts at 2000 basis points of list price (20%) effective now and is pending review, boarding up to 10 current customers (customer_limit) until screenRIG reviews it. The organization must be live, not already a reseller, not a customer of a reseller and not on the staff or promo plan (409 reseller_conflict, the detail names the reason). Appends reseller.enrolled to the organization audit.
       security:
         - dashboardSession: []
       requestBody:
@@ -21752,7 +21904,7 @@ paths:
           $ref: '#/components/responses/Problem'
     post:
       operationId: createDashboardResellerCustomer
-      description: Creates a customer organization delegated to the reseller from its creation, on Standard, with the calling reseller admin as its one admin. The caller's home organization does not change. The organization's own admins may later end the delegation (DELETE /api/organizations/{org_id}/reseller). Appends organization.created and reseller.customer_started to the organization audit. A reseller awaiting review (review_state pending) boards up to customer_limit current customers; past it the answer is 409 reseller_conflict.
+      description: Creates a customer organization delegated to the reseller from its creation, on Standard, with the calling reseller admin as its one admin. The caller's home organization does not change. The organization's own admins may later end the delegation (DELETE /api/organizations/{org_id}/reseller). Appends organization.created and reseller.customer_started to the organization audit. A reseller awaiting review (review_state pending) boards up to customer_limit customers in a UTC month, counting current customers and those whose delegation ended in it; past it the answer is 409 reseller_conflict.
       security:
         - dashboardSession: []
       requestBody:
@@ -24077,6 +24229,7 @@ paths:
         - projectBearer: []
       parameters:
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
           description: Applications
@@ -24193,6 +24346,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/LibraryQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit200'
       responses:
         '200':
           description: Playlists with the adslot page union.
@@ -24255,6 +24409,7 @@ paths:
         - $ref: '#/components/parameters/ScreenNearQuery'
         - $ref: '#/components/parameters/ScreenFolderQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
           description: Screens
@@ -26302,6 +26457,7 @@ paths:
         - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/LibraryQuery'
         - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ListLimit1000'
       responses:
         '200':
           description: Media
@@ -28330,6 +28486,9 @@ components:
     RevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the record, as its revisions list numbers them."}
     PlaylistRevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the playlist, as listPlaylistRevisions numbers them."}
     ListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 256}, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request."}
+    ListLimit200: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 200}, description: "Page size. Omitted is 200. A value outside 1-200 is invalid_request."}
+    ListLimit500: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 500}, description: "Page size. Omitted is 500. A value outside 1-500 is invalid_request."}
+    ListLimit1000: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}, description: "Page size. Omitted is 1000. A value outside 1-1000 is invalid_request."}
     EventListLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit."}
     PlaybackScreenID: {name: screen_id, in: query, required: false, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_"}}
     PlaybackMediaID: {name: media_id, in: query, required: false, schema: {type: string, pattern: "^med_"}}
@@ -32570,7 +32729,7 @@ components:
     ApplicationUploadSession: {type: object, additionalProperties: false, required: [id, application_id, release_id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string, description: "Upload identifier, the receiving operation's id. Commit it with POST /api/applications/uploads/{id}/commit."}, application_id: {type: string, description: Application the upload publishes to.}, release_id: {type: string, description: "Release this upload creates. Pin it into a playlist once the operation succeeds."}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; send every field verbatim.}, expires_at: {type: string, format: date-time, description: The PUT must start before this instant.}}}
     ApplicationUploadCommit: {type: object, additionalProperties: false, required: [sha256, compressed_bytes], description: "Names the declared archive again; a commit naming other bytes is refused with invalid_request.", properties: {sha256: {type: string, pattern: "^[0-9a-f]{64}$"}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600}}}
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the application."}, id: {type: string, description: "ID of the application."}, name: {type: string, description: "Name of the application."}, revision: {type: integer, description: "Counter that increases with each change to the application."}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time, description: "When the application was created."}, updated_at: {type: string, format: date-time, description: "When the application record last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
-    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
     Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}. A succeeded canva.publish carries design_id and items (CanvaPublishResult)."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
@@ -32777,7 +32936,7 @@ components:
       properties:
         id:
           type: string
-          enum: [video_walls, alert_routing, reports, bi_dashboards, connectors, media_sync, uploaders, screen_scope, campaigns, weighted_rotation, data_conditions, direct_campaigns, library, playlist_templates, sso, audit_log, protected_folders, schedule_import, schedule_calendar, playlist_revisions, keyed_data, scim, change_control, momentus, large_walls]
+          enum: [video_walls, alert_routing, reports, bi_dashboards, connectors, media_sync, uploaders, screen_scope, campaigns, weighted_rotation, data_conditions, direct_campaigns, library, playlist_templates, sso, audit_log, protected_folders, schedule_import, schedule_calendar, playlist_revisions, keyed_data, screen_map, scim, change_control, momentus, large_walls]
         enabled: {type: boolean, description: "Whether the project has the feature now."}
         required_plan: {type: string, enum: [plus, premium, enterprise], description: "The lowest generally sold plan that includes the feature, whether or not the project has it. Education, a plan staff assign to verified K-12 schools, is never named."}
     ProjectPlanLimits:
@@ -33849,7 +34008,7 @@ components:
       properties:
         revision: {$ref: "#/components/schemas/PlaylistRevision"}
         playlist: {$ref: "#/components/schemas/PlaylistV2", description: "The playlist as it stood at this revision: its name, pages, soundtrack and format, and revision set to this one."}
-    PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}, description: "Playlists of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}, description: "Playlists of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     PlaylistAudioWrite:
       type: object
       additionalProperties: false
@@ -33975,6 +34134,7 @@ components:
         A transition-only stinger card (major 1). All members are optional; defaults stay in the synthetic runtime placement. hang_ms defaults to 1000 and is at most 60% of the transition duration_ms (checked by the server). logo names a ready image in this project, using the card media grant path.
       properties:
         theme: {type: string, enum: [neomustard, cyanotype, propaganda, signal, avant-garde, bloom, primetime]}
+        look: {type: string, enum: [theme, wipe, alert], description: "theme (the default) plays the theme's own bumper; wipe is a short slab that carries the title across; alert is a spinning globe that whips to a title band."}
         title: {type: string, maxLength: 40}
         subtitle: {type: string, maxLength: 60}
         logo: {type: string, pattern: '^media:med_[A-Za-z0-9_-]{1,120}$'}
@@ -34185,7 +34345,7 @@ components:
         - {$ref: "#/components/schemas/ImageCanvasBackground"}
       description: "A page's canvas background as authored: solid canonical uppercase #RRGGBBAA, a top-to-bottom linear gradient, or a catalog image over a colour. Players receive CanvasBackground and, for an image, RuntimeCanvasBackgroundImage."
     PlaylistIntrinsicSize: {type: object, additionalProperties: false, required: [width, height], properties: {width: {type: number, exclusiveMinimum: 0}, height: {type: number, exclusiveMinimum: 0}}}
-    PlaylistList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Playlist"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    PlaylistList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Playlist"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     CommentsWrite:
       type: object
       additionalProperties: false
@@ -34331,6 +34491,72 @@ components:
         location:
           anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
           description: "Where the screen is: the object replaces the whole location and null clears it."
+    ScreenPosition:
+      type: object
+      additionalProperties: false
+      required: [floor_id, x, y]
+      description: >-
+        Where a person placed a screen on the project's custom map (ScreenMap): a floor, and a point in the map's own units, x from 0 at the left edge to the map's width and y from 0 at the top edge to its height. The dashboard's alone: no Player reads it.
+      properties:
+        floor_id: {type: string, description: "The id of a floor of the project's map."}
+        x: {type: number, minimum: 0}
+        y: {type: number, minimum: 0}
+    ScreenPositionPatch:
+      type: object
+      additionalProperties: false
+      required: [position]
+      description: >-
+        A change of where a screen sits on the custom map (patchScreenPosition). The body has no other member.
+      properties:
+        position:
+          anyOf: [{$ref: "#/components/schemas/ScreenPosition"}, {type: "null"}]
+          description: "The object replaces the position and null takes the screen off the map."
+    ScreenMapFloor:
+      type: object
+      additionalProperties: false
+      required: [id, name, media_id]
+      properties:
+        id: {type: string, description: "ID of the floor (flr_...)."}
+        name: {type: string, minLength: 1, maxLength: 60}
+        media_id: {type: string, description: "The image that is the floor's plan, drawn over the map's whole width and height."}
+    ScreenMap:
+      type: object
+      additionalProperties: false
+      required: [kind, floors, revision]
+      description: >-
+        The map the dashboard draws the project's screens on (getScreenMap). width, height and floors are the custom map's and stay stored while kind is geographic.
+      properties:
+        kind: {type: string, enum: [geographic, custom]}
+        width: {type: number, exclusiveMinimum: 0, maximum: 1000000, description: "The custom map's width in the project's own units. Absent until a custom map is set."}
+        height: {type: number, exclusiveMinimum: 0, maximum: 1000000, description: "The custom map's height in the project's own units. Absent until a custom map is set."}
+        floors:
+          type: array
+          maxItems: 50
+          items: {$ref: "#/components/schemas/ScreenMapFloor"}
+        revision: {type: integer, format: int64, minimum: 1}
+        updated_at: {type: string, format: date-time, description: "When the map was last set. Absent for a project that never set one."}
+        unplaced_screens: {type: integer, format: int64, minimum: 0, description: "On putScreenMap's answer: the screens that lost their position because their floor was removed or the map shrank."}
+    ScreenMapWrite:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >-
+        The body of putScreenMap. kind geographic needs nothing else; kind custom needs width, height and floors.
+      properties:
+        kind: {type: string, enum: [geographic, custom]}
+        width: {type: number, exclusiveMinimum: 0, maximum: 1000000}
+        height: {type: number, exclusiveMinimum: 0, maximum: 1000000}
+        floors:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, media_id]
+            properties:
+              id: {type: string, description: "The id of a floor the map has, to keep it; left out for a new floor."}
+              name: {type: string, minLength: 1, maxLength: 60}
+              media_id: {type: string}
     ScreenVerbosityPatch:
       type: object
       additionalProperties: false
@@ -35029,6 +35255,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "The project's own values for this screen, such as a store number or a region. Absent when none are set. Set by ScreenPatch; changing them remints the manifest revision of a screen that shows a playlist. Card placements read them through {screen.field.NAME} tokens. Never authorization."}
         location: {$ref: "#/components/schemas/ScreenLocation", description: "Where the screen is. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision of a screen that shows a playlist. Card placements read it through the {screen.location} token. Never authorization."}
+        position: {$ref: "#/components/schemas/ScreenPosition", description: "Where a person placed the screen on the project's custom map. Absent when unplaced. Set by patchScreenPosition; it changes no manifest."}
         log_level: {type: string, enum: [debug, info, warn, error], description: "The lowest log level the screen's Player generates; error lines are always generated. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision."}
         toast_level: {type: string, enum: [info, alert, error], description: "The lowest toast level the screen's Player shows; error toasts are always shown. Absent when unset. Set by ScreenPatch; changing it remints the manifest revision."}
         overlay_strips: {type: array, maxItems: 2, items: {type: object, additionalProperties: false, required: [trigger_id, edge], properties: {trigger_id: {type: string}, edge: {type: string, enum: [top, bottom]}}}, description: "The bars overlay triggers hold on the screen, at most one per edge: the trigger and the edge. Absent when none. An overlay trigger sets and removes them; a change remints the manifest revision of a screen that shows a playlist. Never authorization."}
@@ -35423,7 +35650,7 @@ components:
         model: {type: string, minLength: 1, maxLength: 80}
         firmware: {type: string, minLength: 1, maxLength: 80}
         manufacturer: {type: string, minLength: 1, maxLength: 80}
-    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}, description: "Screens on this page, newest first, at most 500."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}, description: "Screens on this page, newest first, at most 500."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     ScreenManifestUpgrade:
       type: object
       additionalProperties: false
@@ -36712,7 +36939,7 @@ components:
     MediaUploadSession: {type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; clients must send every field verbatim.}, expires_at: {type: string, format: date-time}}}
     MediaUploadSource: {type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: {filename: {type: string}, source_filename: {type: string}, content_type: {type: string}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, bytes: {type: integer, minimum: 1}}}
     Media: {type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the file; the Library project for a library item."}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, tags: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: "Tags on the file, which playlist tag selectors match."}, availability: {$ref: "#/components/schemas/MediaAvailability"}, id: {type: string, description: "ID of the media file."}, filename: {type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension."}, source_filename: {type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups."}, upload_source: {allOf: [{$ref: '#/components/schemas/MediaUploadSource'}], readOnly: true, description: "The original upload's name, type, digest and size, recorded when ingest normalized EXIF orientation."}, primitive: {type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)."}, content_type: {type: string, description: "Content type of the stored file."}, operation_id: {type: string, description: "ID of the upload or generation operation that produced the file."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored file's bytes."}, bytes: {type: integer, description: "Size of the stored file."}, width: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio."}, height: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio."}, duration_ms: {type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms."}, codecs: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec."}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged.}, folder_id: {type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. List a folder's files with GET /api/media?folder=ID. Move files with POST /api/media/move."}, revision: {type: integer, description: "Change counter of the file; update requests send it as the expected revision."}, state: {type: string, enum: [ready], description: "Whether upload processing has finished and the file can be placed on pages."}, review_state: {type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved."}, created_at: {type: string, format: date-time, description: "When the file was added to the library."}, updated_at: {type: string, format: date-time, description: "When the file was last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only."}}}
-    MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}, description: "Ready media items of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
+    MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}, description: "Ready media items of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "human_available", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "human_available": {"type": "boolean", "description": "A person can join this chat on request: Education, Premium and Enterprise. Standard and Plus get documentation and AI support."}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0, "description": "Always 0: Luna answers right away on every plan. Removed in a later release."}, "docs_url": {"type": "string"}}}
     SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Ask for a person, which pauses Luna and waits for staff. It counts only where a person can join (human_available: Education, Premium and Enterprise); on Standard and Plus it is ignored and Luna answers."}}}
@@ -40024,6 +40251,51 @@ components:
         reviews:
           description: GET /api/reviews?state=all&limit=1, the review counts the rail shows.
           $ref: '#/components/schemas/ReviewList'
+        summary:
+          description: GET /api/summary, the inventory counts the rail shows.
+          $ref: '#/components/schemas/DashboardSummary'
+    DashboardPlaylistIndex:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/DashboardPlaylistRow"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}
+        total: {type: integer, minimum: 0, description: "The rows across all pages under the same filters. Present on the first page only."}
+        use_counts:
+          type: object
+          additionalProperties: false
+          required: [active, inactive, empty]
+          description: "The rows under the same q, template and ids of each use, whatever use the request names. Present on the first page only."
+          properties:
+            active: {type: integer, minimum: 0}
+            inactive: {type: integer, minimum: 0}
+            empty: {type: integer, minimum: 0}
+    DashboardPlaylistRow:
+      type: object
+      additionalProperties: false
+      required: [id, name, revision, page_count, item_count, audio_tracks, canvases, template, approved_revision, screens, created_at, updated_at]
+      description: A playlist as the dashboard's index shows it, without its pages.
+      properties:
+        id: {type: string}
+        name: {type: string}
+        revision: {type: integer}
+        page_count: {type: integer, minimum: 0, description: "How many pages the playlist holds."}
+        item_count: {type: integer, minimum: 0, description: "The primitives across every page."}
+        audio_tracks: {type: integer, minimum: 0, description: "The tracks of the playlist's soundtrack; 0 without one."}
+        canvases:
+          type: array
+          description: "The distinct canvases of the playlist's ordinary pages, in no particular order; an ad slot has none."
+          items: {type: object, additionalProperties: false, required: [width, height], properties: {width: {type: number}, height: {type: number}}}
+        format: {$ref: "#/components/schemas/PlaylistFormat"}
+        template: {type: boolean, description: "The playlist declares fields."}
+        template_id: {type: string, description: "The template the playlist was made from."}
+        approved_revision: {type: integer, minimum: 0, description: "0 for a playlist no person has approved yet."}
+        approval: {$ref: "#/components/schemas/PlaylistApproval"}
+        library: {type: boolean, description: "The row is of the organization's Library."}
+        screens: {type: integer, minimum: 0, description: "How many of the caller's pairing_pending and active screens hold the playlist."}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     DashboardSummary:
       type: object
       additionalProperties: false
@@ -40033,6 +40305,15 @@ components:
         media: {$ref: "#/components/schemas/DashboardMediaSummary"}
         applications: {$ref: "#/components/schemas/DashboardApplicationSummary"}
         health: {$ref: "#/components/schemas/DashboardHealthSummary"}
+        playlists: {$ref: "#/components/schemas/DashboardCountSummary", description: "The project's playlists: what GET /api/playlists lists across all its pages for a session of the whole project, the only kind this route answers. Absent when the server does not serve that list."}
+        sources: {$ref: "#/components/schemas/DashboardCountSummary", description: "The project's data sources: what GET /api/sources lists across all its pages. Absent when the server does not serve that list."}
+        connections: {$ref: "#/components/schemas/DashboardCountSummary", description: "The project's connections: what GET /api/connections lists across all its pages. Absent when the server does not serve that list."}
+    DashboardCountSummary:
+      type: object
+      additionalProperties: false
+      required: [count]
+      properties:
+        count: {type: integer, minimum: 0}
     DashboardHealthSummary:
       type: object
       additionalProperties: false

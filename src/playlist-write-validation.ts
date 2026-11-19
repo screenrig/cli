@@ -175,10 +175,13 @@ export function playlistTransitionIssue(value: unknown): TransitionIssue | undef
   if (duration < 2000 || duration > 6000) return fail(["duration_ms"], "must be from 2000 through 6000 for stinger");
   const stinger = value.stinger;
   if (!isRecord(stinger)) return fail(["stinger"], "must be an object for stinger");
-  const extraStinger = Object.keys(stinger).find((key) => !["theme", "title", "subtitle", "logo", "accent", "hang_ms"].includes(key));
+  const extraStinger = Object.keys(stinger).find((key) => !["theme", "look", "title", "subtitle", "logo", "accent", "hang_ms"].includes(key));
   if (extraStinger !== undefined) return fail(["stinger", extraStinger], "is not allowed");
   if (Object.hasOwn(stinger, "theme") && (typeof stinger.theme !== "string" || !["neomustard", "cyanotype", "propaganda", "signal", "avant-garde", "bloom", "primetime"].includes(stinger.theme))) {
     return fail(["stinger", "theme"], "must name one of the seven stinger themes");
+  }
+  if (Object.hasOwn(stinger, "look") && (typeof stinger.look !== "string" || !["theme", "wipe", "alert"].includes(stinger.look))) {
+    return fail(["stinger", "look"], "must be theme, wipe or alert");
   }
   for (const [key, limit] of [["title", 40], ["subtitle", 60]] as const) {
     if (Object.hasOwn(stinger, key) && (typeof stinger[key] !== "string" || Array.from(stinger[key]).length > limit)) {
