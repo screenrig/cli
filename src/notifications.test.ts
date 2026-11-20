@@ -418,6 +418,9 @@ test("notifications update sends only supplied fields with the revision guard", 
   assert.equal(everywhere.code, 0, everywhere.stdout);
   assert.deepEqual(notificationCalls(transport).at(-1)!.body, { screen_tags: [], audience: null });
   assert.deepEqual(everywhere.envelope.data.screen_tags, []);
+  const without = await cli(["--json", "notifications", "update", id, "--not-tag", "Lab"], transport, env);
+  assert.equal(without.code, 0, without.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { audience: { not: { tag: "Lab" } }, screen_tags: [] }, "--not-tag replaces the screens with a rule");
 
   const recipients = await cli(["--json", "notifications", "update", id, "--email", "owner,usr_OTHER"], transport, env);
   assert.equal(recipients.code, 0, recipients.stdout);

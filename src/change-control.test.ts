@@ -276,6 +276,9 @@ test("campaign preview of a change reads the update flags, --publish and --pause
 
   await cli(["--json", "campaign", "preview", campaign.id, "--paused"], transport, env);
   assert.deepEqual(last(transport).body, { id: campaign.id, body: { paused: true } });
+  const without = await cli(["--json", "campaign", "preview", campaign.id, "--tag", "Cafe", "--not-tag", "Kiosk"], transport, env);
+  assert.equal(without.code, 0, without.stdout);
+  assert.deepEqual(last(transport).body, { id: campaign.id, body: { audience: { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] } } });
 });
 
 for (const [flag, values, patch] of [

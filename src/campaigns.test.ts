@@ -327,6 +327,10 @@ test("campaign update sends only the changed members, null clears, and --expect-
   assert.equal(folder.code, 0, folder.stderr);
   assert.deepEqual(lastCall(transport).body, { audience: { folder: FOLDER } });
   assert.match(folder.stdout, new RegExp(`^audience: folder ${FOLDER}$`, "m"));
+  const without = await cli(["--human", "campaign", "update", campaign.id, "--any-tag", "Cafe,Patio", "--not-tag", "Kiosk"], transport, env);
+  assert.equal(without.code, 0, without.stderr);
+  assert.deepEqual(lastCall(transport).body, { audience: { all: [{ any: [{ tag: "Cafe" }, { tag: "Patio" }] }, { not: { tag: "Kiosk" } }] } });
+  assert.match(without.stdout, /^audience: \(tag Cafe or tag Patio\) and not tag Kiosk$/m);
 });
 
 test("campaign update needs a change and refuses conflicting options before any request", async () => {
