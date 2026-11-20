@@ -22,11 +22,18 @@ import { handleScreenFolderCreate, handleScreenFolderDelete, handleScreenFolderL
 import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
 import { type Command, Option } from "commander";
 import { subcommand } from "./subcommand.js";
+import { AUDIENCE_RULE_HELP, audienceOption } from "../screen-fleet.js";
 
 /** --folder on a fleet command: the same fleet as --tag, chosen by screen folder (with every folder inside it). */
 function folderSelector(verb: "Target" | "Capture" = "Target"): Option {
   return new Option("--folder <ID>", `${verb} every active screen in this screen folder (sfd_...) and the folders inside it`)
     .argParser(screenFolderIdOption("--folder")).conflicts("tag");
+}
+
+/** --audience on a fleet command: every active screen a rule matches, as the fleet actions route selects it. */
+function audienceSelector(): Option {
+  return new Option("--audience <RULE>", `Target every active screen this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`)
+    .argParser(audienceOption).conflicts(["tag", "folder"]);
 }
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -117,6 +124,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .requiredOption("--playlist-id <ID>", "Select the playlist to assign (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
@@ -248,6 +256,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expires-in <DURATION>", "How long the reload waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)", expiresInOption)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenReload));
@@ -256,6 +265,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .requiredOption("--text <TEXT>", "Set the screen message (required)")
     .addOption(new Option("--level <LEVEL>", "Set toast level").choices(["error", "alert", "info"]).default("info"))
     .option("--duration-ms <MS>", "Show the message for 2000–60000 milliseconds", toastDuration)
@@ -306,6 +316,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--set <TAGS>", "Replace the tag set with these comma-separated tags", screenTagListOption("--set"))
     .option("--add <TAGS>", "Add these comma-separated tags", screenTagListOption("--add"))
     .option("--remove <TAGS>", "Remove these comma-separated tags", screenTagListOption("--remove"))
@@ -360,6 +371,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .requiredOption("--file <FILE>", "Schedule JSON {\"entries\": [...]}, or - for stdin (required)")
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
@@ -368,6 +380,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenScheduleClear));
@@ -394,6 +407,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .requiredOption("--playlist-id <ID>", "Playlist to show (required)")
     .addOption(new Option("--until <TIME>", "End at this RFC 3339 instant (at most 7 days ahead), or none to hold until cleared").argParser(takeoverUntilOption).conflicts(["for"]))
     .addOption(new Option("--for <DURATION>", "End after this duration, such as 30m, 2h, or 3d (at most 7d)").argParser(durationOption).conflicts(["until"]))
@@ -405,6 +419,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenTakeoverClear));
@@ -419,13 +434,15 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandExamples(takeover.commands.find((command) => command.name() === "set")!,
     'screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"',
     "screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --for 2h",
-    "screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none");
+    "screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none",
+    "screenrig screen takeover --audience '{\"all\":[{\"tag\":\"Cafe\"},{\"not\":{\"tag\":\"Kiosk\"}}]}' --playlist-id pl_LAUNCH --for 2h");
   addCommandExamples(takeover.commands.find((command) => command.name() === "clear")!,
     "screenrig screen takeover clear scr_LOBBY", "screenrig screen takeover clear --tag Lobby");
   const reboot = screen.command("reboot").description("Reboot a screen's device, or a fleet's devices")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--yes", "Confirm a reboot of several screens or --tag (required for a fleet)")
     .option("--expires-in <DURATION>", "How long the reboot waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)", expiresInOption)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
@@ -440,6 +457,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
       .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
       .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
       .addOption(folderSelector())
+      .addOption(audienceSelector())
       .option("--yes", `Confirm ${spec.name} on several screens, --tag or --folder (required for a fleet)`)
       .option("--expires-in <DURATION>", `How long the ${spec.name} waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)`, expiresInOption)
       .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
@@ -470,6 +488,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request; a trailing on|off sets the power")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .addOption(new Option("--power <POWER>", "on or off").choices(["on", "off"]))
     .addOption(new Option("--until <TIME>", "End at this RFC 3339 instant (strictly future, at most 7 days ahead)").argParser(untilOption).conflicts(["for"]))
     .addOption(new Option("--for <DURATION>", "End after this duration, such as 30m, 2h, or 3d (at most 6d23h59m)").argParser(durationOption).conflicts(["until"]))
@@ -481,6 +500,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplayClear));
   addCommandExamples(displayClear, "screenrig screen display clear scr_LOBBY", "screenrig screen display clear --tag Lobby");
@@ -493,6 +513,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .requiredOption("--file <FILE>", "Display schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin (required)")
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplayScheduleSet));
@@ -500,6 +521,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplayScheduleClear));
   addCommandNotes(displaySchedule, "Display schedule:\n  1 to 16 windows when the display is ON, in the screen's effective timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
@@ -516,6 +538,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .addOption(new Option("--window <SPEC>", "Reboot at the start of this weekly window, DAYS HH:MM-HH:MM such as \"Mon-Sun 04:00-04:30\" (repeatable, at most 16); each window lasts 5 minutes to 24 hours").argParser(rebootWindowOption).conflicts(["file"]))
     .addOption(new Option("--file <FILE>", "Reboot schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin, instead of --window").conflicts(["window", "disabled"]))
     .addOption(new Option("--disabled", "Keep the windows and reboot nothing").conflicts(["file"]))
@@ -526,6 +549,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenRebootScheduleClear));
   addCommandNotes(rebootSchedule, "Reboot schedule:\n  The screen's Player must declare the reboot capability (reboot_unsupported otherwise).\n  Each --window is DAYS HH:MM-HH:MM in the screen timezone, 5 minutes to 24 hours\n  long (end <= start crosses midnight); the backend sends the normal reboot at the\n  start of every window, so \"Mon-Sun 04:00-04:30\" reboots the screen at 04:00\n  local time every day. An offline screen keeps the reboot queued only until its\n  window ends, so a late reboot never lands in business hours. screen show lists\n  such a reboot under commands with source schedule, and a planned reboot raises\n  no offline alert for ten minutes. --disabled keeps the windows and reboots\n  nothing. show prints next_reboot_at.");
@@ -540,6 +564,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector())
+    .addOption(audienceSelector())
     .addOption(new Option("--level <PERCENT>", "Volume from 0 to 100 (omitted: the screen keeps its level)").argParser(volumeLevelOption))
     .addOption(new Option("--mute", "Silence the screen; its level is kept").conflicts(["unmute"]))
     .addOption(new Option("--unmute", "Restore the sound at the screen's level").conflicts(["mute"]))
@@ -547,7 +572,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .action(bind(handleScreenVolume));
   requireOptionGroup(volume, "atLeastOne", ["--level", "--mute", "--unmute"]);
   addCommandNotes(volume, "Volume:\n  Sets the screen's level (0 to 100), its mute, or both. --mute keeps the\n  level, so --unmute restores it. Only a Player that declares the volume\n  capability applies it; any other screen is refused with volume_unsupported\n  (exit 5) and nothing is recorded. A screen in a protected screen folder is\n  refused with protected_target (exit 5); one protected screen in a fleet\n  selection refuses the whole fleet request. An offline screen applies the\n  request from its next manifest. A change made later in the Player's settings\n  menu wins until the next request. screen show: Volume reported is what the\n  Player reached (device volume, or the Player's own gain). A video plays its\n  audio, at this volume, only when its page sets sound (playlist page add\n  --sound). At most 10 volume changes per screen per minute.");
-  addCommandExamples(volume, "screenrig screen volume scr_LOBBY --level 40", "screenrig screen volume scr_LOBBY --mute", "screenrig screen volume --tag Lobby --level 25 --unmute");
+  addCommandExamples(volume, "screenrig screen volume scr_LOBBY --level 40", "screenrig screen volume scr_LOBBY --mute", "screenrig screen volume --tag Lobby --level 25 --unmute", "screenrig screen volume --audience @audience.json --mute");
   const networkGroup = screen.command("network").description("Show a screen's network, or change its connection and IPv4 addressing remotely with an automatic rollback");
   networkGroup.command("show").description("Show a screen's network as its Player reports it and the latest network change")
     .argument("<id>", "Screen identifier")

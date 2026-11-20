@@ -2,6 +2,7 @@ import { BACKGROUND_ID_MAX, BACKGROUND_ID_PATTERN } from "./backgrounds.js";
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { iframeSnippetSource } from "./iframe-snippet.js";
 import { CliError, usageError } from "./problems.js";
+import { SCREEN_TAG_PATTERN } from "./screen-fleet.js";
 import { hasScreenToken, screenTemplateRefusal, screenTokenStandIn } from "./screen-tokens.js";
 
 interface JsonRecord { [key: string]: unknown }
@@ -218,10 +219,54 @@ function validCivil(value: string): boolean {
 
 const SCREEN_WEATHER_KEY = "{screen.weather}";
 
+/** Screen rules nest at most this deep, a not counting as a level, and hold at most this many rules (the server's audience limits). */
+const SCREEN_RULE_DEPTH_MAX = 3;
+const SCREEN_RULE_COUNT_MAX = 500;
+
+/**
+ * The first rule a page's visibility.screens breaks, with its path below
+ * screens, or undefined: a screen rule over tags and screen ids (all, any, not,
+ * tag, screen_id), at most 3 deep and 500 rules. A folder and the empty all
+ * (every screen) are refused, as the server refuses them.
+ */
+export function pageScreensIssue(value: unknown): TransitionIssue | undefined {
+  let count = 0;
+  const walk = (rule: unknown, path: string[], depth: number): TransitionIssue | undefined => {
+    if (++count > SCREEN_RULE_COUNT_MAX) return { path: [], message: `must have at most ${SCREEN_RULE_COUNT_MAX} rules` };
+    const entries = rule !== null && typeof rule === "object" && !Array.isArray(rule) ? Object.entries(rule) : [];
+    if (entries.length !== 1) return { path, message: "must be an object with exactly one of all, any, not, tag or screen_id" };
+    const [key, member] = entries[0]!;
+    if (key === "all" || key === "any" || key === "not") {
+      if (depth > SCREEN_RULE_DEPTH_MAX) return { path, message: `nests deeper than ${SCREEN_RULE_DEPTH_MAX} levels` };
+      if (key === "not") return walk(member, [...path, key], depth + 1);
+      if (!Array.isArray(member)) return { path: [...path, key], message: "must be an array of rules" };
+      if (member.length === 0) return depth === 1 && key === "all" ? { path, message: "selects every screen; leave it out" } : { path: [...path, key], message: "must list at least one rule" };
+      for (const [index, child] of member.entries()) {
+        const issue = walk(child, [...path, key, String(index)], depth + 1);
+        if (issue) return issue;
+      }
+      return undefined;
+    }
+    if (key === "tag") return typeof member === "string" && SCREEN_TAG_PATTERN.test(member) ? undefined : { path: [...path, key], message: "must be 1 to 32 letters or digits" };
+    if (key === "screen_id") {
+      const id = typeof member === "string" ? member.trim() : "";
+      return id && Buffer.byteLength(id, "utf8") <= 200 && !/\p{Cc}/u.test(id) ? undefined : { path: [...path, key], message: "must be a screen ID" };
+    }
+    if (key === "folder") return { path, message: "cannot name a folder; select screens by tag or screen_id" };
+    return { path: [...path, key], message: "is not allowed; use all, any, not, tag or screen_id" };
+  };
+  return walk(value, [], 1);
+}
+
+
 function validateVisibility(value: unknown, name: string): void {
   const visibility = record(value, name);
-  exact(visibility, ["enabled", "from", "until", "windows", "data"], name);
+  exact(visibility, ["enabled", "from", "until", "windows", "data", "screens"], name);
   if (typeof visibility.enabled !== "boolean") throw usageError(`${name}.enabled must be boolean.`);
+  if (visibility.screens !== undefined) {
+    const issue = pageScreensIssue(visibility.screens);
+    if (issue) throw usageError(`${[`${name}.screens`, ...issue.path].join(".")} ${issue.message}.`);
+  }
   if (visibility.data !== undefined) {
     const dataName = `${name}.data`;
     const data = record(visibility.data, dataName);
@@ -274,7 +319,7 @@ function validateVisibility(value: unknown, name: string): void {
       }
     }
   }
-  if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined && visibility.data === undefined) {
+  if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined && visibility.data === undefined && visibility.screens === undefined) {
     throw usageError(`${name} with enabled true must bound visibility.`);
   }
 }

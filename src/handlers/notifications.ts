@@ -1,9 +1,10 @@
 // Command handlers for the notifications commands, loaded on demand.
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
-import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationAudience, notificationReachDrop, notificationSeverityMap, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationActiveHours, notificationReachDrop, notificationSeverityMap, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "../notifications.js";
 import { type Notification, type NotificationDelivery, type NotificationDeliveryList, type NotificationList, type NotificationPatch, type NotificationActiveHours, type NotificationSeverity, type CampaignAudience, type NotificationWithSecret, type NotificationWrite } from "../adapters/protocol.js";
 import { flagBool, flagString, type ParsedArgs } from "../command-input.js";
-import { campaignAnyTagAudience, campaignTagAudience, campaignWindowList } from "../campaigns.js";
+import { campaignAnyTagAudience, campaignTagAudience, campaignWindowList, withoutTags } from "../campaigns.js";
+import { audienceRule } from "../screen-fleet.js";
 import { quotedRevision } from "../if-match.js";
 import { ApiClient, requireToken } from "../client.js";
 import { successEnvelope } from "../envelope.js";
@@ -74,18 +75,20 @@ export async function notificationSecretResult(response: Awaited<ReturnType<ApiC
  * The severity filter, overrides, active hours and audience the flags name, each undefined
  * when its flags are absent: --min-severity, --severity (repeatable CONDITION=LEVEL),
  * --active-hours (repeatable weekly windows) with --timezone and --outside-hours, and the
- * audience as --any-tag, --all-tags or --audience (a campaign audience rule: inline JSON,
- * FILE or - for stdin).
+ * audience as --any-tag or --all-tags, either with --not-tag (none of those tags) or
+ * --not-tag alone, or --audience (a campaign audience rule: inline JSON, FILE or - for stdin).
  */
 async function notificationRuleFlags(args: ParsedArgs, runtime: CliRuntime) {
   const severity = flagString(args.flags, "severity");
   const hours = flagString(args.flags, "active-hours");
   const anyTags = flagString(args.flags, "any-tag");
   const allTags = flagString(args.flags, "all-tags");
+  const notTags = flagString(args.flags, "not-tag");
   const raw = flagString(args.flags, "audience");
-  const audience: CampaignAudience | undefined = anyTags !== undefined ? campaignAnyTagAudience(anyTags.split(","))
-    : allTags !== undefined ? campaignTagAudience(allTags.split(","))
-    : raw !== undefined ? await notificationAudience(raw, runtime) : undefined;
+  const tagRule = anyTags !== undefined ? campaignAnyTagAudience(anyTags.split(","))
+    : allTags !== undefined ? campaignTagAudience(allTags.split(",")) : undefined;
+  const audience: CampaignAudience | undefined = notTags !== undefined ? withoutTags(tagRule, notTags.split(","))
+    : tagRule ?? (raw !== undefined ? await audienceRule(raw, runtime) : undefined);
   return {
     audience,
     minSeverity: flagString(args.flags, "min-severity") as NotificationSeverity | undefined,
@@ -233,7 +236,7 @@ export const handleNotificationsUpdate = commandHandler(async (args, runtime, re
     ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --reach-drop-screens, --reach-drop-percent, --clear-reach-drop, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+    throw usageError("notifications update requires at least one change: --email, --url, --destination, --telegram-chat, --conditions, --clear-conditions, --events, --clear-events, --tag, --any-tag, --all-tags, --not-tag, --audience, --all-screens, --min-severity, --clear-min-severity, --severity, --clear-severity, --active-hours, --timezone, --outside-hours, --clear-active-hours, --reach-drop-screens, --reach-drop-percent, --clear-reach-drop, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
   }
   const guard = webhookRevisionHeaders(args) ?? (readRevision !== undefined ? { "if-match": quotedRevision(String(readRevision)) } : undefined);
   // --snooze derives its instant from the clock, so a rerun fingerprints

@@ -784,7 +784,7 @@ test("help names each new command's arguments, required options and the parity u
   }
   for (const [name, capability] of [["clear-cache", "clear_cache"], ["restart-app", "restart_app"], ["update-software", "update"]] as const) {
     const help = commandHelp(["screen", name]);
-    assert.deepEqual(help.options.map((option) => option.name).filter((option) => option !== "--help"), ["--tag", "--folder", "--yes", "--expires-in", "--expect-rev"], name);
+    assert.deepEqual(help.options.map((option) => option.name).filter((option) => option !== "--help"), ["--tag", "--folder", "--audience", "--yes", "--expires-in", "--expect-rev"], name);
     assert.match(help.usage, new RegExp(`declares the\\s+${capability} capability`), `${name} states the Player must support it`);
     assert.match(help.usage, /command_unsupported/, name);
     assert.match(help.usage, /screen show lists host capabilities/, name);

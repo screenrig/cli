@@ -5,6 +5,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { handlePlaylistPromote, handlePlaylistRevisions, handlePlaylistRevisionShow } from "../playlist-revisions.js";
 import { handlePlaylistPageAdd, handlePlaylistPageRemove, handlePlaylistPageReplace } from "../playlist-page.js";
+import { tagList } from "../campaigns.js";
 import { handlePlaylistFields, handlePlaylistInstances, templateClearOption, templateSetOption } from "../playlist-fields.js";
 import { subcommand } from "./subcommand.js";
 
@@ -14,6 +15,10 @@ const REGION_HELP = "Make a strip: a playlist drawn over the page along the top 
 const ORIENTATION_HELP = "With --format-region: the orientation of the display the strip is made for, as the viewer sees it";
 
 const SOUND_HELP = "Play a video's audio (default: silent)";
+const SCREEN_TAG_HELP = "Show the page only on screens carrying every listed tag (repeatable, or comma-separated; letter case is ignored)";
+const NOT_SCREEN_TAG_HELP = "Keep the page off screens carrying any listed tag (repeatable, or comma-separated; letter case is ignored)";
+/** A repeatable page tag flag: the accumulated tags joined by commas. */
+const pageScreenTags = (flag: string) => (value: string, previous?: string): string => tagList(value, previous, flag);
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, and manage playlists");
@@ -176,6 +181,8 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--sound", SOUND_HELP)
     .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
     .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
+    .option("--screen-tag <TAG>", SCREEN_TAG_HELP, pageScreenTags("--screen-tag"))
+    .option("--not-screen-tag <TAG>", NOT_SCREEN_TAG_HELP, pageScreenTags("--not-screen-tag"))
     .option("--before <PAGE_ID>", "Put the page in front of this page (default: at the end)")
     .option("--page-id <ID>", "The new page's id (default: up- and eight letters or digits)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
@@ -192,12 +199,15 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--sound", SOUND_HELP)
     .option("--from <WHEN>", "First time the page is shown: YYYY-MM-DDTHH:MM or YYYY-MM-DD (00:00), in each screen's timezone")
     .option("--until <WHEN>", "End of the page's showing: YYYY-MM-DDTHH:MM, or YYYY-MM-DD for the end of that day")
-    .option("--always", "Remove the page's dates (from and until); a switch-off or weekly windows the project set stay")
+    .option("--always", "Remove the page's dates (from and until); a switch-off, weekly windows or a screen rule the project set stay")
+    .addOption(new Option("--screen-tag <TAG>", `${SCREEN_TAG_HELP}; replaces the page's screen rule`).argParser(pageScreenTags("--screen-tag")).conflicts("everyScreen"))
+    .addOption(new Option("--not-screen-tag <TAG>", `${NOT_SCREEN_TAG_HELP}; replaces the page's screen rule`).argParser(pageScreenTags("--not-screen-tag")).conflicts("everyScreen"))
+    .addOption(new Option("--every-screen", "Remove the page's screen rule: it shows on every screen again").conflicts(["screenTag", "notScreenTag"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistPageReplace));
   requireOptionGroup(pageReplace, "atMostOne", ["--file", "--media"]);
-  requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always", "--sound"]);
+  requireOptionGroup(pageReplace, "atLeastOne", ["--file", "--media", "--from", "--until", "--always", "--screen-tag", "--not-screen-tag", "--every-screen", "--sound"]);
   page.command("remove").description("Remove one page")
     .argument("<playlist-id>", "Playlist identifier")
     .argument("<page-id>", "The page to remove")

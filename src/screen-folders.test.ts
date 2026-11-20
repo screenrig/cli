@@ -501,7 +501,7 @@ test("screen show names the folder, and the folder default reads as an effective
   assert.equal(effectivePlaylistText({ id: PLAYLIST, source: "default" }), `${PLAYLIST} (default)`);
 });
 
-test("folder rows, subtrees, names, levels and project routing", () => {
+test("folder rows, subtrees, names, levels and project routing", async () => {
   assert.deepEqual(folderRows(TREE).map((row) => row.path), ["North", "North/Cafes", "North/Cafes/Patio", "South"]);
   // A folder whose parent is missing from the list is a root; a cycle is still listed.
   assert.deepEqual(folderRows([folder("sfd_ORPHAN", "Orphan", "sfd_GONE")] as unknown as ScreenFolder[]).map((row) => row.path), ["Orphan"]);
@@ -518,7 +518,7 @@ test("folder rows, subtrees, names, levels and project routing", () => {
   assert.deepEqual(levelsLines(undefined), []);
   assert.deepEqual(levelsLines({ gained: [], lost: [] }), ["No levels gained or lost: no campaign or folder default playlist changed for these screens."]);
 
-  assert.deepEqual(screenTarget({ command: ["screen", "assign"], positionals: ["screen", "assign"], flags: { folder: NORTH } }, "screen assign"), { kind: "fleet", selector: { by: "folder", folder_id: NORTH } });
+  assert.deepEqual(await screenTarget({ command: ["screen", "assign"], positionals: ["screen", "assign"], flags: { folder: NORTH } }, "screen assign", {} as CliRuntime), { kind: "fleet", selector: { by: "folder", folder_id: NORTH } });
 
   const list: { method: "GET"; path: string; query?: Record<string, string | undefined> } = { method: "GET", path: "/api/screen-folders" };
   assert.deepEqual(projectRequest(list, "prj_X").query, { project: "prj_X" });

@@ -9,7 +9,7 @@ import { test, type TestContext } from "node:test";
 import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
 import { processRuntime } from "./runtime.js";
-import { buildMediaPage, civilTime, formatCanvas, newPageId, pageCanvas, replaceMedia, stingerLogo, visibilityOf, withoutDates } from "./playlist-page.js";
+import { buildMediaPage, civilTime, formatCanvas, newPageId, pageCanvas, replaceMedia, screenRule, stingerLogo, visibilityOf, withoutDates } from "./playlist-page.js";
 import { normalizeProblem } from "./problems.js";
 import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";
 
@@ -655,6 +655,86 @@ test("playlist page replace --file --always drops the file page's dates alone", 
   const dated = { ...page, visibility: { enabled: true, from: "2026-12-01T00:00" } };
   assert.equal((await invoke(["playlist", "page", "replace", PLAYLIST, "custom", "--file", "-", "--always"], JSON.stringify(dated))).code, ExitCode.Success);
   assert.equal("visibility" in bodies[1]!, false);
+});
+
+const LOBBY_ONLY = { tag: "Lobby" };
+const flags = (values: Record<string, string | boolean>) => ({ command: ["playlist", "page"], positionals: [], flags: values });
+
+test("a stored screen rule is a bound: dates, --always and a media swap keep it", () => {
+  assert.deepEqual(visibilityOf(undefined, undefined, undefined, LOBBY_ONLY), { enabled: true, screens: LOBBY_ONLY }, "a screen rule alone bounds the page");
+  assert.deepEqual(visibilityOf({ enabled: true, screens: LOBBY_ONLY }, undefined, undefined), { enabled: true, screens: LOBBY_ONLY });
+  assert.deepEqual(visibilityOf({ enabled: true, screens: LOBBY_ONLY }, "2026-12-01T00:00"), { enabled: true, screens: LOBBY_ONLY, from: "2026-12-01T00:00" });
+  assert.equal(visibilityOf({ enabled: true, screens: LOBBY_ONLY }, undefined, undefined, null), undefined, "removing the only bound leaves no visibility");
+  assert.deepEqual(visibilityOf({ enabled: true, from: "2026-12-01T00:00", screens: LOBBY_ONLY }, undefined, undefined, null), { enabled: true, from: "2026-12-01T00:00" });
+  assert.deepEqual(withoutDates({ enabled: true, from: "2026-12-01T00:00", screens: LOBBY_ONLY }), { enabled: true, screens: LOBBY_ONLY }, "--always keeps the screen rule");
+
+  const playlist = playlistBody();
+  const stored = storedImagePage({ visibility: { enabled: true, until: "2026-12-25T00:00", screens: LOBBY_ONLY } });
+  assert.deepEqual(replaceMedia({ stored, playlist, always: true }).visibility, { enabled: true, screens: LOBBY_ONLY });
+  assert.deepEqual(replaceMedia({ stored, playlist, until: "2027-01-01T00:00", always: false }).visibility, { enabled: true, until: "2027-01-01T00:00", screens: LOBBY_ONLY });
+  assert.deepEqual(replaceMedia({ stored, mediaId: VIDEO, kind: "video", playlist, always: false }).visibility, stored.visibility, "a rebuilt page keeps the rule");
+  assert.deepEqual(replaceMedia({ stored, playlist, always: false, screens: { tag: "Cafe" } }).visibility, { enabled: true, until: "2026-12-25T00:00", screens: { tag: "Cafe" } }, "a screen flag replaces the rule");
+  assert.deepEqual(replaceMedia({ stored, playlist, always: false, screens: null }).visibility, { enabled: true, until: "2026-12-25T00:00" }, "--every-screen removes the rule");
+  assert.equal("visibility" in replaceMedia({ stored, playlist, always: true, screens: null }), false, "--always --every-screen leaves nothing to bound the page");
+  assert.deepEqual(buildMediaPage({ id: "up-gggggggg", mediaId: IMAGE, kind: "image", fit: "contain", seconds: 10, playlist, screens: LOBBY_ONLY }).visibility, { enabled: true, screens: LOBBY_ONLY });
+});
+
+test("--screen-tag and --not-screen-tag make one screen rule, three deep at most; --every-screen removes it", () => {
+  assert.equal(screenRule(flags({})), undefined);
+  assert.deepEqual(screenRule(flags({ "screen-tag": "Lobby" })), { tag: "Lobby" });
+  assert.deepEqual(screenRule(flags({ "screen-tag": "Cafe,Patio" })), { all: [{ tag: "Cafe" }, { tag: "Patio" }] });
+  assert.deepEqual(screenRule(flags({ "not-screen-tag": "Kiosk" })), { not: { tag: "Kiosk" } });
+  assert.deepEqual(screenRule(flags({ "not-screen-tag": "Kiosk,Lab" })), { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } });
+  assert.deepEqual(screenRule(flags({ "screen-tag": "Cafe", "not-screen-tag": "Kiosk" })), { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] });
+  assert.deepEqual(screenRule(flags({ "screen-tag": "Cafe,Patio", "not-screen-tag": "Kiosk,Lab" })),
+    { all: [{ tag: "Cafe" }, { tag: "Patio" }, { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } }] }, "the only-tags flatten into the all beside the not");
+  assert.equal(screenRule(flags({ "every-screen": true })), null);
+  assert.throws(() => screenRule(flags({ "every-screen": true, "screen-tag": "Cafe" })), /--every-screen removes the page's screen rule/);
+});
+
+test("playlist page add and replace send the screen rule; replace --always and a date change keep a stored rule", async (t) => {
+  const posts: Record<string, unknown>[] = [];
+  const puts: Record<string, unknown>[] = [];
+  const stored = storedImagePage({ visibility: { enabled: true, from: "2026-12-01T00:00", screens: LOBBY_ONLY } });
+  const transport = new FakeTransport()
+    .on("GET", `/api/media/${IMAGE}`, () => media("image"))
+    .on("GET", `/api/playlists/${PLAYLIST}`, () => ({ status: 200, headers: {}, body: playlistBody([stored]) }))
+    .on("POST", `/api/playlists/${PLAYLIST}/pages`, (request) => { posts.push((request.body as { page: Record<string, unknown> }).page); return playlistAnswer(); })
+    .on("PUT", `/api/playlists/${PLAYLIST}/pages/up-ab12cd34`, (request) => { puts.push(request.body as never); return playlistAnswer(); });
+  const invoke = await cli(t, transport);
+
+  const added = await invoke(["playlist", "page", "add", PLAYLIST, "--media", IMAGE, "--screen-tag", "Lobby", "--screen-tag", "Floor2", "--not-screen-tag", "Kiosk"]);
+  assert.equal(added.code, ExitCode.Success, added.output);
+  assert.deepEqual(posts[0]!.visibility, { enabled: true, screens: { all: [{ tag: "Lobby" }, { tag: "Floor2" }, { not: { tag: "Kiosk" } }] } });
+  const page = { id: "custom", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 600 }, advance: { mode: "duration", after_ms: 5000 }, primitives: [] };
+  assert.equal((await invoke(["playlist", "page", "add", PLAYLIST, "--file", "-", "--not-screen-tag", "Kiosk"], JSON.stringify(page))).code, ExitCode.Success);
+  assert.deepEqual(posts[1]!.visibility, { enabled: true, screens: { not: { tag: "Kiosk" } } });
+
+  for (const [argv, visibility] of [
+    [["--always"], { enabled: true, screens: LOBBY_ONLY }],
+    [["--until", "2026-12-31"], { enabled: true, from: "2026-12-01T00:00", until: "2027-01-01T00:00", screens: LOBBY_ONLY }],
+    [["--screen-tag", "Cafe"], { enabled: true, from: "2026-12-01T00:00", screens: { tag: "Cafe" } }],
+    [["--every-screen"], { enabled: true, from: "2026-12-01T00:00" }],
+  ] as const) {
+    const replaced = await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", ...argv]);
+    assert.equal(replaced.code, ExitCode.Success, `${argv.join(" ")}: ${replaced.output}`);
+    assert.deepEqual(puts.at(-1)!.visibility, visibility, argv.join(" "));
+  }
+  const filePage = { ...page, id: "up-ab12cd34", visibility: { enabled: true, until: "2026-12-25T00:00", screens: LOBBY_ONLY } };
+  assert.equal((await invoke(["playlist", "page", "replace", PLAYLIST, "up-ab12cd34", "--file", "-", "--always"], JSON.stringify(filePage))).code, ExitCode.Success);
+  assert.deepEqual(puts.at(-1)!.visibility, { enabled: true, screens: LOBBY_ONLY }, "--file --always keeps the file page's screen rule");
+
+  const before = puts.length + posts.length;
+  for (const argv of [
+    ["replace", PLAYLIST, "up-ab12cd34", "--every-screen", "--screen-tag", "Cafe"],
+    ["replace", PLAYLIST, "up-ab12cd34", "--not-screen-tag", "not a tag"],
+    ["add", PLAYLIST, "--media", IMAGE, "--every-screen"],
+    ["add", PLAYLIST, "--media", IMAGE, "--screen-tag", "Lobby,Lobby"],
+  ]) {
+    const refused = await invoke(["playlist", "page", ...argv]);
+    assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.output}`);
+  }
+  assert.equal(puts.length + posts.length, before, "a refused screen flag sends nothing");
 });
 
 const STINGER_LOGO = "med_LLLLLLLLLLLLLLLLLLLLLLLL";

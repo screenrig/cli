@@ -1242,11 +1242,12 @@ export interface ScreenLocation {
 
 export type ScreenTags = string[];
 
-/** POST /api/screens/actions selector: explicit ids (any state), every active screen with a tag, or every active screen in a folder and the folders inside it. */
+/** POST /api/screens/actions selector: explicit ids (any state), every active screen with a tag, every active screen in a folder and the folders inside it, or every active screen an audience rule matches. */
 export type ScreenActionSelector =
   | { by: "ids"; screen_ids: string[] }
   | { by: "tag"; tag: string }
-  | { by: "folder"; folder_id: string };
+  | { by: "folder"; folder_id: string }
+  | { by: "audience"; audience: CampaignAudience };
 
 /** One fleet action, discriminated by type. New action types are additive. */
 export type ScreenAction =
@@ -2025,6 +2026,8 @@ export interface AlertMute {
   project_id?: string;
   screen_ids: string[];
   tags: string[];
+  /** Present when the mute was set with one: every screen the rule matches now is silenced. */
+  audience?: CampaignAudience;
   until: string;
 }
 
@@ -2032,11 +2035,12 @@ export interface AlertMuteList {
   items: AlertMute[];
 }
 
-/** POST /api/alert-mutes: at least one screen id or tag, and until at most 30 days ahead. */
+/** POST /api/alert-mutes: at least one screen id or tag, or an audience (tags and screen ids, no folder), and until at most 30 days ahead. */
 export interface AlertMuteWrite {
   note?: string;
   screen_ids?: string[];
   tags?: string[];
+  audience?: CampaignAudience;
   until: string;
 }
 
@@ -2110,10 +2114,11 @@ export interface FleetLinkPatch {
   fields?: Record<string, string> | null;
 }
 
-/** Exactly one of tag and screen_ids. */
+/** Exactly one of tag, screen_ids and audience. */
 export interface TriggerTarget {
   tag?: string;
   screen_ids?: string[];
+  audience?: CampaignAudience;
 }
 
 /** What the latest takeover change did; failed screens are retried. */
@@ -2494,12 +2499,15 @@ export interface ScreenMoveResult {
 }
 
 /**
- * CampaignAudience: exactly one member. all (every rule matches) and any (at
- * least one matches) nest at most 3 deep; {"all": []} is every screen.
+ * CampaignAudience: exactly one member. all (every rule matches), any (at
+ * least one matches) and not (the screens its rule does not match) nest at
+ * most 3 deep; {"all": []} is every screen. A tag matches without regard to
+ * letter case.
  */
 export interface CampaignAudience {
   all?: CampaignAudience[];
   any?: CampaignAudience[];
+  not?: CampaignAudience;
   tag?: string;
   screen_id?: string;
   /** The screens in this screen folder and every folder inside it. */

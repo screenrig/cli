@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import type { ReviewList, ScreenWallArrangement } from "./adapters/protocol.js";
+import type { CampaignAudience, ReviewList, ScreenWallArrangement } from "./adapters/protocol.js";
+import { campaignTagAudience, withoutTags } from "./campaigns.js";
 import { requireToken } from "./client.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import {
@@ -17,7 +18,8 @@ import { wallSize } from "./screen-wall.js";
  * One page of a playlist at a time (`playlist page add|replace|remove`): the
  * way an uploader changes a playlist, and available to anyone. The media page
  * builder here is the rule the dashboard follows too: one full-canvas image or
- * video, dated by the page's own visibility.
+ * video, dated by the page's own visibility and kept to some screens by its
+ * visibility.screens rule.
  */
 
 export const PAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -136,6 +138,8 @@ export interface MediaPageInput {
   transition?: unknown;
   from?: string;
   until?: string;
+  /** The page's visibility.screens rule: the screens it shows on. */
+  screens?: CampaignAudience;
   /** A video plays its audio (muted false) instead of silent; refused for an image. */
   sound?: boolean;
 }
@@ -147,8 +151,8 @@ export const SOUND_CUE_MESSAGE = "a page with sound cannot cue the soundtrack";
  * The page an upload becomes: one full-canvas image or video primitive named by
  * id, contained or covered. An image advances after `seconds`; a video at its
  * own end, muted unless `sound`. `from` and `until` are the page's visibility,
- * civil times in each screen's timezone with `until` exclusive; neither means
- * the page is always shown.
+ * civil times in each screen's timezone with `until` exclusive, and `screens`
+ * the screens it shows on; none of them means the page is always shown.
  */
 export function buildMediaPage(input: MediaPageInput): JSONObject {
   const canvas = pageCanvas(input.playlist);
@@ -163,30 +167,50 @@ export function buildMediaPage(input: MediaPageInput): JSONObject {
     advance: input.kind === "image" ? { mode: "duration", after_ms: Math.round(input.seconds * 1000) } : { mode: "media_end" },
     primitives: [primitive],
   };
-  const visibility = visibilityOf(undefined, input.from, input.until);
+  const visibility = visibilityOf(undefined, input.from, input.until, input.screens);
   if (visibility) page.visibility = visibility;
   return page;
 }
 
-/** The visibility with from and until set; a bound not given stays as it was. Undefined when nothing bounds the page. */
-export function visibilityOf(existing: unknown, from?: string, until?: string): JSONObject | undefined {
+/** The members that limit a page: its dates, weekly windows, data condition and screen rule. */
+const PAGE_BOUNDS = ["from", "until", "windows", "data", "screens"] as const;
+
+/** The visibility when something limits the page (a bound, or the page switched off), else undefined. */
+function limiting(visibility: JSONObject): JSONObject | undefined {
+  return PAGE_BOUNDS.some((key) => visibility[key] !== undefined) || visibility.enabled === false ? visibility : undefined;
+}
+
+/**
+ * The visibility with from, until and the screen rule set (null removes the
+ * rule); a member not given stays as it was. Undefined when nothing limits
+ * the page, which then omits visibility.
+ */
+export function visibilityOf(existing: unknown, from?: string, until?: string, screens?: CampaignAudience | null): JSONObject | undefined {
   const base: JSONObject = isObject(existing) ? { ...existing } : { enabled: true };
   if (from !== undefined) base.from = from;
   if (until !== undefined) base.until = until;
-  const bounded = base.from !== undefined || base.until !== undefined || base.windows !== undefined || base.data !== undefined;
-  return bounded ? base : undefined;
+  if (screens === null) delete base.screens;
+  else if (screens !== undefined) base.screens = screens;
+  return limiting(base);
 }
 
 /**
  * The visibility with its dates (`from` and `until`) removed: whether the page is
- * switched off, its weekly windows and its data condition stay as the project
- * set them. Undefined when nothing else limits the page, and a page that is
- * switched off stays off.
+ * switched off, its weekly windows, its data condition and its screen rule stay
+ * as the project set them. Undefined when nothing else limits the page, and a
+ * page that is switched off stays off.
  */
 export function withoutDates(existing: unknown): JSONObject | undefined {
   if (!isObject(existing)) return undefined;
   const { from: _from, until: _until, ...rest } = existing;
-  return rest.windows !== undefined || rest.data !== undefined || rest.enabled === false ? rest : undefined;
+  return limiting(rest);
+}
+
+/** A page written with its visibility: set when something limits it, else left out. */
+function withVisibility(page: JSONObject, visibility: JSONObject | undefined): JSONObject {
+  if (visibility) page.visibility = visibility;
+  else delete page.visibility;
+  return page;
 }
 
 const CARD_INSTANCE = /^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$/;
@@ -229,6 +253,8 @@ export interface ReplaceMediaInput {
   from?: string;
   until?: string;
   always: boolean;
+  /** The page's new screen rule; null removes it, absent keeps the stored one. */
+  screens?: CampaignAudience | null;
   /** The video plays its audio (muted false). Without it a kept video keeps the stored muted and a rebuilt one is silent. */
   sound?: boolean;
 }
@@ -238,7 +264,8 @@ export interface ReplaceMediaInput {
  * keeps every other member, dates included. A different kind is rebuilt as
  * a media page on the playlist's canvas, keeping the stored dates and id. A
  * date flag changes only its bound; `always` removes the dates and keeps the
- * rest of the visibility the project set. `sound` gives the page's video its
+ * rest of the visibility the project set, its screen rule included. `screens`
+ * replaces the screen rule (null removes it). `sound` gives the page's video its
  * audio, which a page that cues the soundtrack cannot have.
  */
 export function replaceMedia(input: ReplaceMediaInput): JSONObject {
@@ -268,15 +295,14 @@ export function replaceMedia(input: ReplaceMediaInput): JSONObject {
   if (input.sound === true && result.audio_cue !== undefined) {
     throw usageError(`Page ${String(input.stored.id)} has an audio_cue, and ${SOUND_CUE_MESSAGE}. Replace it with --file, without the cue, to give it sound.`);
   }
-  if (input.always) {
-    const visibility = withoutDates(page.visibility);
-    if (visibility) result.visibility = visibility;
-    else delete result.visibility;
-    return result;
-  }
-  const visibility = visibilityOf(page.visibility, input.from, input.until);
-  if (visibility) result.visibility = visibility;
-  return result;
+  // Visibility changes only when a date or screen flag asks; otherwise it stays as stored.
+  if (!input.always && input.from === undefined && input.until === undefined && input.screens === undefined) return result;
+  return withVisibility(result, pageVisibility(page.visibility, input));
+}
+
+/** A page's visibility after the date and screen flags: --always drops the dates, a date flag sets its bound, a screen flag the rule. */
+function pageVisibility(existing: unknown, change: { from?: string; until?: string; always: boolean; screens?: CampaignAudience | null }): JSONObject | undefined {
+  return visibilityOf(change.always ? withoutDates(existing) : existing, change.from, change.until, change.screens);
 }
 
 function playlistId(args: ParsedArgs, command: string): string {
@@ -308,6 +334,21 @@ function fit(args: ParsedArgs): "contain" | "cover" | undefined {
 /** --sound: the video plays its audio. Page files carry their own muted. */
 function sound(args: ParsedArgs): boolean {
   return flagBool(args.flags, "sound");
+}
+
+/**
+ * The page's screen rule from --screen-tag (every listed tag), --not-screen-tag
+ * (none of the listed tags), both (one all, 3 deep at most), or --every-screen
+ * (null: the rule is removed). Undefined when no screen flag is given.
+ */
+export function screenRule(args: ParsedArgs): CampaignAudience | null | undefined {
+  const only = flagString(args.flags, "screen-tag"), not = flagString(args.flags, "not-screen-tag");
+  if (flagBool(args.flags, "every-screen")) {
+    if (only !== undefined || not !== undefined) throw usageError("--every-screen removes the page's screen rule; it cannot be used with --screen-tag or --not-screen-tag.");
+    return null;
+  }
+  const rule = only !== undefined ? campaignTagAudience(only.split(",")) : undefined;
+  return not !== undefined ? withoutTags(rule, not.split(",")) : rule;
 }
 
 function dates(args: ParsedArgs): { from?: string; until?: string; always: boolean } {
@@ -410,6 +451,7 @@ export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolv
   if ((file === undefined) === (media === undefined)) throw usageError("playlist page add requires exactly one of --file PAGE.json or --media MED_ID.");
   const when = dates(args);
   if (when.always) throw usageError("--always belongs to playlist page replace: a new page is always shown unless --from or --until bound it.");
+  const screens = screenRule(args) ?? undefined;
   const before = flagString(args.flags, "before");
   if (before !== undefined && !PAGE_ID_PATTERN.test(before)) throw usageError("--before takes a page ID.");
   const requestedId = flagString(args.flags, "page-id");
@@ -420,13 +462,13 @@ export const handlePlaylistPageAdd = commandHandler(async (args, runtime, resolv
     if (seconds(args) !== undefined || fit(args) !== undefined || sound(args)) throw usageError("--seconds, --fit and --sound shape a page built from --media; a --file page is sent as written.");
     page = await pageFromFile(file, runtime);
     if (requestedId !== undefined) page.id = requestedId;
-    const visibility = visibilityOf(page.visibility, when.from, when.until);
-    if (visibility) page.visibility = visibility;
+    // A page file without flags is sent as written.
+    if (when.from !== undefined || when.until !== undefined || screens !== undefined) withVisibility(page, visibilityOf(page.visibility, when.from, when.until, screens));
   } else {
     const kind = await mediaOf(client, media!);
     const { playlist } = await playlistOf(client, id);
     const transition = await transitionFor(client, playlist);
-    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, transition, ...(sound(args) ? { sound: true } : {}), ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}) });
+    page = buildMediaPage({ id: requestedId ?? newPageId(), mediaId: media!, kind, fit: fit(args) ?? "contain", seconds: seconds(args) ?? DEFAULT_SECONDS, playlist, transition, ...(sound(args) ? { sound: true } : {}), ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), ...(screens ? { screens } : {}) });
   }
   const response = await pageWrite(client, args, { method: "POST", path: pagesPath(id), body: { page, ...(before !== undefined ? { before } : {}) } });
   return pageResult(response, client.requestId, `Page ${String(page.id)} added to ${id}.`);
@@ -438,8 +480,9 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
   const file = flagString(args.flags, "file"), media = flagString(args.flags, "media");
   if (file !== undefined && media !== undefined) throw usageError("playlist page replace takes --file PAGE.json or --media MED_ID, not both.");
   const when = dates(args);
-  if (file === undefined && media === undefined && when.from === undefined && when.until === undefined && !when.always && !sound(args)) {
-    throw usageError("playlist page replace requires --file PAGE.json, --media MED_ID, a date change (--from, --until or --always), or --sound.");
+  const screens = screenRule(args);
+  if (file === undefined && media === undefined && when.from === undefined && when.until === undefined && !when.always && screens === undefined && !sound(args)) {
+    throw usageError("playlist page replace requires --file PAGE.json, --media MED_ID, a date change (--from, --until or --always), a screen change (--screen-tag, --not-screen-tag or --every-screen), or --sound.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   let page: JSONObject;
@@ -449,18 +492,12 @@ export const handlePlaylistPageReplace = commandHandler(async (args, runtime, re
     page = await pageFromFile(file, runtime);
     if (page.id !== undefined && page.id !== pageId) throw usageError(`The page file's id ${String(page.id)} is not ${pageId}; a replace keeps the page's id.`);
     page.id = pageId;
-    if (when.always) {
-      const visibility = withoutDates(page.visibility);
-      if (visibility) page.visibility = visibility;
-      else delete page.visibility;
-    } else {
-      const visibility = visibilityOf(page.visibility, when.from, when.until);
-      if (visibility) page.visibility = visibility;
-    }
+    // A page file without flags is sent as written.
+    if (when.always || when.from !== undefined || when.until !== undefined || screens !== undefined) withVisibility(page, pageVisibility(page.visibility, { ...when, screens }));
   } else {
     const { stored, playlist, revision: current } = await storedPageOf(client, id, pageId, resolved.token);
     const kind = media !== undefined ? await mediaOf(client, media) : undefined;
-    page = replaceMedia({ stored, ...(media !== undefined ? { mediaId: media, kind: kind! } : {}), ...(fit(args) ? { fit: fit(args)! } : {}), ...(seconds(args) !== undefined ? { seconds: seconds(args)! } : {}), ...(sound(args) ? { sound: true } : {}), playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), always: when.always });
+    page = replaceMedia({ stored, ...(media !== undefined ? { mediaId: media, kind: kind! } : {}), ...(fit(args) ? { fit: fit(args)! } : {}), ...(seconds(args) !== undefined ? { seconds: seconds(args)! } : {}), ...(sound(args) ? { sound: true } : {}), playlist, ...(when.from ? { from: when.from } : {}), ...(when.until ? { until: when.until } : {}), always: when.always, ...(screens !== undefined ? { screens } : {}) });
     // The page was derived from the stored one, so the write is held to the revision it was read at.
     revision = current;
   }

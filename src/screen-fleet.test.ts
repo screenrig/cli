@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import { formatEventLine } from "./handlers/events.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -10,7 +10,9 @@ import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
 import { type CliRuntime } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
-import { FakeTransport } from "./transport/fake.js";
+import type { Screen } from "./adapters/protocol.js";
+import { selectorFlags } from "./screen-fleet.js";
+import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 import { networkError } from "./problems.js";
 
@@ -49,7 +51,7 @@ async function enrolled(): Promise<{ fs: ConfigFs; cwd: string }> {
   return { fs, cwd };
 }
 
-async function cli(argv: string[], transport: FakeTransport, env: { fs: ConfigFs; cwd: string }): Promise<{ code: number; stdout: string; envelope: Envelope }> {
+async function cli(argv: string[], transport: FakeTransport, env: { fs: ConfigFs; cwd: string }, stdin?: string): Promise<{ code: number; stdout: string; envelope: Envelope }> {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const outP = collect(stdout);
@@ -65,6 +67,7 @@ async function cli(argv: string[], transport: FakeTransport, env: { fs: ConfigFs
     cwd: () => env.cwd,
     fs: env.fs,
     transport,
+    ...(stdin !== undefined ? { stdin: Readable.from([stdin]), isStdinTty: () => false } : {}),
   };
   const code = await run(runtime);
   stdout.end();
@@ -552,6 +555,53 @@ test("screen screenshot fan-out validates output, concurrency, and idempotency b
     assert.match(refused.envelope.error!.detail, detail);
   }
   assert.equal(transport.calls.length, 0);
+});
+
+test("fleet --audience sends the rule as an audience selector; not and letter case select as the server does", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  transport.putScreen!(screen(A, { tags: ["Cafe"] }) as unknown as Screen);
+  transport.putScreen!(screen(B, { tags: ["cafe", "Kiosk"] }) as unknown as Screen);
+  transport.putScreen!(screen(C, { tags: ["Lobby"] }) as unknown as Screen);
+  const actions = () => transport.calls.filter((call) => call.path === "/api/screens/actions");
+  const rule = { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] };
+
+  const toast = await cli(["--json", "screen", "toast", "--audience", JSON.stringify(rule), "--text", "Closing soon"], transport, env);
+  assert.equal(toast.code, 0, toast.stdout);
+  assert.deepEqual((actions().at(-1)!.body as { selector: unknown }).selector, { by: "audience", audience: rule });
+  assert.deepEqual(toast.envelope.data.results.map((item: { screen_id: string }) => item.screen_id), [A], "the kiosk is left out");
+
+  await writeFile(path.join(env.cwd, "rule.json"), JSON.stringify({ tag: "CAFE" }));
+  const assign = await cli(["--json", "screen", "assign", "--audience", "@rule.json", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, env);
+  assert.equal(assign.code, 0, assign.stdout);
+  assert.deepEqual((actions().at(-1)!.body as { selector: unknown }).selector, { by: "audience", audience: { tag: "CAFE" } });
+  assert.deepEqual(assign.envelope.data.results.map((item: { screen_id: string }) => item.screen_id).sort(), [A, B].sort(), "a screen tag matches without regard to letter case");
+
+  const piped = await cli(["--json", "screen", "tag", "--audience", "-", "--add", "Spring"], transport, env, JSON.stringify({ not: { tag: "Lobby" } }));
+  assert.equal(piped.code, 0, piped.stdout);
+  assert.deepEqual((actions().at(-1)!.body as { selector: unknown; action: unknown }), { selector: { by: "audience", audience: { not: { tag: "Lobby" } } }, action: { type: "add_tags", tags: ["Spring"] } });
+
+  const reboot = await cli(["--json", "screen", "reboot", "--audience", '{"tag":"Cafe"}'], transport, env);
+  assert.equal(reboot.code, ExitCode.Usage, reboot.stdout);
+  assert.equal((reboot.envelope.error as { next?: { command: string } }).next?.command, `screenrig screen reboot --audience '{"tag":"Cafe"}' --yes`);
+  assert.equal(selectorFlags({ by: "audience", audience: rule }), `--audience '${JSON.stringify(rule)}'`);
+
+  const before = actions().length;
+  for (const [argv, stdin, message] of [
+    [["screen", "reload", "--audience", '{"tag":"Cafe"}', "--tag", "Lobby"], undefined, /cannot be used with/],
+    [["screen", "reload", "--audience", '{"tag":"Cafe"}', "--folder", "sfd_NORTH"], undefined, /cannot be used with/],
+    [["screen", "reload", A, "--audience", '{"tag":"Cafe"}'], undefined, /screen ids, --tag TAG, --folder ID or --audience RULE; give only one/],
+    [["screen", "reload", "--audience", '{"tag":"Cafe"}', "--expect-rev", "3"], undefined, /does not take --expect-rev/],
+    [["screen", "reload", "--audience", "[]"], undefined, /--audience must be a rule as JSON with exactly one of all, any, not, tag, screen_id or folder/],
+    [["screen", "reload", "--audience", "@missing.json"], undefined, /missing\.json does not exist/],
+    [["screen", "schedule", "set", "--audience", "-", "--file", "-"], "{}", /--audience and --file cannot both read stdin/],
+    [["screen", "screenshot", "--audience", '{"tag":"Cafe"}'], undefined, /does not accept --audience/],
+  ] as const) {
+    const refused = await cli(["--json", ...argv], transport, env, stdin);
+    assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error?.detail ?? "", message, argv.join(" "));
+  }
+  assert.equal(actions().length, before, "a refused selector sends nothing");
 });
 
 test("screen.online and screen.offline render as compact logfmt lines", () => {

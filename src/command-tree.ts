@@ -43,7 +43,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
   command.on(`option:${option.name()}`, () => {
     const repeatable = (name === "capability" && command.name() === "create" && command.parent?.name() === "service-client")
       || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
-      || (["any-tag", "all-tags", "severity", "active-hours"].includes(name) && command.parent?.name() === "notifications" && ["create", "update"].includes(command.name()))
+      || (["any-tag", "all-tags", "not-tag", "severity", "active-hours"].includes(name) && command.parent?.name() === "notifications" && ["create", "update"].includes(command.name()))
       || (name === "window" && command.parent?.name() === "reboot-schedule" && command.name() === "set")
       || (name === "field" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
       || (["set", "clear"].includes(name) && command.parent?.name() === "playlist" && ["create", "fields"].includes(command.name()))
@@ -53,7 +53,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (["screen-id", "tag"].includes(name) && command.parent?.name() === "alerts" && command.name() === "mute")
       || (name === "filter" && command.parent?.name() === "subscriptions" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
-      || (["tag", "any-tag", "screen-id", "window", "monthly", "date", "except"].includes(name) && command.parent?.name() === "campaign" && ["create", "update", "preview"].includes(command.name()))
+      || (["screen-tag", "not-screen-tag"].includes(name) && command.parent?.name() === "page" && ["add", "replace"].includes(command.name()))
+      || (["tag", "any-tag", "not-tag", "screen-id", "window", "monthly", "date", "except"].includes(name) && command.parent?.name() === "campaign" && ["create", "update", "preview"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
     if (seen.has(flagName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(flagName(option));

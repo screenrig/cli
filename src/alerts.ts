@@ -2,6 +2,7 @@ import type { Alert, AlertActor, AlertList, AlertMute } from "./adapters/protoco
 import { fleetLinkTags } from "./fleet-links.js";
 import { isResourceID } from "./generated/resource-ids.js";
 import { NOTIFICATION_SNOOZE_MAX_MS, snoozeDurationMs } from "./notifications.js";
+import { campaignAudienceText } from "./campaigns.js";
 import { CliError, usageError } from "./problems.js";
 import { normalizeInstant } from "./screen-control.js";
 import { table } from "./webhooks.js";
@@ -262,6 +263,7 @@ export function alertMuteLines(mute: AlertMute | undefined): string[] {
     `id: ${mute.id}`,
     `screen_ids: ${(mute.screen_ids ?? []).join(", ") || "(none)"}`,
     `tags: ${(mute.tags ?? []).join(", ") || "(none)"}`,
+    ...(mute.audience ? [`audience: ${campaignAudienceText(mute.audience)}`] : []),
     `until: ${mute.until}`,
     ...when(mute.note, "note"),
     ...(mute.created_by ? [`created_by: ${actorText(mute.created_by)}`] : []),
@@ -277,8 +279,11 @@ function listCell(values: string[] | undefined): string {
 
 export function alertMuteTableLines(items: AlertMute[]): string[] {
   if (!items.length) return ["No current mutes"];
-  return table(["ID", "UNTIL", "SCREENS", "TAGS", "BY", "NOTE"], items.map((item) => [
+  // AUDIENCE appears only when a listed mute was set with a rule.
+  const audience = items.some((item) => item.audience);
+  return table(["ID", "UNTIL", "SCREENS", "TAGS", ...(audience ? ["AUDIENCE"] : []), "BY", "NOTE"], items.map((item) => [
     item.id ?? "", item.until ?? "", listCell(item.screen_ids), listCell(item.tags),
+    ...(audience ? [clip(item.audience ? campaignAudienceText(item.audience) : "", 48)] : []),
     item.created_by ? item.created_by.name ?? item.created_by.id : "", clip(item.note ?? "", 60),
   ]));
 }

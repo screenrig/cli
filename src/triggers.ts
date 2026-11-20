@@ -2,6 +2,7 @@ import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import type { Trigger, TriggerAlert, TriggerDelivery, TriggerOverlay } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
+import { campaignAudienceText } from "./campaigns.js";
 import { screenTag } from "./screen-fleet.js";
 import { verifyLines } from "./webhook-verify.js";
 
@@ -185,10 +186,11 @@ function when(value: string | number | undefined, label: string): string[] {
   return value === undefined || value === "" ? [] : [`${label}: ${value}`];
 }
 
-/** "tag Lobby" or "3 screens: scr_a, scr_b, scr_c". */
+/** "tag Lobby", "audience tag Cafe and not tag Kiosk" or "3 screens: scr_a, scr_b, scr_c". */
 export function triggerTargetText(trigger: Pick<Trigger, "target"> | undefined): string {
   const target = trigger?.target;
   if (target?.tag) return `tag ${target.tag}`;
+  if (target?.audience) return `audience ${campaignAudienceText(target.audience)}`;
   const ids = target?.screen_ids ?? [];
   return `${ids.length} screen${ids.length === 1 ? "" : "s"}${ids.length ? `: ${ids.join(", ")}` : ""}`;
 }
@@ -313,7 +315,7 @@ function table(header: string[], rows: string[][]): string[] {
 export function triggerTableLines(items: Trigger[]): string[] {
   if (!items.length) return ["No triggers"];
   return table(["ID", "KIND", "LABEL", "TARGET", "ALERT", "LAST_RECEIVED"], items.map((item) => [
-    item.id ?? "", item.kind ?? "", item.label ?? "", item.target?.tag ? `tag ${item.target.tag}` : `${item.target?.screen_ids?.length ?? 0} screens`,
+    item.id ?? "", item.kind ?? "", item.label ?? "", item.target?.tag ? `tag ${item.target.tag}` : item.target?.audience ? "audience" : `${item.target?.screen_ids?.length ?? 0} screens`,
     alertCell(item), item.last_received_at ?? "",
   ]));
 }

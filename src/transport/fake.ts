@@ -1403,7 +1403,11 @@ export function memoryBackend(options: {
   // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
   transport.on("POST", "/api/screens/actions", (req): TransportResponse => {
-    const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string } | { by: "folder"; folder_id: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
+    const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string } | { by: "folder"; folder_id: string } | { by: "audience"; audience: Record<string, unknown> }; action: { type: string; tags?: string[]; playlist_id?: string } };
+    if (body.selector.by === "audience") {
+      const refusal = campaignAudienceProblem(body.selector.audience, "selector.audience");
+      if (refusal) return refusal;
+    }
     // Like the server, a fleet takeover's until is checked once before fan-out.
     const fleetUntil = (body.action as { until?: unknown }).until;
     if (body.action.type === "takeover" && typeof fleetUntil === "string") {
@@ -1418,7 +1422,9 @@ export function memoryBackend(options: {
       ? selector.screen_ids
       : selector.by === "folder"
         ? [...screens.values()].filter((screen) => screen.state === "active" && screen.folder_id === selector.folder_id).map((screen) => screen.id)
-        : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes(selector.tag)).map((screen) => screen.id);
+        : selector.by === "audience"
+          ? [...screens.values()].filter((screen) => screen.state === "active" && inCampaignAudience(selector.audience, screen)).map((screen) => screen.id)
+          : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes(selector.tag)).map((screen) => screen.id);
     const results = ids.map((id) => {
       const screen = screens.get(id);
       if (!screen) {
@@ -2325,8 +2331,10 @@ export function memoryBackend(options: {
     .filter((mute) => Date.parse(mute.until as string) > clock().getTime())
     .sort((a, b) => Date.parse(a.until as string) - Date.parse(b.until as string));
   const alertView = (alert: Record<string, unknown>): Record<string, unknown> => {
-    const tags = screens.get(alert.screen_id as string)?.tags ?? [];
-    const muted = currentMutes().some((mute) => (mute.screen_ids as string[]).includes(alert.screen_id as string) || (mute.tags as string[]).some((tag) => tags.includes(tag)));
+    const screen = screens.get(alert.screen_id as string);
+    const tags = screen?.tags ?? [];
+    const muted = currentMutes().some((mute) => (mute.screen_ids as string[]).includes(alert.screen_id as string) || (mute.tags as string[]).some((tag) => tags.includes(tag))
+      || (screen !== undefined && mute.audience !== undefined && inCampaignAudience(mute.audience as Record<string, unknown>, screen)));
     const snoozed = typeof alert.snoozed_until === "string" && Date.parse(alert.snoozed_until) > clock().getTime();
     const acknowledged = alert.acknowledged_at !== undefined && (alert.snoozed_until === undefined || snoozed);
     return { ...alert, muted, attention: alert.state === "open" && !muted && !acknowledged };
@@ -2382,20 +2390,20 @@ export function memoryBackend(options: {
   }));
   transport.on("GET", "/api/alert-mutes", () => ({ status: 200, headers: {}, body: { items: currentMutes() } }));
   transport.on("POST", "/api/alert-mutes", (req) => webhookReplay(req, () => {
-    const body = (req.body ?? {}) as { screen_ids?: unknown; tags?: unknown; until?: unknown; note?: unknown };
-    const unknown = Object.keys(body).find((key) => !["screen_ids", "tags", "until", "note"].includes(key));
+    const body = (req.body ?? {}) as { screen_ids?: unknown; tags?: unknown; audience?: unknown; until?: unknown; note?: unknown };
+    const unknown = Object.keys(body).find((key) => !["screen_ids", "tags", "audience", "until", "note"].includes(key));
     if (unknown) return invalidRequest(`${unknown} is not a field of a mute.`, unknown);
-    const refusal = alertEndRefusal(body.until);
+    const refusal = alertEndRefusal(body.until) ?? (body.audience !== undefined ? campaignAudienceProblem(body.audience, "audience", 1, false) : undefined);
     if (refusal) return refusal;
     const screenIds = Array.isArray(body.screen_ids) ? body.screen_ids as string[] : [];
     const tags = Array.isArray(body.tags) ? body.tags as string[] : [];
-    if (!screenIds.length && !tags.length) return invalidRequest("A mute needs at least one screen id or tag.", "screen_ids");
+    if (!screenIds.length && !tags.length && body.audience === undefined) return invalidRequest("A mute needs at least one screen id or tag, or an audience.", "screen_ids");
     if (screenIds.length > 100) return invalidRequest("screen_ids takes at most 100 screens.", "screen_ids");
     if (typeof body.note === "string" && [...body.note].length > 200) return invalidRequest("note takes at most 200 characters.", "note");
     if (currentMutes().length >= 50) return problem(409, "alert_mute_limit_reached", "The organization already has the maximum of 50 current mutes.");
     alertMuteSequence += 1;
     const mute: Record<string, unknown> = {
-      id: `amt_${String(alertMuteSequence).padStart(20, "D")}`, screen_ids: screenIds, tags, until: body.until,
+      id: `amt_${String(alertMuteSequence).padStart(20, "D")}`, screen_ids: screenIds, tags, ...(body.audience !== undefined ? { audience: body.audience } : {}), until: body.until,
       ...(typeof body.note === "string" && body.note ? { note: body.note } : {}),
       created_by: alertActor(), created_at: clock().toISOString(),
     };
@@ -2529,12 +2537,22 @@ export function memoryBackend(options: {
   const activeAlert = (trigger: Record<string, unknown>): boolean => (trigger.alert as { state?: string } | undefined)?.state === "active" || overlayAlerts(trigger).length > 0;
   const alertActive = () => problem(409, "resource_conflict", "The trigger has an active alert.");
   const publicTrigger = (trigger: Record<string, unknown>) => ({ ...trigger });
+  // TriggerTarget: exactly one of tag, screen_ids and audience.
+  const triggerTargetProblem = (value: unknown): TransportResponse | undefined => {
+    const target = (value ?? {}) as Record<string, unknown>;
+    if (Object.keys(target).filter((key) => ["tag", "screen_ids", "audience"].includes(key)).length !== 1 || Object.keys(target).length !== 1) {
+      return problem(400, "invalid_request", "target must set exactly one of tag, screen_ids and audience.");
+    }
+    return target.audience === undefined ? undefined : campaignAudienceProblem(target.audience, "target.audience");
+  };
   transport.on("GET", "/api/triggers", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...triggers.values()].map(publicTrigger) } }));
   transport.on("POST", "/api/triggers", (req) => triggerReplay(req, () => {
     const body = (req.body ?? {}) as {
-      kind?: string; label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number; pull?: Record<string, unknown>;
+      kind?: string; label?: string; target?: { tag?: string; screen_ids?: string[]; audience?: unknown }; default_for_seconds?: number; pull?: Record<string, unknown>;
       overlay?: { show?: string; edge?: string; style?: Record<string, unknown>; mapping?: Record<string, unknown>; signing?: boolean };
     };
+    const target = triggerTargetProblem(body.target);
+    if (target) return target;
     if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The organization has the maximum of 20 triggers.");
     if (body.kind === "overlay" && !body.overlay?.show) return problem(400, "invalid_request", "overlay.show is required: bar or takeover.");
     triggerSequence += 1;
@@ -2572,6 +2590,8 @@ export function memoryBackend(options: {
     const body = (req.body ?? {}) as Record<string, any>;
     if (Object.keys(body).length === 0) return problem(400, "invalid_request", "body must set at least one member to change.");
     if (body.overlay && !trigger.overlay) return problem(400, "invalid_request", "overlay is only for an overlay trigger.");
+    const target = body.target === undefined ? undefined : triggerTargetProblem(body.target);
+    if (target) return target;
     for (const key of ["label", "target", "default_for_seconds"]) if (body[key] !== undefined) trigger[key] = body[key];
     if (body.pull !== undefined) { if (body.pull === null) delete trigger.pull; else trigger.pull = body.pull; }
     let signingSecret: string | undefined;
@@ -2846,19 +2866,21 @@ export function memoryBackend(options: {
     if (!ifMatch || ifMatch === `"${campaign.revision}"`) return undefined;
     return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The campaign revision does not match If-Match.", current_revision: campaign.revision } };
   };
-  const campaignAudienceProblem = (value: unknown, path = "audience", depth = 1): TransportResponse | undefined => {
+  const campaignAudienceProblem = (value: unknown, path = "audience", depth = 1, folders = true): TransportResponse | undefined => {
     const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
-    if (entries.length !== 1) return campaignInvalid(path, "must be an object with exactly one of all, any, tag, screen_id or folder");
+    if (entries.length !== 1) return campaignInvalid(path, "must be an object with exactly one of all, any, not, tag, screen_id or folder");
     const [key, member] = entries[0]!;
     if (key === "tag") return typeof member === "string" && /^[A-Za-z0-9]{1,32}$/.test(member) ? undefined : campaignInvalid(`${path}.tag`, "must match ^[A-Za-z0-9]{1,32}$");
     if (key === "screen_id") return typeof member === "string" && member ? undefined : campaignInvalid(`${path}.screen_id`, "must be an ID");
+    if (key === "folder" && !folders) return campaignInvalid(path, "cannot name a folder; select screens by tag or screen_id");
     if (key === "folder") return typeof member === "string" && /^(?:(?:stage|qa|development)_)?sfd_[A-Za-z0-9]{1,64}$/.test(member) ? undefined : campaignInvalid(`${path}.folder`, "must be a screen folder ID");
-    if (key !== "all" && key !== "any") return campaignInvalid(`${path}.${key}`, "is not allowed; use all, any, tag, screen_id or folder");
+    if (key !== "all" && key !== "any" && key !== "not") return campaignInvalid(`${path}.${key}`, "is not allowed; use all, any, not, tag, screen_id or folder");
     if (depth > 3) return campaignInvalid(path, "nests deeper than 3 levels");
+    if (key === "not") return campaignAudienceProblem(member, `${path}.not`, depth + 1, folders);
     if (!Array.isArray(member)) return campaignInvalid(`${path}.${key}`, "must be an array of rules");
     if (member.length === 0 && (key === "any" || depth > 1)) return campaignInvalid(`${path}.${key}`, "must list at least one rule");
     for (const [index, child] of member.entries()) {
-      const failure = campaignAudienceProblem(child, `${path}.${key}[${index}]`, depth + 1);
+      const failure = campaignAudienceProblem(child, `${path}.${key}[${index}]`, depth + 1, folders);
       if (failure) return failure;
     }
     return undefined;
@@ -2866,7 +2888,9 @@ export function memoryBackend(options: {
   const inCampaignAudience = (audience: Record<string, unknown>, screen: Screen): boolean => {
     if (Array.isArray(audience.all)) return audience.all.every((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
     if (Array.isArray(audience.any)) return audience.any.some((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
-    if (typeof audience.tag === "string") return (screen.tags ?? []).includes(audience.tag);
+    if (audience.not && typeof audience.not === "object") return !inCampaignAudience(audience.not as Record<string, unknown>, screen);
+    // A screen tag matches without regard to letter case.
+    if (typeof audience.tag === "string") return (screen.tags ?? []).some((tag) => tag.toLowerCase() === (audience.tag as string).toLowerCase());
     // The fake keeps no folder tree: a folder leaf matches the screens directly inside it.
     if (typeof audience.folder === "string") return screen.folder_id === audience.folder;
     return audience.screen_id === screen.id;

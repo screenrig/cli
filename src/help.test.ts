@@ -671,7 +671,8 @@ test("notifications help, JSON help and preflight agree on option relationships 
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
   assert.deepEqual(update.relationships[1], { kind: "atMostOne", options: ["--email", "--url", "--destination"] });
   assert.match(update.options.find((option) => option.name === "--destination")?.description ?? "", /\bstdin\b/);
-  assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens", "--any-tag", "--all-tags", "--audience"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--tag")?.conflicts, ["--all-screens", "--any-tag", "--all-tags", "--not-tag", "--audience"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--not-tag")?.conflicts, ["--all-screens", "--tag", "--audience"], "--not-tag joins --any-tag and --all-tags");
   assert.deepEqual(update.options.find((option) => option.name === "--clear-active-hours")?.conflicts, ["--active-hours", "--timezone", "--outside-hours"]);
   assert.deepEqual(update.options.find((option) => option.name === "--severity")?.conflicts, ["--clear-severity"]);
   assert.deepEqual(update.options.find((option) => option.name === "--description")?.conflicts, ["--clear-description"]);
@@ -695,13 +696,14 @@ test("notifications help, JSON help and preflight agree on option relationships 
 test("alerts help, JSON help and preflight agree on option relationships, choices and scope", () => {
   const mute = commandHelp(["alerts", "mute"]);
   assert.deepEqual(mute.relationships, [
-    { kind: "atLeastOne", options: ["--screen-id", "--tag"] },
+    { kind: "atLeastOne", options: ["--screen-id", "--tag", "--audience"] },
     { kind: "exactlyOne", options: ["--for", "--until"] },
   ]);
   assert.deepEqual(mute.options.find((option) => option.name === "--for")?.conflicts, ["--until"]);
   assert.deepEqual(mute.options.find((option) => option.name === "--until")?.conflicts, ["--for"]);
-  for (const name of ["--screen-id", "--tag", "--note"]) assert.equal(mute.options.find((option) => option.name === name)?.type, "value", name);
-  for (const sentence of ["Provide at least one of --screen-id or --tag.", "Provide exactly one of --for or --until."]) {
+  for (const name of ["--screen-id", "--tag", "--audience", "--note"]) assert.equal(mute.options.find((option) => option.name === name)?.type, "value", name);
+  assert.match(mute.options.find((option) => option.name === "--audience")?.description ?? "", /exactly one of all, any, not, tag or screen_id[^]*\bstdin\b/, "--audience names its members and reads stdin");
+  for (const sentence of ["Provide at least one of --screen-id or --tag or --audience.", "Provide exactly one of --for or --until."]) {
     assert.equal(mute.usage.split(sentence).length, 2, `${sentence} appears once in the human help`);
   }
   const snooze = commandHelp(["alerts", "snooze"]);

@@ -3,8 +3,9 @@ import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList, handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate } from "../handlers/notifications.js";
-import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationAudienceOption, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationReachDropPercent, notificationReachDropScreens, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
+import { NOTIFICATION_CONDITIONS, NOTIFICATION_SEVERITIES, notificationAllTags, notificationAnyTags, notificationNotTags, notificationSeverityOverride, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationReachDropPercent, notificationReachDropScreens, notificationSnooze, notificationTags, notificationTimezone, notificationUserId } from "../notifications.js";
 import { weeklyWindows } from "../campaigns.js";
+import { AUDIENCE_RULE_HELP, audienceOption } from "../screen-fleet.js";
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
 const conditionsOption = (value: string): string => { notificationConditions(value); return value; };
@@ -28,7 +29,8 @@ const CONDITIONS = NOTIFICATION_CONDITIONS.join(", ");
 const SEVERITIES = NOTIFICATION_SEVERITIES.join(", ");
 const SEVERITY_HELP = `Override a condition's severity for this notification, CONDITION=LEVEL such as not_playing=error (repeatable; conditions: ${CONDITIONS}; levels: ${SEVERITIES}). The default is error for screen_offline and warning for every other condition. It counts for --min-severity and is the severity every channel shows`;
 const HOURS_HELP = 'Send opened notices only in this weekly window, DAYS HH:MM-HH:MM such as "Mon-Fri 08:00-22:00" (repeatable, at most 16; needs --timezone)';
-const AUDIENCE_HELP = 'The screens it covers, as a campaign audience rule in JSON such as {"all":[{"tag":"level2"},{"tag":"overhead"}]} (inline, a FILE, or - for stdin); instead of --tag';
+const AUDIENCE_HELP = `The screens it covers, as ${AUDIENCE_RULE_HELP.replace("tag, screen_id or folder", "tag or screen_id")} (inline, a FILE, or - for stdin); instead of --tag`;
+const NOT_TAG_HELP = "Keep out screens carrying any of these tags (repeatable, or comma-separated): alone, every other screen; with --any-tag or --all-tags, those screens without them";
 const RECIPIENTS = "comma-separated, at most 20: owner (whoever owns the project when a notice sends) and project members' user ids";
 const EVENTS = "exact event types (screen.online) or prefixes (screen.*), comma-separated, at most 32";
 
@@ -90,10 +92,11 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--telegram-chat <CHAT_ID>", "With --telegram: the chat to post to, its numeric id (-1001234567890) or @channelname").argParser(chatOption))
     .option("--conditions <LIST>", `Notify on these screen state changes, comma-separated: ${CONDITIONS}`, conditionsOption)
     .option("--events <TYPES>", `Webhook only: also POST these raw project events as they happen, ${EVENTS}`, eventsOption)
-    .addOption(new Option("--tag <TAG>", "Only screens carrying any of these tags (repeatable, or comma-separated; at most 16). Without a screen option, every screen").argParser(notificationTags).conflicts(["anyTag", "allTags", "audience"]))
+    .addOption(new Option("--tag <TAG>", "Only screens carrying any of these tags (repeatable, or comma-separated; at most 16). Without a screen option, every screen").argParser(notificationTags).conflicts(["anyTag", "allTags", "notTag", "audience"]))
     .addOption(new Option("--any-tag <TAG>", "Only screens carrying at least one of these tags (repeatable, or comma-separated), as a campaign any rule").argParser(notificationAnyTags).conflicts(["tag", "allTags", "audience"]))
     .addOption(new Option("--all-tags <TAG>", "Only screens carrying every one of these tags (repeatable, or comma-separated), as a campaign all rule").argParser(notificationAllTags).conflicts(["tag", "anyTag", "audience"]))
-    .addOption(new Option("--audience <FILE|->", AUDIENCE_HELP).argParser(notificationAudienceOption).conflicts(["tag", "anyTag", "allTags"]))
+    .addOption(new Option("--not-tag <TAG>", NOT_TAG_HELP).argParser(notificationNotTags).conflicts(["tag", "audience"]))
+    .addOption(new Option("--audience <FILE|->", AUDIENCE_HELP).argParser(audienceOption).conflicts(["tag", "anyTag", "allTags", "notTag"]))
     .addOption(new Option("--min-severity <LEVEL>", "Create no opened notice below this severity (a resolved notice follows its opened one); info, warning or error").choices([...NOTIFICATION_SEVERITIES]))
     .addOption(new Option("--severity <CONDITION=LEVEL>", SEVERITY_HELP).argParser(notificationSeverityOverride))
     .addOption(new Option("--active-hours <SPEC>", HOURS_HELP).argParser(activeHoursOption))
@@ -131,11 +134,12 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .addOption(new Option("--clear-conditions", "Remove every condition (a webhook then needs --events)").conflicts(["conditions"]))
     .addOption(new Option("--events <TYPES>", `Webhook notifications: replace the raw project events, ${EVENTS}`).argParser(eventsOption).conflicts(["clearEvents"]))
     .addOption(new Option("--clear-events", "Webhook notifications: stop POSTing raw project events (it then needs conditions)").conflicts(["events"]))
-    .addOption(new Option("--tag <TAG>", "Replace the screens with any of these tags (repeatable, or comma-separated; at most 16); replaces an audience too").argParser(notificationTags).conflicts(["allScreens", "anyTag", "allTags", "audience"]))
+    .addOption(new Option("--tag <TAG>", "Replace the screens with any of these tags (repeatable, or comma-separated; at most 16); replaces an audience too").argParser(notificationTags).conflicts(["allScreens", "anyTag", "allTags", "notTag", "audience"]))
     .addOption(new Option("--any-tag <TAG>", "Replace the screens with those carrying at least one of these tags (repeatable, or comma-separated), as a campaign any rule").argParser(notificationAnyTags).conflicts(["allScreens", "tag", "allTags", "audience"]))
     .addOption(new Option("--all-tags <TAG>", "Replace the screens with those carrying every one of these tags (repeatable, or comma-separated), as a campaign all rule").argParser(notificationAllTags).conflicts(["allScreens", "tag", "anyTag", "audience"]))
-    .addOption(new Option("--audience <FILE|->", `Replace the screens with ${AUDIENCE_HELP.replace(/^The screens it covers, as/, "")}`).argParser(notificationAudienceOption).conflicts(["allScreens", "tag", "anyTag", "allTags"]))
-    .addOption(new Option("--all-screens", "Remove the screen tags and the audience; the notification covers every screen").conflicts(["tag", "anyTag", "allTags", "audience"]))
+    .addOption(new Option("--not-tag <TAG>", `Replace the screens: ${NOT_TAG_HELP.replace(/^Keep/, "keep")}`).argParser(notificationNotTags).conflicts(["allScreens", "tag", "audience"]))
+    .addOption(new Option("--audience <FILE|->", `Replace the screens with ${AUDIENCE_HELP.replace(/^The screens it covers, as/, "")}`).argParser(audienceOption).conflicts(["allScreens", "tag", "anyTag", "allTags", "notTag"]))
+    .addOption(new Option("--all-screens", "Remove the screen tags and the audience; the notification covers every screen").conflicts(["tag", "anyTag", "allTags", "notTag", "audience"]))
     .addOption(new Option("--min-severity <LEVEL>", "Create no opened notice below this severity; info, warning or error").choices([...NOTIFICATION_SEVERITIES]).conflicts(["clearMinSeverity"]))
     .addOption(new Option("--clear-min-severity", "Remove the severity filter; every opened notice is created").conflicts(["minSeverity"]))
     .addOption(new Option("--severity <CONDITION=LEVEL>", `Replace every override with these. ${SEVERITY_HELP}`).argParser(notificationSeverityOverride).conflicts(["clearSeverity"]))
@@ -156,7 +160,7 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     .option("--expect-rev <REVISION>", "Optionally require this notification revision", revision)
     .action(bind(handleNotificationsUpdate));
   requireOptionGroup(update, "atLeastOne", [
-    "--email", "--url", "--destination", "--telegram-chat", "--conditions", "--clear-conditions", "--events", "--clear-events", "--tag", "--any-tag", "--all-tags", "--audience", "--all-screens",
+    "--email", "--url", "--destination", "--telegram-chat", "--conditions", "--clear-conditions", "--events", "--clear-events", "--tag", "--any-tag", "--all-tags", "--not-tag", "--audience", "--all-screens",
     "--min-severity", "--clear-min-severity", "--severity", "--clear-severity", "--active-hours", "--timezone", "--outside-hours", "--clear-active-hours", "--reach-drop-screens", "--reach-drop-percent", "--clear-reach-drop",
     "--hold", "--description", "--clear-description", "--enable", "--disable", "--snooze",
   ]);

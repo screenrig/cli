@@ -3,7 +3,7 @@ import { CliError, usageError } from "./problems.js";
 import { readAuthoringText } from "./authoring-input.js";
 import type { CliRuntime } from "./runtime.js";
 import type { CampaignAudience, ScreenScheduleWindow, Notification, NotificationActiveHours, NotificationDelivery, NotificationReachDrop, NotificationSeverity, NotificationSeverityOverrides } from "./adapters/protocol.js";
-import { campaignAudienceJson, campaignAudienceText, campaignWindowSpec, tagList } from "./campaigns.js";
+import { campaignAudienceText, campaignWindowSpec, tagList } from "./campaigns.js";
 import { fleetLinkTags } from "./fleet-links.js";
 import { normalizeInstant } from "./screen-control.js";
 import { table } from "./webhooks.js";
@@ -59,8 +59,6 @@ export function notificationId(value: string | undefined, command: string): stri
 
 /** NotificationSeverity (vendor/openapi.yaml), least severe first. */
 export const NOTIFICATION_SEVERITIES = ["info", "warning", "error"] as const;
-/** The audience JSON a file or stdin carries is a campaign audience rule: a 64 KiB request body at most. */
-export const NOTIFICATION_AUDIENCE_INPUT_MAX_BYTES = 64 * 1024;
 
 /** Repeatable --severity CONDITION=LEVEL; returns the accumulated pairs joined by commas, each condition once. */
 export function notificationSeverityOverride(value: string, previous?: string): string {
@@ -109,6 +107,11 @@ export function notificationAllTags(value: string, previous?: string): string {
   return tagList(value, previous, "--all-tags");
 }
 
+/** Repeatable --not-tag: the screen carries none of the listed tags. Returns the accumulated list joined by commas. */
+export function notificationNotTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--not-tag");
+}
+
 /** Repeatable --any-tag: the screen carries at least one listed tag. Returns the accumulated list joined by commas. */
 export function notificationAnyTags(value: string, previous?: string): string {
   return tagList(value, previous, "--any-tag");
@@ -121,24 +124,6 @@ export function notificationTimezone(value: string): string {
   if (known) { try { new Intl.DateTimeFormat("en", { timeZone: zone }); } catch { known = false; } }
   if (!known) throw usageError("--timezone takes an IANA timezone name, such as America/Los_Angeles, Europe/London or UTC.");
   return zone;
-}
-
-/** --audience: inline JSON, @FILE, - for stdin, or a FILE path; the handler reads the file or stdin. */
-export function notificationAudienceOption(value: string): string {
-  if (!value.trim() || value.trim() === "@") throw usageError("--audience takes a JSON rule, FILE to read it from a file, or - for stdin.");
-  return value;
-}
-
-/** The text of an --audience value: the value itself when it is inline JSON, else the file (a leading @ is allowed) or stdin. */
-export async function notificationAudienceText(raw: string, runtime: CliRuntime): Promise<string> {
-  const source = raw.trim();
-  if (/^[\[{]/.test(source)) return source;
-  return readAuthoringText(source.startsWith("@") ? source.slice(1) : source, runtime, NOTIFICATION_AUDIENCE_INPUT_MAX_BYTES);
-}
-
-/** The audience rule a --audience value names. The server checks the rule's members. */
-export async function notificationAudience(raw: string, runtime: CliRuntime): Promise<CampaignAudience> {
-  return campaignAudienceJson(await notificationAudienceText(raw, runtime));
 }
 
 /**

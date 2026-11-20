@@ -1,9 +1,12 @@
 import type { ParsedArgs } from "./command-input.js";
 import { flagString } from "./command-input.js";
+import { readAuthoringText } from "./authoring-input.js";
 import type { Warning } from "./envelope.js";
 import { ExitCode, exitCodeForStatus } from "./exit-codes.js";
-import type { ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType, ScreenFolder } from "./adapters/protocol.js";
+import type { CampaignAudience, ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType, ScreenFolder } from "./adapters/protocol.js";
 import { normalizeProblem, usageError, unexpectedResponseError } from "./problems.js";
+import type { CliRuntime } from "./runtime.js";
+import { singleStdin } from "./webhook-verify.js";
 
 /** Screen tags share the media tag grammar. */
 export const SCREEN_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
@@ -40,22 +43,61 @@ export function screenFolderId(value: string | undefined, label: string): string
   return value;
 }
 
+/** The members a screen rule takes, with an example; the words every --audience help and refusal share. */
+export const AUDIENCE_RULE_HELP = 'a rule as JSON with exactly one of all, any, not, tag, screen_id or folder, such as {"all":[{"tag":"Cafe"},{"not":{"tag":"Kiosk"}}]}';
+/** The API reads a request body of at most 64 KiB, so a rule read from a file or stdin is at most that. */
+export const AUDIENCE_INPUT_MAX_BYTES = 64 * 1024;
+
+/** --audience is inline JSON, @FILE or FILE, or - (stdin); the handler reads the file or stdin (audienceRule). */
+export function audienceOption(value: string): string {
+  if (!value.trim() || value.trim() === "@") throw usageError("--audience takes a JSON rule, @FILE to read it from a file, or - for stdin.");
+  return value;
+}
+
+/** An --audience rule as JSON text. The server checks the rule's members; this checks it is one JSON object. */
+export function audienceJson(text: string): CampaignAudience {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw usageError(`--audience is not valid JSON. Give ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin.`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw usageError(`--audience must be ${AUDIENCE_RULE_HELP}; {"all":[]} is every screen.`);
+  }
+  return parsed as CampaignAudience;
+}
+
+/** The rule an --audience value names: the value itself when it is inline JSON, else the file (a leading @ is allowed) or stdin (-). */
+export async function audienceRule(raw: string, runtime: CliRuntime): Promise<CampaignAudience> {
+  const source = raw.trim();
+  const text = /^[[{]/.test(source) ? source : await readAuthoringText(source.startsWith("@") ? source.slice(1) : source, runtime, AUDIENCE_INPUT_MAX_BYTES);
+  return audienceJson(text);
+}
+
 /**
- * Resolve `<id>`, several `<id>`s, `--tag TAG` or `--folder ID`. Exactly one
- * screen id keeps the single-screen route and its envelope; several ids, a tag
- * or a folder (with every folder inside it) select the fleet actions route.
+ * Resolve `<id>`, several `<id>`s, `--tag TAG`, `--folder ID` or `--audience RULE`.
+ * Exactly one screen id keeps the single-screen route and its envelope; several
+ * ids, a tag, a folder (with every folder inside it) or an audience rule select
+ * the fleet actions route.
  */
-export function screenTarget(args: ParsedArgs, command: string): ScreenTarget {
+export async function screenTarget(args: ParsedArgs, command: string, runtime: CliRuntime): Promise<ScreenTarget> {
   const ids = args.positionals.slice(2);
   if (args.flags.tag === true) throw usageError("--tag requires a value, such as --tag Lobby.");
   if (args.flags.folder === true) throw usageError("--folder requires a value, such as --folder sfd_NORTH.");
   const tag = flagString(args.flags, "tag");
   const folder = flagString(args.flags, "folder");
-  if ([ids.length > 0, tag !== undefined, folder !== undefined].filter(Boolean).length > 1) {
-    throw usageError(`${command} takes screen ids, --tag TAG or --folder ID; give only one.`);
+  const audience = flagString(args.flags, "audience");
+  if ([ids.length > 0, tag !== undefined, folder !== undefined, audience !== undefined].filter(Boolean).length > 1) {
+    throw usageError(`${command} takes screen ids, --tag TAG${audience !== undefined ? ", --folder ID or --audience RULE" : " or --folder ID"}; give only one.`);
   }
   if (tag !== undefined) return { kind: "fleet", selector: { by: "tag", tag: screenTag(tag) } };
   if (folder !== undefined) return { kind: "fleet", selector: { by: "folder", folder_id: screenFolderId(folder, "--folder") } };
+  if (audience !== undefined) {
+    // A schedule set reads its --file too; only one of them can be stdin.
+    singleStdin([["--audience", audience.trim()], ["--file", flagString(args.flags, "file")]]);
+    return { kind: "fleet", selector: { by: "audience", audience: await audienceRule(audience, runtime) } };
+  }
   if (!ids.length) throw usageError(`${command} requires <id>, --tag TAG or --folder ID.`);
   if (ids.some((id) => id.length < 1 || id.length > 200)) throw usageError(`${command} screen ids must be 1 to 200 characters.`);
   if (new Set(ids).size !== ids.length) throw usageError(`${command} lists a screen id more than once.`);
@@ -78,15 +120,20 @@ export function folderSubtree(items: readonly Pick<ScreenFolder, "id" | "parent_
   return subtree;
 }
 
-/** The flags that reselect a fleet: --tag TAG, --folder ID or the ids. */
+/** The flags that reselect a fleet: --tag TAG, --folder ID, --audience 'RULE' or the ids. */
 export function selectorFlags(selector: ScreenActionSelector): string {
-  return selector.by === "tag" ? `--tag ${selector.tag}` : selector.by === "folder" ? `--folder ${selector.folder_id}` : selector.screen_ids.join(" ");
+  switch (selector.by) {
+    case "tag": return `--tag ${selector.tag}`;
+    case "folder": return `--folder ${selector.folder_id}`;
+    case "audience": return `--audience '${JSON.stringify(selector.audience)}'`;
+    default: return selector.screen_ids.join(" ");
+  }
 }
 
 /** Revision guards are per screen; the fleet route has none. */
 export function rejectFleetRevision(args: ParsedArgs, command: string): void {
   if (args.flags["expect-rev"] !== undefined) {
-    throw usageError(`${command} with several screens or --tag does not take --expect-rev: revision guards are per screen. Target one screen id to use --expect-rev.`);
+    throw usageError(`${command} with several screens, --tag, --folder or --audience does not take --expect-rev: revision guards are per screen. Target one screen id to use --expect-rev.`);
   }
 }
 

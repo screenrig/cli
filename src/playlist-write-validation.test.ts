@@ -88,6 +88,52 @@ test("authoring and bundle validators accept data-only and mixed visibility with
   assert.throws(() => validatePlaylistWrite(noFallback, new Map()), CliError);
 });
 
+test("authoring and bundle validators accept a page's screen rule over tags and ids, alone or with dates, and refuse what the server refuses", () => {
+  for (const screens of [
+    { tag: "lobby" }, { screen_id: "scr_LOBBY" }, { not: { tag: "Kiosk" } },
+    { all: [{ tag: "Cafe" }, { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } }] },
+    { any: [{ screen_id: "scr_A" }, { all: [{ tag: "x" }, { tag: "y" }] }] },
+  ]) {
+    for (const bounds of [{}, { until: "2026-12-25T00:00" }]) {
+      const value = playlistWithVisibility({ enabled: true, screens, ...bounds });
+      assert.deepEqual(playlistIssues(value), [], JSON.stringify(screens));
+      assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set(), JSON.stringify(screens));
+    }
+  }
+  const tooDeep = { all: [{ not: { any: [{ all: [{ tag: "x" }] }] } }] };
+  for (const [screens, path, message] of [
+    [{ folder: "sfd_NORTH" }, "/pages/1/visibility/screens", /cannot name a folder/],
+    [{ all: [{ tag: "Cafe" }, { folder: "sfd_NORTH" }] }, "/pages/1/visibility/screens/all/1", /cannot name a folder/],
+    [{ all: [] }, "/pages/1/visibility/screens", /selects every screen/],
+    [{ any: [] }, "/pages/1/visibility/screens/any", /at least one rule/],
+    [{ all: [{ all: [] }] }, "/pages/1/visibility/screens/all/0/all", /at least one rule/],
+    [tooDeep, "/pages/1/visibility/screens/all/0/not/any/0", /deeper than 3/],
+    [{ tag: "not a tag" }, "/pages/1/visibility/screens/tag", /letters or digits/],
+    [{ tag: "a", any: [] }, "/pages/1/visibility/screens", /exactly one of all, any, not, tag or screen_id/],
+    [{ all: Array.from({ length: 500 }, (_, index) => ({ tag: `t${index}` })) }, "/pages/1/visibility/screens", /at most 500 rules/],
+  ] as const) {
+    const value = playlistWithVisibility({ enabled: true, screens });
+    const issues = playlistIssues(value);
+    // The schema answers a shape it states (a tag pattern, an empty any) in its own words; the rest are the semantic checks'.
+    assert.ok(issues.some((issue) => issue.path === path), `${JSON.stringify(screens).slice(0, 80)}: ${JSON.stringify(issues)}`);
+    assert.throws(() => validatePlaylistWrite(value, new Map()), (error: CliError) => message.test(error.problem.detail ?? ""), JSON.stringify(screens).slice(0, 80));
+  }
+  // A page bounded by its screens is still a page with visibility: one page must keep none.
+  const noFallback = playlistWithVisibility({ enabled: true, screens: { tag: "Lobby" } });
+  noFallback.pages.shift();
+  assert.ok(playlistIssues(noFallback).some((issue) => issue.path === "/pages"));
+  assert.throws(() => validatePlaylistWrite(noFallback, new Map()), CliError);
+});
+
+test("a media tag group takes the whole entry {screen.tags}; the tag shorthand and a longer value do not", () => {
+  const image = (selector: unknown) => playlistWithPrimitives([{ id: "pic", primitive: "image", selector, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "cover" }]);
+  for (const tags of [{ any: ["{screen.tags}"] }, { all: ["Menu", "{screen.tags}"] }, { none: ["{screen.tags}"] }]) {
+    assert.deepEqual(playlistIssues(image({ by: "tag", tags, one_at_a_time: true })), [], JSON.stringify(tags));
+  }
+  assert.ok(playlistIssues(image({ by: "tag", tag: "{screen.tags}", one_at_a_time: true })).some((issue) => issue.path === "/pages/0/primitives/0/selector/tag"));
+  assert.ok(playlistIssues(image({ by: "tag", tags: { any: ["x{screen.tags}"] }, one_at_a_time: true })).some((issue) => issue.path === "/pages/0/primitives/0/selector/tags/any/0"));
+});
+
 test("bundle predicates keep the backend's key, scalar and RFC 6901 limits", () => {
   const path256 = "/" + "é".repeat(127) + "x";
   for (const data of [{ key: "agenda", path: path256 }, { key: "agenda", path: "/x".repeat(16) }, { key: "agenda", equals: "🧀".repeat(256) }]) {

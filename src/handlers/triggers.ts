@@ -11,6 +11,7 @@ import type { CliRuntime } from "../runtime.js";
 import { quotedRevision } from "../if-match.js";
 import { clientFor, commandHandler, jsonBody, writeRecoveries, type CommandResult } from "../commands.js";
 import { singleStdin, verifyMembers } from "../webhook-verify.js";
+import { audienceRule } from "../screen-fleet.js";
 
 
 // Triggers: /api/triggers. A CAP trigger takes an emergency system's alerts; an
@@ -107,12 +108,20 @@ export async function triggerPull(file: string, runtime: CliRuntime): Promise<Tr
   return parsed as TriggerPull;
 }
 
-export function triggerTargetBody(args: ParsedArgs): TriggerTarget | undefined {
+/** At most one of the inputs a trigger write reads may be stdin. */
+function triggerStdin(args: ParsedArgs): void {
+  singleStdin((["audience", "pull", "style", "map", "verify-secret-file"] as const).map((flag) => [`--${flag}`, flagString(args.flags, flag)] as const));
+}
+
+/** The target the flags name: --tag, --screen-id (repeatable) or --audience (a rule: inline JSON, @FILE or - for stdin); undefined for none. */
+export async function triggerTargetBody(args: ParsedArgs, runtime: CliRuntime): Promise<TriggerTarget | undefined> {
   const tag = flagString(args.flags, "tag");
   const screenIds = flagString(args.flags, "screen-id");
-  if (tag !== undefined && screenIds !== undefined) throw usageError("Add --tag TAG or --screen-id ID, not both.");
+  const audience = flagString(args.flags, "audience");
+  if ([tag, screenIds, audience].filter((value) => value !== undefined).length > 1) throw usageError("Add one of --tag TAG, --screen-id ID or --audience RULE.");
   if (tag !== undefined) return { tag: triggerTag(tag) };
   if (screenIds !== undefined) return { screen_ids: triggerScreenIds(screenIds).split(",") };
+  if (audience !== undefined) return { audience: await audienceRule(audience, runtime) };
   return undefined;
 }
 
@@ -127,8 +136,9 @@ export function triggerOverlayOptionsOnly(args: ParsedArgs, kind: string): void 
 export const handleTriggersCreate = commandHandler(async (args, runtime, resolved) => {
   const label = triggerName(flagString(args.flags, "name") ?? "");
   const kind = flagString(args.flags, "kind") ?? "cap";
-  const target = triggerTargetBody(args);
-  if (!target) throw usageError("triggers create takes exactly one of --tag TAG or --screen-id ID.");
+  triggerStdin(args);
+  const target = await triggerTargetBody(args, runtime);
+  if (!target) throw usageError("triggers create takes exactly one of --tag TAG, --screen-id ID or --audience RULE.");
   const hold = flagString(args.flags, "for");
   const pullFile = flagString(args.flags, "pull");
   triggerOverlayOptionsOnly(args, kind);
@@ -143,7 +153,6 @@ export const handleTriggersCreate = commandHandler(async (args, runtime, resolve
     const styleFile = flagString(args.flags, "style");
     const mapFile = flagString(args.flags, "map");
     if (signing && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
-    singleStdin([["--style", styleFile], ["--map", mapFile], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
     const vendor = await verifyMembers(args, runtime, { create: true, subject: "the trigger" });
     body = {
       kind: "overlay", label, target,
@@ -173,14 +182,14 @@ export const handleTriggersCreate = commandHandler(async (args, runtime, resolve
 export const handleTriggersUpdate = commandHandler(async (args, runtime, resolved) => {
   const id = triggerId(args.positionals[2], "update");
   const name = flagString(args.flags, "name");
-  const target = triggerTargetBody(args);
+  triggerStdin(args);
+  const target = await triggerTargetBody(args, runtime);
   const hold = flagString(args.flags, "for");
   const pullFile = flagString(args.flags, "pull");
   const edge = flagString(args.flags, "edge");
   const styleFile = flagString(args.flags, "style");
   const mapFile = flagString(args.flags, "map");
   if (flagBool(args.flags, "signing") && flagString(args.flags, "verify") !== undefined) throw usageError("--verify and --signing exclude each other: a vendor signs with its own scheme, not ScreenRig-Signature.");
-  singleStdin([["--style", styleFile], ["--map", mapFile], ["--verify-secret-file", flagString(args.flags, "verify-secret-file")]]);
   const vendor = await verifyMembers(args, runtime, { create: false, subject: "the trigger" });
   const overlay: NonNullable<TriggerPatch["overlay"]> = {
     ...(edge !== undefined ? { edge: edge as "top" | "bottom" } : {}),

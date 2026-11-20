@@ -447,6 +447,30 @@ test("alerts mute sends screen ids, tags, the end and the note with a write key 
   assert.match(human.stdout, /^created_by: ScreenRig CLI \(agent agt_AAAAAAAAAAAAAAAAAAAAAAAA\)$/m);
 });
 
+test("alerts mute takes an audience rule alone or beside ids and tags, and the mute silences the screens it matches", async () => {
+  const env = await enrolled();
+  const transport = seeded();
+  const rule = { all: [{ tag: "floor2" }, { not: { tag: "Kiosk" } }] };
+  const alone = await cli(["--json", "alerts", "mute", "--audience", JSON.stringify(rule), "--for", "2h"], transport, env);
+  assert.equal(alone.code, 0, alone.stdout);
+  assert.deepEqual(alertCalls(transport).at(-1)!.body, { audience: rule, until: "2026-10-27T19:00:00Z" }, "an audience alone satisfies the screen options");
+  assert.deepEqual(alone.envelope.data.audience, rule);
+  const muted = await cli(["--json", "alerts", "show", OFFLINE], transport, env);
+  assert.equal(muted.envelope.data.muted, true, "the Lobby screen carries Floor2 (any letter case) and no Kiosk tag");
+  assert.equal((await cli(["--json", "alerts", "show", HOT], transport, env)).envelope.data.muted, false);
+
+  const beside = await cli(["--human", "alerts", "mute", "--screen-id", ENTRANCE, "--tag", "Cafe", "--audience", '{"not":{"tag":"Lobby"}}', "--for", "1h"], transport, env);
+  assert.equal(beside.code, 0, beside.stderr);
+  assert.deepEqual(alertCalls(transport).at(-1)!.body, { screen_ids: [ENTRANCE], tags: ["Cafe"], audience: { not: { tag: "Lobby" } }, until: "2026-10-27T18:00:00Z" });
+  assert.match(beside.stdout, /^audience: not tag Lobby$/m);
+  const list = await cli(["--human", "alerts", "mutes"], transport, env);
+  assert.match(list.stdout, /AUDIENCE/);
+  assert.match(list.stdout, /tag floor2 and not tag Kiosk/);
+
+  const folder = await cli(["--json", "alerts", "mute", "--audience", '{"folder":"sfd_NORTH"}', "--for", "1h"], transport, env);
+  assert.equal(folder.code, ExitCode.Client, "a mute's rule is over tags and screen ids; the server refuses a folder");
+});
+
 test("alerts mute validates targets, the end and the note before any request", async () => {
   const env = await enrolled();
   const transport = seeded();
@@ -456,7 +480,8 @@ test("alerts mute validates targets, the end and the note before any request", a
   const manyIds = Array.from({ length: 101 }, (_, index) => `scr_S${String(index).padStart(10, "0")}`).join(",");
   const manyTags = Array.from({ length: 17 }, (_, index) => `t${index}`).join(",");
   for (const [args, message] of [
-    [[...end], /Provide at least one of --screen-id or --tag/],
+    [[...end], /Provide at least one of --screen-id or --tag or --audience/],
+    [["--audience", "[]", ...end], /--audience must be a rule as JSON/],
     [[...target], /Provide exactly one of --for or --until/],
     [[...target, ...end, "--until", "2026-11-01T09:00:00Z"], /--for cannot be used with --until|--until cannot be used with --for/],
     [["--screen-id", "pl_PLAYLIST", ...end], /--screen-id takes screen ids \(scr_…\), repeated or comma-separated/],

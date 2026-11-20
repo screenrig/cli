@@ -3,7 +3,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 /**
- * A tag selector whose tag or tag group names {screen.id} or {screen.field.NAME}.
+ * A tag selector whose tag or tag group names {screen.id}, {screen.field.NAME} or {screen.tags}.
  * The token is filled for each screen when the selector resolves, so the selector
  * has no single match to preview and no fixed file list to freeze.
  */

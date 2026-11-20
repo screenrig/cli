@@ -6,7 +6,7 @@ import { lintPlaylistPages, type LintFinding } from "./playlist-lint.js";
 import { ExitCode } from "./exit-codes.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";
-import { playlistTransitionIssue } from "./playlist-write-validation.js";
+import { pageScreensIssue, playlistTransitionIssue } from "./playlist-write-validation.js";
 import { declaresFields, templateIssues, withFieldStandIns } from "./playlist-template-check.js";
 
 /**
@@ -113,7 +113,19 @@ function playlistDocumentIssues(value: unknown): Array<{ path: string; message: 
     return [{ path: `/pages/${index}/transition${suffix}`, message: issue.message }];
   });
   if (transitionIssues.length) return transitionIssues;
-  return adslot && pages ? [...validatePlaylistWriteSemantics(value), ...adslotPageIssues(pages)] : validatePlaylistWriteSemantics(value);
+  // The schema takes any audience for visibility.screens; a page's rule is over tags and screen ids, and the
+  // generated checks predate it, so a page bounded by its screens alone is not the no-op they refuse.
+  const screens = (pages ?? []).map((page) => page !== null && typeof page === "object" && !Array.isArray(page)
+    ? ((page as Record<string, unknown>).visibility as Record<string, unknown> | undefined)?.screens : undefined);
+  const screenIssues = screens.flatMap((rule, index) => {
+    const issue = rule === undefined ? undefined : pageScreensIssue(rule);
+    return issue ? [{ path: `/pages/${index}/visibility/screens${issue.path.map((key) => `/${key}`).join("")}`, message: issue.message }] : [];
+  });
+  const semantic = validatePlaylistWriteSemantics(value).filter((issue) => {
+    const page = /^\/pages\/(\d+)\/visibility$/.exec(issue.path);
+    return !(page && screens[Number(page[1])] !== undefined && issue.message === "an always-visible page must omit visibility");
+  });
+  return [...screenIssues, ...semantic, ...(adslot && pages ? adslotPageIssues(pages) : [])];
 }
 export function assertPlaylistValid(value: unknown): void {
   const errors = playlistIssues(value);

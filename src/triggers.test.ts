@@ -134,6 +134,42 @@ test("triggers create refuses a bad target or hold before any request", async ()
   assert.equal(triggerHoldSeconds("1d12h"), 129_600);
 });
 
+test("triggers create and update target an audience rule from inline JSON, a file or stdin", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const rule = { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] };
+  const inline = await cli(["--json", "triggers", "create", "--name", "Cafe alerts", "--audience", JSON.stringify(rule)], transport, env);
+  assert.equal(inline.code, 0, inline.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { label: "Cafe alerts", target: { audience: rule } });
+  const id = inline.envelope.data.id as string;
+  const shown = await cli(["--human", "triggers", "show", id], transport, env);
+  assert.match(shown.stdout, /^target: audience tag Cafe and not tag Kiosk$/m);
+
+  await writeFile(path.join(env.cwd, "rule.json"), JSON.stringify({ any: [{ tag: "Lobby" }, { screen_id: "scr_AAAAAAAAAAAAAAAA" }] }));
+  const fromFile = await cli(["--json", "triggers", "update", id, "--audience", "@rule.json"], transport, env);
+  assert.equal(fromFile.code, 0, fromFile.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { target: { audience: { any: [{ tag: "Lobby" }, { screen_id: "scr_AAAAAAAAAAAAAAAA" }] } } });
+  const piped = await cli(["--json", "triggers", "update", id, "--audience", "-"], transport, env, undefined, JSON.stringify({ not: { tag: "Lab" } }));
+  assert.equal(piped.code, 0, piped.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { target: { audience: { not: { tag: "Lab" } } } });
+
+  const before = triggerCalls(transport).length;
+  for (const [argv, stdin] of [
+    [["create", "--name", "x", "--audience", '{"tag":"Cafe"}', "--tag", "Cafe"], undefined],
+    [["create", "--name", "x", "--audience", '{"tag":"Cafe"}', "--screen-id", "scr_AAAAAAAAAAAAAAAA"], undefined],
+    [["create", "--name", "x", "--audience", "[]"], undefined],
+    [["create", "--name", "x", "--audience", "-", "--pull", "-"], "{}"],
+    [["update", id, "--audience", '{"tag":"Cafe"}', "--tag", "Cafe"], undefined],
+  ] as const) {
+    const refused = await cli(["--json", "triggers", ...argv], transport, env, undefined, stdin);
+    assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.stdout}`);
+  }
+  assert.equal(triggerCalls(transport).length, before, "a refused target sends nothing");
+  const create = commandHelp(["triggers", "create"]);
+  assert.deepEqual(create.relationships.find((item) => item.kind === "exactlyOne")?.options, ["--tag", "--screen-id", "--audience"]);
+  assert.match(create.options.find((option) => option.name === "--audience")?.description ?? "", /all, any, not, tag, screen_id or folder[^]*\bstdin\b/);
+});
+
 test("triggers create --pull sends the CAP sources from a file or stdin and the trigger keeps them", async () => {
   const env = await enrolled();
   const transport = memoryBackend();

@@ -143,6 +143,12 @@ test("campaign create maps every audience flag onto the audience rule", async ()
     [["--all-screens"], { all: [] }],
     [["--audience", nested], JSON.parse(nested)],
     [["--audience", `{"all":[{"tag":"North"},{"folder":"${FOLDER}"}]}`], { all: [{ tag: "North" }, { folder: FOLDER }] }],
+    [["--audience", '{"all":[{"tag":"Cafe"},{"not":{"tag":"Kiosk"}}]}'], { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] }],
+    [["--not-tag", "Kiosk"], { not: { tag: "Kiosk" } }],
+    [["--not-tag", "Kiosk,Lab"], { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } }],
+    [["--tag", "Cafe", "--not-tag", "Kiosk"], { all: [{ tag: "Cafe" }, { not: { tag: "Kiosk" } }] }],
+    [["--tag", "Cafe,North", "--not-tag", "Kiosk", "--not-tag", "Lab"], { all: [{ tag: "Cafe" }, { tag: "North" }, { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } }] }],
+    [["--any-tag", "Cafe,Patio", "--not-tag", "Kiosk"], { all: [{ any: [{ tag: "Cafe" }, { tag: "Patio" }] }, { not: { tag: "Kiosk" } }] }],
   ];
   for (const [flags, audience] of cases) {
     const created = await cli(["--json", "campaign", "create", "--name", "Menu", "--playlist-id", PLAYLIST, ...flags], transport, env);
@@ -196,7 +202,10 @@ test("campaign create refuses a bad input before any request", async () => {
     [["--name", "x".repeat(121), "--playlist-id", PLAYLIST, "--tag", "Lobby"], /1 to 120 characters/],
     [["--name", "Bad\u0007", "--playlist-id", PLAYLIST, "--tag", "Lobby"], /without controls/],
     [["--name", "Menu", "--playlist-id", A, "--tag", "Lobby"], /playlist id/],
-    [base, /exactly one of --tag or --any-tag or --screen-id or --folder or --all-screens or --audience/],
+    [base, /at least one of --tag or --any-tag or --screen-id or --folder or --all-screens or --audience or --not-tag/],
+    [[...base, "--not-tag", "Kiosk", "--folder", FOLDER], /cannot be used with/],
+    [[...base, "--not-tag", "Kiosk", "--audience", "{}"], /cannot be used with/],
+    [[...base, "--not-tag", "not a tag"], /--not-tag takes tags of 1 to 32 letters or digits/],
     [[...base, "--tag", "Lobby", "--all-screens"], /cannot be used with/],
     [[...base, "--tag", "Lobby", "--audience", "{}"], /cannot be used with/],
     [[...base, "--any-tag", "Cafe", "--screen-id", A], /cannot be used with/],
@@ -463,6 +472,8 @@ test("campaign show prints the audience and clock readably and answers not_found
 });
 
 test("campaign audiences read as text", () => {
+  assert.equal(campaignAudienceText({ not: { tag: "Kiosk" } }), "not tag Kiosk");
+  assert.equal(campaignAudienceText({ all: [{ tag: "Cafe" }, { not: { any: [{ tag: "Kiosk" }, { tag: "Lab" }] } }] }), "tag Cafe and not (tag Kiosk or tag Lab)");
   assert.equal(campaignAudienceText({ all: [] }), "every screen");
   assert.equal(campaignAudienceText({ tag: "Lobby" }), "tag Lobby");
   assert.equal(campaignAudienceText({ screen_id: A }), `screen ${A}`);
@@ -833,7 +844,10 @@ test("campaign help names the audience flags, the screens it schedules and how t
   assert.match(commandHelp(["campaign"]).usage, /It schedules your own screens: ads campaigns\s+buy ad time on other screens/);
 
   const create = commandHelp(["campaign", "create"]);
-  assert.deepEqual(create.relationships, [{ kind: "exactlyOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] }]);
+  assert.deepEqual(create.relationships, [
+    { kind: "atLeastOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience", "--not-tag"] },
+    { kind: "atMostOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] },
+  ]);
   assert.match(create.usage, /Switches every screen in the audience to --playlist-id while the campaign holds, and back when it stops, within a minute\./);
   assert.match(create.usage, /campaign screens ID lists every screen's standing and campaign explain SCREEN_ID says why/);
   assert.match(create.usage, /DAYS or DAYS@HH:MM-HH:MM/);
@@ -844,7 +858,8 @@ test("campaign help names the audience flags, the screens it schedules and how t
   const update = commandHelp(["campaign", "update"]);
   assert.deepEqual(update.relationships.map((relationship) => relationship.kind), ["atLeastOne", "atMostOne"]);
   assert.deepEqual(update.relationships[1]!.options, ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"]);
-  assert.deepEqual(update.options.find((option) => option.name === "--folder")!.conflicts, ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--folder")!.conflicts, ["--tag", "--any-tag", "--screen-id", "--all-screens", "--audience", "--not-tag"]);
+  assert.deepEqual(update.options.find((option) => option.name === "--not-tag")!.conflicts, ["--screen-id", "--folder", "--all-screens", "--audience"], "--not-tag joins --tag and --any-tag");
   assert.match(update.options.find((option) => option.name === "--folder")!.description, /screen folder \(sfd_\.\.\.\) and every folder inside it/);
   assert.deepEqual(update.options.find((option) => option.name === "--clear-from")!.conflicts, ["--from"]);
   assert.deepEqual(update.options.find((option) => option.name === "--window")!.conflicts, ["--clear-windows"]);
@@ -1181,7 +1196,10 @@ test("campaign help documents the level flags, their relationships and the stack
   for (const name of ["--monthly", "--date", "--except", "--on-touch", "--displays", "--start"]) assert.ok(create.options.some((option) => option.name === name), `create has ${name}`);
   assert.equal(create.options.find((option) => option.name === "--on-touch")!.valueRequired, false, "--on-touch takes an optional IDLE_S");
   assert.equal(create.options.find((option) => option.name === "--monthly")!.valueRequired, true);
-  assert.deepEqual(create.relationships, [{ kind: "exactlyOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] }]);
+  assert.deepEqual(create.relationships, [
+    { kind: "atLeastOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience", "--not-tag"] },
+    { kind: "atMostOne", options: ["--tag", "--any-tag", "--screen-id", "--folder", "--all-screens", "--audience"] },
+  ]);
   assert.deepEqual(create.options.find((option) => option.name === "--start")!.choices, ["on-time", "next-item"]);
   assert.match(create.usage, /--monthly is a day of the month \(15 or day15/);
   assert.match(create.usage, /last-sun/);

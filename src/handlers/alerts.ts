@@ -7,6 +7,7 @@ import { successEnvelope } from "../envelope.js";
 import { ExitCode } from "../exit-codes.js";
 import { usageError } from "../problems.js";
 import { clientFor, commandHandler, jsonBody, reportFileOf } from "../commands.js";
+import { audienceRule } from "../screen-fleet.js";
 
 
 // Alerts: /api/alerts, one screen's condition while it lasts (acknowledge or
@@ -99,17 +100,19 @@ export const handleAlertsMute = commandHandler(async (args, runtime, resolved) =
   const tags = flagString(args.flags, "tag");
   const note = flagString(args.flags, "note");
   const forValue = flagString(args.flags, "for");
-  if (screenIds === undefined && tags === undefined) throw usageError("alerts mute requires --screen-id or --tag.");
+  const audience = flagString(args.flags, "audience");
+  if (screenIds === undefined && tags === undefined && audience === undefined) throw usageError("alerts mute requires --screen-id, --tag or --audience.");
   const body: AlertMuteWrite = {
     ...(screenIds !== undefined ? { screen_ids: screenIds.split(",") } : {}),
     ...(tags !== undefined ? { tags: tags.split(",") } : {}),
+    ...(audience !== undefined ? { audience: await audienceRule(audience, runtime) } : {}),
     until: alertEnd(forValue, flagString(args.flags, "until"), runtime.now()),
     ...(note !== undefined ? { note: alertNote(note) } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await alertCall(client, {
     method: "POST", path: ALERT_MUTES_PATH, idempotent: true, body,
-    ...(forValue !== undefined ? { recoverySupersede: JSON.stringify(["alerts mute", body.screen_ids ?? [], body.tags ?? [], body.note ?? null]) } : {}),
+    ...(forValue !== undefined ? { recoverySupersede: JSON.stringify(["alerts mute", body.screen_ids ?? [], body.tags ?? [], body.note ?? null, ...(body.audience ? [body.audience] : [])]) } : {}),
   });
   const created = response.body as AlertMute | undefined;
   return {

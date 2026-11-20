@@ -42,10 +42,10 @@ export function commandError(error: CommanderError, command: Command): never {
     case "commander.missingMandatoryOptionValue": {
       const required = command.options.filter((option) => option.mandatory && command.getOptionValue(option.attributeName()) === undefined);
       const positional = command.registeredArguments.filter((arg, index) => arg.required && index >= command.args.length).map((arg) => `<${arg.name()}>`);
-      // Fleet commands take `[id...]`, `--tag TAG` or `--folder ID`; name the missing target too.
+      // Fleet commands take `[id...]`, `--tag TAG`, `--folder ID` or `--audience RULE`; name the missing target too.
       const fleetTarget = command.registeredArguments.some((arg) => arg.variadic && !arg.required && arg.name() === "id")
         && command.options.some((option) => option.long === "--tag")
-        && !command.args.length && command.getOptionValue("tag") === undefined && command.getOptionValue("folder") === undefined;
+        && !command.args.length && ["tag", "folder", "audience"].every((name) => command.getOptionValue(name) === undefined);
       if (fleetTarget) throw usageError(`${path} requires <id>, --tag TAG or --folder ID, and ${required.map((option) => option.long).join(" ")}.`);
       throw usageError(`${path} requires ${[...positional, ...required.map((option) => option.long)].join(" ")}.`);
     }

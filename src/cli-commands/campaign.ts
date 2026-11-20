@@ -5,22 +5,24 @@ import type { CommandActionBinder } from "./types.js";
 import { handleCampaignCreate, handleCampaignDelete, handleCampaignExplain, handleCampaignList, handleCampaignPause, handleCampaignPreview, handleCampaignPromote, handleCampaignPublish, handleCampaignResume, handleCampaignRestore, handleCampaignRevisions, handleCampaignScreens, handleCampaignShow, handleCampaignUpdate } from "../handlers/campaign.js";
 import { calendarInstantOption } from "../change-control.js";
 import {
-  campaignAnyTags, campaignAudienceOption, campaignDataOption, campaignDates, campaignDisplays, campaignExceptDates, campaignExplainTime, campaignFolder, campaignInstant, campaignMonthlies, campaignName,
-  campaignOnTouch, campaignPlaylistId, campaignPriority, campaignScreenIds, campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,
+  campaignAnyTags, campaignDataOption, campaignDates, campaignDisplays, campaignExceptDates, campaignExplainTime, campaignFolder, campaignInstant, campaignMonthlies, campaignName,
+  campaignNotTags, campaignOnTouch, campaignPlaylistId, campaignPriority, campaignScreenIds, campaignScreensCursor, campaignScreensLimit, campaignTags, campaignWindows,
 } from "../campaigns.js";
+import { AUDIENCE_RULE_HELP, audienceOption } from "../screen-fleet.js";
 
 const nameOption = (value: string): string => { campaignName(value); return value; };
 
-/** The audience options, each conflicting with the others; `verb` words the help for create or update. */
+/** The audience options, each conflicting with the others but --not-tag, which joins --tag or --any-tag; `verb` words the help for create or update. */
 function audienceOptions(command: Command, verb: "Audience" | "Replace the audience"): void {
-  const others = (own: string) => ["tag", "anyTag", "screenId", "folder", "allScreens", "audience"].filter((name) => name !== own);
+  const others = (own: string) => ["tag", "anyTag", "screenId", "folder", "allScreens", "audience", "notTag"].filter((name) => name !== own && !(name === "notTag" && (own === "tag" || own === "anyTag")));
   command
     .addOption(new Option("--tag <TAG>", `${verb}: screens that carry this tag; repeat or comma-separate to require every listed tag`).argParser(campaignTags).conflicts(others("tag")))
     .addOption(new Option("--any-tag <TAG>", `${verb}: screens that carry at least one of these tags (repeatable, or comma-separated)`).argParser(campaignAnyTags).conflicts(others("anyTag")))
+    .addOption(new Option("--not-tag <TAG>", `${verb}: keep out screens that carry any of these tags (repeatable, or comma-separated); alone it is every other screen, with --tag or --any-tag those screens without them`).argParser(campaignNotTags).conflicts(["screenId", "folder", "allScreens", "audience"]))
     .addOption(new Option("--screen-id <ID>", `${verb}: these screens (repeatable, or comma-separated)`).argParser(campaignScreenIds).conflicts(others("screenId")))
     .addOption(new Option("--folder <ID>", `${verb}: the screens in this screen folder (sfd_...) and every folder inside it`).argParser(campaignFolder).conflicts(others("folder")))
     .addOption(new Option("--all-screens", `${verb}: every screen in the project`).conflicts(others("allScreens")))
-    .addOption(new Option("--audience <RULE>", `${verb}: a rule as JSON such as {"all":[{"tag":"North"},{"tag":"Cafe"}]}, @FILE to read it from a file, or - for stdin`).argParser(campaignAudienceOption).conflicts(others("audience")));
+    .addOption(new Option("--audience <RULE>", `${verb}: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`).argParser(audienceOption).conflicts(others("audience")));
 }
 
 const MONTHLY_HELP = "DAY or NTH-WEEKDAY with an optional @HH:MM-HH:MM, such as 15, 1st-mon, 3rd-wed@18:00-21:00 or last-sun@09:00-14:00 (repeatable, at most 16)";
@@ -92,7 +94,8 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .option("--paused", "Create it paused: no screen changes until campaign resume")
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleCampaignCreate));
-  requireOptionGroup(create, "exactlyOne", AUDIENCE_FLAGS);
+  requireOptionGroup(create, "atLeastOne", [...AUDIENCE_FLAGS, "--not-tag"]);
+  requireOptionGroup(create, "atMostOne", AUDIENCE_FLAGS);
 
   const update = campaign.command("update").description("Change a campaign; the screens of its old and new audience re-resolve within a minute")
     .argument("<id>", "Campaign identifier")
@@ -104,7 +107,7 @@ export function registerCampaignCommands(root: Command, bind: CommandActionBinde
     .option("--expect-rev <REVISION>", "Optionally require this campaign revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleCampaignUpdate));
-  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--data", "--clear-data", "--on-touch", "--clear-on-touch", "--covers", "--displays", "--clear-displays", "--start", "--priority"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", ...AUDIENCE_FLAGS, "--not-tag", "--from", "--clear-from", "--until", "--clear-until", "--window", "--clear-windows", "--monthly", "--clear-monthly", "--date", "--clear-dates", "--except", "--clear-except", "--data", "--clear-data", "--on-touch", "--clear-on-touch", "--covers", "--displays", "--clear-displays", "--start", "--priority"]);
   requireOptionGroup(update, "atMostOne", AUDIENCE_FLAGS);
 
   const preview = campaign.command("preview").description("Show what creating or changing a campaign would do before making it: the screens that gain or lose it and the calendar before and after")

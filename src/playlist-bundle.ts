@@ -670,7 +670,7 @@ export async function snapshotBundleSelectors(client: ApiClient, input: unknown)
       const category = stringField(primitive, "primitive", "Playlist primitive");
       if (selectorHasScreenTokens(selector)) {
         const where = [typeof page.id === "string" ? `page ${page.id}` : "a page", typeof primitive.id === "string" ? `${category} primitive ${primitive.id}` : `a ${category} primitive`].join(", ");
-        throw usageError(`Cannot export ${where}: its tag selector names a screen token ({screen.id} or {screen.field.NAME}), which is filled per screen and cannot be frozen into a bundle. Replace the token with a concrete tag and export again.`);
+        throw usageError(`Cannot export ${where}: its tag selector names a screen token ({screen.id}, {screen.field.NAME} or {screen.tags}), which is filled per screen and cannot be frozen into a bundle. Replace the token with a concrete tag and export again.`);
       }
       if (selector.batch_size !== undefined && selector.one_at_a_time !== true) throw usageError("Static bundle export cannot retain a runtime batch cursor; remove batch_size or use explicit ids.");
       // A bundle pins the files that fit now; it keeps neither weights nor fit.

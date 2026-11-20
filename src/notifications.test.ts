@@ -1092,6 +1092,15 @@ test("notifications create takes --any-tag, a one-tag --all-tags, and an audienc
   const one = await cli([...base, "--all-tags", "Lobby"], transport, env);
   assert.deepEqual((notificationCalls(transport).at(-1)!.body as { audience: unknown }).audience, { tag: "Lobby" });
   assert.equal(one.code, 0, one.stdout);
+  for (const [flags, audience] of [
+    [["--not-tag", "Lab"], { not: { tag: "Lab" } }],
+    [["--any-tag", "Lobby,Floor2", "--not-tag", "Lab"], { all: [{ any: [{ tag: "Lobby" }, { tag: "Floor2" }] }, { not: { tag: "Lab" } }] }],
+    [["--all-tags", "level2", "--not-tag", "Lab", "--not-tag", "Kiosk"], { all: [{ tag: "level2" }, { not: { any: [{ tag: "Lab" }, { tag: "Kiosk" }] } }] }],
+  ] as const) {
+    const made = await cli([...base, ...flags], transport, env);
+    assert.equal(made.code, 0, `${flags.join(" ")}: ${made.stdout}`);
+    assert.deepEqual((notificationCalls(transport).at(-1)!.body as { audience: unknown }).audience, audience, flags.join(" "));
+  }
   const rule = { any: [{ all: [{ tag: "level2" }, { tag: "overhead" }] }, { screen_id: "scr_LOBBYAAAAAAAAAAAAAAAAAA" }] };
   await writeFile(path.join(env.cwd, "audience.json"), JSON.stringify(rule));
   for (const [value, stdin] of [["audience.json", undefined], ["@audience.json", undefined], ["-", JSON.stringify(rule)], [JSON.stringify(rule), undefined]] as const) {
@@ -1107,11 +1116,13 @@ test("notifications create takes --any-tag, a one-tag --all-tags, and an audienc
   const before = notificationCalls(transport).length;
   const failures: Array<[string[], RegExp]> = [
     [["--audience", "missing.json"], /missing\.json does not exist/],
-    [["--audience", "[1]"], /--audience (must be a JSON object|is not valid JSON)|Input is not valid JSON|must be a JSON object/],
+    [["--audience", "[1]"], /--audience must be a rule as JSON with exactly one of all, any, not, tag/],
     [["--tag", "Lobby", "--any-tag", "Lobby"], /--tag cannot be used with --any-tag|--any-tag cannot be used with --tag/],
     [["--any-tag", "Lobby", "--all-tags", "Lobby"], /cannot be used with/],
     [["--all-tags", "Lobby", "--audience", "{}"], /cannot be used with/],
     [["--tag", "Lobby", "--audience", "{}"], /cannot be used with/],
+    [["--tag", "Lobby", "--not-tag", "Lab"], /cannot be used with/],
+    [["--not-tag", "Lab", "--audience", "{}"], /cannot be used with/],
     [["--any-tag", "Lobby!"], /--any-tag takes tags of 1 to 32 letters or digits/],
     [["--all-tags", "Lobby,Lobby"], /--all-tags lists a tag more than once/],
   ];

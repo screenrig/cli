@@ -2019,12 +2019,16 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listApplications
-      description: Lists applications newest first, at most 500 per page. Names are labels and need not be unique; address an application by id. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ApplicationSearchQuery'
+        - $ref: '#/components/parameters/ApplicationPublishedQuery'
+        - $ref: '#/components/parameters/ApplicationIDsQuery'
+        - $ref: '#/components/parameters/ApplicationListSort'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
@@ -3093,7 +3097,7 @@ paths:
       x-screenrig-access: read
       operationId: listScreens
       description: >-
-        Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page. A caller limited to screens (docs/screen-scope.md) lists only the screens in its scope. A request that names no project leaves out each project where the caller is limited to screens; name the project to list it.
+        Default list returns pairing_pending and active screens. Pass state=pairing_pending to list only the screens waiting to pair, or state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Pass q to search labels, IDs, public IDs, tags, last IP addresses and device serials and DUIDs, ids to keep named screens, online to keep the screens stored online or not, health to keep the screens of one health count, attention to keep the screens that need attention or not, playlist to keep the screens that hold one playlist (each row then carries playlist_uses and the first page playlist_upgrades), and advertising=none to keep the active screens without an advertising inventory row; every filter combines with every other and with every sort. Screens are newest first, or in the order sort names (ScreenListSort), at most 500 per page. The first page (a request without after) carries total, the screens under the same filters across all pages, and facts, their presence and condition counts. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters and sort, for the next page. next_cursor is null on the last page. A caller limited to screens (docs/screen-scope.md) lists only the screens in its scope. A request that names no project leaves out each project where the caller is limited to screens; name the project to list it.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3103,7 +3107,15 @@ paths:
         - $ref: '#/components/parameters/ScreenFieldQuery'
         - $ref: '#/components/parameters/ScreenNearQuery'
         - $ref: '#/components/parameters/ScreenFolderQuery'
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ScreenSearchQuery'
+        - $ref: '#/components/parameters/ScreenListSort'
+        - $ref: '#/components/parameters/ScreenIDsQuery'
+        - $ref: '#/components/parameters/ScreenOnlineQuery'
+        - $ref: '#/components/parameters/ScreenHealthQuery'
+        - $ref: '#/components/parameters/ScreenAttentionQuery'
+        - $ref: '#/components/parameters/ScreenPlaylistQuery'
+        - $ref: '#/components/parameters/ScreenAdvertisingQuery'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
@@ -3117,6 +3129,56 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/places:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenPlaces
+      description: Every live (pairing_pending and active) screen on one map, as the map draws it, in name order, without paging. map=geo (the default) is the screens with a location; map=custom the screens with a position on the project's custom map, on floor alone when floor names one. within keeps the screens in that folder and every folder inside it. At most 10,000 rows; truncated is true when more were left out. counts.not_placed is how many live screens of the same scope are not on the map. A caller limited to screens (docs/screen-scope.md) sees its own.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - {name: map, in: query, required: false, schema: {type: string, enum: [geo, custom], default: geo}, description: "Which map: geo, the screens' locations, or custom, their positions on the project's custom map."}
+        - {name: floor, in: query, required: false, schema: {type: string}, description: "With map=custom: keeps the screens placed on this floor. Without map=custom it is invalid_request naming floor."}
+        - {name: within, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}, description: "Keeps the screens in this screen folder and every folder inside it; a folder the project does not have keeps none."}
+      responses:
+        '200':
+          description: The screens on the map.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenPlaceList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screen-tags:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenTags
+      description: The tags the screens carry, with how many screens carry each, most first then by tag, at most 500. state reads as the screens list reads it (omitted pairing_pending and active). A caller limited to screens counts its own.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ScreenListState'
+      responses:
+        '200':
+          description: Tags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenTagList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screen-folders:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -3124,7 +3186,7 @@ paths:
       x-screenrig-access: read
       operationId: listScreenFolders
       description: >-
-        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder. A screen's folder is Screen.folder_id. A caller limited to screens (docs/screen-scope.md) lists the folders inside its scope and the folders above them, which are read-only so its tree has a root; folders above carry no screens count and sibling folders are hidden. A request that names no project leaves out each project where the caller is limited to screens.
+        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder, and totals the live screens in it and every folder inside it with their facts (ScreenFolderTotals). A screen's folder is Screen.folder_id. A caller limited to screens (docs/screen-scope.md) lists the folders inside its scope and the folders above them, which are read-only so its tree has a root; folders above carry no screens count, every folder's totals count the caller's screens alone, and sibling folders are hidden. A request that names no project leaves out each project where the caller is limited to screens.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9335,7 +9397,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAdvertisingInventory
-      description: The calling seller's opted-in inventory.
+      description: The calling seller's opted-in inventory, each row with its screen's label, state and stored online state.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -13427,7 +13489,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMedia
-      description: Lists ready media newest first, at most 1000 per page. folder keeps only the files directly inside one media folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Lists ready media newest first, or with sort by name, creation, size or duration, at most 1000 per page. folder keeps only the files directly inside one media folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing. primitive keeps one primitive or several. q searches the names a person sees, a converted file's stored file name, tags and IDs, and combines with every other filter and order. The first page (a request without after) carries total, the files under the same filters across all pages. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -13437,7 +13499,9 @@ paths:
         - $ref: '#/components/parameters/MediaFolderQuery'
         - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/LibraryQuery'
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/MediaSearchQuery'
+        - $ref: '#/components/parameters/MediaListSort'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit1000'
       responses:
         '200':
@@ -13446,6 +13510,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaList'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/media/tags:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaTags
+      description: The tags the ready files of the selection carry, with how many files carry each, most first then by tag, at most 500. primitive, folder and library select the files as GET /api/media selects them, and an uploader counts the files of its folders. One read for a tag filter beside the media list.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/MediaPrimitiveQuery'
+        - $ref: '#/components/parameters/MediaFolderQuery'
+        - $ref: '#/components/parameters/LibraryQuery'
+      responses:
+        '200':
+          description: Tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaTagList'
+        default:
+          $ref: '#/components/responses/Problem'
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
@@ -13509,7 +13599,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMediaFolders
-      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library, and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library root. Build the tree from parent_id; a file's folder is Media.folder_id. library=true lists the organization Library's folders instead (read-only; a by:folder selector may name one).
+      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library, and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library root. Build the tree from parent_id; a file's folder is Media.folder_id. files counts the ready files directly inside each folder. library=true lists the organization Library's folders instead (read-only; a by:folder selector may name one).
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -21012,7 +21102,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/LibraryQuery'
         - {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the playlists whose name contains the text, ignoring case, and the playlist whose ID the text is. A search without sort is answered in name order."}
-        - {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name"]}, description: "name orders by name, ignoring case and reading a run of digits as a number, and -name reverses it. Omitted is newest first, or name with q."}
+        - {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", pages, "-pages", items, "-items", soundtrack, "-soundtrack", revision, "-revision", canvas, "-canvas", screens, "-screens"]}, description: "The order of the rows, each then by ID; a leading - reverses it. name orders by name, ignoring case and reading a run of digits as a number. pages, items and soundtrack order by page_count, item_count and audio_tracks, and revision by revision. canvas orders by what the Canvas column shows: playlists without an ordinary page first, then those whose ordinary pages share one canvas size, by width then height, then those that share only an orientation (landscape, portrait, square), then mixed orientations. A playlist stored before the server kept these columns orders first ascending and last descending until the server's next migration stores them. screens orders by the row's screens: screens lists the playlists no screen holds by name, then the held ones fewest first, each count by name; -screens lists the held ones most first, each count by name, then the others by name. Omitted is newest first, or name with q."}
         - {name: use, in: query, required: false, schema: {type: string, enum: [active, inactive, empty]}, description: "Keeps the playlists of one use."}
         - {name: template, in: query, required: false, schema: {type: boolean, default: false}, description: "true keeps only the playlists that declare fields."}
         - {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated playlist IDs, at most 200: keeps only those. An ID that names no listed playlist is absent from the answer."}
@@ -21031,6 +21121,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardPlaylistIndex'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/dashboard/playlists/delete:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: deleteDashboardPlaylistSelection
+      description: Deletes every playlist a selection of the index matches, a batch a call, for the Playlists page's select all matching. selector takes GET /api/dashboard/playlists' q, use, template and ids with the same validation and meaning (use counts the caller's screens, a caller limited to screens its own); except leaves playlists out. The Library is never deleted from here. The walk is in playlist ID order from after, so a deletion never moves what is still ahead of it, and takes at most limit playlists. Each is deleted exactly as DELETE /api/playlists/{id} deletes it, at the revision just read, with its events and audit entry; one still used by a screen (archived and waiting ones included), a folder default or a campaign, one that changed since it was read, and one that went away are passed over and listed in refused with the problem that delete answers. Call again with next_cursor as after, with the same selector and except, until it is null. Send a new Idempotency-Key for each call; a replay of a call with its key answers what the call answered and deletes nothing more, and the key with another body is idempotency_mismatch. A call that fails part way keeps the deletes before the failure, and its retry with the same key walks on from after without them.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardPlaylistDeleteSelection'
+      responses:
+        '200':
+          description: What this call deleted and passed over.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardPlaylistDeleteResult'
         '401':
           $ref: '#/components/responses/Problem'
         default:
@@ -24224,11 +24348,15 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listApplicationsInProject
-      description: Lists applications newest first, at most 500 per page. Names are labels and need not be unique; address an application by id. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
       parameters:
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ApplicationSearchQuery'
+        - $ref: '#/components/parameters/ApplicationPublishedQuery'
+        - $ref: '#/components/parameters/ApplicationIDsQuery'
+        - $ref: '#/components/parameters/ApplicationListSort'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
@@ -24399,7 +24527,7 @@ paths:
       x-screenrig-access: read
       operationId: listScreensInProject
       description: >-
-        Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page. A caller limited to screens (docs/screen-scope.md) lists only the screens in its scope. A request that names no project leaves out each project where the caller is limited to screens; name the project to list it.
+        Default list returns pairing_pending and active screens. Pass state=pairing_pending to list only the screens waiting to pair, or state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Pass field, once per field, as NAME:VALUE to list only screens whose fields hold every value, and near as LAT,LON,KM to list only screens located within KM kilometres of the point; screens with no location are omitted, and every filter combines with state and tag. Pass folder as a screen folder ID to list only the screens directly inside it (not those of its subfolders), or root for the screens outside every folder. Pass q to search labels, IDs, public IDs, tags, last IP addresses and device serials and DUIDs, ids to keep named screens, online to keep the screens stored online or not, health to keep the screens of one health count, attention to keep the screens that need attention or not, playlist to keep the screens that hold one playlist (each row then carries playlist_uses and the first page playlist_upgrades), and advertising=none to keep the active screens without an advertising inventory row; every filter combines with every other and with every sort. Screens are newest first, or in the order sort names (ScreenListSort), at most 500 per page. The first page (a request without after) carries total, the screens under the same filters across all pages, and facts, their presence and condition counts. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters and sort, for the next page. next_cursor is null on the last page. A caller limited to screens (docs/screen-scope.md) lists only the screens in its scope. A request that names no project leaves out each project where the caller is limited to screens; name the project to list it.
       security:
         - projectBearer: []
       parameters:
@@ -24408,7 +24536,15 @@ paths:
         - $ref: '#/components/parameters/ScreenFieldQuery'
         - $ref: '#/components/parameters/ScreenNearQuery'
         - $ref: '#/components/parameters/ScreenFolderQuery'
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/ScreenSearchQuery'
+        - $ref: '#/components/parameters/ScreenListSort'
+        - $ref: '#/components/parameters/ScreenIDsQuery'
+        - $ref: '#/components/parameters/ScreenOnlineQuery'
+        - $ref: '#/components/parameters/ScreenHealthQuery'
+        - $ref: '#/components/parameters/ScreenAttentionQuery'
+        - $ref: '#/components/parameters/ScreenPlaylistQuery'
+        - $ref: '#/components/parameters/ScreenAdvertisingQuery'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit500'
       responses:
         '200':
@@ -24417,6 +24553,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScreenList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens/places:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listScreenPlacesInProject
+      description: Every live (pairing_pending and active) screen on one map, as the map draws it, in name order, without paging. map=geo (the default) is the screens with a location; map=custom the screens with a position on the project's custom map, on floor alone when floor names one. within keeps the screens in that folder and every folder inside it. At most 10,000 rows; truncated is true when more were left out. counts.not_placed is how many live screens of the same scope are not on the map. A caller limited to screens (docs/screen-scope.md) sees its own.
+      security:
+        - projectBearer: []
+      parameters:
+        - {name: map, in: query, required: false, schema: {type: string, enum: [geo, custom], default: geo}, description: "Which map: geo, the screens' locations, or custom, their positions on the project's custom map."}
+        - {name: floor, in: query, required: false, schema: {type: string}, description: "With map=custom: keeps the screens placed on this floor. Without map=custom it is invalid_request naming floor."}
+        - {name: within, in: query, required: false, schema: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}, description: "Keeps the screens in this screen folder and every folder inside it; a folder the project does not have keeps none."}
+      responses:
+        '200':
+          description: The screens on the map.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenPlaceList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screen-tags:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listScreenTagsInProject
+      description: The tags the screens carry, with how many screens carry each, most first then by tag, at most 500. state reads as the screens list reads it (omitted pairing_pending and active). A caller limited to screens counts its own.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ScreenListState'
+      responses:
+        '200':
+          description: Tags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenTagList'
         default:
           $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/screen-folders:
@@ -24430,7 +24616,7 @@ paths:
       x-screenrig-access: read
       operationId: listScreenFoldersInProject
       description: >-
-        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder. A screen's folder is Screen.folder_id. A caller limited to screens (docs/screen-scope.md) lists the folders inside its scope and the folders above them, which are read-only so its tree has a root; folders above carry no screens count and sibling folders are hidden. A request that names no project leaves out each project where the caller is limited to screens.
+        Lists every screen folder in the project, at most 1000, ordered by name. Folders organize screens and target them: a campaign audience leaf {"folder": ID} matches the screens in that folder and every folder inside it, a fleet action selector by:folder acts on the same screens, and a folder's default_playlist_id is what its screens without a playlist of their own show. parent_id is null at the project root; build the tree from parent_id. screens counts the live screens directly inside each folder, and totals the live screens in it and every folder inside it with their facts (ScreenFolderTotals). A screen's folder is Screen.folder_id. A caller limited to screens (docs/screen-scope.md) lists the folders inside its scope and the folders above them, which are read-only so its tree has a root; folders above carry no screens count, every folder's totals count the caller's screens alone, and sibling folders are hidden. A request that names no project leaves out each project where the caller is limited to screens.
       security:
         - projectBearer: []
       responses:
@@ -26447,7 +26633,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMediaInProject
-      description: Lists ready media newest first, at most 1000 per page. folder keeps only the files directly inside one media folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      description: Lists ready media newest first, or with sort by name, creation, size or duration, at most 1000 per page. folder keeps only the files directly inside one media folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing. primitive keeps one primitive or several. q searches the names a person sees, a converted file's stored file name, tags and IDs, and combines with every other filter and order. The first page (a request without after) carries total, the files under the same filters across all pages. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
       parameters:
@@ -26456,7 +26642,9 @@ paths:
         - $ref: '#/components/parameters/MediaFolderQuery'
         - $ref: '#/components/parameters/MediaIDsQuery'
         - $ref: '#/components/parameters/LibraryQuery'
-        - $ref: '#/components/parameters/ListAfter'
+        - $ref: '#/components/parameters/MediaSearchQuery'
+        - $ref: '#/components/parameters/MediaListSort'
+        - $ref: '#/components/parameters/NamedListAfter'
         - $ref: '#/components/parameters/ListLimit1000'
       responses:
         '200':
@@ -26465,6 +26653,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaList'
+  /api/projects/{project_id}/media/tags:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listMediaTagsInProject
+      description: The tags the ready files of the selection carry, with how many files carry each, most first then by tag, at most 500. primitive, folder and library select the files as GET /api/media selects them, and an uploader counts the files of its folders. One read for a tag filter beside the media list.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/MediaPrimitiveQuery'
+        - $ref: '#/components/parameters/MediaFolderQuery'
+        - $ref: '#/components/parameters/LibraryQuery'
+      responses:
+        '200':
+          description: Tags
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaTagList'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/media/generations:
     parameters:
       - name: project_id
@@ -26529,7 +26743,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMediaFoldersInProject
-      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library, and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library root. Build the tree from parent_id; a file's folder is Media.folder_id. library=true lists the organization Library's folders instead (read-only; a by:folder selector may name one).
+      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library, and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library root. Build the tree from parent_id; a file's folder is Media.folder_id. files counts the ready files directly inside each folder. library=true lists the organization Library's folders instead (read-only; a by:folder selector may name one).
       security:
         - projectBearer: []
       responses:
@@ -28486,6 +28700,22 @@ components:
     RevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the record, as its revisions list numbers them."}
     PlaylistRevisionNumber: {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}, description: "A revision of the playlist, as listPlaylistRevisions numbers them."}
     ListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 256}, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request."}
+    NamedListAfter: {name: after, in: query, required: false, schema: {type: string, maxLength: 4096}, description: "next_cursor of the previous page of the same list, with the same filters and sort. Omitted starts the list. A cursor made under another sort, or a value that is not such a cursor, is invalid_request."}
+    NamedListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name"]}, description: "name orders by name, ignoring case and reading a run of digits as a number (Screen 2 before Screen 10), then by ID; -name reverses it. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
+    ScreenSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the screens whose label contains the text, ignoring case and read literally (no wildcards); the screen whose ID or public ID the text is; the screens carrying a tag equal to the text; those whose Player last reported the text as its IP address; and those whose device reports the text as its serial or DUID. Each screen is listed once, in the list's order. Platform, model, time zone, what a screen plays and its place are not searched. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order; any sort combines with it."}
+    ScreenListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", created, "-created", seen, "-seen", status, "-status", tags, "-tags", version, "-version", platform, "-platform", storage, "-storage", cpu, "-cpu", memory, "-memory", uptime, "-uptime", crashes, "-crashes", temperature, "-temperature", resolution, "-resolution", timezone, "-timezone", archived, "-archived", reason, "-reason", location, "-location"]}, description: "The order of the screens; a leading - reverses it. name orders by label, ignoring case and reading a run of digits as a number, then by ID. created is oldest first (-created is newest first, the default). seen orders by the latest confirmed Player contact (last_seen_at), longest unseen first; a screen never seen comes first, and last with -seen. These orders read about a page. Every other order is a value worked out from what the server stores and READS THE WHOLE SCOPE (every screen the filters select) on each page, then the page: status by a rank of what needs the reader (-status most urgent first: 22 an open reconnect offer, 21 stored offline, 20 the Player's error chip, 19 crashing, 18 display disconnected, 15 suspended, 14 hot, 13 the Player's partial content chip, 12 a storage shortfall, 11 the Player's alert chip, 10 its assignment held chip, 8 waiting to pair, 6 its paused chip, 5 its syncing chip, 4 its info chip, 3 a stale report, 2 online, 1 archived; the health ranks as health judges them and the chips only while stored online); tags by the tags joined; version by the Player's host version as text; platform by the host platform code and device model; storage by the disk's used share; cpu, memory (used share), uptime, crashes (24 h) and temperature from a current health report of an active screen stored online; resolution by the first surface's pixels (width and height times its pixel ratio); timezone by the screen's own time zone, else its device's, else UTC; archived by archived_at; reason by archive_reason; location by its name and address. Text compares in lower case. A screen without the value comes last in either direction, and screens with equal values order by label, then ID. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
+    ScreenIDsQuery: {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated screen IDs, at most 200 (else invalid_request naming ids): keeps only those. An ID that names no listed screen is absent from the answer; an empty value keeps none."}
+    ScreenOnlineQuery: {name: online, in: query, required: false, schema: {type: boolean}, description: "true keeps the screens whose stored presence state is online, false the others, as GET /api/summary counts online screens from the stored state. A screen whose lease just ended may still list as online until the presence sweep records it, as the stored state says. Anything but true or false is invalid_request naming online."}
+    ScreenPlaylistQuery: {name: playlist, in: query, required: false, schema: {type: string, maxLength: 128}, description: "Keeps the screens that hold the playlist with this ID: as their default, in an entry of their playlist schedule (paused drafts too), in a takeover, or as what they show now (the stored effective override), as the playlist's delete guard and the index's screens count judge it. It reads the state the list names: with state=archived the archived screens that hold it, which its delete guard counts too. Each row then carries playlist_uses, and the first page playlist_upgrades. A list of a playlist many screens hold pages in the order's index; one few hold reads and sorts those screens alone."}
+    ScreenAdvertisingQuery: {name: advertising, in: query, required: false, schema: {type: string, enum: [none]}, description: "none keeps the active screens that have no advertising inventory row of the project's network (opted in or not), the screens not yet offered: the list leaves out the IDs of every inventory row, so its cost grows with the inventory, not the fleet. Anything else is invalid_request naming advertising."}
+    ScreenAttentionQuery: {name: attention, in: query, required: false, schema: {type: boolean}, description: "true keeps the screens that need attention, false the others, judged from what the server stores: an active screen with an open reconnect offer, a suspension, a current display_disconnected, hot or crashing health count (as health judges it; stale is not attention) or a storage shortfall. The dashboard's manifest upgrade states (upgrade failed, blocked, partial content, retry overdue) are worked out on each read and are not judged here. Anything but true or false is invalid_request naming attention."}
+    ScreenHealthQuery: {name: health, in: query, required: false, schema: {type: string, enum: [display_disconnected, hot, crashing, stale]}, description: "Keeps the active screens of one health count, judged as GET /api/summary's health counts judge the stored state: display_disconnected, hot and crashing need a stored online state and a report at most 35 minutes old, stale a stored online state and an older report. A screen whose lease just ended may still list until the presence sweep records it, as for online. Anything else is invalid_request naming health."}
+    MediaSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the files whose name as a person sees it (source_filename when the upload was converted, else filename) contains the text, the converted files whose stored filename contains it, both ignoring case and read literally (no wildcards), the files carrying a tag equal to the text, and the file whose ID the text is. Each file is listed once, in the list's order. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order; any sort combines with it."}
+    MediaListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", created, "-created", size, "-size", duration, "-duration"]}, description: "The order of the files, each then by ID; a leading - reverses it. name orders by the name a person sees, ignoring case and reading a run of digits as a number. created is oldest first (-created is newest first, the default). size orders by stored bytes, smallest first. duration orders by the stored duration of a video or an audio file, shortest first; a file without one (an image, or a file whose duration was not read) comes first, and last with -duration. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
+    ApplicationListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", updated, "-updated", created, "-created"]}, description: "The order of the applications, each then by ID; a leading - reverses it. name orders by name, ignoring case and reading a run of digits as a number. updated is least recently updated first (-updated most recently first), created oldest first (-created newest first, the default). Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
+    ApplicationPublishedQuery: {name: published, in: query, required: false, schema: {type: boolean}, description: "true keeps the applications that have a ready release (latest_ready_release is present), false those that have none. Anything but true or false is invalid_request naming published."}
+    ApplicationIDsQuery: {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated application IDs, at most 200: keeps only those. Empty keeps none; an ID that names no application is absent from the answer. More than 200 is invalid_request naming ids."}
+    ApplicationSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the applications whose name contains the text, ignoring case and read literally (no wildcards), and the application whose ID the text is. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order."}
     ListLimit200: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 200}, description: "Page size. Omitted is 200. A value outside 1-200 is invalid_request."}
     ListLimit500: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 500}, description: "Page size. Omitted is 500. A value outside 1-500 is invalid_request."}
     ListLimit1000: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}, description: "Page size. Omitted is 1000. A value outside 1-1000 is invalid_request."}
@@ -28493,7 +28723,7 @@ components:
     PlaybackScreenID: {name: screen_id, in: query, required: false, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_"}}
     PlaybackMediaID: {name: media_id, in: query, required: false, schema: {type: string, pattern: "^med_"}}
     MediaTagQuery: {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: Exact media tag. Untagged objects are omitted when this filter is present.}
-    MediaPrimitiveQuery: {name: primitive, in: query, required: false, schema: {type: string, enum: [image, video, audio]}}
+    MediaPrimitiveQuery: {name: primitive, in: query, required: false, schema: {type: string, pattern: "^ *(image|video|audio) *(, *(image|video|audio) *)*$"}, description: "Keeps the files of one primitive (image, video or audio) or of several, comma separated (image,video keeps everything but audio). Anything else is invalid_request naming primitive."}
     MediaFolderQuery: {name: folder, in: query, required: false, schema: {type: string, pattern: "^(root|([a-z]+_)?mfd_[A-Za-z0-9]{1,64})$"}, description: "A media folder ID keeps only the files directly inside that folder, not those of its subfolders; root keeps only the files at the library root. Omitted lists every file."}
     LibraryQuery: {name: library, in: query, required: false, schema: {type: boolean, default: false}, description: "true lists the organization's Library project instead of this project: its items are read-only here and carry library true. An organization with no Library, or the Library project itself, lists nothing with true."}
     MediaIDsQuery: {name: ids, in: query, required: false, schema: {type: string, maxLength: 4096}, description: "Comma-separated media ids, at most 200 distinct; more is invalid_request at ids. Keeps only those files: an id that names no ready file is absent, and the other filters and paging still apply. An empty value lists nothing."}
@@ -28533,8 +28763,8 @@ components:
     Range: {name: Range, in: header, required: false, schema: {type: string, pattern: "^bytes=[0-9]*-[0-9]*$"}, description: V1 accepts one byte range only.}
     ScreenshotCaptureID: {name: capture_id, in: query, required: false, schema: {$ref: "#/components/schemas/ScreenshotCaptureID"}}
     ScreenshotCaptureIDHeader: {name: ScreenRig-Capture-Id, in: header, required: true, schema: {$ref: "#/components/schemas/ScreenshotCaptureID"}}
-    ScreenListState: {name: state, in: query, required: false, schema: {type: string, enum: [archived]}, description: Omit for pairing_pending and active. Pass archived to list archived screens only.}
-    ScreenTagQuery: {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: Exact screen tag. Untagged screens are omitted when this filter is present.}
+    ScreenListState: {name: state, in: query, required: false, schema: {type: string, enum: [pairing_pending, archived]}, description: "Omit for pairing_pending and active. Pass pairing_pending to list only the screens waiting to pair, or archived to list archived screens only. Anything else is invalid_request naming state."}
+    ScreenTagQuery: {name: tag, in: query, required: false, schema: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: "A screen tag, matched without regard to letter case. Untagged screens are omitted when this filter is present."}
     ScreenFolderQuery: {name: folder, in: query, required: false, schema: {type: string, pattern: "^(root|([a-z]+_)?sfd_[A-Za-z0-9]{1,64})$"}, description: "A screen folder ID keeps only the screens directly inside that folder, not those of its subfolders; root keeps only the screens outside every folder. Omitted lists every screen."}
     ScreenFieldQuery: {name: field, in: query, required: false, style: form, explode: true, schema: {type: array, maxItems: 32, items: {type: string, pattern: "^[a-z0-9_]{1,32}:.{1,200}$"}}, description: "NAME:VALUE, split at the first colon: only screens whose field NAME holds exactly VALUE. Repeat the parameter for several fields; every one must match, and a name may be given once. A malformed or repeated one is invalid_request naming field."}
     ScreenNearQuery: {name: near, in: query, required: false, schema: {type: string, pattern: "^-?[0-9]+(\\.[0-9]+)?(,-?[0-9]+(\\.[0-9]+)?){2}$"}, description: "LAT,LON,KM in decimal degrees and kilometres, for example 47.6062,-122.3321,25: only screens whose location lies within KM kilometres of the point. Latitude is -90 to 90, longitude -180 to 180 and KM above 0 and at most 20038. Screens with no location are omitted. A malformed value is invalid_request naming near."}
@@ -32729,7 +32959,7 @@ components:
     ApplicationUploadSession: {type: object, additionalProperties: false, required: [id, application_id, release_id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string, description: "Upload identifier, the receiving operation's id. Commit it with POST /api/applications/uploads/{id}/commit."}, application_id: {type: string, description: Application the upload publishes to.}, release_id: {type: string, description: "Release this upload creates. Pin it into a playlist once the operation succeeds."}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; send every field verbatim.}, expires_at: {type: string, format: date-time, description: The PUT must start before this instant.}}}
     ApplicationUploadCommit: {type: object, additionalProperties: false, required: [sha256, compressed_bytes], description: "Names the declared archive again; a commit naming other bytes is refused with invalid_request.", properties: {sha256: {type: string, pattern: "^[0-9a-f]{64}$"}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600}}}
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the application."}, id: {type: string, description: "ID of the application."}, name: {type: string, description: "Name of the application."}, revision: {type: integer, description: "Counter that increases with each change to the application."}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time, description: "When the application was created."}, updated_at: {type: string, format: date-time, description: "When the application record last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
-    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
+    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}, publication_counts: {type: object, additionalProperties: false, required: [published, unpublished], description: "How many applications under the same q and ids have a ready release and how many have none, whatever published asks. Present on the first page and absent on later pages.", properties: {published: {type: integer, minimum: 0}, unpublished: {type: integer, minimum: 0}}}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
     Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}. A succeeded canva.publish carries design_id and items (CanvaPublishResult)."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
@@ -33312,6 +33542,15 @@ components:
         timezone: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        screen:
+          type: object
+          additionalProperties: false
+          required: [label, state, online]
+          description: "On the seller's inventory list: the screen's label, state and stored online state, so the list needs no screen read. Absent for a screen that is gone."
+          properties:
+            label: {type: string}
+            state: {type: string, enum: [pairing_pending, active, archived]}
+            online: {type: boolean, description: "The stored online state of a screen that is not archived."}
     AdvertisingInventoryList: {type: object, additionalProperties: false, required: [inventory], properties: {inventory: {type: array, items: {$ref: "#/components/schemas/AdvertisingInventory"}}}}
     AdvertisingSlotWrite:
       type: object
@@ -34051,9 +34290,10 @@ components:
       additionalProperties: false
       required: [enabled]
       description: >-
-        Optional page visibility schedule. It is a sibling of advance and is never part of screenrig.canvas/v1; it describes playback orchestration, not geometry. The server validates and carries these rules as data. The player evaluates them against the screen timezone published at the manifest root. A page is eligible when enabled is true, now is inside [from, until), and either windows is absent or at least one window matches. Every playlist must keep at least one page with no visibility field at all, so eligible content always exists. Conformance vectors for the evaluation rules are the screenrig.schedule/v1 family in packages/schedule-contract.
+        Optional page visibility schedule. It is a sibling of advance and is never part of screenrig.canvas/v1; it describes playback orchestration, not geometry. The server validates and carries these rules as data. The player evaluates them against the screen timezone published at the manifest root. A page is eligible when enabled is true, now is inside [from, until), and either windows is absent or at least one window matches. screens limits the page to the screens its rule matches; the server decides it for each screen when it builds the screen's manifest, so every Player honors it and none receives the rule. Every playlist must keep at least one page with no visibility field at all, so eligible content always exists. Conformance vectors for the evaluation rules are the screenrig.schedule/v1 family in packages/schedule-contract.
       properties:
-        enabled: {type: boolean, description: "False hides the page unconditionally and needs no clock. A visibility object that sets enabled true and carries no from, until, windows or data is a no-op and is rejected."}
+        enabled: {type: boolean, description: "False hides the page unconditionally and needs no clock. A visibility object that sets enabled true and carries no from, until, windows, data or screens is a no-op and is rejected."}
+        screens: {$ref: "#/components/schemas/CampaignAudience", description: "The screens the page shows on, in the rules of a campaign audience over the screen's tags and id: all, any, not, tag and screen_id (a folder rule and the empty all are invalid_request). A screen the rule does not match never shows the page, whatever the page's other bounds say; a screen it matches shows the page by those bounds. For example {\"tag\": \"lobby\"} shows the page on screens tagged lobby, and {\"all\": [{\"tag\": \"cafe\"}, {\"not\": {\"tag\": \"kiosk\"}}]} on cafe screens that are not kiosks. Changing a screen's tags reissues its manifest, so the page appears or leaves at the screen's next manifest."}
         from: {type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Inclusive civil lower bound in the screen timezone, minute precision, no offset and no zone suffix."}
         until: {type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil upper bound in the screen timezone. When both bounds are present, from must be strictly earlier than until."}
         windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/PageVisibilityWindow"}}
@@ -34281,7 +34521,7 @@ components:
     PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: "Only on a page stored when an image could end a media_end page; Players receive that page as a duration page without it. A write refuses it."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, description: "false plays the video's audio at the screen volume while its page is current and pauses the playlist soundtrack for that page."}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials. A Google Slides, Docs or Sheets link or a Microsoft 365 Embed link is stored rebuilt for the screen, and a pasted iframe embed code is stored as the address in its src. A template with screen tokens ({screen.field.NAME} and the others of the write schema) is returned as written, braces included; each screen's manifest carries its own filled address."}, title: {type: string, minLength: 1, maxLength: 200}, reload_s: {type: integer, minimum: 60, maximum: 86400, description: "Seconds between reloads of the page while it is on glass. Present only when above 0; absent means the page never reloads."}, fallback_src: {type: string, pattern: "^https?://", description: "The page a screen shows in src's place when src does not load, stored by the rules of src, screen tokens included (returned as written). Absent means no fallback."}, navigation_allowlist: {type: array, minItems: 1, maxItems: 64, items: {type: string, minLength: 1, maxLength: 2048}, description: "Where the page may navigate, as stored entries ([scheme://]host[:port][path], CSP host-sources; the write schema has the rules). Absent means no restriction."}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, locked: {$ref: "#/components/schemas/PlaylistPrimitiveLocked"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+$"}}}}
+    MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, description: "Tag filters of a tag selector: a file must carry every all tag, at least one any tag and no none tag, each spelled exactly as the file's tag is. An entry may be {screen.tags}, which stands for every tag of the screen the playlist plays on, as the screen spells them: any [\"{screen.tags}\"] plays the files that share a tag with the screen, so one playlist plays each screen its own media, and a screen without tags plays none of them.", properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^(\\{screen\\.tags\\}|([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+)$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^(\\{screen\\.tags\\}|([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+)$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, maxLength: 128, pattern: "^(\\{screen\\.tags\\}|([A-Za-z0-9]|\\{screen\\.id\\}|\\{screen\\.field\\.[a-z0-9_]{1,32}\\})+)$"}}}}
     MediaSelectorWeights:
       type: object
       minProperties: 1
@@ -34458,7 +34698,7 @@ components:
       uniqueItems: true
       items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}
       description: >-
-        Fleet selector tags, 0 to 16 unique exact tags, each matching the media tag grammar. On ScreenPatch the array replaces the whole set and an empty array clears it; a duplicate or malformed tag is invalid_request. Changing tags bumps the screen revision (If-Match guards it) and appends screen.updated with details.tags; it never changes the manifest revision. Tags are never on the runtime manifest and never authorization.
+        Screen tags, 0 to 16 unique tags, each matching the media tag grammar. A tag keeps the spelling it was written with and matches without regard to letter case, so Lobby and lobby are one tag and a set cannot hold both. On ScreenPatch the array replaces the whole set and an empty array clears it; a duplicate or malformed tag is invalid_request. Changing tags bumps the screen revision (If-Match guards it) and appends screen.updated with details.tags. When the screen's playlist reads its tags (a page's PageVisibility.screens, a {screen.tags} media selector) the change also reissues the screen's manifest and the event is screen.manifest_changed, with details.tags. Tags are never on the runtime manifest and never authorization.
     ScreenTagsPatch:
       type: object
       additionalProperties: false
@@ -34790,12 +35030,13 @@ components:
     TabShareWrite:
       type: object
       additionalProperties: false
-      description: The tabs to show and the screens to show them on. At least one of screen_ids, folder_ids and tags.
+      description: The tabs to show and the screens to show them on. At least one of screen_ids, folder_ids, tags and audience.
       required: [tabs]
       properties:
         screen_ids: {type: array, maxItems: 100, items: {type: string, minLength: 1}, description: Screens by id. Duplicates collapse.}
         folder_ids: {type: array, maxItems: 20, items: {type: string}, description: "Screen folders; each includes every folder inside it."}
         tags: {type: array, maxItems: 20, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: A screen carrying any of the tags.}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: Every active screen the rule matches.}
         tabs:
           type: array
           minItems: 1
@@ -34899,10 +35140,32 @@ components:
         default_playlist_id: {type: string, description: "The playlist this folder's screens show when they have no playlist of their own, unless a folder nearer the screen sets one. Absent when unset."}
         protected: {type: boolean, description: "A protected folder and every folder inside it make each change that reaches their screens a review decided by a second approver (docs/screen-scope.md)."}
         screens: {type: integer, minimum: 0, description: "Live screens directly inside this folder. Present in the list."}
+        totals: {$ref: "#/components/schemas/ScreenFolderTotals"}
         levels: {$ref: "#/components/schemas/ScreenLevelChanges", description: "Present in the response of a PATCH that moved the folder or changed its default playlist."}
         revision: {type: integer, description: "Change counter of the folder."}
         created_at: {type: string, format: date-time, description: "When the folder was created."}
         updated_at: {type: string, format: date-time, description: "When the folder was last changed."}
+    ScreenFolderTotals:
+      type: object
+      additionalProperties: false
+      required: [screens, online, offline, pairing_pending, attention]
+      description: "The live screens in this folder and every folder inside it, and their facts as ScreenFacts counts them; a caller limited to screens counts only its own. Present in the list."
+      properties:
+        screens: {type: integer, minimum: 0, description: "Live (pairing_pending and active) screens."}
+        online: {type: integer, minimum: 0, description: "Active screens whose stored presence state is online."}
+        offline: {type: integer, minimum: 0, description: "Active screens whose stored presence state is not online."}
+        pairing_pending: {type: integer, minimum: 0, description: "Screens waiting to pair."}
+        attention: {type: integer, minimum: 0, description: "Screens that need attention, as the screens list's attention=true keeps them."}
+    ScreenFacts:
+      type: object
+      additionalProperties: false
+      required: [online, offline, pairing_pending, attention]
+      description: "The presence and condition counts of the screens a list selects across all its pages, from what the server stores: online and offline count active screens by their stored presence state, as the online filter keeps them (a screen whose lease just ended may still count online until the presence sweep records it); pairing_pending counts the screens waiting to pair; attention counts the screens that need attention, as attention=true keeps them."
+      properties:
+        online: {type: integer, minimum: 0}
+        offline: {type: integer, minimum: 0}
+        pairing_pending: {type: integer, minimum: 0}
+        attention: {type: integer, minimum: 0}
     ScreenFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/ScreenFolder"}, description: "Every screen folder in the project, ordered by name."}}}
     ScreenFolderCreate:
       type: object
@@ -35266,6 +35529,7 @@ components:
         glass: {$ref: "#/components/schemas/ScreenGlass"}
         last_page_failure: {$ref: "#/components/schemas/PageFailure"}
         manifest_upgrade: {$ref: "#/components/schemas/ScreenManifestUpgrade"}
+        playlist_uses: {type: array, items: {type: string, enum: [playing, takeover, scheduled, default]}, description: "Only in a list filtered by playlist: how the screen holds that playlist, in this order: playing (what its manifest is built from now), takeover, scheduled (an entry of its playlist schedule) and default. Empty for a screen that holds it only through a stored effective override not yet resolved."}
         comments: {type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization."}
         ads_unsupported:
           type: object
@@ -35389,7 +35653,16 @@ components:
         - {$ref: "#/components/schemas/ScreenActionSelectorIds"}
         - {$ref: "#/components/schemas/ScreenActionSelectorTag"}
         - {$ref: "#/components/schemas/ScreenActionSelectorFolder"}
+        - {$ref: "#/components/schemas/ScreenActionSelectorAudience"}
       discriminator: {propertyName: by}
+    ScreenActionSelectorAudience:
+      type: object
+      additionalProperties: false
+      required: [by, audience]
+      description: Every active screen the audience rule matches when the action starts, in creation order. There is no screen-count cap. A caller limited to some screens may use it only when the rule is contained in them (a folder or screen of theirs, alone or in an all with any other rule).
+      properties:
+        by: {type: string, enum: [audience]}
+        audience: {$ref: "#/components/schemas/CampaignAudience"}
     ScreenActionSelectorIds:
       type: object
       additionalProperties: false
@@ -35650,7 +35923,62 @@ components:
         model: {type: string, minLength: 1, maxLength: 80}
         firmware: {type: string, minLength: 1, maxLength: 80}
         manufacturer: {type: string, minLength: 1, maxLength: 80}
-    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}, description: "Screens on this page, newest first, at most 500."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
+    ScreenList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Screen"}, description: "Screens on this page, newest first, at most 500."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}, facts: {$ref: "#/components/schemas/ScreenFacts", description: "The presence and condition counts of the same screens total counts. Present on the first page and absent on later pages."}, playlist_upgrades: {$ref: "#/components/schemas/ScreenPlaylistUpgrades"}}}
+    ScreenPlaylistUpgrades:
+      type: object
+      additionalProperties: false
+      required: [targeting, updating, failed, blocked, faults]
+      description: "Present on the first page of a list filtered by playlist (and not by state=archived or pairing_pending): of the active screens the list selects whose manifest upgrade targets that playlist (desired_playlist, state other than none), how many still take its latest revision (pending, downloading, preparing, activating, retrying or partial, or current at an older revision), how many failed and how many are blocked, and the failed and blocked ones by name, at most 20: what the playlist's notices count without reading every screen."
+      properties:
+        targeting: {type: integer, minimum: 0}
+        updating: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+        blocked: {type: integer, minimum: 0}
+        faults:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, label, state, code]
+            properties:
+              id: {type: string}
+              label: {type: string}
+              state: {type: string, enum: [failed, blocked]}
+              code: {anyOf: [{type: string}, {type: "null"}]}
+    ScreenPlaceList:
+      type: object
+      additionalProperties: false
+      required: [items, truncated, counts]
+      properties:
+        items: {type: array, maxItems: 10000, items: {$ref: "#/components/schemas/ScreenPlace"}, description: "The screens on the map, by name."}
+        truncated: {type: boolean, description: "true when the map holds more than 10,000 screens and the rest were left out."}
+        counts:
+          type: object
+          additionalProperties: false
+          required: [not_placed]
+          properties:
+            not_placed: {type: integer, minimum: 0, description: "Live screens of the same scope (within, a caller's screens) that are not on this map: no location on the geographic map; no position on any floor of the custom one (a screen placed on another floor is neither)."}
+    ScreenPlace:
+      type: object
+      additionalProperties: false
+      required: [id, label, state, online]
+      description: "A screen as the map draws it."
+      properties:
+        id: {type: string}
+        label: {type: string}
+        state: {type: string, enum: [pairing_pending, active], description: "Waiting to pair or active."}
+        online: {type: boolean, description: "The stored online state, as the list's online filter reads it."}
+        status: {$ref: "#/components/schemas/ScreenStatus", description: "The chip the Player shows, while the screen is active and stored online; absent otherwise."}
+        folder_id: {type: string, description: "The folder holding the screen; absent at the root."}
+        location: {type: object, additionalProperties: false, required: [latitude, longitude], description: "On the geographic map: where the screen is.", properties: {latitude: {type: number}, longitude: {type: number}, name: {type: string}, address: {type: string}}}
+        position: {$ref: "#/components/schemas/ScreenPosition", description: "On the custom map: the floor and the point of it."}
+    ScreenTagList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 500, description: "The tags, most screens first, then by tag.", items: {type: object, additionalProperties: false, required: [tag, screens], properties: {tag: {type: string}, screens: {type: integer, minimum: 1}}}}
     ScreenManifestUpgrade:
       type: object
       additionalProperties: false
@@ -36909,7 +37237,7 @@ components:
         credits: {type: integer, minimum: 1}
         usd: {type: string}
     MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Declare and commit are refused with 413 quota_exceeded when the bytes its payer stores, with this upload, pass the payer's plan storage (1 GB on Standard, 100 GB on Plus, 1,000 GB on Education and Premium, 10,000 GB on Enterprise, Staff and Promo); stored content is never touched, and bandwidth and storage are never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded by the project's plan, 500000000 bytes, 500 MB, on Standard and 1000000000 bytes, 1 GB, on every other plan, and a larger one is rejected the same way, naming the limit that applies; read media_video_bytes from GET /api/project/capabilities to preflight it. A plan change affects only later declarations: stored videos keep playing. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent: a bare file name of at most 255 UTF-8 bytes, without a directory, backslash or control characters."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only, at most 255 UTF-8 bytes. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, folder_id: {type: string, description: "The media folder the ready media lands in; omitted lands it at the library root. The folder must exist when the upload is declared (invalid_request at folder_id otherwise) and when it commits (the operation fails with invalid_request: declare it again). An uploader (docs/uploaders.md) must send one of its folders (outside_upload_scope otherwise)."}}}
-    MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
+    MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, files: {type: integer, minimum: 0, description: "Ready files directly inside this folder, not those of its subfolders. Present in the list."}, bytes: {type: integer, minimum: 0, description: "Stored bytes of the ready files directly inside this folder. Present in the list."}, kinds: {type: object, additionalProperties: false, required: [image, video, audio], description: "How many of the ready files directly inside this folder are of each primitive. Present in the list.", properties: {image: {type: integer, minimum: 0}, video: {type: integer, minimum: 0}, audio: {type: integer, minimum: 0}}}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
     MediaFolderPatch: {type: object, additionalProperties: false, minProperties: 1, properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "Move the folder into this one; null for the library root."}}}
@@ -36939,6 +37267,7 @@ components:
     MediaUploadSession: {type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; clients must send every field verbatim.}, expires_at: {type: string, format: date-time}}}
     MediaUploadSource: {type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: {filename: {type: string}, source_filename: {type: string}, content_type: {type: string}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, bytes: {type: integer, minimum: 1}}}
     Media: {type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the file; the Library project for a library item."}, library: {type: boolean, readOnly: true, description: "true on a read-only item of the organization's Library project (PUT /api/organizations/{org_id}/library), listed with library=true or read by id: use it (page media references, by:folder selectors on its folders, screen schedules and stacks, from_template), never change it; project_id names the Library. Absent on the project's own items."}, tags: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}, description: "Tags on the file, which playlist tag selectors match."}, availability: {$ref: "#/components/schemas/MediaAvailability"}, id: {type: string, description: "ID of the media file."}, filename: {type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension."}, source_filename: {type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups."}, upload_source: {allOf: [{$ref: '#/components/schemas/MediaUploadSource'}], readOnly: true, description: "The original upload's name, type, digest and size, recorded when ingest normalized EXIF orientation."}, primitive: {type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)."}, content_type: {type: string, description: "Content type of the stored file."}, operation_id: {type: string, description: "ID of the upload or generation operation that produced the file."}, sha256: {type: string, pattern: "^[a-f0-9]{64}$", description: "SHA-256 digest of the stored file's bytes."}, bytes: {type: integer, description: "Size of the stored file."}, width: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio."}, height: {type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio."}, duration_ms: {type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms."}, codecs: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec."}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged.}, folder_id: {type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. List a folder's files with GET /api/media?folder=ID. Move files with POST /api/media/move."}, revision: {type: integer, description: "Change counter of the file; update requests send it as the expected revision."}, state: {type: string, enum: [ready], description: "Whether upload processing has finished and the file can be placed on pages."}, review_state: {type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved."}, created_at: {type: string, format: date-time, description: "When the file was added to the library."}, updated_at: {type: string, format: date-time, description: "When the file was last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only."}}}
+    MediaTagList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, description: "The tags, most files first, then by tag.", items: {type: object, additionalProperties: false, required: [tag, files], properties: {tag: {type: string}, files: {type: integer, minimum: 1, description: "How many of the selected ready files carry the tag."}}}}}}
     MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}, description: "Ready media items of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "human_available", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "human_available": {"type": "boolean", "description": "A person can join this chat on request: Education, Premium and Enterprise. Standard and Plus get documentation and AI support."}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0, "description": "Always 0: Luna answers right away on every plan. Removed in a later release."}, "docs_url": {"type": "string"}}}
@@ -37420,7 +37749,7 @@ components:
         description: {type: string, maxLength: 200, description: A name for people.}
         conditions: {$ref: "#/components/schemas/NotificationConditions"}
         screen_tags: {$ref: "#/components/schemas/ScreenTags"}
-        audience: {$ref: "#/components/schemas/CampaignAudience", description: "The screens the notification covers, in the rules of a campaign audience (all, any, tag, screen_id; at most 3 deep). Use it instead of screen_tags, which means any of those tags; both is invalid_request."}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: "The screens the notification covers, in the rules of a campaign audience (all, any, not, tag, screen_id; a folder rule is invalid_request; at most 3 deep). Use it instead of screen_tags, which means any of those tags; both is invalid_request."}
         min_severity: {$ref: "#/components/schemas/NotificationSeverity", description: "Opened notices below this severity are not sent; a resolved notice follows its opened notice. Absent sends them all."}
         severity: {$ref: "#/components/schemas/NotificationSeverityOverrides"}
         active_hours: {$ref: "#/components/schemas/NotificationActiveHours"}
@@ -37864,6 +38193,7 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?amt_[A-Za-z0-9_-]{16,24}$", description: "ID of the alert mute."}
         screen_ids: {type: array, items: {type: string}, description: "IDs of the screens the mute silences."}
         tags: {type: array, items: {type: string}, description: "Screen tags; every screen carrying one of them is silenced."}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: "Present when the mute was set with one: every screen the rule matches now is silenced."}
         until: {type: string, format: date-time, description: "When the mute ends and alert notices resume."}
         note: {type: string, description: "Free-text reason the mute was set."}
         created_by: {$ref: "#/components/schemas/AlertActor", description: "Person or agent that created the mute."}
@@ -37872,10 +38202,11 @@ components:
       type: object
       additionalProperties: false
       required: [until]
-      description: At least one screen id or tag.
+      description: At least one screen id or tag, or an audience.
       properties:
         screen_ids: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 200}}
         tags: {$ref: "#/components/schemas/ScreenTags"}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: "Every screen the rule matches when a notice is due, by tag and screen id; a folder rule is invalid_request."}
         until: {type: string, format: date-time, description: At most 30 days ahead.}
         note: {type: string, maxLength: 200}
     AlertMuteList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/AlertMute"}, description: "Mutes that have not ended, soonest end first."}}}
@@ -37970,10 +38301,11 @@ components:
     TriggerTarget:
       type: object
       additionalProperties: false
-      description: Exactly one of tag and screen_ids.
+      description: Exactly one of tag, screen_ids and audience.
       properties:
         tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Every active screen with this tag when an alert arrives.}
         screen_ids: {type: array, minItems: 1, maxItems: 500, items: {type: string}}
+        audience: {$ref: "#/components/schemas/CampaignAudience", description: Every active screen the rule matches when an alert arrives.}
     TriggerAlertScreens:
       type: object
       additionalProperties: false
@@ -38018,10 +38350,11 @@ components:
       minProperties: 1
       maxProperties: 1
       description: >-
-        Which screens a campaign targets: exactly one of all (every rule matches), any (at least one matches), tag (the screen carries the tag), screen_id (that screen) or folder (the screens in that screen folder and every folder inside it, GET /api/screen-folders; the folder must exist). Rules nest at most 3 deep and an audience has at most 500 rules. {"all": []} is every screen of the project; elsewhere all and any list at least one rule.
+        A rule that selects screens, the one shape every screen selection takes (campaigns, notifications, fleet actions, triggers, alert mutes, tab shares and a page's visibility.screens): exactly one of all (every rule matches), any (at least one matches), not (the screens its rule does not match), tag (the screen carries the tag; letter case is ignored, so Lobby and lobby are one tag), screen_id (that screen) or folder (the screens in that screen folder and every folder inside it, GET /api/screen-folders; the folder must exist). Rules nest at most 3 deep, a not counting as a level, and an audience has at most 500 rules. {"all": []} is every screen of the project; elsewhere all and any list at least one rule.
       properties:
         all: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
         any: {type: array, minItems: 1, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
+        not: {$ref: "#/components/schemas/CampaignAudience"}
         tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}
         screen_id: {type: string, minLength: 1, maxLength: 200}
         folder: {type: string, pattern: "^([a-z]+_)?sfd_[A-Za-z0-9]{1,64}$"}
@@ -40271,6 +40604,43 @@ components:
             active: {type: integer, minimum: 0}
             inactive: {type: integer, minimum: 0}
             empty: {type: integer, minimum: 0}
+    DashboardPlaylistDeleteSelection:
+      type: object
+      additionalProperties: false
+      required: [selector]
+      properties:
+        selector:
+          type: object
+          additionalProperties: false
+          description: "The playlists to delete, as GET /api/dashboard/playlists selects them."
+          properties:
+            q: {type: string, maxLength: 100, description: "The playlists whose name contains the text, ignoring case, and the playlist whose ID the text is."}
+            use: {type: string, enum: [active, inactive, empty], description: "The playlists of one use."}
+            template: {type: boolean, default: false, description: "true keeps only the playlists that declare fields."}
+            ids: {type: array, maxItems: 200, items: {type: string}, description: "Only these playlists; empty selects none."}
+        except: {type: array, maxItems: 1000, items: {type: string}, description: "Playlists the selection leaves out."}
+        after: {type: string, maxLength: 512, description: "next_cursor of the previous call with the same selector and except; omitted starts the walk."}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 100, description: "How many playlists this call takes."}
+    DashboardPlaylistDeleteResult:
+      type: object
+      additionalProperties: false
+      required: [deleted, refused, next_cursor]
+      properties:
+        deleted: {type: integer, minimum: 0, description: "How many playlists this call deleted."}
+        refused:
+          type: array
+          maxItems: 100
+          description: "The playlists of this call's batch that were not deleted, each with the problem DELETE /api/playlists/{id} answers for it."
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, code, detail]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              code: {type: string, description: "The problem code: resource_conflict for a playlist still in use, revision_conflict for one that changed since it was read, not_found for one that went away."}
+              detail: {type: string}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Where the walk goes on: pass it back as after. null when it is done."}
     DashboardPlaylistRow:
       type: object
       additionalProperties: false

@@ -31,8 +31,6 @@ export const CAMPAIGN_SCREENS_LIMIT_MAX = 500;
 /** An audience has at most 500 rules, groups included, so a group of N tags or screens is N + 1 rules. */
 export const CAMPAIGN_AUDIENCE_RULES_MAX = 500;
 const AUDIENCE_LEAVES_MAX = CAMPAIGN_AUDIENCE_RULES_MAX - 1;
-/** The API reads a request body of at most 64 KiB. */
-export const CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES = 64 * 1024;
 const CURSOR_MAX = 200;
 
 const DAYS: readonly ScreenScheduleDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -153,6 +151,30 @@ export function campaignAnyTagAudience(tags: readonly string[]): CampaignAudienc
   return { any: tags.map((tag) => ({ tag })) };
 }
 
+/** Repeatable --not-tag: the screen carries none of the listed tags. Returns the accumulated list joined by commas. */
+export function campaignNotTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--not-tag");
+}
+
+/** The rules of an audience, groups included, as the server counts them against its 500. */
+export function audienceRuleCount(rule: CampaignAudience): number {
+  return 1 + [...(rule.all ?? []), ...(rule.any ?? []), ...(rule.not ? [rule.not] : [])].reduce((sum, child) => sum + audienceRuleCount(child), 0);
+}
+
+/**
+ * A tag rule that also keeps out every screen carrying one of `excluded`:
+ * {"not": {"tag": T}}, or {"not": {"any": [{"tag": T}, …]}} for several, alone or
+ * after the members of `rule` in one all, so it nests at most 3 deep.
+ */
+export function withoutTags(rule: CampaignAudience | undefined, excluded: readonly string[]): CampaignAudience {
+  const not: CampaignAudience = { not: excluded.length === 1 ? { tag: excluded[0]! } : { any: excluded.map((tag) => ({ tag })) } };
+  const combined: CampaignAudience = rule ? { all: [...(rule.all ?? [rule]), not] } : not;
+  if (audienceRuleCount(combined) > CAMPAIGN_AUDIENCE_RULES_MAX) {
+    throw usageError(`The tags make a rule of ${audienceRuleCount(combined)} rules; an audience has at most ${CAMPAIGN_AUDIENCE_RULES_MAX}.`);
+  }
+  return combined;
+}
+
 /** --screen-id ID[,ID…] → {"screen_id": ID}, or {"any": [{"screen_id": ID}, …]} for several. */
 export function campaignScreenAudience(ids: readonly string[]): CampaignAudience {
   return ids.length === 1 ? { screen_id: ids[0]! } : { any: ids.map((id) => ({ screen_id: id })) };
@@ -171,28 +193,6 @@ export function campaignFolderAudience(id: string): CampaignAudience {
 /** --all-screens: {"all": []}, every screen of the project. */
 export function campaignAllScreensAudience(): CampaignAudience {
   return { all: [] };
-}
-
-/** --audience as JSON text. The server checks the rule's members; this checks it is one JSON object. */
-export function campaignAudienceJson(text: string): CampaignAudience {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw usageError('--audience is not valid JSON. Pass a rule such as {"tag":"Lobby"}, @FILE to read it from a file, or - for stdin.');
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw usageError('--audience must be a JSON object with exactly one of all, any, tag, screen_id or folder, such as {"all":[{"tag":"Lobby"},{"folder":"sfd_NORTH"}]}; {"all":[]} is every screen.');
-  }
-  return parsed as CampaignAudience;
-}
-
-/** --audience is inline JSON, @FILE or - (stdin); the handler reads the file or stdin. */
-export function campaignAudienceOption(value: string): string {
-  if (!value.trim() || value.trim() === "@") {
-    throw usageError("--audience takes a JSON rule, @FILE to read it from a file, or - for stdin.");
-  }
-  return value;
 }
 
 /** Splits "HEAD@HH:MM-HH:MM" into HEAD and its two times; the times are optional, and `fail` words a malformed one. */
@@ -566,7 +566,7 @@ function clip(text: string, width: number): string {
   return characters.length <= width ? text : `${characters.slice(0, width - 1).join("")}…`;
 }
 
-/** "every screen", "tag Lobby", "tag Lobby and tag Floor2", "screen scr_A or screen scr_B", "folder sfd_NORTH". */
+/** "every screen", "tag Lobby", "tag Lobby and tag Floor2", "screen scr_A or screen scr_B", "folder sfd_NORTH", "tag Cafe and not tag Kiosk". */
 export function campaignAudienceText(audience: CampaignAudience | undefined, nested = false): string {
   if (!audience) return "";
   const group = (rules: CampaignAudience[], word: string): string => {
@@ -576,6 +576,7 @@ export function campaignAudienceText(audience: CampaignAudience | undefined, nes
   };
   if (audience.all) return audience.all.length ? group(audience.all, "and") : "every screen";
   if (audience.any) return group(audience.any, "or");
+  if (audience.not) return `not ${campaignAudienceText(audience.not, true)}`;
   if (audience.tag !== undefined) return `tag ${audience.tag}`;
   if (audience.screen_id !== undefined) return `screen ${audience.screen_id}`;
   if (audience.folder !== undefined) return `folder ${audience.folder}`;

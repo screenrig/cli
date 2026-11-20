@@ -684,7 +684,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const playlistId = flagString(args.flags, "playlist-id");
   const ifMatch = flagString(args.flags, "expect-rev");
   if (!playlistId) throw usageError("screen assign requires <id> --playlist-id.");
-  const target = screenTarget(args, "screen assign");
+  const target = await screenTarget(args, "screen assign", runtime);
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen assign");
     // Each screen runs the single-screen PATCH on the server; a refusal is that screen's result.
@@ -917,7 +917,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  const target = screenTarget(args, "screen reload");
+  const target = await screenTarget(args, "screen reload", runtime);
   const lifetime = commandLifetime(args);
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen reload");
@@ -1100,7 +1100,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
     : add !== undefined ? screenTagList(add, "--add")
     : remove !== undefined ? screenTagList(remove, "--remove")
     : [];
-  const target = screenTarget(args, "screen tag");
+  const target = await screenTarget(args, "screen tag", runtime);
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen tag");
     const action: ScreenAction = add !== undefined ? { type: "add_tags", tags }
@@ -1167,7 +1167,7 @@ export const handleScreenScreenshot = commandHandler(async (args, runtime, resol
 
 export async function screenToast(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
   const body = toastWriteFromArgs(args);
-  const target = screenTarget(args, "screen toast");
+  const target = await screenTarget(args, "screen toast", runtime);
   if (target.kind === "fleet") {
     return screenFleetAction(client, runtime, "Fleet toast", target.selector, { type: "toast", ...body });
   }
@@ -1290,7 +1290,7 @@ export async function resolveScreenshotOutput(cwd: string, id: string, flags: Pa
 }
 
 export async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
-  const target = screenTarget(args, "screen screenshot");
+  const target = await screenTarget(args, "screen screenshot", runtime);
   if (target.kind === "fleet") return screenScreenshotFleet(args, runtime, client, target.selector);
   const id = target.id;
   if (!isScreenId(id)) {
@@ -1693,8 +1693,11 @@ export async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntim
     ids = active.map((screen) => screen.id);
     for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
     if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
-  } else {
+  } else if (selector.by === "ids") {
     ids = selector.screen_ids;
+  } else {
+    // Captures fan out here, so the selector must be one the screen list answers: ids, a tag or a folder.
+    throw usageError("screen screenshot takes screen ids, --tag TAG or --folder ID.");
   }
   if (ids.length) {
     try {
@@ -1853,9 +1856,9 @@ export function publishPlaybackWarning(result: Extract<Awaited<ReturnType<typeof
 // Playlist schedules and takeover. One screen id uses the single-screen
 // routes (revision guard allowed); several ids or --tag use the fleet actions
 // route (set_playlist_schedule, takeover, takeover_clear).
-export function nestedScreenTarget(args: ParsedArgs, command: string) {
+export function nestedScreenTarget(args: ParsedArgs, command: string, runtime: CliRuntime) {
   // positionals are [screen, schedule|takeover, action, ...ids].
-  return screenTarget({ ...args, positionals: args.positionals.slice(1) }, command);
+  return screenTarget({ ...args, positionals: args.positionals.slice(1) }, command, runtime);
 }
 
 export async function screenControlCall(client: ApiClient, id: string, request: Parameters<ApiClient["call"]>[0]) {
@@ -1913,7 +1916,7 @@ export const handleScreenScheduleShow = commandHandler(async (args, runtime, res
 export const handleScreenScheduleSet = commandHandler(async (args, runtime, resolved) => {
   const file = flagString(args.flags, "file");
   if (!file) throw usageError("screen schedule set requires --file FILE (or --file - for stdin).");
-  const target = nestedScreenTarget(args, "screen schedule set");
+  const target = await nestedScreenTarget(args, "screen schedule set", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule set");
   const entries = scheduleEntries(await readAuthoringJson(file, runtime));
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -1939,7 +1942,7 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
 });
 
 export const handleScreenScheduleClear = commandHandler(async (args, runtime, resolved) => {
-  const target = nestedScreenTarget(args, "screen schedule clear");
+  const target = await nestedScreenTarget(args, "screen schedule clear", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
@@ -1963,7 +1966,7 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
 export const handleScreenTakeover = commandHandler(async (args, runtime, resolved) => {
   const playlistId = flagString(args.flags, "playlist-id");
   if (!playlistId) throw usageError("screen takeover requires <id>, --tag TAG or --folder ID, and --playlist-id.");
-  const target = nestedScreenTarget(args, "screen takeover");
+  const target = await nestedScreenTarget(args, "screen takeover", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover");
   const forValue = flagString(args.flags, "for");
   const until = takeoverUntil(flagString(args.flags, "until"), forValue, runtime.now());
@@ -2007,7 +2010,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
 });
 
 export const handleScreenTakeoverClear = commandHandler(async (args, runtime, resolved) => {
-  const target = nestedScreenTarget(args, "screen takeover clear");
+  const target = await nestedScreenTarget(args, "screen takeover clear", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
@@ -2032,7 +2035,7 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
 // (revision guard allowed); several ids or --tag use the fleet actions route
 // (reboot, display, set_display_schedule, clear_display_schedule, volume).
 export const handleScreenReboot = commandHandler(async (args, runtime, resolved) => {
-  const target = screenTarget(args, "screen reboot");
+  const target = await screenTarget(args, "screen reboot", runtime);
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen reboot");
     // Noninteractive: a fleet reboot is never a side effect of a typo.
@@ -2081,7 +2084,7 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
 export function maintenanceHandler(spec: MaintenanceSpec) {
   const command = `screen ${spec.name}`;
   return commandHandler(async (args, runtime, resolved) => {
-    const target = screenTarget(args, command);
+    const target = await screenTarget(args, command, runtime);
     if (target.kind === "fleet") {
       rejectFleetRevision(args, command);
       // Noninteractive: a fleet action is never a side effect of a typo.
@@ -2406,7 +2409,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
   const flagPower = flagString(args.flags, "power");
   if (trailing && flagPower && trailing !== flagPower) throw usageError("screen display got two different powers; use --power on|off once.");
   const power = displayPower(flagPower ?? trailing);
-  const target = screenTarget({ ...args, positionals }, "screen display");
+  const target = await screenTarget({ ...args, positionals }, "screen display", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display");
   const until = displayUntil(flagString(args.flags, "until"), flagString(args.flags, "for"), runtime.now());
   const write = { power, ...(until !== undefined ? { until } : {}) };
@@ -2435,7 +2438,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
 // Screen volume: the same single-screen route and fleet action shape as display.
 export const handleScreenVolume = commandHandler(async (args, runtime, resolved) => {
   const write = volumeWrite(flagString(args.flags, "level"), flagBool(args.flags, "mute"), flagBool(args.flags, "unmute"));
-  const target = screenTarget(args, "screen volume");
+  const target = await screenTarget(args, "screen volume", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen volume");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, `Fleet volume ${volumeText(write)}`, target.selector, { type: "volume", ...write });
@@ -2488,7 +2491,7 @@ export const handleScreenDisplayScheduleShow = commandHandler(async (args, runti
 export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtime, resolved) => {
   const file = flagString(args.flags, "file");
   if (!file) throw usageError("screen display-schedule set requires --file FILE (or --file - for stdin).");
-  const target = nestedScreenTarget(args, "screen display-schedule set");
+  const target = await nestedScreenTarget(args, "screen display-schedule set", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule set");
   const write = displayScheduleWrite(await readAuthoringJson(file, runtime));
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -2507,7 +2510,7 @@ export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtim
 }, true);
 
 export const handleScreenDisplayScheduleClear = commandHandler(async (args, runtime, resolved) => {
-  const target = nestedScreenTarget(args, "screen display-schedule clear");
+  const target = await nestedScreenTarget(args, "screen display-schedule clear", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display schedule clear", target.selector, { type: "clear_display_schedule" });
@@ -2553,7 +2556,7 @@ export const handleScreenRebootScheduleSet = commandHandler(async (args, runtime
   const file = flagString(args.flags, "file");
   const windows = flagString(args.flags, "window");
   if ((file === undefined) === (windows === undefined)) throw usageError("screen reboot-schedule set requires --window SPEC (repeatable) or --file FILE (or --file - for stdin).");
-  const target = nestedScreenTarget(args, "screen reboot-schedule set");
+  const target = await nestedScreenTarget(args, "screen reboot-schedule set", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule set");
   const write = file !== undefined
     ? rebootScheduleWrite(await readAuthoringJson(file, runtime))
@@ -2579,7 +2582,7 @@ export const handleScreenRebootScheduleSet = commandHandler(async (args, runtime
 }, true);
 
 export const handleScreenRebootScheduleClear = commandHandler(async (args, runtime, resolved) => {
-  const target = nestedScreenTarget(args, "screen reboot-schedule clear");
+  const target = await nestedScreenTarget(args, "screen reboot-schedule clear", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen reboot-schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot schedule clear", target.selector, { type: "clear_reboot_schedule" });
@@ -2597,7 +2600,7 @@ export const handleScreenRebootScheduleClear = commandHandler(async (args, runti
 }, true);
 
 export const handleScreenDisplayClear = commandHandler(async (args, runtime, resolved) => {
-  const target = nestedScreenTarget(args, "screen display clear");
+  const target = await nestedScreenTarget(args, "screen display clear", runtime);
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display clear", target.selector, { type: "display_clear" });

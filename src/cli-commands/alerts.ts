@@ -6,6 +6,7 @@ import { handleAlertsAck, handleAlertsList, handleAlertsMute, handleAlertsMutes,
 import {
   ALERT_STATES, alertForOption, alertMuteScreenIds, alertMuteTags, alertNote, alertScreenId, alertUntilOption, alertsCursor, alertsLimit,
 } from "../alerts.js";
+import { AUDIENCE_RULE_HELP, audienceOption } from "../screen-fleet.js";
 
 export function registerAlertsCommands(root: Command, bind: CommandActionBinder): void {
   const alerts = root.command("alerts").description("Triage open screen alerts: acknowledge, snooze or mute them");
@@ -20,7 +21,8 @@ export function registerAlertsCommands(root: Command, bind: CommandActionBinder)
     "  that is not acknowledged, snoozed or muted, the count the dashboard shows.",
     "  ack marks an open alert as handled until it resolves; snooze does so until a",
     "  time at most 30 days ahead, when it needs attention again if it is still",
-    "  open. mute covers screens by id or tag until a time at most 30 days ahead,",
+    "  open. mute covers screens by id, tag or an audience rule over tags and ids",
+    "  until a time at most 30 days ahead,",
     "  for maintenance: their alerts still open and resolve, marked muted, and",
     "  never need attention. A notification (screenrig notifications) skips a",
     "  notice whose alert is acknowledged or snoozed while the notice is in its",
@@ -52,14 +54,15 @@ export function registerAlertsCommands(root: Command, bind: CommandActionBinder)
     .action(bind(handleAlertsSnooze));
   requireOptionGroup(snooze, "exactlyOne", ["--for", "--until"]);
 
-  const mute = alerts.command("mute").description("Mute screens by id or tag for maintenance until a time")
+  const mute = alerts.command("mute").description("Mute screens by id, tag or audience rule for maintenance until a time")
     .option("--screen-id <ID>", "Mute this screen (repeatable, or comma-separated; at most 100)", alertMuteScreenIds)
     .option("--tag <TAG>", "Mute every screen carrying this tag when a notice falls due (repeatable, or comma-separated; at most 16)", alertMuteTags)
+    .option("--audience <RULE>", `Mute every screen this rule matches when a notice falls due, beside any --screen-id and --tag: ${AUDIENCE_RULE_HELP.replace("tag, screen_id or folder", "tag or screen_id")}, @FILE to read it from a file, or - for stdin`, audienceOption)
     .addOption(new Option("--for <DURATION>", "Mute this long from now, such as 4h, 2d or 7d (at most 29d23h59m)").argParser(alertForOption).conflicts(["until"]))
     .addOption(new Option("--until <TIME>", "Mute until this RFC 3339 instant, with seconds and an offset (at most 30 days ahead)").argParser(alertUntilOption).conflicts(["for"]))
     .option("--note <TEXT>", "Say why, for the people who see the mute (at most 200 characters)", alertNote)
     .action(bind(handleAlertsMute));
-  requireOptionGroup(mute, "atLeastOne", ["--screen-id", "--tag"]);
+  requireOptionGroup(mute, "atLeastOne", ["--screen-id", "--tag", "--audience"]);
   requireOptionGroup(mute, "exactlyOne", ["--for", "--until"]);
 
   alerts.command("mutes").description("List the current mutes, soonest end first")

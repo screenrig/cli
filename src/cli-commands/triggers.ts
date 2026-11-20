@@ -5,19 +5,21 @@ import type { CommandActionBinder } from "./types.js";
 import { handleTriggersClear, handleTriggersCreate, handleTriggersDelete, handleTriggersDeliveries, handleTriggersList, handleTriggersRotateSecret, handleTriggersShow, handleTriggersTest, handleTriggersUpdate } from "../handlers/triggers.js";
 import { triggerDeliveriesLimit, triggerHoldOption, triggerName, triggerScreenIds, triggerTag } from "../triggers.js";
 import { addVerifyOptions, type VerifyOptionsTarget } from "./verify-options.js";
+import { AUDIENCE_RULE_HELP, audienceOption } from "../screen-fleet.js";
 
 const nameOption = (value: string): string => { triggerName(value); return value; };
 const OVERLAY_VERIFY: VerifyOptionsTarget = { scope: "Overlay", secret: "the trigger's srtg_ secret" };
 
 export function registerTriggersCommands(root: Command, bind: CommandActionBinder): void {
   const triggers = root.command("triggers").description("Show alerts from outside systems on screens");
-  addCommandNotes(triggers, "Triggers:\n  A trigger is a URL with its own secret that an outside system posts to. Two kinds.\n  CAP (the default): an emergency notification system (Everbridge, Rave, Alertus, an\n  IPAWS relay) posts CAP 1.2 alerts with HTTP Basic; an Alert takes the target screens\n  over with a full-screen card coloured by severity until the alert's <expires>, else\n  --for, and a Cancel or AllClear gives them back. Overlay (--kind overlay): Home\n  Assistant, a sensor hub or an alerting tool posts a few words (alert_id, title,\n  message, duration, clear) with Authorization: Bearer; --show bar draws a strip over\n  whatever plays, --show takeover plays the alert full screen. The same alert_id\n  updates one alert instead of stacking, a clear ends it, and every post holds its\n  alert for its duration from that post. The target is a tag or up to 500 screen ids.\n  An organization has at most 20 triggers across its projects, overlay triggers included.\n  An overlay trigger also takes posts straight from GitHub, Stripe, Shopify, Slack, Linear, Vercel,\n  Asana and any sender that signs with an HMAC, with no relay: --verify VENDOR --verify-secret-file FILE\n  makes the vendor's own signature authenticate a post, and the srtg_ secret keeps working beside it;\n  --handshake VENDOR answers the setup challenge of Microsoft Graph, monday.com, Trello or Azure Event Grid.");
+  addCommandNotes(triggers, "Triggers:\n  A trigger is a URL with its own secret that an outside system posts to. Two kinds.\n  CAP (the default): an emergency notification system (Everbridge, Rave, Alertus, an\n  IPAWS relay) posts CAP 1.2 alerts with HTTP Basic; an Alert takes the target screens\n  over with a full-screen card coloured by severity until the alert's <expires>, else\n  --for, and a Cancel or AllClear gives them back. Overlay (--kind overlay): Home\n  Assistant, a sensor hub or an alerting tool posts a few words (alert_id, title,\n  message, duration, clear) with Authorization: Bearer; --show bar draws a strip over\n  whatever plays, --show takeover plays the alert full screen. The same alert_id\n  updates one alert instead of stacking, a clear ends it, and every post holds its\n  alert for its duration from that post. The target is a tag, up to 500 screen ids, or an audience rule (--audience).\n  An organization has at most 20 triggers across its projects, overlay triggers included.\n  An overlay trigger also takes posts straight from GitHub, Stripe, Shopify, Slack, Linear, Vercel,\n  Asana and any sender that signs with an HMAC, with no relay: --verify VENDOR --verify-secret-file FILE\n  makes the vendor's own signature authenticate a post, and the srtg_ secret keeps working beside it;\n  --handshake VENDOR answers the setup challenge of Microsoft Graph, monday.com, Trello or Azure Event Grid.");
 
   const create = triggers.command("create").description("Create a trigger and print its URL and secret")
     .requiredOption("--name <NAME>", "Name the trigger, 1 to 80 characters (required)", nameOption)
     .addOption(new Option("--kind <KIND>", "cap: emergency CAP 1.2 alerts (default). overlay: words from any sender over or instead of what plays").choices(["cap", "overlay"]))
-    .addOption(new Option("--tag <TAG>", "Target every active screen with this tag when an alert arrives").argParser(triggerTag).conflicts(["screenId"]))
-    .addOption(new Option("--screen-id <ID>", "Target this screen (repeatable, or comma-separated; at most 500)").argParser(triggerScreenIds).conflicts(["tag"]))
+    .addOption(new Option("--tag <TAG>", "Target every active screen with this tag when an alert arrives").argParser(triggerTag).conflicts(["screenId", "audience"]))
+    .addOption(new Option("--screen-id <ID>", "Target this screen (repeatable, or comma-separated; at most 500)").argParser(triggerScreenIds).conflicts(["tag", "audience"]))
+    .addOption(new Option("--audience <RULE>", `Target every active screen this rule matches when an alert arrives: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`).argParser(audienceOption).conflicts(["tag", "screenId"]))
     .option("--for <DURATION>", "Hold an alert that names no end this long: 1m to 7d for CAP (default 1h), 10s to 7d for overlay (default 10m)", triggerHoldOption)
     .option("--pull <FILE>", "CAP: also read CAP alert sources the platform pulls: a JSON object (sources, location, filters) from a file, or - for stdin")
     .addOption(new Option("--show <SHOW>", "Overlay: bar draws a strip over whatever plays; takeover plays the alert full screen").choices(["bar", "takeover"]))
@@ -26,15 +28,16 @@ export function registerTriggersCommands(root: Command, bind: CommandActionBinde
     .option("--map <FILE>", "Overlay: the template that builds the post from the body a sender posts, a JSON file or - for stdin")
     .option("--signing", "Overlay: also require a ScreenRig-Signature header on every post, and print the signing secret once")
     .action(bind(handleTriggersCreate));
-  requireOptionGroup(create, "exactlyOne", ["--tag", "--screen-id"]);
+  requireOptionGroup(create, "exactlyOne", ["--tag", "--screen-id", "--audience"]);
   requireOptionGroup(create, "requires", ["--edge", "--show"]);
   addVerifyOptions(create, OVERLAY_VERIFY, false);
 
   const update = triggers.command("update").description("Change a trigger's name, target, hold or overlay without a new URL or secret")
     .argument("<id>", "Trigger identifier")
     .option("--name <NAME>", "Rename the trigger, 1 to 80 characters", nameOption)
-    .addOption(new Option("--tag <TAG>", "Target every active screen with this tag").argParser(triggerTag).conflicts(["screenId"]))
-    .addOption(new Option("--screen-id <ID>", "Target this screen (repeatable, or comma-separated; at most 500)").argParser(triggerScreenIds).conflicts(["tag"]))
+    .addOption(new Option("--tag <TAG>", "Target every active screen with this tag").argParser(triggerTag).conflicts(["screenId", "audience"]))
+    .addOption(new Option("--screen-id <ID>", "Target this screen (repeatable, or comma-separated; at most 500)").argParser(triggerScreenIds).conflicts(["tag", "audience"]))
+    .addOption(new Option("--audience <RULE>", `Target every active screen this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`).argParser(audienceOption).conflicts(["tag", "screenId"]))
     .option("--for <DURATION>", "Hold an alert that names no end this long (CAP 1m to 7d, overlay 10s to 7d)", triggerHoldOption)
     .option("--pull <FILE>", "CAP: replace the CAP alert sources, a JSON object from a file, or - for stdin")
     .option("--no-pull", "CAP: stop reading CAP alert sources")
@@ -51,7 +54,7 @@ export function registerTriggersCommands(root: Command, bind: CommandActionBinde
     .action(bind(handleTriggersUpdate));
   addVerifyOptions(update, OVERLAY_VERIFY, true);
   requireOptionGroup(update, "atLeastOne", [
-    "--name", "--tag", "--screen-id", "--for", "--pull", "--no-pull", "--edge", "--style", "--clear-style", "--map", "--clear-map", "--enable", "--disable", "--signing", "--no-signing",
+    "--name", "--tag", "--screen-id", "--audience", "--for", "--pull", "--no-pull", "--edge", "--style", "--clear-style", "--map", "--clear-map", "--enable", "--disable", "--signing", "--no-signing",
     "--verify", "--clear-verify", "--handshake", "--clear-handshake",
   ]);
 

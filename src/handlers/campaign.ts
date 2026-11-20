@@ -1,7 +1,7 @@
 // Command handlers for the campaign commands, loaded on demand.
-import { readAuthoringText } from "../authoring-input.js";
 import { LEVEL_IDLE_DEFAULT_S } from "../screen-control.js";
-import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignPromoteProblem, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignFolder, campaignFolderAudience, campaignBounds, campaignData, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
+import { audienceRule } from "../screen-fleet.js";
+import { campaignPromoteProblem, campaignAllScreensAudience, campaignAnyTagAudience, withoutTags, campaignFolder, campaignFolderAudience, campaignBounds, campaignData, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList, campaignDateList, campaignDisplayList, campaignMonthlyList } from "../campaigns.js";
 import { type Campaign, type CampaignAudience, type CampaignList, type CampaignPatch, type CampaignPreviewRequest, type CampaignPromote, type CampaignRevision, type CampaignScreens, type CampaignWrite, type LevelCovers, type RevisionPage, type SchedulePreview, type ScreenCampaigns } from "../adapters/protocol.js";
 import { campaignRevisionLines, schedulePreviewLines } from "../change-control.js";
 import { revisionNumber } from "../playlist-revisions.js";
@@ -45,13 +45,15 @@ export function campaignRevisionHeaders(args: ParsedArgs): Record<string, string
 
 /**
  * The audience the flags name, or undefined when none is given: --tag (every
- * listed tag), --any-tag (at least one), --screen-id, --folder (a screen
- * folder and every folder inside it), --all-screens, or --audience (a raw
- * rule: inline JSON, @FILE, or - for stdin).
+ * listed tag), --any-tag (at least one), either with --not-tag (none of those)
+ * or --not-tag alone, --screen-id, --folder (a screen folder and every folder
+ * inside it), --all-screens, or --audience (a raw rule: inline JSON, @FILE, or
+ * - for stdin).
  */
 export async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime): Promise<CampaignAudience | undefined> {
   const tags = flagString(args.flags, "tag");
   const anyTags = flagString(args.flags, "any-tag");
+  const notTags = flagString(args.flags, "not-tag");
   const screenIds = flagString(args.flags, "screen-id");
   const folder = flagString(args.flags, "folder");
   const raw = flagString(args.flags, "audience");
@@ -59,17 +61,16 @@ export async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime
   if ([tags, anyTags, screenIds, folder, raw].filter((value) => value !== undefined).length + (all ? 1 : 0) > 1) {
     throw usageError("Provide at most one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.");
   }
-  if (tags !== undefined) return campaignTagAudience(tags.split(","));
-  if (anyTags !== undefined) return campaignAnyTagAudience(anyTags.split(","));
+  if (notTags !== undefined && [screenIds, folder, raw].some((value) => value !== undefined) || notTags !== undefined && all) {
+    throw usageError("--not-tag goes with --tag or --any-tag, or alone; write a rule with --audience to combine it with screens or a folder.");
+  }
+  const tagRule = tags !== undefined ? campaignTagAudience(tags.split(",")) : anyTags !== undefined ? campaignAnyTagAudience(anyTags.split(",")) : undefined;
+  if (notTags !== undefined) return withoutTags(tagRule, notTags.split(","));
+  if (tagRule) return tagRule;
   if (screenIds !== undefined) return campaignScreenAudience(screenIds.split(","));
   if (folder !== undefined) return campaignFolderAudience(campaignFolder(folder));
   if (all) return campaignAllScreensAudience();
-  if (raw === undefined) return undefined;
-  const source = raw.trim();
-  const text = source === "-" || source.startsWith("@")
-    ? await readAuthoringText(source === "-" ? source : source.slice(1), runtime, CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES)
-    : raw;
-  return campaignAudienceJson(text);
+  return raw === undefined ? undefined : audienceRule(raw, runtime);
 }
 
 /**
@@ -111,7 +112,7 @@ export async function campaignCreateBody(args: ParsedArgs, runtime: CliRuntime, 
   const name = campaignName(flagString(args.flags, "name") ?? "");
   const playlistId = campaignPlaylistId(flagString(args.flags, "playlist-id") ?? "");
   const audience = await campaignAudienceFlag(args, runtime);
-  if (!audience) throw usageError(`${command} takes exactly one of --tag, --any-tag, --screen-id, --folder, --all-screens or --audience.`);
+  if (!audience) throw usageError(`${command} takes exactly one of --tag, --any-tag, --not-tag, --screen-id, --folder, --all-screens or --audience.`);
   const from = flagString(args.flags, "from");
   const until = flagString(args.flags, "until");
   campaignBounds(from, until);
