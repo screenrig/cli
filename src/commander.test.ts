@@ -75,3 +75,15 @@ test("login waits for approval unless --no-wait is given, and agent connect is g
   assert.equal(parseArgv(["login", "--no-wait"]).flags["no-wait"], true);
   assert.throws(() => parseArgv(["agent", "connect"]), /agent has no command connect/);
 });
+
+test("an unknown command or option names this CLI's version and the update path", () => {
+  for (const argv of [["screen", "volume-x", "scr_X", "--mute"], ["screen", "frobnicate"], ["playlist", "list", "--frobnicate"]]) {
+    assert.throws(() => parseArgv(argv), (error: unknown) => {
+      assert.ok(usage(error));
+      const problem = (error as CliError).problem;
+      assert.match(problem.hint ?? "", /^This is screenRIG CLI \d{2}\.\d{2}\.\d+(-dev)?\. .*update the screenRIG plugin/);
+      assert.match(problem.next?.command ?? "", /--help$/);
+      return true;
+    }, argv.join(" "));
+  }
+});

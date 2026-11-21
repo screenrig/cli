@@ -1,6 +1,7 @@
 import type { Command, CommanderError } from "commander";
 import { commandPath } from "./command-path.js";
 import { usageError } from "./problems.js";
+import { CLI_VERSION, cliDistribution } from "./version.js";
 
 /** Commander diagnostics can contain raw option names/values. Never expose them. */
 export function commandError(error: CommanderError, command: Command): never {
@@ -28,7 +29,7 @@ export function commandError(error: CommanderError, command: Command): never {
       throw usageError(`${path} requires ${command.registeredArguments.filter((arg) => arg.required).map((arg) => `<${arg.name()}>`).join(" ")}.`);
     case "commander.excessArguments": {
       const word = command.commands.length && !command.registeredArguments.length && /^[a-z][a-z0-9-]{0,39}$/.test(command.args[0] ?? "") ? command.args[0] : undefined;
-      if (word) throw usageError(`${path || "screenrig"} has no command ${word}. See command help for supported commands.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+      if (word) throw usageError(`${path || "screenrig"} has no command ${word}. See command help for supported commands.`, helpNext(path), updateHint());
       throw usageError(`${path || "screenrig"} does not accept ${command.registeredArguments.length ? "extra" : "positional"} arguments.`);
     }
     case "commander.conflictingOption": {
@@ -55,16 +56,16 @@ export function commandError(error: CommanderError, command: Command): never {
     }
     case "commander.unknownOption": {
       const option = safeName(error.message, /unknown option '([^']*)'/, /^--?[A-Za-z][A-Za-z0-9-]{0,39}$/, "=");
-      if (option) throw usageError(`${path || "screenrig"} does not accept ${option}. See command help for supported options.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+      if (option) throw usageError(`${path || "screenrig"} does not accept ${option}. See command help for supported options.`, helpNext(path), updateHint());
       break;
     }
     case "commander.unknownCommand": {
       const name = safeName(error.message, /unknown command '([^']*)'/, /^[a-z][a-z0-9-]{0,39}$/);
-      if (name) throw usageError(`${path || "screenrig"} has no command ${name}. See command help for supported commands.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+      if (name) throw usageError(`${path || "screenrig"} has no command ${name}. See command help for supported commands.`, helpNext(path), updateHint());
       break;
     }
   }
-  throw usageError("Unknown command or unsupported option. See command help for supported arguments.", { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+  throw usageError("Unknown command or unsupported option. See command help for supported arguments.", helpNext(path), updateHint());
 }
 
 /** The option or command name commander quoted, without any `=value`; only a plain name shape is ever echoed. */
@@ -72,4 +73,19 @@ function safeName(message: string, quoted: RegExp, shape: RegExp, cut?: string):
   const raw = quoted.exec(message)?.[1];
   const name = raw !== undefined && cut ? raw.split(cut)[0]! : raw;
   return name !== undefined && shape.test(name) ? name : undefined;
+}
+
+function helpNext(path: string) {
+  return { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." };
+}
+
+/**
+ * A command or option the docs list and this CLI lacks comes from a newer release,
+ * so name this build's version and the update path beside the help pointer.
+ */
+function updateHint(): string {
+  const update = cliDistribution().kind === "plugin_bundle"
+    ? "rerun the screenRIG plugin's bootstrap helper, which reports refresh when a newer plugin release exists, and update the plugin"
+    : "update the screenRIG plugin, or the screenrig package in a developer shell";
+  return `This is screenRIG CLI ${CLI_VERSION}. The docs at screenrig.ai describe the current release; for a command or option listed there and missing here, ${update}.`;
 }
