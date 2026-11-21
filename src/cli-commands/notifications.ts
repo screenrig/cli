@@ -77,7 +77,11 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  \"<t>.<raw body>\">; its secret is printed only by create and rotate-secret.",
     "  Slack, Teams, PagerDuty and Telegram post one message per outage and screen and",
     "  a recovery after it; their credential is sealed, never shown again (only a",
-    "  masked destination_hint), and a - value reads it from stdin. A",
+    "  masked destination_hint), and a - value reads it from stdin. A webhook,",
+    "  Slack, Teams, PagerDuty or Telegram notification sends nothing until an owner",
+    "  or admin of the organization approves its destination with their passkey on",
+    "  the Notifications page of the dashboard (approval shows pending; a new URL or",
+    "  chat address waits again); its notices wait and retry meanwhile. An",
     "  organization has at most 50 notifications of every channel across its projects, and a new",
     "  project starts with one email to its owner for screens that go offline.",
   ].join("\n"));

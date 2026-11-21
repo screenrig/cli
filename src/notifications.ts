@@ -6,7 +6,7 @@ import type { CampaignAudience, ScreenScheduleWindow, Notification, Notification
 import { campaignAudienceText, campaignWindowSpec, tagList } from "./campaigns.js";
 import { fleetLinkTags } from "./fleet-links.js";
 import { normalizeInstant } from "./screen-control.js";
-import { table } from "./webhooks.js";
+import { approvalCell, approvalLines, approvalListNote, deliveryErrorNotes, table } from "./webhooks.js";
 
 /** Backend Notification.id shape (vendor/openapi.yaml): whk_ for a webhook, ntf_ for every other channel. */
 export const NOTIFICATION_ID_PATTERN = /^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$/;
@@ -341,6 +341,7 @@ export function notificationLines(notification: Notification | undefined): strin
     `hold_minutes: ${notification.hold_minutes}`,
     `enabled: ${notification.enabled}`,
     `status: ${notification.status}`,
+    ...approvalLines(notification.approval),
     `revision: ${notification.revision}`,
     ...when(notification.description, "description"),
     ...when(notification.snoozed_until, "snoozed_until"),
@@ -369,17 +370,19 @@ function rulesCell(item: Notification): string {
   ].join("; ");
 }
 
-/** SNOOZED_UNTIL, EVENTS, RULES and UNSUBSCRIBED appear only when a listed notification has them. */
+/** APPROVAL, SNOOZED_UNTIL, EVENTS, RULES and UNSUBSCRIBED appear only when a listed notification has them. */
 export function notificationTableLines(items: Notification[]): string[] {
   if (!items.length) return ["No notifications"];
+  const approval = items.some((item) => item.approval);
   const snoozed = items.some((item) => item.snoozed_until);
   const rules = items.some((item) => rulesCell(item) !== "");
   const events = items.some((item) => item.event_types?.length);
   const unsubscribed = items.some((item) => item.unsubscribed?.length);
   const lines = table(
-    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), ...(rules ? ["RULES"] : []), "TO", ...(unsubscribed ? ["UNSUBSCRIBED"] : [])],
+    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(approval ? ["APPROVAL"] : []), ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), ...(rules ? ["RULES"] : []), "TO", ...(unsubscribed ? ["UNSUBSCRIBED"] : [])],
     items.map((item) => [
       item.id ?? "", item.channel ?? "", item.status ?? "", String(item.enabled),
+      ...(approval ? [approvalCell(item.approval)] : []),
       ...(snoozed ? [item.snoozed_until ?? ""] : []),
       (item.conditions ?? []).join(","),
       ...(events ? [(item.event_types ?? []).join(",")] : []),
@@ -388,9 +391,11 @@ export function notificationTableLines(items: Notification[]): string[] {
       ...(unsubscribed ? [String(item.unsubscribed?.length ?? 0)] : []),
     ]),
   );
-  return items.some(withheld)
-    ? [...lines, "", "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them."]
-    : lines;
+  return [
+    ...lines,
+    ...(items.some(withheld) ? ["", "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them."] : []),
+    ...approvalListNote(items.map((item) => item.approval)),
+  ];
 }
 
 /**
@@ -425,5 +430,5 @@ export function notificationDeliveryTableLines(items: NotificationDelivery[]): s
     ["CREATED_AT", (item) => item.created_at ?? "", true],
   ];
   const shown = columns.filter(([, cell, always]) => always || items.some((item) => cell(item) !== undefined));
-  return table(shown.map(([name]) => name), items.map((item) => shown.map(([, cell]) => cell(item) ?? "")));
+  return [...table(shown.map(([name]) => name), items.map((item) => shown.map(([, cell]) => cell(item) ?? ""))), ...deliveryErrorNotes(items)];
 }

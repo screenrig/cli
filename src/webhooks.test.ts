@@ -12,8 +12,8 @@ import { type CliRuntime } from "./runtime.js";
 import { networkError } from "./problems.js";
 import { redactText } from "./redact.js";
 import { testTemp } from "./test-temp.js";
-import { webhookLines, webhookTableLines } from "./webhooks.js";
-import type { Webhook } from "./adapters/protocol.js";
+import { deliveryTableLines, webhookLines, webhookTableLines } from "./webhooks.js";
+import type { Webhook, WebhookDelivery } from "./adapters/protocol.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest } from "./transport/types.js";
 
@@ -469,4 +469,84 @@ test("a webhook URL withheld from a Read only credential is said, never printed 
   assert.equal(table.at(-1), "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them.");
   // A Manage credential's URL prints as before, with no note.
   assert.deepEqual(webhookTableLines([{ ...webhook, url: "https://hooks.example.net/in", url_redacted: undefined }]).length, 2);
+});
+
+/** The backend's sentence on a create or address change whose approval is pending. */
+const PENDING_NEXT = "This destination receives nothing until an owner or admin of the organization approves it with their passkey in the screenRIG dashboard; delivery starts the moment they do.";
+
+/** The memory backend, with every webhook answer carrying the approval the delivery service reads: pending until approved is set. */
+function approvalBackend(): { backend: FakeTransport; approve: () => void } {
+  const backend = memoryBackend();
+  let approved = false;
+  const original = backend.request.bind(backend);
+  backend.request = async (req) => {
+    const response = await original(req);
+    if (!req.path.startsWith("/api/webhooks") || req.path.endsWith("/deliveries") || req.path.endsWith("/test") || response.status >= 300) return response;
+    const write = req.method === "POST" || (req.method === "PATCH" && (req.body as { url?: string } | undefined)?.url !== undefined);
+    const mark = (item: Record<string, unknown>) => ({
+      ...item,
+      approval: approved ? { state: "approved", approved_by: "usr_OWNERAAAAAAAAAAAAAAAA", approved_at: "2026-08-14T16:59:00Z" } : { state: "pending" },
+      ...(write && !approved ? { next: PENDING_NEXT } : {}),
+    });
+    const body = response.body as { items?: Record<string, unknown>[] } & Record<string, unknown>;
+    return { ...response, body: Array.isArray(body.items) ? { ...body, items: body.items.map(mark) } : mark(body) };
+  };
+  return { backend, approve: () => { approved = true; } };
+}
+
+test("a webhook waiting for approval says so on create, update, show and list, and JSON carries approval and next unchanged", async () => {
+  const env = await enrolled();
+  const { backend, approve } = approvalBackend();
+  const created = await cli(["--json", "webhooks", "create", "--url", URL_OK, "--event-types", "screen.*"], backend, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(created.envelope.data.approval, { state: "pending" });
+  assert.equal(created.envelope.data.next, PENDING_NEXT);
+  const id = created.envelope.data.id as string;
+
+  const human = await cli(["--human", "webhooks", "create", "--url", URL_OK, "--event-types", "screen.online"], backend, env);
+  assert.match(human.stdout, /^approval: pending$/m);
+  assert.match(human.stdout, /^next: Waiting for approval: nothing is delivered until an owner or admin of the organization approves this destination with their passkey on the Notifications page of the screenRIG dashboard\./m);
+  assert.equal(human.stdout.match(/^next: /gm)?.length, 1, "one line says what to do");
+
+  const moved = await cli(["--human", "webhooks", "update", id, "--url", "https://hooks.example.com/screenrig/other"], backend, env);
+  assert.match(moved.stdout, /^approval: pending$/m);
+  const shown = await cli(["--human", "webhooks", "show", id], backend, env);
+  assert.match(shown.stdout, /^next: Waiting for approval/m);
+  const shownJson = await cli(["--json", "webhooks", "show", id], backend, env);
+  assert.deepEqual(shownJson.envelope.data.approval, { state: "pending" });
+  assert.equal(shownJson.envelope.data.next, undefined, "show carries no next the server did not send");
+  const listed = await cli(["--human", "webhooks", "list"], backend, env);
+  assert.match(listed.stdout, /ID\s+STATUS\s+ENABLED\s+APPROVAL\s+EVENT_TYPES\s+URL/);
+  assert.match(listed.stdout, new RegExp(`${id}\\s+active\\s+true\\s+pending\\s+`));
+  assert.match(listed.stdout, /^Waiting for approval: nothing is delivered to a pending destination until an owner or admin of the organization approves it with their passkey/m);
+
+  approve();
+  const approved = await cli(["--human", "webhooks", "show", id], backend, env);
+  assert.match(approved.stdout, /^approval: approved by usr_OWNERAAAAAAAAAAAAAAAA at 2026-08-14T16:59:00Z$/m);
+  assert.doesNotMatch(approved.stdout, /Waiting for approval/);
+  const approvedList = await cli(["--human", "webhooks", "list"], backend, env);
+  assert.doesNotMatch(approvedList.stdout, /Waiting for approval/);
+});
+
+test("a webhook without an approval prints no approval line or column", () => {
+  const webhook: Webhook = {
+    id: "whk_WEBHOOKAAAAAAAAAAAA", url: "https://hooks.example.net/in", event_types: ["screen.offline"], enabled: true,
+    status: "active", revision: 1, created_at: "2026-10-14T12:00:00Z", updated_at: "2026-10-14T12:00:00Z",
+  };
+  assert.ok(!webhookLines(webhook).some((line) => line.startsWith("approval:") || line.startsWith("next:")));
+  assert.doesNotMatch(webhookTableLines([webhook]).join("\n"), /APPROVAL|Waiting for approval/);
+});
+
+test("delivery listings explain approval_required, content_denied and rate_limited in one phrase each", () => {
+  const row = (id: string, last_error?: WebhookDelivery["last_error"]): WebhookDelivery => ({
+    id, webhook_id: "whk_WEBHOOKAAAAAAAAAAAA", event_id: "ev1_1", event_type: "screen.offline", state: last_error === "content_denied" ? "failed" : "pending", attempts: 1, created_at: "2026-10-14T12:00:00Z", ...(last_error ? { last_error } : {}),
+  });
+  const lines = deliveryTableLines([row("whd_1", "approval_required"), row("whd_2", "content_denied"), row("whd_3", "rate_limited"), row("whd_4", "approval_required")]);
+  assert.deepEqual(lines.slice(-4), [
+    "",
+    "approval_required: waiting for an owner or admin to approve the destination with their passkey in the dashboard (Notifications); retried.",
+    "content_denied: not sent: it carried a credential or personal data; not retried.",
+    "rate_limited: the destination reached its delivery limit; retried.",
+  ]);
+  assert.equal(deliveryTableLines([row("whd_5", "timeout"), row("whd_6")]).length, 3, "other classes add no note");
 });

@@ -1441,3 +1441,51 @@ test("card_data_stale is a condition of every notification, with a severity of i
   assert.ok(commandHelp(["notifications", "create"]).examples.some((example) => example.includes("--conditions card_data_stale")));
   assert.ok(commandHelp(["notifications", "update"]).examples.some((example) => example.includes("card_data_stale")));
 });
+
+test("a chat or webhook notification waiting for approval says so in show and list, and deliveries explain approval_required", async () => {
+  const pending: Notification = {
+    id: "ntf_SLACKAAAAAAAAAAAAAAAA", channel: "slack", destination_hint: "https://hooks.slack.com/…/ghij", conditions: ["screen_offline"], screen_tags: [], hold_minutes: 10,
+    enabled: true, revision: 1, status: "active", approval: { state: "pending" }, created_at: "2026-10-28T10:00:00Z", updated_at: "2026-10-28T10:00:00Z",
+  };
+  const email: Notification = { ...pending, id: "ntf_EMAILAAAAAAAAAAAAAAAA", channel: "email", destination_hint: undefined, recipients: ["owner"], approval: undefined };
+  const lines = notificationLines(pending);
+  assert.ok(lines.includes("approval: pending"), lines.join("\n"));
+  assert.equal(lines.filter((line) => line.startsWith("next: Waiting for approval: nothing is delivered until an owner or admin of the organization approves this destination with their passkey on the Notifications page")).length, 1);
+  assert.ok(!notificationLines(email).some((line) => line.startsWith("approval:")), "email has no approval");
+  const table = notificationTableLines([pending, email]);
+  assert.match(table[0]!, /ID\s+CHANNEL\s+STATUS\s+ENABLED\s+APPROVAL\s+CONDITIONS/);
+  assert.match(table[1]!, /ntf_SLACK\S+\s+slack\s+active\s+true\s+pending\s+screen_offline/);
+  assert.equal(table.at(-1), "Waiting for approval: nothing is delivered to a pending destination until an owner or admin of the organization approves it with their passkey on the Notifications page of the screenRIG dashboard.");
+  assert.doesNotMatch(notificationTableLines([email]).join("\n"), /APPROVAL|Waiting for approval/);
+
+  const held: NotificationDelivery = {
+    id: "whd_HELDAAAAAAAAAAAAAAAAAA", notification_id: pending.id, event_id: "ev1_7", event_type: "screen.offline", condition: "screen_offline", phase: "opened",
+    screen_id: "scr_LOBBYAAAAAAAAAAAAAAAA", screen_name: "Lobby TV", state: "pending", attempts: 2, last_error: "approval_required", created_at: "2026-08-14T16:55:00.000Z",
+  };
+  const deliveries = notificationDeliveryTableLines([held, { ...held, id: "whd_DENIEDAAAAAAAAAAAAAAAA", state: "failed", last_error: "content_denied" }]);
+  assert.match(deliveries[1]!, /pending\s+2\s+approval_required/);
+  assert.deepEqual(deliveries.slice(-3), [
+    "",
+    "approval_required: waiting for an owner or admin to approve the destination with their passkey in the dashboard (Notifications); retried.",
+    "content_denied: not sent: it carried a credential or personal data; not retried.",
+  ]);
+});
+
+test("notifications create carries the approval and next of a pending destination through JSON unchanged", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const next = "This destination receives nothing until an owner or admin of the organization approves it with their passkey in the screenRIG dashboard; delivery starts the moment they do.";
+  const original = transport.request.bind(transport);
+  transport.request = async (req) => {
+    const response = await original(req);
+    if (req.method !== "POST" || req.path !== "/api/notifications" || response.status >= 300) return response;
+    return { ...response, body: { ...(response.body as object), approval: { state: "pending" }, next } };
+  };
+  const json = await cli(["--json", "notifications", "create", "--webhook", "https://hooks.example.com/screenrig", "--conditions", "screen_offline"], transport, env);
+  assert.equal(json.code, 0, json.stdout);
+  assert.deepEqual(json.envelope.data.approval, { state: "pending" });
+  assert.equal(json.envelope.data.next, next);
+  const human = await cli(["--human", "notifications", "create", "--webhook", "https://hooks.example.com/screenrig", "--conditions", "screen_offline"], transport, env);
+  assert.match(human.stdout, /^approval: pending$/m);
+  assert.match(human.stdout, /^next: Waiting for approval: /m);
+});

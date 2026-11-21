@@ -1,6 +1,6 @@
 import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
-import type { Webhook, WebhookDelivery } from "./adapters/protocol.js";
+import type { DestinationApproval, Webhook, WebhookDelivery } from "./adapters/protocol.js";
 
 /** Backend Webhook.id and WebhookDelivery cursor shapes (vendor/openapi.yaml). */
 export const WEBHOOK_ID_PATTERN = /^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$/;
@@ -134,6 +134,43 @@ function withheld(webhook: Webhook): boolean {
   return webhook.url_redacted === true && !webhook.url;
 }
 
+/** What a person does for a destination waiting for approval, said once under a show, create, update or list. */
+export const APPROVAL_PENDING_NEXT = "Waiting for approval: nothing is delivered until an owner or admin of the organization approves this destination with their passkey on the Notifications page of the screenRIG dashboard. Deliveries wait and retry meanwhile.";
+
+/** The approval lines of a destination: none where approval does not apply, else its state and, while pending, what the person does. */
+export function approvalLines(approval: DestinationApproval | undefined): string[] {
+  if (!approval) return [];
+  if (approval.state === "pending") return ["approval: pending", `next: ${APPROVAL_PENDING_NEXT}`];
+  const by = approval.approved_by ? ` by ${approval.approved_by}` : "";
+  const at = approval.approved_at ? ` at ${approval.approved_at}` : "";
+  return [`approval: ${approval.state}${by}${at}`];
+}
+
+/** The APPROVAL cell of a list row: the state, or empty where approval does not apply. */
+export function approvalCell(approval: DestinationApproval | undefined): string {
+  return approval?.state ?? "";
+}
+
+/** Under a list: one line when any listed destination waits for approval. */
+export function approvalListNote(approvals: Array<DestinationApproval | undefined>): string[] {
+  return approvals.some((approval) => approval?.state === "pending")
+    ? ["", "Waiting for approval: nothing is delivered to a pending destination until an owner or admin of the organization approves it with their passkey on the Notifications page of the screenRIG dashboard."]
+    : [];
+}
+
+/** What a delivery's last_error means, for the classes a person acts on differently from a receiver's answer. */
+const DELIVERY_ERROR_NOTES: Record<string, string> = {
+  approval_required: "waiting for an owner or admin to approve the destination with their passkey in the dashboard (Notifications); retried",
+  content_denied: "not sent: it carried a credential or personal data; not retried",
+  rate_limited: "the destination reached its delivery limit; retried",
+};
+
+/** Under a delivery table: one line for each of those classes a listed delivery has. */
+export function deliveryErrorNotes(items: Array<{ last_error?: string }>): string[] {
+  const present = Object.keys(DELIVERY_ERROR_NOTES).filter((name) => items.some((item) => item.last_error === name));
+  return present.length ? ["", ...present.map((name) => `${name}: ${DELIVERY_ERROR_NOTES[name]}.`)] : [];
+}
+
 export function webhookLines(webhook: Webhook | undefined): string[] {
   if (!webhook) return [];
   return [
@@ -142,6 +179,7 @@ export function webhookLines(webhook: Webhook | undefined): string[] {
     `event_types: ${(webhook.event_types ?? []).join(", ")}`,
     `enabled: ${webhook.enabled}`,
     `status: ${webhook.status}`,
+    ...approvalLines(webhook.approval),
     `revision: ${webhook.revision}`,
     ...when(webhook.description, "description"),
     ...when(webhook.failing_since, "failing_since"),
@@ -159,20 +197,24 @@ export function table(header: string[], rows: string[][]): string[] {
   return [render(header), ...rows.map(render)];
 }
 
+/** APPROVAL appears only when a listed webhook has an approval. */
 export function webhookTableLines(items: Webhook[]): string[] {
   if (!items.length) return ["No webhooks"];
-  const lines = table(["ID", "STATUS", "ENABLED", "EVENT_TYPES", "URL"], items.map((item) => [
-    item.id ?? "", item.status ?? "", String(item.enabled), (item.event_types ?? []).join(","), withheld(item) ? "(withheld)" : item.url ?? "",
+  const approval = items.some((item) => item.approval);
+  const lines = table(["ID", "STATUS", "ENABLED", ...(approval ? ["APPROVAL"] : []), "EVENT_TYPES", "URL"], items.map((item) => [
+    item.id ?? "", item.status ?? "", String(item.enabled), ...(approval ? [approvalCell(item.approval)] : []), (item.event_types ?? []).join(","), withheld(item) ? "(withheld)" : item.url ?? "",
   ]));
-  return items.some(withheld)
-    ? [...lines, "", "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them."]
-    : lines;
+  return [
+    ...lines,
+    ...(items.some(withheld) ? ["", "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them."] : []),
+    ...approvalListNote(items.map((item) => item.approval)),
+  ];
 }
 
 export function deliveryTableLines(items: WebhookDelivery[]): string[] {
   if (!items.length) return ["No deliveries"];
-  return table(["ID", "EVENT_TYPE", "STATE", "ATTEMPTS", "LAST_STATUS", "LAST_ERROR", "CREATED_AT"], items.map((item) => [
+  return [...table(["ID", "EVENT_TYPE", "STATE", "ATTEMPTS", "LAST_STATUS", "LAST_ERROR", "CREATED_AT"], items.map((item) => [
     item.id ?? "", `${item.event_type ?? ""}${item.test ? " (test)" : ""}`, item.state ?? "", String(item.attempts ?? 0),
     item.last_status === undefined ? "" : String(item.last_status), item.last_error ?? "", item.created_at ?? "",
-  ]));
+  ])), ...deliveryErrorNotes(items)];
 }

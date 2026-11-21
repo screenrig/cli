@@ -1731,8 +1731,23 @@ export interface PlaybackPlayList {
 
 export const TEMPORARY_PROTOCOL_VERSION = "screenrig.cli.adapter/0";
 
+/**
+ * Whether a person approved a destination's exact address with a passkey. pending:
+ * nothing is delivered (deliveries fail approval_required and are retried) until an
+ * owner or admin of the organization approves it in the dashboard; approved: it
+ * delivers. A new address waits again. Read-only; absent where approval does not
+ * apply or the delivery service has not answered.
+ */
+export interface DestinationApproval {
+  state: "approved" | "pending";
+  /** The user id of the person who approved it; absent for a destination approved before approval by passkey began, and while pending. */
+  approved_by?: string;
+  approved_at?: string;
+}
+
 /** GET/PATCH /api/webhooks/{id}. The signing secret is never part of this shape. */
 export interface Webhook {
+  approval?: DestinationApproval;
   created_at: string;
   description?: string;
   disabled_at?: string;
@@ -1743,6 +1758,8 @@ export interface Webhook {
   id: string;
   last_failure_at?: string;
   last_success_at?: string;
+  /** On a create or an address change whose approval is pending: what happens until a person approves the destination. */
+  next?: string;
   revision: number;
   status: "active" | "failing" | "disabled";
   updated_at: string;
@@ -1784,7 +1801,7 @@ export interface WebhookDelivery {
   id: string;
   last_attempt_at?: string;
   last_duration_ms?: number;
-  last_error?: "http_status" | "timeout" | "connection_failed" | "tls_failed" | "dns_failed" | "url_rejected" | "payment_required" | "webhook_disabled" | "webhook_deleted" | "event_expired" | "secret_unavailable";
+  last_error?: "http_status" | "timeout" | "connection_failed" | "tls_failed" | "dns_failed" | "url_rejected" | "payment_required" | "webhook_disabled" | "webhook_deleted" | "event_expired" | "secret_unavailable" | "content_denied" | "rate_limited" | "approval_required";
   last_status?: number;
   next_attempt_at?: string;
   state: "pending" | "succeeded" | "failed";
@@ -1825,6 +1842,8 @@ export interface NotificationActiveHours {
 }
 
 export interface Notification {
+  /** Webhook, Slack, Teams, PagerDuty and Telegram only: whether a person approved the destination with a passkey. While it is pending nothing is sent. */
+  approval?: DestinationApproval;
   channel: string;
   conditions: string[];
   created_at: string;
@@ -1841,6 +1860,8 @@ export interface Notification {
   id: string;
   last_failure_at?: string;
   last_success_at?: string;
+  /** On a create or an address change whose approval is pending: what happens until a person approves the destination. */
+  next?: string;
   /** Email only: owner, or the user ids of project members. */
   recipients?: string[];
   revision: number;
