@@ -431,3 +431,23 @@ test("an audit log the project's plan does not include is skipped, not a failed 
     assert.equal(result.failed, 0);
   });
 });
+
+test("log files the plan does not include skip the plays and alerts and keep the uptime files", async () => {
+  await inTemp(async (directory) => {
+    const api = fakeApi({ gets: [], files: [], appends: [] });
+    const file = api.file.bind(api);
+    api.file = async (pathName, query, target, type) => {
+      if (pathName === "/api/alerts" || pathName.startsWith("/api/playback")) {
+        throw new CliError(makeProblem("feature_not_in_plan", "This feature is not in the project's plan", 402, "Exporting logs as files is part of Premium."));
+      }
+      return file(pathName, query, target, type);
+    };
+    const result = await runProjectExport(api, { directory, media: false, now: NOW });
+    const sections = Object.fromEntries(result.sections.map((section) => [section.name, section]));
+    assert.deepEqual(sections.uptime, { name: "uptime", status: "ok", files: 2 });
+    assert.equal(sections["plays and alerts"]?.status, "skipped");
+    assert.equal(sections["plays and alerts"]?.code, "feature_not_in_plan");
+    assert.equal(result.failed, 0);
+    await readFile(path.join(directory, "data/uptime-daily.csv"), "utf8");
+  });
+});

@@ -151,6 +151,39 @@ test("a refused download gets the same plan guidance", async () => {
   });
 });
 
+// The commands whose writes or files a plan feature gates: each 402 reaches the agent with the
+// feature, the plan that includes it and the capabilities command, never as a raw error.
+const GATED: Array<{ argv: string[]; method: string; path: RegExp; feature: string; required_plan: string; download?: boolean }> = [
+  { argv: ["screen", "takeover", "set", "scr_1", "--playlist-id", "pl_1"], method: "POST", path: /^\/api\/screens\/scr_1\/takeover$/, feature: "takeover", required_plan: "plus" },
+  { argv: ["screen", "takeover", "set", "--tag", "Lobby", "--playlist-id", "pl_1"], method: "POST", path: /^\/api\/screens\/actions$/, feature: "takeover", required_plan: "plus" },
+  { argv: ["screen", "live", "start", "scr_1"], method: "POST", path: /^\/api\/screens\/scr_1\/live$/, feature: "live_view", required_plan: "premium" },
+  { argv: ["playback", "totals"], method: "GET", path: /^\/api\/playback\/totals$/, feature: "play_totals", required_plan: "plus" },
+  { argv: ["playback", "completeness"], method: "GET", path: /^\/api\/playback\/completeness$/, feature: "play_totals", required_plan: "plus" },
+  { argv: ["playback", "list"], method: "GET", path: /^\/api\/playback$/, feature: "play_totals", required_plan: "plus" },
+  { argv: ["playback", "plays", "--format", "csv"], method: "GET", path: /^\/api\/playback\/plays$/, feature: "log_exports", required_plan: "premium", download: true },
+  { argv: ["alerts", "list", "--format", "xlsx"], method: "GET", path: /^\/api\/alerts$/, feature: "log_exports", required_plan: "premium", download: true },
+  { argv: ["screen", "health-history", "scr_1", "--format", "pdf"], method: "GET", path: /^\/api\/screens\/scr_1\/health\/history$/, feature: "log_exports", required_plan: "premium", download: true },
+  { argv: ["triggers", "create", "--name", "Sirens", "--tag", "Lobby"], method: "POST", path: /^\/api\/triggers$/, feature: "cap_alerts", required_plan: "premium" },
+  { argv: ["notifications", "create", "--pagerduty", "0123456789abcdef0123456789abcdef", "--conditions", "screen_offline"], method: "POST", path: /^\/api\/notifications$/, feature: "alert_paging", required_plan: "premium" },
+];
+
+for (const gated of GATED) {
+  test(`${gated.argv.slice(0, 3).join(" ")} refused for ${gated.feature} names the plan and the capabilities command`, async () => {
+    const refusal = { status: 402, headers: { "content-type": "application/problem+json" }, body: planProblem({ feature: gated.feature, required_plan: gated.required_plan, hint: SERVER_HINT }) };
+    const transport = new FakeTransport();
+    if (gated.download) transport.onDownload(gated.method, gated.path, () => ({ status: refusal.status, headers: refusal.headers, problem: refusal.body }));
+    else transport.on(gated.method, gated.path, () => refusal);
+    const result = await invoke(["--json", ...gated.argv], transport);
+    assert.equal(result.code, ExitCode.Client, result.stdout);
+    const error = JSON.parse(result.stdout).error;
+    assert.equal(error.code, "feature_not_in_plan", result.stdout);
+    assert.equal(error.feature, gated.feature);
+    assert.equal(error.required_plan, gated.required_plan);
+    assert.equal(error.next.command, "screenrig project capabilities");
+    assert.match(error.hint, new RegExp(gated.required_plan === "plus" ? "Plus" : "Premium"));
+  });
+}
+
 test("project capabilities passes plan_features and limits through untouched in JSON", async () => {
   const transport = new FakeTransport().on("GET", "/api/project/capabilities", () => ({ status: 200, headers: NO_STORE, body: CAPABILITIES }));
   const result = await invoke(["--json", "project", "capabilities"], transport);

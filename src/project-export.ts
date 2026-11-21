@@ -415,26 +415,30 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
     return 2;
   });
 
-  await section("plays, uptime and alerts", async () => {
-    let files = 0;
-    const csv = async (relative: string, pathName: string, query: Record<string, string | undefined>): Promise<void> => {
-      const target = path.join(root, relative);
-      await mkdir(path.dirname(target), { recursive: true });
-      await api.file(pathName, { ...query, format: "csv" }, `${target}.part`, "text/csv");
-      await rename(`${target}.part`, target);
-      written.add(relative);
-      files += 1;
-    };
-    const today = dayOf(options.now);
-    const playsFrom = dayOf(new Date(options.now.getTime() - (PLAYS_LOOKBACK_DAYS - 1) * DAY_MS));
-    const created = projectCreated ? projectCreated.slice(0, 10) : playsFrom;
-    const since = options.since ?? (created > playsFrom ? created : playsFrom);
-    const uptimeFrom = (() => {
-      const limit = dayOf(new Date(options.now.getTime() - (UPTIME_LOOKBACK_DAYS - 1) * DAY_MS));
-      return since > limit ? since : limit;
-    })();
+  const csv = async (relative: string, pathName: string, query: Record<string, string | undefined>): Promise<void> => {
+    const target = path.join(root, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    await api.file(pathName, { ...query, format: "csv" }, `${target}.part`, "text/csv");
+    await rename(`${target}.part`, target);
+    written.add(relative);
+  };
+  const today = dayOf(options.now);
+  const playsFrom = dayOf(new Date(options.now.getTime() - (PLAYS_LOOKBACK_DAYS - 1) * DAY_MS));
+  const created = projectCreated ? projectCreated.slice(0, 10) : playsFrom;
+  const since = options.since ?? (created > playsFrom ? created : playsFrom);
+  const uptimeFrom = (() => {
+    const limit = dayOf(new Date(options.now.getTime() - (UPTIME_LOOKBACK_DAYS - 1) * DAY_MS));
+    return since > limit ? since : limit;
+  })();
+  // Uptime is a report, in every plan; the plays and alerts files are log exports
+  // (Premium), so a plan without them skips that section and keeps the uptime files.
+  await section("uptime", async () => {
     await csv("data/uptime-daily.csv", "/api/uptime/daily", { day_from: uptimeFrom, day_to: today });
     await csv("data/uptime-by-screen.csv", "/api/reports/uptime", { group_by: "screen", from: uptimeFrom, to: today });
+    return 2;
+  });
+
+  await section("plays and alerts", async () => {
     await csv("data/alerts.csv", "/api/alerts", { state: "all" });
     await csv("data/play-aggregates.csv", "/api/playback", { day_from: uptimeFrom, day_to: today });
     // Plays: one request per window of at most 31 days, joined under one header.
@@ -451,7 +455,7 @@ export async function runProjectExport(api: ExportApi, options: ExportOptions): 
       await rm(piece, { force: true });
     }
     written.add("data/plays.csv");
-    return files + 1;
+    return 3;
   });
 
   await section("media", async () => {

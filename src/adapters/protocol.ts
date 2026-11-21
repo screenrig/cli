@@ -114,7 +114,11 @@ export interface ProjectBillingUsage {
 /** One plan feature and whether the project's plan or featuresets include it (`ProjectPlanFeature` in the contract). */
 export interface ProjectPlanFeature {
   enabled: boolean;
-  id: "video_walls" | "alert_routing" | "reports" | "bi_dashboards" | "connectors" | "media_sync" | "uploaders" | "screen_scope" | "campaigns" | "weighted_rotation" | "data_conditions" | "direct_campaigns" | "library" | "playlist_templates" | "sso" | "audit_log" | "protected_folders" | "schedule_import" | "schedule_calendar" | "playlist_revisions" | "keyed_data" | "scim" | "change_control" | "momentus" | "large_walls";
+  id:
+    | "video_walls" | "alert_routing" | "reports" | "media_sync" | "uploaders" | "campaigns" | "weighted_rotation" | "takeover" | "play_totals"
+    | "bi_dashboards" | "connectors" | "screen_scope" | "data_conditions" | "alert_paging" | "live_view" | "approvals" | "cap_alerts" | "log_exports"
+    | "direct_campaigns" | "library" | "playlist_templates" | "sso" | "audit_log" | "schedule_import" | "schedule_calendar" | "playlist_revisions" | "keyed_data" | "screen_map"
+    | "protected_folders" | "scim" | "change_control" | "momentus" | "large_walls";
   /** The lowest sold plan that includes the feature. */
   required_plan: "plus" | "premium" | "enterprise";
 }
