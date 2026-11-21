@@ -31,8 +31,8 @@ function folderSelector(verb: "Target" | "Capture" = "Target"): Option {
 }
 
 /** --audience on a fleet command: every active screen a rule matches, as the fleet actions route selects it. */
-function audienceSelector(): Option {
-  return new Option("--audience <RULE>", `Target every active screen this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`)
+function audienceSelector(verb = "Target"): Option {
+  return new Option("--audience <RULE>", `${verb} every active screen this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`)
     .argParser(audienceOption).conflicts(["tag", "folder"]);
 }
 
@@ -81,10 +81,11 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   screen.command("list").description("List screens")
     .addOption(new Option("--state <STATE>", "List archived screens; omitted lists active screens").choices(["archived"]))
-    .option("--tag <TAG>", "List only screens carrying this exact tag", screenTagOption)
+    .option("--tag <TAG>", "List only screens carrying this tag, in any letter case", screenTagOption)
     .option("--folder <ID|root>", "List only the screens directly in this screen folder (sfd_...), not those of the folders inside it; root lists the screens outside every folder", screenListFolderOption)
     .addOption(new Option("--field <NAME=VALUE>", "List only screens whose field NAME holds exactly VALUE (repeatable; every one must match)").argParser(screenFieldFilterOption))
     .addOption(new Option("--near <LAT,LON,KM>", "List only screens located within KM kilometres of the point; screens with no location are left out").argParser(screenNearOption))
+    .addOption(new Option("--audience <RULE>", `List only the active screens this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`).argParser(audienceOption))
     .action(bind(handleScreenList));
 
   screen.command("show").description("Inspect a screen")
@@ -307,8 +308,9 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids capture each screen")
     .option("--tag <TAG>", "Capture every active screen carrying this tag", screenTagOption)
     .addOption(folderSelector("Capture"))
-    .option("--output <PATH>", "Write the screenshot to this file; with several ids or --tag, a directory")
-    .option("--concurrency <N>", "Captures in flight at once with several ids or --tag (1-8, default 4)", positiveInteger("concurrency"))
+    .addOption(audienceSelector("Capture"))
+    .option("--output <PATH>", "Write the screenshot to this file; with several screens, a directory")
+    .option("--concurrency <N>", "Captures in flight at once with several screens (1-8, default 4)", positiveInteger("concurrency"))
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .action(bind(handleScreenScreenshot));
 

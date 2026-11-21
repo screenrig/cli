@@ -390,7 +390,7 @@ function screenshotBackend(failing: string, inFlight: { now: number; max: number
   const captures = new Map<string, string>();
   transport.on("GET", "/api/screens", (req) => ({
     status: 200, headers: {},
-    body: { items: [screen(A, { tags: ["Lobby"] }), screen(C, { tags: ["Lobby"], state: "pairing_pending" }), screen(B, { tags: ["Lobby"] }), screen(failing, { tags: ["Lobby"] })].filter((item) => (item.tags as string[]).includes(req.query?.tag ?? "")) },
+    body: { items: [screen(A, { tags: ["Lobby"] }), screen(C, { tags: ["Lobby"], state: "pairing_pending" }), screen(B, { tags: ["Lobby"] }), screen(failing, { tags: ["Lobby"] })].filter((item) => req.query?.audience !== undefined || (item.tags as string[]).includes(req.query?.tag ?? "")) },
   }));
   transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, async (req): Promise<TransportResponse> => {
     const id = req.path.split("/")[3]!;
@@ -540,6 +540,33 @@ test("screen screenshot --tag fans out client-side with bounded concurrency into
   assert.match(human.stdout, new RegExp(`^${B}  ok  .*more/${B}\\.webp$`, "m"));
 });
 
+test("screen screenshot --audience captures the screens the screen list answers for the rule", async () => {
+  const env = await enrolled();
+  const transport = screenshotBackend(MISSING, { now: 0, max: 0 });
+  const rule = { all: [{ tag: "lobby" }, { not: { tag: "kiosk" } }] };
+  const result = await cli(["--json", "screen", "screenshot", "--audience", JSON.stringify(rule), "--output", "shots"], transport, env);
+  assert.equal(result.code, ExitCode.Conflict, result.stdout);
+  assert.equal(transport.calls[0]!.path, "/api/screens");
+  assert.deepEqual(transport.calls[0]!.query, { audience: JSON.stringify(rule) });
+  const data = result.envelope.data;
+  assert.deepEqual(data.selector, { by: "audience", audience: rule });
+  assert.equal(data.matched, 3, "only active screens are captured");
+  assert.deepEqual(data.results.map((item: any) => [item.screen_id, item.status]), [[A, "ok"], [B, "ok"], [MISSING, "failed"]]);
+
+  const both = await cli(["--json", "screen", "screenshot", "--audience", JSON.stringify(rule), "--tag", "Lobby"], screenshotBackend(MISSING, { now: 0, max: 0 }), env);
+  assert.equal(both.code, ExitCode.Usage, both.stdout);
+});
+
+test("screen list --audience sends the rule to the screen list", async () => {
+  const env = await enrolled();
+  const transport = screenshotBackend(MISSING, { now: 0, max: 0 });
+  const result = await cli(["--json", "screen", "list", "--audience", '{"tag":"lobby"}'], transport, env);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(transport.calls[0]!.query, { audience: '{"tag":"lobby"}' });
+  const bad = await cli(["--json", "screen", "list", "--audience", "lobby"], screenshotBackend(MISSING, { now: 0, max: 0 }), env);
+  assert.equal(bad.code, ExitCode.Usage, bad.stdout);
+});
+
 test("screen screenshot fan-out validates output, concurrency, and idempotency before capturing", async () => {
   const env = await enrolled();
   await writeFile(path.join(env.cwd, "taken.webp"), "x");
@@ -595,7 +622,6 @@ test("fleet --audience sends the rule as an audience selector; not and letter ca
     [["screen", "reload", "--audience", "[]"], undefined, /--audience must be a rule as JSON with exactly one of all, any, not, tag, screen_id or folder/],
     [["screen", "reload", "--audience", "@missing.json"], undefined, /missing\.json does not exist/],
     [["screen", "schedule", "set", "--audience", "-", "--file", "-"], "{}", /--audience and --file cannot both read stdin/],
-    [["screen", "screenshot", "--audience", '{"tag":"Cafe"}'], undefined, /does not accept --audience/],
   ] as const) {
     const refused = await cli(["--json", ...argv], transport, env, stdin);
     assert.equal(refused.code, ExitCode.Usage, `${argv.join(" ")}: ${refused.stdout}`);

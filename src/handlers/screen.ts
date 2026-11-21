@@ -2,7 +2,7 @@
 import { newIdempotencyKey } from "../ids.js";
 import { readAuthoringJson } from "../authoring-input.js";
 import { publishScreen } from "../screen-publish.js";
-import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, SCREEN_FOLDER_ID_PATTERN, screenFolderId, screenTag, screenTagList, screenTarget, selectorFlags, folderSubtree, SCREEN_TAGS_MAX, type FleetItem } from "../screen-fleet.js";
+import { audienceRule, fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, SCREEN_FOLDER_ID_PATTERN, screenFolderId, screenTag, screenTagList, screenTarget, selectorFlags, folderSubtree, SCREEN_TAGS_MAX, type FleetItem } from "../screen-fleet.js";
 import { canonicalPairingCode } from "../pairing-code.js";
 import { playlistWarnings, playlistAnswerWarnings, withoutAnswerWarnings, hasFramingRefusal } from "../playlist-warnings.js";
 import { shortApplicationPageWarning } from "../playlist-authoring.js";
@@ -49,6 +49,7 @@ import { aspectMismatchWarnings } from "../aspect-mismatch.js";
 import { clientFor, commandHandler, humanLines, isScreenId, jsonBody, pendingReviewResult, requireFlagValue, requirePrivateNoStore, resolveDownloadOutput, resourceNotes, reviewNoteFrom, simpleGet, simpleList, uptimeDays, type CommandResult, type ResolvedCommandConfig } from "../commands.js";
 
 
+/** The filters of screen list as query parameters; --audience is added by the handler, which may read a file or stdin for it. */
 export function screenListQuery(args: ParsedArgs): { query: Record<string, string>; repeated?: Record<string, string[]> } {
   const state = screenListStateFromArgs(args);
   const tag = screenListTagFromArgs(args);
@@ -191,6 +192,9 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const { query, repeated } = screenListQuery(args);
+  requireFlagValue(args, "audience", `'{"tag":"lobby"}'`);
+  const audience = flagString(args.flags, "audience");
+  if (audience !== undefined) query.audience = JSON.stringify(await audienceRule(audience, runtime));
   const response = await client.listAll("/api/screens", query, repeated ? { queryRepeated: repeated } : undefined);
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   const warnings = Array.isArray(items) ? items.flatMap((screen) => screenStorageWarnings(screen.id, screen, runtime.now())) : [];
@@ -1693,11 +1697,17 @@ export async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntim
     ids = active.map((screen) => screen.id);
     for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
     if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
-  } else if (selector.by === "ids") {
-    ids = selector.screen_ids;
+  } else if (selector.by === "audience") {
+    // The screen list answers the rule as a fleet action selects it: the active screens it matches now.
+    const listed = await client.listAll("/api/screens", { audience: JSON.stringify(selector.audience) }, { uncapped: true });
+    const items = (listed.body as { items?: Screen[] } | undefined)?.items;
+    if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
+    const active = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string");
+    ids = active.map((screen) => screen.id);
+    for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
+    if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
   } else {
-    // Captures fan out here, so the selector must be one the screen list answers: ids, a tag or a folder.
-    throw usageError("screen screenshot takes screen ids, --tag TAG or --folder ID.");
+    ids = selector.screen_ids;
   }
   if (ids.length) {
     try {
