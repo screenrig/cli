@@ -567,7 +567,7 @@ paths:
       x-screenrig-access: write
       operationId: createInvitations
       description: >-
-        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A project_member email invitation to a person who would be an external guest of the project's organization (it is not their home organization) is subject to that organization's guest policy, and guest_not_allowed (403) answers when the policy (allow, domains or none) does not admit the address. Accepting the invitation checks again. Staff and the organization's own admins are exempt. A screen_scope on the invitation is screen scope, which the Premium plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+        Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days; links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused. A member limited to screens does not invite people (outside_screen_scope). A project_member email invitation to a person who would be an external guest of the project's organization (it is not their home organization) is subject to that organization's guest policy, and guest_not_allowed (403) answers when the policy (allow, domains or none) does not admit the address. Accepting the invitation checks again. Staff and the organization's own admins are exempt. A screen_scope on the invitation is screen scope, which the Premium plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A dashboard session also sends proof: a fresh proof of kind project_invitation_create for the project, checked after the request is otherwise admissible (401 reauthentication_required without one). Bearer callers send none.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -1208,6 +1208,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardReauthentication'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/destinations/approval/options:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: startDestinationApproval
+      description: Starts the passkey approval of a webhook's, a notification's or an MCP event subscription's destination. The delivery service issues a single-use challenge bound to the destination's exact address, for the passkeys of the people who may approve the organization's destinations, and the answer carries it as WebAuthn request options. The person must be able to change the resource in the dashboard (a notification that covers other projects, through the organization, as its admin; an MCP event subscription of the session's project, or of any project of an organization they administer) and be an owner or admin of the organization. Every attempt takes fresh options; a challenge is used up when it is presented, accepted or not. Options and complete each admit 60 calls per person and 180 per client address in 10 minutes (rate_limited), apart from the limits of the other proof actions. Dashboard session only, with the session's CSRF header.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationApprovalTarget'
+      responses:
+        '200':
+          description: The WebAuthn request options for navigator.credentials.get.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationApprovalOptions'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/destinations/approval/complete:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: completeDestinationApproval
+      description: Relays the passkey assertion to the delivery service, which verifies it against the keys it holds, and answers the destination's approval. A destination already approved answers its approval too. approval_rejected is an assertion the delivery service did not accept; approval_unavailable is the service not answering. Dashboard session only, with the session's CSRF header.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationApprovalComplete'
+      responses:
+        '200':
+          description: The destination's approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationApprovalResult'
         default:
           $ref: '#/components/responses/Problem'
   /api/me/password:
@@ -11593,6 +11641,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/event-subscriptions:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned dashboard origin
+    parameters:
+      - {name: org_id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: listOrganizationEventSubscriptions
+      description: >-
+        The live MCP event subscriptions of the organization's projects (those a connected app or service client made with events/subscribe over /mcp and that have not lapsed), oldest first (at most 100, the organization's limit), each with its destination's approval, so an admin can approve them with POST /api/destinations/approval/options and complete (kind mcp_subscription). receiver_origin is the receiver's scheme and host only; its path and query are never returned. approval is read with the notification list's bounds (at most 50 reads of the delivery service per answer, answers kept 10 seconds): a row without it is unknown, not approved, and a read soon after fills it. Requires an administrator of the organization; anyone else is not_found.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's event subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationEventSubscriptionList'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -24036,7 +24107,7 @@ paths:
     put:
       operationId: setDashboardMemberApprover
       description: >-
-        Sets whether a member can approve: decide reviews and grant agents Manage access. A member who cannot approve has their agents held to Propose. The project owner, or a member who administers the project's organization (forbidden otherwise); the owner's own row is fixed (resource_conflict); a non-member is not_found. Appends project.member_approver_changed (details user_id, can_approve).
+        Sets whether a member can approve: decide reviews and grant agents Manage access. A member who cannot approve has their agents held to Propose. The project owner, or a member who administers the project's organization (forbidden otherwise); the owner's own row is fixed (resource_conflict); a non-member is not_found. Appends project.member_approver_changed (details user_id, can_approve). Granting it (can_approve true) takes proof: a fresh proof of kind member_access_change for the member's user id (401 reauthentication_required without one); withdrawing it takes none.
       security:
         - dashboardSession: []
       requestBody:
@@ -24108,9 +24179,15 @@ paths:
     delete:
       operationId: clearDashboardMemberScreenScope
       description: >-
-        Gives a scoped member the whole project's screens again. The project owner, or a member who administers the project's organization, only; a member who is not scoped is left as they are. Appends project.member_screen_scope_changed with screen_scope null.
+        Gives a scoped member the whole project's screens again. The project owner, or a member who administers the project's organization, only; a member who is not scoped is left as they are. Appends project.member_screen_scope_changed with screen_scope null. Takes a fresh proof of kind member_access_change for the member's user id (401 reauthentication_required without one).
       security:
         - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
       parameters:
         - name: project_id
           in: query
@@ -24189,9 +24266,15 @@ paths:
     delete:
       operationId: clearDashboardAgentScreenScope
       description: >-
-        Removes the scope of an agent's membership of the session project. The project owner, or a member who administers the project's organization, only. Appends agent.screen_scope_changed with screen_scope null.
+        Removes the scope of an agent's membership of the session project. The project owner, or a member who administers the project's organization, only. Appends agent.screen_scope_changed with screen_scope null. Takes a fresh proof of kind member_access_change for the agent's id (401 reauthentication_required without one).
       security:
         - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
       responses:
         '200':
           description: The agent.
@@ -24249,9 +24332,15 @@ paths:
     delete:
       operationId: clearDashboardMemberUploadScope
       description: >-
-        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner, or a member who administers the project's organization, only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null.
+        Makes an uploader a full member again, who does not approve reviews (turn that on with setDashboardMemberApprover). The project owner, or a member who administers the project's organization, only; a member who is not an uploader is left as they are. Appends project.member_upload_scope_changed with upload_scope null. Takes a fresh proof of kind member_access_change for the member's user id (401 reauthentication_required without one).
       security:
         - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
       parameters:
         - name: project_id
           in: query
@@ -29130,6 +29219,7 @@ components:
       properties:
         can_approve: {type: boolean}
         project_id: {type: string, minLength: 1, maxLength: 200, description: "The project the caller means; a session whose selection has changed is refused with resource_conflict."}
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required when can_approve is true: a fresh proof of kind member_access_change for the member's user id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
     UploadScope:
       type: object
       additionalProperties: false
@@ -31475,7 +31565,7 @@ components:
         action:
           type: string
           pattern: '^[a-z0-9_-]+(\.[a-z0-9_-]+)*$'
-          description: Stable server code. A dashboard change is the matched route's command name, with the verb wherever the name alone would not tell two routes apart (screens.archive, playlists.structure.patch, screens.display.delete, advertising.slots.update); account actions are named (session.sign_in, session.sign_out, session.project_switch, password.set, passkey.add, passkey.rename, passkey.remove, email.change, email.verify, account.delete, reauthentication.<proof kind>).
+          description: Stable server code. A dashboard change is the matched route's command name, with the verb wherever the name alone would not tell two routes apart (screens.archive, playlists.structure.patch, screens.display.delete, advertising.slots.update); account actions are named (session.sign_in, session.sign_out, session.project_switch, password.set, passkey.add, passkey.rename, passkey.remove, email.change, email.verify, account.delete, destination.approve, reauthentication.<proof kind>).
         method: {type: string}
         route: {type: string, description: "The route pattern the server matched, never the request URL."}
         outcome: {$ref: '#/components/schemas/MemberActivityOutcome'}
@@ -31617,6 +31707,7 @@ components:
     DashboardPasswordProof:
       type: object
       additionalProperties: false
+      description: Proof by the current password, for a person who holds no passkey. Once a person holds a passkey every protected change takes the passkey (or a recent single sign-on), and a password proof answers 401 reauthentication_required ("Confirm with a passkey to do this."). Staff never prove with a password.
       required:
         - type
         - password
@@ -31663,10 +31754,12 @@ components:
             - organization_admins_change
             - project_owner_change
             - organization_member_change
+            - project_invitation_create
+            - member_access_change
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens). kind organization_admins_change requires the organization id (an organization admin naming or inviting admins). kind project_owner_change requires the project id (handing a project to another owner). kind organization_member_change requires the member's user id (an organization admin deleting or removing a home member, or resetting their sign-in). For these organization and project kinds a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens). kind organization_admins_change requires the organization id (an organization admin naming or inviting admins). kind project_owner_change requires the project id (handing a project to another owner). kind organization_member_change requires the member's user id (an organization admin deleting or removing a home member, or resetting their sign-in). kind project_invitation_create requires the project id (a person inviting someone into the project by email or link). kind member_access_change requires the member's user id, or the agent's id for an agent's screen scope (letting a member approve reviews, or ending a member's screen or upload scope or an agent's screen scope). For these organization and project kinds a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -31884,6 +31977,9 @@ components:
         screen_scope:
           $ref: '#/components/schemas/ScreenScope'
           description: "project_member only (invalid_request otherwise; not with upload_scope). The person who accepts becomes a member limited to these screen folders and screens (docs/screen-scope.md) and cannot approve reviews until the owner lets them. A person who is already a member keeps their row."
+        proof:
+          $ref: '#/components/schemas/DashboardProof'
+          description: "Dashboard sessions only, where it is required: a fresh proof of kind project_invitation_create for the project, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. A bearer caller that sends it is invalid_request."
       description: Email delivery requires emails. Link delivery is project_member only and omits emails and advertising. ad_buyer requires advertising. At most 50 outstanding member and buyer invitations per organization; an outstanding email invitation of the same kind and address is reused.
       oneOf:
         - properties:
@@ -37776,6 +37872,43 @@ components:
         event_types: {$ref: "#/components/schemas/WebhookEventTypes"}
         enabled: {type: boolean}
         description: {type: string, maxLength: 200, description: An empty string clears the description.}
+    DestinationApprovalTarget:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [webhook, notification, mcp_subscription], description: "webhook: a /api/webhooks webhook; notification: a notification of any channel but email, read through the session's project or its organization; mcp_subscription: an MCP event subscription of the session's project."}
+        id: {type: string, minLength: 1, maxLength: 200}
+    DestinationApprovalOptions:
+      type: object
+      additionalProperties: false
+      required: [request_options]
+      properties:
+        request_options: {type: object, additionalProperties: true, description: "WebAuthn PublicKeyCredentialRequestOptions, passed to navigator.credentials.get: challenge, rpId, timeout, allowCredentials (the passkeys of the people who may approve) and userVerification required."}
+    DestinationApprovalComplete:
+      type: object
+      additionalProperties: false
+      required: [kind, id, credential]
+      properties:
+        kind: {type: string, enum: [webhook, notification, mcp_subscription]}
+        id: {type: string, minLength: 1, maxLength: 200}
+        credential: {type: object, additionalProperties: true, description: WebAuthn assertion response serialized from the PublicKeyCredential the authenticator returned.}
+    DestinationApprovalResult:
+      type: object
+      additionalProperties: false
+      required: [approval]
+      properties:
+        approval: {$ref: "#/components/schemas/DestinationApproval"}
+    DestinationApproval:
+      type: object
+      additionalProperties: false
+      required: [state]
+      description: >-
+        Whether a person approved this destination's exact address with a passkey, as the delivery service records it. pending: nothing is delivered (deliveries fail approval_required and are retried) until an owner or admin of the organization approves it in the dashboard; approved: it delivers. A destination is registered, and its approval exists, from the moment its address is written; a new address is a new destination that waits for approval again. Read-only; absent while the delivery service has not answered for it.
+      properties:
+        state: {type: string, enum: [approved, pending]}
+        approved_by: {type: string, description: "The user id of the person who approved it; absent for a destination approved before approval by passkey began, and while pending."}
+        approved_at: {type: string, format: date-time, description: "When it was approved; absent while pending."}
     Webhook:
       type: object
       additionalProperties: false
@@ -37799,6 +37932,8 @@ components:
         last_failure_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        approval: {$ref: "#/components/schemas/DestinationApproval"}
+        next: {type: string, description: "On a create or an address change whose approval is pending: what happens until a person approves the destination."}
     WebhookWithSecret:
       type: object
       additionalProperties: false
@@ -37819,6 +37954,8 @@ components:
         last_failure_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        approval: {$ref: "#/components/schemas/DestinationApproval"}
+        next: {type: string, description: "On a create or an address change whose approval is pending: what happens until a person approves the destination."}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: The signing secret. Store it; it is not shown again.}
     MediaSyncAccountConfig:
       type: object
@@ -38085,8 +38222,8 @@ components:
         last_status: {type: integer, description: HTTP status of the last attempt when one was received.}
         last_error:
           type: string
-          enum: [http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable]
-          description: Why the last attempt failed. url_rejected means the host no longer resolves only to public addresses. payment_required is a historical value that stored deliveries may carry.
+          enum: [http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, content_denied, rate_limited, approval_required]
+          description: Why the last attempt failed. url_rejected means the host no longer resolves only to public addresses. content_denied means the delivery's address, headers or body contained a screenRIG credential or other secret, so it was not sent; it is not retried. rate_limited means the destination reached its delivery limit; the delivery is retried. approval_required means the destination is waiting for a person to approve it with a passkey in the dashboard; the delivery is retried. payment_required is a historical value that stored deliveries may carry.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -38102,7 +38239,7 @@ components:
         error:
           oneOf:
             - type: string
-              enum: [http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, secret_unavailable]
+              enum: [http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, secret_unavailable, content_denied, rate_limited, approval_required]
             - type: "null"
           description: Why the attempt failed, as WebhookDelivery.last_error; null when it succeeded.
         duration_ms: {type: integer, minimum: 0}
@@ -38337,6 +38474,8 @@ components:
         created_at: {type: string, format: date-time, description: "When the notification was created."}
         updated_at: {type: string, format: date-time, description: "When the notification last changed."}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
+        approval: {$ref: "#/components/schemas/DestinationApproval", description: "Webhook, Slack, Teams, PagerDuty and Telegram only: whether a person approved the destination with a passkey. While it is pending nothing is sent."}
+        next: {type: string, description: "On a create or an address change whose approval is pending: what happens until a person approves the destination."}
     ReportColumn: {type: object, additionalProperties: false, required: [key, label, type], properties: {key: {type: string}, label: {type: string}, type: {type: string, enum: [text, int, decimal, percent, hours, date, datetime]}}}
     ReportParam: {type: object, additionalProperties: false, required: [name, description], properties: {name: {type: string}, description: {type: string}}}
     ReportKindInfo: {type: object, additionalProperties: false, required: [kind, title, description, params], properties: {kind: {type: string, description: "Name of the report kind; it is the kind segment of the report route."}, title: {type: string, description: "Display title of the report."}, description: {type: string, description: "What the report contains."}, params: {type: array, items: {$ref: "#/components/schemas/ReportParam"}, description: "Query parameters the report accepts, each with its name and meaning."}}}
@@ -38436,6 +38575,29 @@ components:
     ReportSubscriptionWrite: {type: object, additionalProperties: false, required: [name, kind, schedule, format, recipients], properties: {name: {type: string, minLength: 1, maxLength: 100}, kind: {type: string, enum: [fleet_health, uptime, publishing, alerts, alert_log, proof_of_play]}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}, description: "The report's filters other than the days (GET /api/reports lists them)."}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}, description: "user_id or email address of project members."}, enabled: {type: boolean, default: true}}}
     ReportSubscriptionPatch: {type: object, additionalProperties: false, properties: {name: {type: string, minLength: 1, maxLength: 100}, filters: {type: object, additionalProperties: {type: string, maxLength: 200}}, schedule: {$ref: "#/components/schemas/ReportSchedule"}, format: {type: string, enum: [pdf, xlsx, csv]}, recipients: {type: array, minItems: 1, maxItems: 25, items: {type: string, maxLength: 254}}, enabled: {type: boolean}}}
     OrganizationNotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/Notification"}}}}
+    OrganizationEventSubscriptionList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/OrganizationEventSubscription"}}}}
+    OrganizationEventSubscription:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, project_name, event, created_at]
+      description: An MCP event subscription of one of the organization's projects, as its admins see it to approve its destination.
+      properties:
+        id: {type: string, description: "The subscription id (sub_...), the id of an approval of kind mcp_subscription."}
+        project_id: {type: string}
+        project_name: {type: string}
+        event: {type: string, description: "The MCP event name it subscribes to."}
+        receiver_origin: {type: string, description: "The receiver's scheme and host (https://host[:port]); absent when the stored address does not parse."}
+        owner:
+          type: object
+          additionalProperties: false
+          required: [kind, id]
+          description: The connected app (agent) or service client that subscribed.
+          properties:
+            kind: {type: string, enum: [agent, client]}
+            id: {type: string}
+            name: {type: string, description: "Its name; absent when it cannot be read (it was removed)."}
+        created_at: {type: string, format: date-time}
+        approval: {$ref: "#/components/schemas/DestinationApproval"}
     OrganizationNotificationWrite:
       type: object
       additionalProperties: false
@@ -38543,7 +38705,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required (historical), webhook_disabled, webhook_deleted, event_expired, secret_unavailable (the signing secret or the custom headers cannot be opened; send the headers again), body_too_large (the body a template rendered is over 262144 bytes), email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, a group_empty one because a publish removed the tag or folder from the campaign's audience, or a card_data_stale one because the card's data was deleted, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required (historical), webhook_disabled, webhook_deleted, event_expired, secret_unavailable (the signing secret or the custom headers cannot be opened; send the headers again), body_too_large (the body a template rendered is over 262144 bytes), content_denied (the delivery's address, headers or body contained a screenRIG credential or other secret, so it was not sent; it is not retried), rate_limited (the destination reached its delivery limit; the delivery is retried), approval_required (the destination is waiting for a person to approve it with a passkey in the dashboard; the delivery is retried), email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), outside_hours (the notification's active hours were closed and it drops notices outside them), below_severity (the notice is below min_severity, which was raised after it was queued), no_recipients (no recipient is a member with a verified address who has not unsubscribed), planned_reboot (the screen crashed while restarting for a reboot the backend sent, until it is done or ten minutes after it was sent; its offline and display disconnected notices wait for the end of that period instead), grouped (the screen is part of a group whose one notice says it; group_id names the group), no_longer_judged (a loop_stalled, glass_blank or glass_frozen condition ended because its check stopped judging the screen, a reach_dropped one because the campaign was published again or deleted, a group_empty one because a publish removed the tag or folder from the campaign's audience, or a card_data_stale one because the card's data was deleted, not because it was seen to recover, so no mail or chat notice says it did). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0, description: "How long the last attempt took, in milliseconds."}
         completed_at: {type: string, format: date-time, description: "When the delivery reached its final state; absent while it is pending."}
         created_at: {type: string, format: date-time, description: "When the delivery was queued."}
@@ -42240,3 +42402,6 @@ x-problem-codes:
   - app_store_account_mismatch
   - education_not_eligible
   - app_store_plan_conflict
+  - approval_rejected
+  - approval_unavailable
+  - approval_no_passkey
