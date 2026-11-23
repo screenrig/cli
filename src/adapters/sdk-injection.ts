@@ -1,17 +1,12 @@
-import { createHash } from "node:crypto";
 import { processSettings } from "../host-settings.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { readAsset } from "../assets.js";
-import { packError } from "../pack/limits.js";
+import { bufferEntries, packError, rethrowRule } from "../pack/limits.js";
+import { injectRuntime, SDK_PROTOCOL_VERSION, SDK_RUNTIME_PATH } from "../pack/release-core.js";
 import type { ArchiveEntry } from "../pack/types.js";
 
-export const SDK_PROTOCOL_VERSION = "1";
-export const SDK_RUNTIME_PATH = "_screenrig/runtime.js";
-export const SDK_MARKER = `data-screenrig-sdk="${SDK_PROTOCOL_VERSION}"`;
-// This bootstrap must execute before any customer classic or module script.
-// `defer` does not provide a cross-kind ordering guarantee with module scripts.
-export const SDK_SCRIPT_TAG = `<script src="./${SDK_RUNTIME_PATH}" ${SDK_MARKER}></script>`;
+export { SDK_MARKER, SDK_PROTOCOL_VERSION, SDK_RUNTIME_PATH, SDK_SCRIPT_TAG } from "../pack/release-core.js";
 
 export interface SdkInjectionRequest {
   sdk_version?: string;
@@ -30,45 +25,6 @@ export interface SdkInjector {
   inject(entries: ArchiveEntry[], request?: SdkInjectionRequest): Promise<SdkInjectionResult>;
 }
 
-function attribute(tag: string, name: string): string | undefined {
-  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
-function injectTag(html: string): string {
-  const rawMarkers = html.match(/data-screenrig-sdk/gi) ?? [];
-  const markedScripts = [...html.matchAll(/<script\b[^>]*data-screenrig-sdk[^>]*>\s*<\/script\s*>/gi)];
-  if (rawMarkers.length !== markedScripts.length) {
-    throw packError("sdk_marker_invalid", "data-screenrig-sdk must appear only on a complete script element");
-  }
-  if (markedScripts.length > 1) {
-    throw packError("sdk_marker_duplicate", "index.html contains more than one ScreenRig SDK marker");
-  }
-  if (markedScripts.length === 1) {
-    const tag = markedScripts[0]?.[0] ?? "";
-    const version = attribute(tag, "data-screenrig-sdk");
-    const source = attribute(tag, "src")?.replace(/^\.\//, "");
-    if (version !== SDK_PROTOCOL_VERSION || source !== SDK_RUNTIME_PATH || /\b(?:async|defer)\b/i.test(tag)) {
-      throw packError("sdk_marker_incompatible", "Existing ScreenRig SDK marker has an incompatible version, source, or loading mode");
-    }
-    return html;
-  }
-  // Keep the prologue and inert head metadata (including charset, CSP and base)
-  // ahead of the runtime, then stop before any script or body content. Matching
-  // whole comments, quoted attributes and raw-text elements avoids fake tags.
-  // This also leaves the DOCTYPE first when the document omits <head>.
-  const tagEnd = `(?:[^"'<>]|"[^"]*"|'[^']*')*>`;
-  const prefix = new RegExp(
-    `(?:\\s+|<!--[\\s\\S]*?-->|<!doctype\\b${tagEnd}`
-      + `|<(?:html|head|meta|base|link)(?=[\\s/>])${tagEnd}`
-      + `|<(title|style|noscript)(?=[\\s/>])${tagEnd}[\\s\\S]*?<\\/\\1\\s*>)`,
-    "iy",
-  );
-  let offset = 0;
-  while (prefix.exec(html)) offset = prefix.lastIndex;
-  return `${html.slice(0, offset)}${SDK_SCRIPT_TAG}\n${html.slice(offset)}`;
-}
-
 export class ArchiveSdkInjector implements SdkInjector {
   constructor(private readonly runtime: Buffer) {}
 
@@ -77,26 +33,11 @@ export class ArchiveSdkInjector implements SdkInjector {
     if (version !== SDK_PROTOCOL_VERSION) {
       throw packError("sdk_version_incompatible", `Requested SDK protocol ${version}; this release supports ${SDK_PROTOCOL_VERSION}`);
     }
-    if (entries.some((entry) => entry.path.toLocaleLowerCase("en-US") === SDK_RUNTIME_PATH.toLocaleLowerCase("en-US"))) {
-      throw packError("sdk_path_collision", `${SDK_RUNTIME_PATH} is reserved for ScreenRig archive injection`);
-    }
-    const index = entries.findIndex((entry) => entry.path === "index.html" && entry.type === "file");
-    if (index < 0) {
-      throw packError("missing_index", "Application root must contain index.html");
-    }
-    const cloned = entries.map((entry) => ({ ...entry, data: entry.data ? Buffer.from(entry.data) : undefined }));
-    const indexEntry = cloned[index];
-    if (!indexEntry?.data) {
-      throw packError("missing_index", "index.html has no readable contents");
-    }
-    const nextHtml = Buffer.from(injectTag(indexEntry.data.toString("utf8")), "utf8");
-    cloned[index] = { ...indexEntry, data: nextHtml, size: nextHtml.length };
-    const hash = createHash("sha256").update(this.runtime).digest("hex");
-    if (request.sdk_sha256 && request.sdk_sha256 !== hash) {
+    const injected = await injectRuntime(entries, this.runtime).catch(rethrowRule);
+    if (request.sdk_sha256 && request.sdk_sha256 !== injected.asset_sha256) {
       throw packError("sdk_hash_mismatch", "Pinned SDK runtime hash does not match the requested compatibility record");
     }
-    cloned.push({ path: SDK_RUNTIME_PATH, type: "file", data: Buffer.from(this.runtime), size: this.runtime.length });
-    return { entries: cloned, injected: true, reason: "Pinned ScreenRig browser runtime injected into archive only", asset_path: SDK_RUNTIME_PATH, asset_sha256: hash };
+    return { entries: bufferEntries(injected.entries), injected: true, reason: "Pinned ScreenRig browser runtime injected into archive only", asset_path: SDK_RUNTIME_PATH, asset_sha256: injected.asset_sha256 };
   }
 }
 

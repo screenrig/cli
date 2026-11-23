@@ -1,13 +1,8 @@
 import type { OperationLogger } from "../log/types.js";
 
-export interface ArchiveLimits {
-  application_archive_bytes: number;
-  application_expanded_bytes: number;
-  application_file_count: number;
-  application_file_bytes: number;
-  application_path_depth: number;
-  application_path_bytes: number;
-}
+import type { ArchiveLimits } from "./release-core.js";
+
+export type { ArchiveLimits };
 
 export interface ArchiveEntry {
   path: string;

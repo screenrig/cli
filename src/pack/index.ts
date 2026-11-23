@@ -1,5 +1,6 @@
 import { defaultSdkInjector } from "../adapters/sdk-injection.js";
-import { mergeLimits, packError } from "./limits.js";
+import { bufferEntries, mergeLimits, packError, rethrowRule } from "./limits.js";
+import { finishRelease } from "./release-core.js";
 import { gzipDeterministic, sha256Hex, writeTar } from "./archive.js";
 import type { ArchiveEntry, PackOptions, PackResult } from "./types.js";
 import { walkDirectory } from "./walk.js";
@@ -29,40 +30,32 @@ export async function releaseEntries(root: string, options: Pick<PackOptions, "l
         return result;
       })
     : await walkDirectory(root, limits);
-  const hoisted = hoistInlineAssets(walked);
+  const hoisted = await hoistInlineAssets(walked);
   const injector = options.injector ?? defaultSdkInjector;
   const injected = await injector.inject(hoisted);
-  const entries = injected.entries
-    .slice()
-    .sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
-
-  const files = entries.filter((entry) => entry.type === "file");
-  const expandedBytes = files.reduce((sum, entry) => sum + entry.size, 0);
   const enforceLimits = () => {
-    if (files.length > limits.application_file_count) {
-      throw packError("too_many_files", `Archive contains ${files.length} files; limit is ${limits.application_file_count}`);
-    }
-    if (expandedBytes > limits.application_expanded_bytes) {
-      throw packError("expanded_too_large", `Expanded archive ${expandedBytes} exceeds ${limits.application_expanded_bytes}`);
+    try {
+      return finishRelease(injected.entries, limits);
+    } catch (error) {
+      return rethrowRule(error);
     }
   };
-  if (logger?.enabled) {
-    await logger.withLocal({ op: "pack.limits", message: "enforce archive limits" }, async (span) => {
-      enforceLimits();
-      span.finish({
-        file_count: files.length,
-        expanded_bytes: expandedBytes,
-        application_file_count: limits.application_file_count,
-        application_expanded_bytes: limits.application_expanded_bytes,
-      });
-    });
-  } else {
-    enforceLimits();
-  }
+  const release = logger?.enabled
+    ? await logger.withLocal({ op: "pack.limits", message: "enforce archive limits" }, async (span) => {
+        const finished = enforceLimits();
+        span.finish({
+          file_count: finished.file_count,
+          expanded_bytes: finished.expanded_bytes,
+          application_file_count: limits.application_file_count,
+          application_expanded_bytes: limits.application_expanded_bytes,
+        });
+        return finished;
+      })
+    : enforceLimits();
   return {
-    entries,
-    file_count: files.length,
-    expanded_bytes: expandedBytes,
+    entries: bufferEntries(release.entries),
+    file_count: release.file_count,
+    expanded_bytes: release.expanded_bytes,
     sdk_injection: {
       injected: injected.injected,
       reason: injected.reason,

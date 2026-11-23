@@ -359,25 +359,12 @@ export interface Capabilities {
   features: Record<string, unknown>;
 }
 
-export interface ArchiveLimits {
-  application_archive_bytes: number;
-  application_expanded_bytes: number;
-  application_file_count: number;
-  application_file_bytes: number;
-  application_path_depth: number;
-  application_path_bytes: number;
-}
+export { DEFAULT_ARCHIVE_LIMITS } from "../pack/release-core.js";
+export type { ArchiveLimits } from "../pack/release-core.js";
 
-export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
-  application_archive_bytes: 100 * 1024 * 1024,
-  application_expanded_bytes: 250 * 1024 * 1024,
-  application_file_count: 5000,
-  application_file_bytes: 32 * 1024 * 1024,
-  application_path_depth: 16,
-  application_path_bytes: 255,
-};
+import type { ArchiveLimits as Limits } from "../pack/release-core.js";
 
-export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimits {
+export function limitsFromCapabilities(capabilities: Capabilities): Limits {
   return {
     application_archive_bytes: capabilities.application_compressed_bytes,
     application_expanded_bytes: capabilities.application_expanded_bytes,

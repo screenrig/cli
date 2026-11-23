@@ -1,18 +1,9 @@
 import { constants } from "node:fs";
 import { lstat, open, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { packError } from "./limits.js";
-import {
-  caseFold,
-  compileIgnore,
-  hasIllegalChars,
-  hasTraversal,
-  isBuiltinIgnored,
-  pathDepth,
-  posixNormalize,
-  toPosixRelative,
-  utf8Bytes,
-} from "./paths.js";
+import { packError, rethrowRule } from "./limits.js";
+import { compileIgnore, posixNormalize, toPosixRelative } from "./paths.js";
+import { admitPath } from "./release-core.js";
 import type { ArchiveEntry } from "./types.js";
 import type { ArchiveLimits } from "./types.js";
 
@@ -53,8 +44,7 @@ export async function loadScreenrigIgnore(root: string): Promise<(posixPath: str
 export async function walkDirectory(root: string, limits: ArchiveLimits): Promise<ArchiveEntry[]> {
   const extraIgnore = await loadScreenrigIgnore(root);
   const entries: ArchiveEntry[] = [];
-  const seenNormalized = new Set<string>();
-  const seenFolded = new Set<string>();
+  const seen = { normalized: new Set<string>(), folded: new Set<string>() };
   let fileCount = 0;
   let expandedBytes = 0;
 
@@ -73,27 +63,15 @@ export async function walkDirectory(root: string, limits: ArchiveLimits): Promis
 
     const isDir = st.isDirectory();
     if (posixPath) {
-      if (hasTraversal(posixPath) || posixPath.startsWith("/") || hasIllegalChars(posixPath)) {
-        throw packError("path_traversal", `Rejected path ${posixPath}`);
+      let admitted: boolean;
+      try {
+        admitted = admitPath(posixPath, isDir, limits, seen, extraIgnore);
+      } catch (error) {
+        rethrowRule(error);
       }
-      if (utf8Bytes(posixPath) > limits.application_path_bytes) {
-        throw packError("path_too_long", `Path exceeds ${limits.application_path_bytes} bytes: ${posixPath}`);
-      }
-      if (pathDepth(posixPath) > limits.application_path_depth) {
-        throw packError("path_too_deep", `Path exceeds depth ${limits.application_path_depth}: ${posixPath}`);
-      }
-      if (isBuiltinIgnored(posixPath, isDir) || extraIgnore(posixPath, isDir)) {
+      if (!admitted) {
         return;
       }
-      if (seenNormalized.has(posixPath)) {
-        throw packError("duplicate_path", `Duplicate normalized path: ${posixPath}`);
-      }
-      const folded = caseFold(posixPath);
-      if (seenFolded.has(folded)) {
-        throw packError("duplicate_path", `Duplicate case-folded path: ${posixPath}`);
-      }
-      seenNormalized.add(posixPath);
-      seenFolded.add(folded);
     }
 
     if (st.isSymbolicLink()) {

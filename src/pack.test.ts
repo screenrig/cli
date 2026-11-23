@@ -342,9 +342,9 @@ function inlineEntry(path: string, html: string) {
   return { path, type: "file" as const, data: Buffer.from(html, "utf8"), size: Buffer.byteLength(html) };
 }
 
-test("hoists inline style and executable script into external files", () => {
+test("hoists inline style and executable script into external files", async () => {
   const html = `<!doctype html><html><head><style>body{background:#123}</style></head><body><script>console.log("hi")</script><script type="module">export default 1</script></body></html>`;
-  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  const entries = await hoistInlineAssets([inlineEntry("index.html", html)]);
   const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
   assert.doesNotMatch(rewritten, /<style>/);
   assert.doesNotMatch(rewritten, /console\.log/);
@@ -367,17 +367,17 @@ for (const artwork of [
   `<svg><foreignObject><div><svg><style>rect{fill:red}</style><rect/></svg></div></foreignObject></svg>`,
   `<svg><style/><rect/></svg>`,
 ]) {
-  test(`preserves SVG styles and following shapes: ${artwork}`, () => {
+  test(`preserves SVG styles and following shapes: ${artwork}`, async () => {
     const entry = inlineEntry("index.html", artwork);
-    assert.deepEqual(hoistInlineAssets([entry]), [entry]);
+    assert.deepEqual(await hoistInlineAssets([entry]), [entry]);
   });
 }
 
-test("hoists HTML styles across SVG integration points and back into the document", () => {
+test("hoists HTML styles across SVG integration points and back into the document", async () => {
   const svgStyle = `<style>rect{fill:red}</style>`;
   const htmlStyle = `<style>p{color:blue}</style>`;
   const html = `<svg>${svgStyle}<foreignObject><div><br>${htmlStyle}</div></foreignObject><desc>${htmlStyle}</desc><title>${htmlStyle}</title>${svgStyle}</svg>${htmlStyle}<svg/>${htmlStyle}`;
-  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  const entries = await hoistInlineAssets([inlineEntry("index.html", html)]);
   const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
   assert.equal(rewritten.split(svgStyle).length - 1, 2);
   assert.ok(!rewritten.includes(htmlStyle));
@@ -386,14 +386,14 @@ test("hoists HTML styles across SVG integration points and back into the documen
   assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:blue}");
 });
 
-test("SVG-looking text in comments and HTML raw text does not change style handling", () => {
+test("SVG-looking text in comments and HTML raw text does not change style handling", async () => {
   const html = `<!-- <svg> --><title><svg></title><textarea><svg></textarea><script type="application/json">"<svg>"</script><style>p{color:red}</style>`;
-  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  const entries = await hoistInlineAssets([inlineEntry("index.html", html)]);
   assert.equal(entries.find((entry) => entry.path.endsWith(".css"))!.data!.toString("utf8"), "p{color:red}");
 });
 
-test("preserving SVG styles still checks unsafe attributes on following shapes", () => {
-  assert.throws(
+test("preserving SVG styles still checks unsafe attributes on following shapes", async () => {
+  await assert.rejects(
     () => hoistInlineAssets([inlineEntry("index.html", `<svg><style>rect{fill:red}</style><rect onclick="go()"/></svg>`)]),
     (error: unknown) => error instanceof CliError && error.problem.code === "inline_event_handler",
   );
@@ -428,9 +428,9 @@ for (const [name, attributes] of [
   ["references without semicolons", `data-label="&copy &amp=raw &notit; &#49"`],
   ["attribute spelling and empty values", `DATA-Label = 'R&amp;D' data-flag data-empty=""`],
 ] as const) {
-  test(`hoisted script preserves ${name} in attributes`, () => {
+  test(`hoisted script preserves ${name} in attributes`, async () => {
     const script = "document.body.dataset.label = document.currentScript.dataset.label";
-    const entries = hoistInlineAssets([inlineEntry("index.html", `<script ${attributes}>${script}</script>`)]);
+    const entries = await hoistInlineAssets([inlineEntry("index.html", `<script ${attributes}>${script}</script>`)]);
     const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
     assert.ok(rewritten.startsWith(`<script ${attributes} src="`), rewritten);
     assert.equal(entries.find((entry) => entry.path.endsWith(".js"))!.data!.toString("utf8"), script);
@@ -438,8 +438,8 @@ for (const [name, attributes] of [
 }
 
 for (const media of ["screen and (min-width: &#49;px)", "screen and (width &gt; 1px)"]) {
-  test(`hoisted stylesheet preserves media="${media}"`, () => {
-    const entries = hoistInlineAssets([inlineEntry("index.html", `<style media="${media}" title='R&amp;D'>p{color:red}</style>`)]);
+  test(`hoisted stylesheet preserves media="${media}"`, async () => {
+    const entries = await hoistInlineAssets([inlineEntry("index.html", `<style media="${media}" title='R&amp;D'>p{color:red}</style>`)]);
     const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
     assert.match(rewritten, /^<link rel="stylesheet" href="[^"]+"/);
     assert.ok(rewritten.endsWith(` media="${media}" title='R&amp;D'>`), rewritten);
@@ -447,8 +447,8 @@ for (const media of ["screen and (min-width: &#49;px)", "screen and (width &gt; 
   });
 }
 
-test("hoisted script still removes inline async and defer attributes", () => {
-  const entries = hoistInlineAssets([inlineEntry("index.html", `<script ASYNC defer="defer" data-label='R&amp;D'>void 0</script>`)]);
+test("hoisted script still removes inline async and defer attributes", async () => {
+  const entries = await hoistInlineAssets([inlineEntry("index.html", `<script ASYNC defer="defer" data-label='R&amp;D'>void 0</script>`)]);
   const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
   assert.ok(rewritten.startsWith(`<script data-label='R&amp;D' src="`), rewritten);
   assert.doesNotMatch(rewritten, /async|defer/i);
@@ -471,8 +471,8 @@ test("packed archive preserves authored script and style attributes deterministi
   }
 });
 
-test("hoisted assets resolve relative to a nested HTML page", () => {
-  const entries = hoistInlineAssets([inlineEntry("pages/board.html", "<style>p{margin:0}</style>")]);
+test("hoisted assets resolve relative to a nested HTML page", async () => {
+  const entries = await hoistInlineAssets([inlineEntry("pages/board.html", "<style>p{margin:0}</style>")]);
   const rewritten = entries.find((entry) => entry.path === "pages/board.html")!.data!.toString("utf8");
   const href = /<link rel="stylesheet" href="([^"]+)">/.exec(rewritten)![1]!;
   const resolved = path.posix.normalize(path.posix.join("pages", href));
@@ -561,35 +561,35 @@ export const image = new URL("./assets/logo.png?v=1#logo", import.meta.url).href
   }
 });
 
-test("refuses generated inline asset collisions beside root and nested documents", () => {
+test("refuses generated inline asset collisions beside root and nested documents", async () => {
   for (const document of ["index.html", "pages/detail.html"]) {
     const html = inlineEntry(document, "<style>p{margin:0}</style>");
-    const asset = hoistInlineAssets([html]).find((entry) => entry.path.endsWith(".css"))!;
-    assert.throws(
+    const asset = (await hoistInlineAssets([html])).find((entry) => entry.path.endsWith(".css"))!;
+    await assert.rejects(
       () => hoistInlineAssets([html, inlineEntry(asset.path, "authored asset")]),
       (error: unknown) => error instanceof CliError && error.problem.code === "inline_asset_conflict" && error.problem.detail.includes(asset.path),
     );
   }
 });
 
-test("leaves external scripts and non-executable script data blocks inline", () => {
+test("leaves external scripts and non-executable script data blocks inline", async () => {
   const dataBlock = `<script type="application/json">{"ok":true}</script>`;
   const external = `<script src="./app.js"></script>`;
-  const entries = hoistInlineAssets([inlineEntry("index.html", `<head></head><body>${dataBlock}${external}</body>`)]);
+  const entries = await hoistInlineAssets([inlineEntry("index.html", `<head></head><body>${dataBlock}${external}</body>`)]);
   const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
   assert.match(rewritten, /<script type="application\/json">\{"ok":true\}<\/script>/);
   assert.match(rewritten, /<script src="\.\/app\.js"><\/script>/);
   assert.equal(entries.length, 1);
 });
 
-test("refuses an inline event handler and a javascript: URL with the file and line", () => {
+test("refuses an inline event handler and a javascript: URL with the file and line", async () => {
   const handler = `<div>\n  <button onclick="go()">Go</button>\n</div>`;
-  assert.throws(
+  await assert.rejects(
     () => hoistInlineAssets([inlineEntry("pages/board.html", handler)]),
     (error: unknown) => error instanceof CliError && error.problem.code === "inline_event_handler" && /pages\/board\.html:2/.test(error.problem.detail),
   );
   const javascriptUrl = `<a href="jAvAsCrIpT&#58;go()">x</a>`;
-  assert.throws(
+  await assert.rejects(
     () => hoistInlineAssets([inlineEntry("index.html", javascriptUrl)]),
     (error: unknown) => error instanceof CliError && error.problem.code === "javascript_url",
   );

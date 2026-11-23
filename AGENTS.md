@@ -31,6 +31,9 @@ Players, backend services or the site.
   source: register a `set` or `export` subcommand with `subcommand()`, never
   start a clause of a message with "pass" (write "name a file"), and read the
   environment only by name in `src/host-settings.ts`.
+- `src/pack/release-core.ts` is the platform-neutral half of `app pack` (path rules, inline hoisting, runtime
+  injection, limits, the ustar writer). It imports nothing and uses only what Node and browsers share; the dashboard
+  vendors it to prepare a web app zip in the browser, so a change here changes what both send.
 - Commands load on demand: `src/cli-commands/index.ts` maps each top-level
   command to a bundle in `src/bundles/`, which registers its commands and
   imports their handlers from `src/handlers/`; `src/commands.ts` keeps what
