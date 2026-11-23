@@ -234,7 +234,7 @@ paths:
       security: []
       summary: Send a website contact message
       description: >-
-        Anonymous same-origin JSON intake for the website contact form. Requires the website Origin and an Idempotency-Key of 20-128 letters, digits, hyphens or underscores. Creates no account or session. Saves the message and reply email before acknowledging it; the support worker delivers them to the configured support Slack channel. The visitor-supplied email is contact information, never identity proof. Exact retries return the same acknowledgement without another delivery; a changed body with the same key is idempotency_mismatch. At most 10 new messages per client IP per hour (IPv6 grouped by /64), 3 per email per day and 200 globally per hour; all requests share a 120-per-IP-per-minute limit. Retry-After is authoritative. Messages remain queued during delivery failures; delivered records expire after 30 days.
+        Anonymous same-origin JSON intake for the website contact form. Requires the website Origin and an Idempotency-Key of 20-128 letters, digits, hyphens or underscores. Creates no account or session. Saves the message and reply email before acknowledging it; the support worker delivers them to the configured support Slack channel. The visitor-supplied email is contact information, never identity proof. Exact retries return the same acknowledgement without another delivery; a changed body with the same key is idempotency_mismatch. At most 10 new messages per client IP per hour (IPv6 grouped by /64), 3 per email per day and 200 globally per hour; all requests share a 120-per-IP-per-minute limit. Retry-After is authoritative. Messages remain queued during delivery failures; delivered records expire after 30 days. A message that pitches the sender's own services to screenRIG is refused with 422 submission_rejected and is not stored.
       parameters:
         - name: Origin
           in: header
@@ -2067,13 +2067,14 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listApplications
-      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
+      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, use keeps those of one use, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks; with use, use_counts too. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ApplicationSearchQuery'
         - $ref: '#/components/parameters/ApplicationPublishedQuery'
+        - $ref: '#/components/parameters/ApplicationUseQuery'
         - $ref: '#/components/parameters/ApplicationIDsQuery'
         - $ref: '#/components/parameters/ApplicationListSort'
         - $ref: '#/components/parameters/NamedListAfter'
@@ -2137,6 +2138,30 @@ paths:
   /api/applications/{id}/releases:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listApplicationReleases
+      description: >-
+        Lists the releases of an application, newest accepted first: those being published, ready and failed. latest marks the newest ready release (latest_ready_release). placements counts the application primitives of the project's playlists that pin each release. A release is kept while it is the latest, while a playlist, a pending review or a screen's live grant names it, and for 30 days after a newer release became ready (a failed one: after it failed); then it is removed and expires_at, absent while it is kept for one of those reasons, says when. actor or agent is who sent it, absent for a release whose sender is no longer recorded. Pin a listed ready release everywhere with POST /api/applications/{id}/releases/{release_id}/use.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - {name: cursor, in: query, required: false, schema: {type: string, pattern: "^rlc1_[0-9]{1,16}_.{1,120}$"}, description: "The next_cursor of the previous page."}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: One page of releases.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationReleasePage'
+        default:
+          $ref: '#/components/responses/Problem'
+      servers:
+        - url: https://screenrig.ai
+          description: Backend-owned project dashboard origin
     post:
       x-screenrig-access: write
       operationId: uploadApplicationRelease
@@ -2147,7 +2172,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Publishes an immutable new release of an owned application using the same bounded tar.gz upload pipeline. If-Match guards the application revision; acceptance increments it, and successful publication increments it again when latest_ready_release changes. Name and application identity are preserved. Existing playlist release pins are not changed. An identical idempotent retry returns the original operation even after revision changes. The proxy in front of the API ends a request it has not answered within about 100 s, so a large archive on a slow uplink fails here; POST /api/applications/{id}/uploads sends the archive straight to the object store instead.
+      description: Publishes an immutable new release of an owned application using the same bounded tar.gz upload pipeline. If-Match guards the application revision; acceptance increments it, and successful publication increments it again when latest_ready_release changes. Name and application identity are preserved. Existing playlist release pins are not changed; POST /api/applications/{id}/releases/{release_id}/use pins every placement to a release. An identical idempotent retry returns the original operation even after revision changes. The proxy in front of the API ends a request it has not answered within about 100 s, so a large archive on a slow uplink fails here; POST /api/applications/{id}/uploads sends the archive straight to the object store instead.
       security:
         - projectBearer: []
       parameters:
@@ -2181,6 +2206,42 @@ paths:
                 $ref: '#/components/schemas/OperationAccepted'
         default:
           $ref: '#/components/responses/Problem'
+  /api/applications/{id}/releases/{release_id}/use:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - {name: release_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 120}}
+    post:
+      x-screenrig-access: write
+      operationId: useApplicationRelease
+      description: >-
+        Pins every placement of the application to one of its ready releases: each application primitive of the project's playlists that pins another release (temporary playlists excepted) moves to release_id, one playlist write each, so the screens that show those playlists converge on it. It rolls an application back to an earlier release, or forward to the latest, without editing each playlist. With dry_run nothing is written and every playlist answers would_change. Otherwise each playlist answers applied (with its new revision), unchanged (already pinned) or refused with the problem a write of that playlist would answer, such as an unapproved playlist, a template without playlist templates in the plan, or params that differ from another primitive pinning the release in that playlist. Playlists are written one at a time, so a refusal leaves the others applied; send the request again to retry, which skips what is already pinned. A credential that proposes cannot apply it (forbidden), and from the dashboard only the owner or a member who can approve can. A release that is not ready is resource_conflict; one of another application is not_found.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                dry_run: {type: boolean, default: false, description: "Answer what would change without writing."}
+      responses:
+        '200':
+          description: What changed, or would change, in each playlist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationReleaseUse'
+        default:
+          $ref: '#/components/responses/Problem'
+      servers:
+        - url: https://screenrig.ai
+          description: Backend-owned project dashboard origin
   /api/applications/uploads:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -21235,14 +21296,14 @@ paths:
         description: Backend-owned project dashboard origin
     get:
       operationId: listDashboardPlaylistIndex
-      description: The dashboard's index of playlists. One page of rows without their pages, searched, filtered and ordered by the server, so the Playlists page and a playlist picker cost the same whatever the project holds. Each row carries screens, how many of the caller's pairing_pending and active screens hold the playlist as a default, in a schedule entry, in a takeover or as what is showing now; a caller limited to screens counts its own. The first page (a request without after) also carries total, the rows across all pages under the same q, template, ids and use, and use_counts, the rows under the same q, template and ids that are active (pages, and a screen holds it), inactive (pages, and no screen holds it) and empty (no pages). The playlists themselves are GET /api/playlists and GET /api/playlists/{id}.
+      description: The dashboard's index of playlists. One page of rows without their pages, searched, filtered and ordered by the server, so the Playlists page and a playlist picker cost the same whatever the project holds. Each row carries screens, how many of the caller's pairing_pending and active screens hold the playlist as a default, in a schedule entry, in a takeover or as what is showing now; a caller limited to screens counts its own. The first page (a request without after) also carries total, the rows across all pages under the same q, template, ids and use, and use_counts, the rows under the same q, template and ids that are active (pages, and a screen holds it), inactive (pages, no screen holds it, and one held it in the last 30 days or it was made in them), stale (pages, and no screen has held it for 30 days, or never held, it was made before them) and empty (no pages). When a screen last held a playlist is stamped hourly. The playlists themselves are GET /api/playlists and GET /api/playlists/{id}.
       security:
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/LibraryQuery'
         - {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the playlists whose name contains the text, ignoring case, and the playlist whose ID the text is. A search without sort is answered in name order."}
         - {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", pages, "-pages", items, "-items", soundtrack, "-soundtrack", revision, "-revision", canvas, "-canvas", screens, "-screens"]}, description: "The order of the rows, each then by ID; a leading - reverses it. name orders by name, ignoring case and reading a run of digits as a number. pages, items and soundtrack order by page_count, item_count and audio_tracks, and revision by revision. canvas orders by what the Canvas column shows: playlists without an ordinary page first, then those whose ordinary pages share one canvas size, by width then height, then those that share only an orientation (landscape, portrait, square), then mixed orientations. A playlist stored before the server kept these columns orders first ascending and last descending until the server's next migration stores them. screens orders by the row's screens: screens lists the playlists no screen holds by name, then the held ones fewest first, each count by name; -screens lists the held ones most first, each count by name, then the others by name. Omitted is newest first, or name with q."}
-        - {name: use, in: query, required: false, schema: {type: string, enum: [active, inactive, empty]}, description: "Keeps the playlists of one use."}
+        - {name: use, in: query, required: false, schema: {type: string, enum: [active, inactive, stale, empty]}, description: "Keeps the playlists of one use."}
         - {name: template, in: query, required: false, schema: {type: boolean, default: false}, description: "true keeps only the playlists that declare fields."}
         - {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated playlist IDs, at most 200: keeps only those. An ID that names no listed playlist is absent from the answer."}
         - {name: after, in: query, required: false, schema: {type: string, maxLength: 2048}, description: "next_cursor of the previous page of the same list, with the same filters and sort. A value that is not such a cursor is invalid_request."}
@@ -22872,7 +22933,7 @@ paths:
           maxLength: 200
     post:
       operationId: dashboardOrganizationsResolveMemberRemoval
-      description: A designated admin takes a home member out of the organization, and the server decides how in one transaction. The account is deleted when the person's verified email address is at one of the organization's verified domains, or when they hold nothing outside it (no membership or ownership of a live project of another organization or of none, no admin seat in another organization, and no agent they are responsible for in such a project); otherwise the person is removed from the organization as DELETE /api/organizations/{org_id}/members/{user_id} removes them. expect is the outcome the admin confirmed (GET /api/organizations/{org_id}/members/{user_id} reports it as removal.outcome); when the server decides otherwise the request is member_removal_changed and nothing changes, so a confirmed removal never deletes an account. A deletion ends the person's memberships in the organization's live projects as the removal does, then deletes the account as the person's own deletion does (every session, passkey and password goes at once, their memberships elsewhere and the agents they are responsible for are suspended, and the account is erased after 90 days); it is recorded in the organization audit as organization.member_deleted. The removal's refusals apply unchanged (managed_member, organization_admin_member, member_owns_projects), a person who owns a live project outside the organization is not deleted (member_owns_projects_elsewhere; they transfer it first, and the detail names nothing of it), a person who is the only verified admin of another organization is not deleted (member_last_admin_elsewhere), and an admin acting on themself is forbidden. Requires a fresh proof of kind organization_member_change bound to the person's user id. People only; agents and bearer credentials have no route.
+      description: A designated admin takes a home member out of the organization, and the server decides how in one transaction. The account is deleted when the person's verified email address is at one of the organization's verified domains, or when they hold nothing outside it (no membership or ownership of a live project of another organization or of none, no admin seat in another organization, and no agent they are responsible for in such a project); otherwise the person is removed from the organization as DELETE /api/organizations/{org_id}/members/{user_id} removes them. expect is the outcome the admin confirmed (GET /api/organizations/{org_id}/members/{user_id} reports it as removal.outcome); when the server decides otherwise the request is member_removal_changed and nothing changes, so a confirmed removal never deletes an account. A deletion ends the person's memberships in the organization's live projects as the removal does, then deletes the account as the person's own deletion does (every session, passkey and password goes at once, their memberships elsewhere and the agents they are responsible for are suspended, and the account is erased after 90 days); it is recorded in the organization audit as organization.member_deleted. projects resolves each live project of the organization the person owns, in the same transaction and before the person goes. owner_user_id makes that person its owner as PUT /api/organizations/{org_id}/projects/{project_id}/owner does (recorded as organization.project_owner_changed; the previous and the new owner are emailed once the removal commits), and delete deletes an empty project as its owner's deletion does (recorded as organization.project_deleted; one that is not empty is project_delete_blocked). A refused entry is named in errors[].field (projects[i]) and nothing changes; an owned project left out is member_owns_projects. The removal's refusals apply unchanged (managed_member, organization_admin_member, member_owns_projects), a person who owns a live project outside the organization is not deleted (member_owns_projects_elsewhere; they transfer it first, and the detail names nothing of it), a person who is the only verified admin of another organization is not deleted (member_last_admin_elsewhere), and an admin acting on themself is forbidden. Requires a fresh proof of kind organization_member_change bound to the person's user id. People only; agents and bearer credentials have no route.
       security:
         - dashboardSession: []
       requestBody:
@@ -24639,12 +24700,13 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listApplicationsInProject
-      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
+      description: Lists applications newest first, or with sort by name, update or creation, at most 500 per page; q searches names and IDs, published keeps the applications with a ready release or those without, use keeps those of one use, and ids keeps named ones. Names are labels and need not be unique; address an application by id. The first page (a request without after) carries total, the applications under the same filters across all pages, and publication_counts, how many of those under the same q and ids are published and unpublished whatever published asks; with use, use_counts too. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same q and sort, for the next page. next_cursor is null on the last page.
       security:
         - projectBearer: []
       parameters:
         - $ref: '#/components/parameters/ApplicationSearchQuery'
         - $ref: '#/components/parameters/ApplicationPublishedQuery'
+        - $ref: '#/components/parameters/ApplicationUseQuery'
         - $ref: '#/components/parameters/ApplicationIDsQuery'
         - $ref: '#/components/parameters/ApplicationListSort'
         - $ref: '#/components/parameters/NamedListAfter'
@@ -29007,6 +29069,7 @@ components:
     MediaListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", created, "-created", size, "-size", duration, "-duration"]}, description: "The order of the files, each then by ID; a leading - reverses it. name orders by the name a person sees, ignoring case and reading a run of digits as a number. created is oldest first (-created is newest first, the default). size orders by stored bytes, smallest first. duration orders by the stored duration of a video or an audio file, shortest first; a file without one (an image, or a file whose duration was not read) comes first, and last with -duration. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
     ApplicationListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", updated, "-updated", created, "-created"]}, description: "The order of the applications, each then by ID; a leading - reverses it. name orders by name, ignoring case and reading a run of digits as a number. updated is least recently updated first (-updated most recently first), created oldest first (-created newest first, the default). Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
     ApplicationPublishedQuery: {name: published, in: query, required: false, schema: {type: boolean}, description: "true keeps the applications that have a ready release (latest_ready_release is present), false those that have none. Anything but true or false is invalid_request naming published."}
+    ApplicationUseQuery: {name: use, in: query, required: false, schema: {type: string, enum: [active, inactive, stale, empty]}, description: "Keeps the applications of one use: active have a ready release and a playlist places them; inactive have a ready release, no playlist places them, and one placed them in the last 30 days or they were made in them; stale have a ready release and no playlist has placed them for 30 days (or, never placed, they were made before them); empty have no ready release. When a playlist last placed an application is stamped hourly. With use the first page also carries use_counts. Anything else is invalid_request naming use."}
     ApplicationIDsQuery: {name: ids, in: query, required: false, schema: {type: string}, description: "Comma-separated application IDs, at most 200: keeps only those. Empty keeps none; an ID that names no application is absent from the answer. More than 200 is invalid_request naming ids."}
     ApplicationSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the applications whose name contains the text, ignoring case and read literally (no wildcards), and the application whose ID the text is. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order."}
     ListLimit200: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 200}, description: "Page size. Omitted is 200. A value outside 1-200 is invalid_request."}
@@ -29542,6 +29605,63 @@ components:
       properties:
         placements: {type: array, items: {$ref: "#/components/schemas/ApplicationPlacement"}, description: "In playlist (newest first), page and primitive order."}
         screens: {type: array, items: {$ref: "#/components/schemas/UsageScreen"}}
+    ApplicationRelease:
+      type: object
+      additionalProperties: false
+      required: [id, state, latest, created_at, operation_id, archive_sha256, compressed_bytes, placements]
+      properties:
+        id: {type: string}
+        state: {type: string, enum: [publishing, ready, failed], description: "publishing: accepted and still being received or extracted."}
+        latest: {type: boolean, description: "The application's newest ready release (latest_ready_release)."}
+        created_at: {type: string, format: date-time, description: "When the upload was accepted."}
+        ready_at: {type: string, format: date-time, description: "When a ready release became ready."}
+        operation_id: {type: string, description: "The publish operation (GET /api/operations/{id}) while the server keeps it."}
+        error_code: {type: string, description: "Why a failed release failed, such as extraction_failed."}
+        archive_sha256: {type: string, description: "SHA-256 of the uploaded tar.gz archive."}
+        compressed_bytes: {type: integer, description: "Size of the uploaded archive."}
+        expanded_bytes: {type: integer, description: "Size of the extracted files, which counts toward stored bytes."}
+        file_count: {type: integer}
+        sdk_version: {type: string, description: "The browser SDK version the release was built with, as its upload declared."}
+        placements: {type: integer, minimum: 0, description: "Application primitives of the project's playlists that pin this release."}
+        expires_at: {type: string, format: date-time, description: "When the release is removed: 30 days after a newer release became ready, or after it failed. Absent while it is the latest, pinned, or being published."}
+        actor: {$ref: "#/components/schemas/EventActor"}
+        agent: {$ref: "#/components/schemas/EventAgent"}
+    ApplicationReleasePage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ApplicationRelease"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Pass back as cursor for the next page; null on the last page."}
+    ApplicationReleaseUsePlaylist:
+      type: object
+      additionalProperties: false
+      required: [playlist_id, playlist_name, placements, screen_count, outcome]
+      properties:
+        playlist_id: {type: string}
+        playlist_name: {type: string}
+        placements: {type: integer, description: "Its primitives that place the application on another release."}
+        screen_count: {type: integer, description: "Active and pairing screens that hold the playlist."}
+        outcome: {type: string, enum: [would_change, applied, unchanged, refused]}
+        revision: {type: integer, description: "The playlist's revision after an applied write."}
+        problem:
+          type: object
+          additionalProperties: false
+          required: [code, detail]
+          description: Why a refused playlist was not written, as a write of it would answer.
+          properties:
+            code: {type: string}
+            detail: {type: string}
+    ApplicationReleaseUse:
+      type: object
+      additionalProperties: false
+      required: [release_id, dry_run, already, screens, playlists]
+      properties:
+        release_id: {type: string}
+        dry_run: {type: boolean}
+        already: {type: integer, description: "Placements that already pinned the release."}
+        screens: {type: integer, description: "Active and pairing screens that hold any listed playlist; a caller limited to screens counts only its own."}
+        playlists: {type: array, items: {$ref: "#/components/schemas/ApplicationReleaseUsePlaylist"}}
     MediaVersionPage:
       type: object
       additionalProperties: false
@@ -30583,6 +30703,18 @@ components:
           items:
             type: string
           description: Present for member_owns_projects. The names of the organization's live projects the person owns, as member_owns_projects names them.
+        owned:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/OrganizationMemberOwnedProject'
+          description: Present for member_owns_projects. The organization's live projects the person owns, by name, at most 200, each saying whether it is empty enough to delete with them. Send one entry per project as projects to POST /api/organizations/{org_id}/members/{user_id}/removal.
+        resolved_outcome:
+          type: string
+          enum:
+            - delete
+            - remove
+          description: Present for member_owns_projects. The outcome once every project in owned is given a new owner or deleted; send it as expect with those projects.
         verified_domain:
           type: boolean
           description: The person's verified address is at one of the organization's verified domains, which makes the outcome delete.
@@ -30610,7 +30742,46 @@ components:
             - delete
             - remove
           description: The outcome the admin confirmed; any other outcome is member_removal_changed and changes nothing.
+        projects:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/OrganizationMemberProjectResolution'
+          description: What happens to each of the organization's live projects the person owns (removal.owned), in the removal's transaction. Omitted, a person who owns any is member_owns_projects.
         proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind organization_member_change for the member's user id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
+    OrganizationMemberOwnedProject:
+      type: object
+      additionalProperties: false
+      required:
+        - project_id
+        - name
+        - empty
+      properties:
+        project_id:
+          type: string
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        empty:
+          type: boolean
+          description: The project has no screens (archived paired screens included), media, applications, playlists or pending pairings, is not the organization's Library, and holds no plan of its own, credit, reservations, debt or live advertising, so the removal may delete it.
+    OrganizationMemberProjectResolution:
+      type: object
+      additionalProperties: false
+      required:
+        - project_id
+      properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        owner_user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The new owner, as PUT /api/organizations/{org_id}/projects/{project_id}/owner takes one (a home member who is not a member of the project is added first). Not the person being removed. Send this or delete.
+        delete:
+          type: boolean
+          description: Delete the project, which must be empty (OrganizationMemberOwnedProject.empty), as its owner's deletion does. Send this or owner_user_id.
     OrganizationMemberRemovalResult:
       type: object
       additionalProperties: false
@@ -33468,7 +33639,7 @@ components:
     ApplicationUploadSession: {type: object, additionalProperties: false, required: [id, application_id, release_id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string, description: "Upload identifier, the receiving operation's id. Commit it with POST /api/applications/uploads/{id}/commit."}, application_id: {type: string, description: Application the upload publishes to.}, release_id: {type: string, description: "Release this upload creates. Pin it into a playlist once the operation succeeds."}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; send every field verbatim.}, expires_at: {type: string, format: date-time, description: The PUT must start before this instant.}}}
     ApplicationUploadCommit: {type: object, additionalProperties: false, required: [sha256, compressed_bytes], description: "Names the declared archive again; a commit naming other bytes is refused with invalid_request.", properties: {sha256: {type: string, pattern: "^[0-9a-f]{64}$"}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600}}}
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project that owns the application."}, id: {type: string, description: "ID of the application."}, name: {type: string, description: "Name of the application."}, revision: {type: integer, description: "Counter that increases with each change to the application."}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time, description: "When the application was created."}, updated_at: {type: string, format: date-time, description: "When the application record last changed."}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
-    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}, publication_counts: {type: object, additionalProperties: false, required: [published, unpublished], description: "How many applications under the same q and ids have a ready release and how many have none, whatever published asks. Present on the first page and absent on later pages.", properties: {published: {type: integer, minimum: 0}, unpublished: {type: integer, minimum: 0}}}}}
+    ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}, description: "Applications of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}, publication_counts: {type: object, additionalProperties: false, required: [published, unpublished], description: "How many applications under the same q and ids have a ready release and how many have none, whatever published and use ask. Present on the first page and absent on later pages.", properties: {published: {type: integer, minimum: 0}, unpublished: {type: integer, minimum: 0}}}, use_counts: {type: object, additionalProperties: false, required: [active, inactive, stale, empty], description: "How many applications under the same q, published and ids are of each use, whatever use asks. Present on the first page of a request that names use, and absent otherwise.", properties: {active: {type: integer, minimum: 0}, inactive: {type: integer, minimum: 0}, stale: {type: integer, minimum: 0}, empty: {type: integer, minimum: 0}}}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
     Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string, description: "ID of the project the operation runs in."}, id: {type: string, description: "ID of the operation."}, kind: {type: string, description: "What the operation does, such as media.upload or application.publish."}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string, description: "ID of the API request that started the operation."}, created_at: {type: string, description: "When the operation was created."}, updated_at: {type: string, description: "When the operation last changed."}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.upload that replaced a file (replaceMedia) carries media_id, version and warnings, or status pending_review and review_id under Propose. A succeeded media.generate carries media_id and usage: {quality, credits, usd}. A succeeded canva.publish carries design_id and items (CanvaPublishResult)."}, error: {type: object, additionalProperties: true, description: "Present on a failed operation: code is a registered problem code, detail says why, status (when present) is the equivalent HTTP status, and next is a recovery command when there is one. A failed media.upload is terminal. A cause in the file or its commit is invalid_request with status 400, and its detail says to upload the file again: no bytes arrived before the commit, the size, SHA-256 or content type differs from the declaration, the bytes carry another type's signature, the file ends early, or it cannot be read as its content type."}}}
     PlaylistFormat:
@@ -41200,11 +41371,12 @@ components:
         use_counts:
           type: object
           additionalProperties: false
-          required: [active, inactive, empty]
+          required: [active, inactive, stale, empty]
           description: "The rows under the same q, template and ids of each use, whatever use the request names. Present on the first page only."
           properties:
             active: {type: integer, minimum: 0}
             inactive: {type: integer, minimum: 0}
+            stale: {type: integer, minimum: 0}
             empty: {type: integer, minimum: 0}
     DashboardPlaylistDeleteSelection:
       type: object
@@ -41217,7 +41389,7 @@ components:
           description: "The playlists to delete, as GET /api/dashboard/playlists selects them."
           properties:
             q: {type: string, maxLength: 100, description: "The playlists whose name contains the text, ignoring case, and the playlist whose ID the text is."}
-            use: {type: string, enum: [active, inactive, empty], description: "The playlists of one use."}
+            use: {type: string, enum: [active, inactive, stale, empty], description: "The playlists of one use."}
             template: {type: boolean, default: false, description: "true keeps only the playlists that declare fields."}
             ids: {type: array, maxItems: 200, items: {type: string}, description: "Only these playlists; empty selects none."}
         except: {type: array, maxItems: 1000, items: {type: string}, description: "Playlists the selection leaves out."}

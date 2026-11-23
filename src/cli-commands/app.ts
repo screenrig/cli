@@ -2,6 +2,7 @@ import { positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleAppPack, handleAppTypes, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../handlers/app.js";
 import { handleAppDev } from "../handlers/app-dev.js";
+import { handleAppReleases, handleAppUseRelease } from "../app-releases.js";
 import { requireOptionGroup } from "./notes.js";
 import type { Command } from "commander";
 
@@ -44,6 +45,18 @@ export function registerAppCommands(root: Command, bind: CommandActionBinder): v
 
   app.command("list").description("List applications")
     .action(bind(handleAppList));
+
+  app.command("releases").description("List an application's releases and the playlist placements that pin each")
+    .argument("<id>", "Application identifier")
+    .option("--limit <N>", "Read one page of this many releases, 1 to 100", positiveInteger("limit"))
+    .option("--cursor <CURSOR>", "Read the page after the data.next_cursor of the previous page")
+    .action(bind(handleAppReleases));
+
+  app.command("use-release").description("Preview or apply moving every placement of an application to one of its releases")
+    .argument("<id>", "Application identifier")
+    .argument("<release_id>", "Ready release identifier, as app releases lists it")
+    .option("--apply", "Write the move; without it nothing changes")
+    .action(bind(handleAppUseRelease));
 
   app.command("rename").description("Change an application's display name")
     .argument("<id>", "Application identifier")

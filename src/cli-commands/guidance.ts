@@ -146,6 +146,8 @@ export const GUIDANCE_EXAMPLES: Record<string, string[]> = {
     "app upload": ['./lobby-app --name "Lobby app"'],
     "app update": ["app_APP ./lobby-app"],
     "app rename": ['app_APP --name "Lobby welcome"'],
+    "app releases": ["app_APP", "app_APP --limit 20", "app_APP --limit 20 --cursor CURSOR"],
+    "app use-release": ["app_APP rel_RELEASE", "app_APP rel_RELEASE --apply"],
     "app list": [""], "app show": ["app_APP"], "app delete": ["app_APP"],
     "media upload": ["./poster.png --tag Lobby", "./lobby-loop.wav --tag Lobby", "./menu.png --folder mfd_FOLDER"],
     "media upload-batch": ["uploads.json --state uploads-state.json", "uploads.json --folder mfd_FOLDER"],

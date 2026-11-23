@@ -134,6 +134,8 @@ test("root help is compact and every command is discoverable through immediate c
     "app types",
     "app upload",
     "app update",
+    "app releases",
+    "app use-release",
     "app rename",
     "app list",
     "app show",
