@@ -63,7 +63,8 @@ export function compareUtf8(a: string, b: string): number {
 }
 
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {
-  const bytes = typeof data === "string" ? encoder.encode(data) : data;
+  // A copy, so the digest reads a plain ArrayBuffer whatever backs the caller's bytes.
+  const bytes = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   let out = "";
   for (const byte of digest) out += byte.toString(16).padStart(2, "0");
@@ -253,6 +254,10 @@ export function admitPath(
   if (isBuiltinIgnored(posixPath, isDir) || extraIgnore(posixPath, isDir)) {
     return false;
   }
+  // The server's extraction unpacks plain ASCII paths only (path_unpackable).
+  if (/[^\u0020-\u007e]/.test(posixPath)) {
+    refuse("path_unpackable", `Path is not plain ASCII, which the server cannot unpack; rename it: ${posixPath}`);
+  }
   if (seen.normalized.has(posixPath)) {
     refuse("duplicate_path", `Duplicate normalized path: ${posixPath}`);
   }
@@ -317,11 +322,6 @@ interface ScannedTag {
 interface OpenElement {
   name: string;
   namespace: "html" | "svg";
-}
-
-interface HoistedAsset {
-  assetPath: string;
-  content: string;
 }
 
 function isSpace(char: string | undefined): boolean {

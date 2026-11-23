@@ -617,3 +617,16 @@ test("app pack hoists inline blocks end to end and refuses inline handlers", asy
     await rm(refused, { recursive: true, force: true });
   }
 });
+
+test("refuses a path that is not plain ASCII before anything is sent", async () => {
+  const dir = await tempDir();
+  try {
+    await writeFile(path.join(dir, "index.html"), "<p>x</p>");
+    await writeFile(path.join(dir, "café.txt"), "x");
+    await assert.rejects(packDirectory(dir), (error: unknown) => error instanceof CliError && error.problem.code === "path_unpackable" && error.problem.detail.includes("café.txt"));
+    await writeFile(path.join(dir, ".screenrigignore"), "café.txt\n");
+    assert.ok((await packDirectory(dir)).entries.every((entry) => entry.path !== "café.txt"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
