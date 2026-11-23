@@ -2255,11 +2255,17 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Declares a direct upload of one CLI-produced tar.gz that creates a new application. The answer is a signed authorization for exactly one object PUT of the archive, so the bytes go straight to the object store and never through the API, whose proxy ends a request it has not answered within about 100 s. PUT the archive to upload_url, then commit with POST /api/applications/uploads/{id}/commit and wait on the operation. The application, its release and the receiving operation exist from this answer on, as after POST /api/applications. An upload not committed within 24 hours fails, and an application that never published a release is removed. The same Idempotency-Key and body answer the same upload with a freshly signed URL. GET /api/capabilities sets features.application_direct_uploads where these routes are served.
+      description: Declares a direct upload of one CLI-produced tar.gz that creates a new application. The answer is a signed authorization for exactly one object PUT of the archive, so the bytes go straight to the object store and never through the API, whose proxy ends a request it has not answered within about 100 s. PUT the archive to upload_url, then commit with POST /api/applications/uploads/{id}/commit and wait on the operation. The application, its release and the receiving operation exist from this answer on, as after POST /api/applications. An upload not committed within 24 hours fails, and an application that never published a release is removed. The same Idempotency-Key and body answer the same upload with a freshly signed URL. GET /api/capabilities sets features.application_direct_uploads where these routes are served. The dashboard uploads a web app this way too, after its browser prepares the archive as the CLI's app pack does.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: project_id
+          in: query
+          required: false
+          description: "Required with dashboardSession: the project where the web app was queued. Must match the session's selected project, otherwise resource_conflict. Omitted with a project bearer."
+          schema: {type: string, minLength: 1, maxLength: 200}
       requestBody:
         required: true
         content:
@@ -2301,10 +2307,16 @@ paths:
       description: Declares a direct upload of a new immutable release of an owned application, answered as POST /api/applications/uploads is. If-Match guards the application revision as on POST /api/applications/{id}/releases, and acceptance increments it. The body carries no name; a release keeps its application's name. Existing playlist release pins are not changed.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: project_id
+          in: query
+          required: false
+          description: "Required with dashboardSession: the project where the web app was queued. Must match the session's selected project, otherwise resource_conflict. Omitted with a project bearer."
+          schema: {type: string, minLength: 1, maxLength: 200}
       requestBody:
         required: true
         content:
@@ -2339,6 +2351,7 @@ paths:
       description: Commits a direct application upload once its PUT has finished. The server checks the staged archive against the declaration (its size and the SHA-256 checksum the object store took with the PUT), copies it into its own upload staging and queues publication. Wait on the returned Operation with GET /api/operations/{id} until it is succeeded or failed, as after POST /api/applications. A commit before the PUT finished answers invalid_request and changes nothing, so it can be sent again; staged bytes that differ from the declaration fail the upload. A repeated commit answers the same operation.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3222,6 +3235,7 @@ paths:
         - $ref: '#/components/parameters/ScreenOnlineQuery'
         - $ref: '#/components/parameters/ScreenHealthQuery'
         - $ref: '#/components/parameters/ScreenAttentionQuery'
+        - $ref: '#/components/parameters/ScreenTakeoverQuery'
         - $ref: '#/components/parameters/ScreenPlaylistQuery'
         - $ref: '#/components/parameters/ScreenAdvertisingQuery'
         - $ref: '#/components/parameters/ScreenAudienceQuery'
@@ -3847,9 +3861,10 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover) and is refused with feature_not_in_plan (402) before any screen is touched on a project whose plan lacks it; takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule and volume on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover) and is refused with feature_not_in_plan (402) before any screen is touched on a project whose plan lacks it; takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule and volume on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A dashboard session takes only takeover and takeover_clear here (any other action.type is invalid_request), and only as the project owner or a member who can approve (approver_required otherwise); it acts with Manage access, the person as actor and proposer.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ReviewNote'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -24895,6 +24910,7 @@ paths:
         - $ref: '#/components/parameters/ScreenOnlineQuery'
         - $ref: '#/components/parameters/ScreenHealthQuery'
         - $ref: '#/components/parameters/ScreenAttentionQuery'
+        - $ref: '#/components/parameters/ScreenTakeoverQuery'
         - $ref: '#/components/parameters/ScreenPlaylistQuery'
         - $ref: '#/components/parameters/ScreenAdvertisingQuery'
         - $ref: '#/components/parameters/ScreenAudienceQuery'
@@ -29064,6 +29080,7 @@ components:
     ScreenAudienceQuery: {name: audience, in: query, required: false, schema: {type: string, maxLength: 16384}, description: "One audience rule as JSON (CampaignAudience: all, any, not, tag, screen_id, folder), URL-encoded. Keeps the active screens the rule matches now, as a fleet action with selector.by audience selects them; a folder is its screens and those of every folder inside it. It combines with every other filter. The list names one project: a request across the caller's projects answers invalid_request at audience."}
     ScreenAdvertisingQuery: {name: advertising, in: query, required: false, schema: {type: string, enum: [none]}, description: "none keeps the active screens that have no advertising inventory row of the project's network (opted in or not). The list leaves out the IDs of every inventory row, so its cost grows with the inventory, not the fleet. Anything else is invalid_request naming advertising."}
     ScreenAttentionQuery: {name: attention, in: query, required: false, schema: {type: boolean}, description: "true keeps the screens that need attention, false the others, judged from what the server stores: an active screen with an open reconnect offer, a suspension, a current display_disconnected, hot or crashing health count (as health judges it; stale is not attention) or a storage shortfall. The dashboard's manifest upgrade states (upgrade failed, blocked, partial content, retry overdue) are worked out on each read and are not judged here. Anything but true or false is invalid_request naming attention."}
+    ScreenTakeoverQuery: {name: takeover, in: query, required: false, schema: {type: string, enum: ["true"]}, description: "true keeps the screens with a takeover in force: a takeover whose until is null or still ahead. One whose until has passed is ended by the boundary worker within 60 seconds and is not listed meanwhile. Anything else is invalid_request naming takeover."}
     ScreenHealthQuery: {name: health, in: query, required: false, schema: {type: string, enum: [display_disconnected, hot, crashing, stale]}, description: "Keeps the active screens of one health count, judged as GET /api/summary's health counts judge the stored state: display_disconnected, hot and crashing need a stored online state and a report at most 35 minutes old, stale a stored online state and an older report. A screen whose lease just ended may still list until the presence sweep records it, as for online. Anything else is invalid_request naming health."}
     MediaSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the files whose name as a person sees it (source_filename when the upload was converted, else filename) contains the text, the converted files whose stored filename contains it, both ignoring case and read literally (no wildcards), the files carrying a tag equal to the text, and the file whose ID the text is. Each file is listed once, in the list's order. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order; any sort combines with it."}
     MediaListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", created, "-created", size, "-size", duration, "-duration"]}, description: "The order of the files, each then by ID; a leading - reverses it. name orders by the name a person sees, ignoring case and reading a run of digits as a number. created is oldest first (-created is newest first, the default). size orders by stored bytes, smallest first. duration orders by the stored duration of a video or an audio file, shortest first; a file without one (an image, or a file whose duration was not read) comes first, and last with -duration. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
