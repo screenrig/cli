@@ -1076,6 +1076,11 @@ export async function screenFleetAction(client: ApiClient, runtime: CliRuntime, 
   };
 }
 
+function tagsWithout(tags: string[], excluded: string[]): string[] {
+  const excludedKeys = new Set(excluded.map((tag) => tag.toLowerCase()));
+  return tags.filter((tag) => !excludedKeys.has(tag.toLowerCase()));
+}
+
 /**
  * `screen tag`: exactly one of --set, --add, --remove, --clear.
  *
@@ -1122,7 +1127,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
       throw usageError("Screen response has invalid identity or revision.");
     }
     const stored = Array.isArray(current.tags) ? current.tags : [];
-    next = add !== undefined ? [...stored, ...tags.filter((tag) => !stored.includes(tag))] : stored.filter((tag) => !tags.includes(tag));
+    next = add !== undefined ? [...stored, ...tagsWithout(tags, stored)] : tagsWithout(stored, tags);
     if (next.length > SCREEN_TAGS_MAX) {
       throw usageError(`Screen ${id} would carry ${next.length} tags; a screen carries at most ${SCREEN_TAGS_MAX}. Remove tags first or use --set.`);
     }

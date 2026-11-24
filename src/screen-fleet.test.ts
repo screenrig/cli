@@ -232,6 +232,27 @@ test("screen tag on one screen PATCHes the whole set with the screen's revision 
   assert.equal(actionCalls(transport).length, 0, "one screen id never uses the fleet route");
 });
 
+test("screen tag add and remove ignore case and preserve stored spelling and order", async () => {
+  const env = await enrolled();
+  const { transport, screens } = fleetBackend();
+  screens.get(A)!.tags = ["North", "Cafe"];
+
+  const removed = await cli(["--json", "screen", "tag", A, "--remove", "north"], transport, env);
+  assert.equal(removed.code, 0, removed.stdout);
+  assert.deepEqual(screens.get(A)!.tags, ["Cafe"]);
+  assert.deepEqual(removed.envelope.data.tags, ["Cafe"]);
+
+  const added = await cli(["--json", "screen", "tag", A, "--add", "South"], transport, env);
+  assert.equal(added.code, 0, added.stdout);
+  assert.deepEqual(screens.get(A)!.tags, ["Cafe", "South"]);
+  assert.deepEqual(added.envelope.data.tags, ["Cafe", "South"]);
+
+  const readded = await cli(["--json", "screen", "tag", A, "--add", "sOuTh,cAFE"], transport, env);
+  assert.equal(readded.code, 0, readded.stdout);
+  assert.deepEqual(screens.get(A)!.tags, ["Cafe", "South"]);
+  assert.deepEqual(readded.envelope.data.tags, ["Cafe", "South"]);
+});
+
 test("screen tag --add surfaces a concurrent change as revision_conflict instead of overwriting it", async () => {
   const env = await enrolled();
   const { transport, screens } = fleetBackend();
