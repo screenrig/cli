@@ -128,9 +128,17 @@ const RATE_BASE = {
   code: "rate_limited",
   errors: [],
 };
-const ORG_HEADERS = { "ratelimit-policy": '"api-request-org";q=500;w=3600', ratelimit: '"api-request-org";r=0;t=120' };
+const ORG_HEADERS = { "ratelimit-policy": '"api-request-org";q=300;w=3600', ratelimit: '"api-request-org";r=0;t=120' };
+const MINUTE_HEADERS = { "ratelimit-policy": '"api-request-org-minute";q=30;w=60', ratelimit: '"api-request-org-minute";r=0;t=42' };
 
-test("the hourly request cap says to wait Retry-After and not loop; other 429s keep the server's words", () => {
+test("the minute's request cap is guided like the hour's", () => {
+  const capped = withRateLimitGuidance({ ...RATE_BASE, retry_after_seconds: 42 }, MINUTE_HEADERS);
+  assert.match(capped.hint ?? "", /Wait 42 seconds, then run the same command once; do not retry in a loop/);
+  assert.match(capped.hint ?? "", /requests a minute and an hour/);
+  assert.equal(capped.next?.command, "screenrig billing usage");
+});
+
+test("the request cap says to wait Retry-After and not loop; other 429s keep the server's words", () => {
   const capped = withRateLimitGuidance({ ...RATE_BASE, retry_after_seconds: 120 }, ORG_HEADERS);
   assert.match(capped.hint ?? "", /Wait 120 seconds, then run the same command once; do not retry in a loop/);
   assert.match(capped.hint ?? "", /nothing is charged/);

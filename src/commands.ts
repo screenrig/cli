@@ -767,7 +767,7 @@ const SSE_RETRY_CAP_MS = 60_000;
  * The reconnect wait of a listen stream (`events follow`, `support follow`).
  * Failures back off from 250 ms to 15 s; a connection that opened starts over.
  * The server's SSE `retry:` sets the starting wait. A refusal with HTTP 429 is
- * the organization's hourly request cap, which no quicker reconnect can lift:
+ * the organization's request cap (a minute or an hour), which no quicker reconnect can lift:
  * the wait is the server's Retry-After (an hour at most), and a 429 without one
  * backs off like any other failure.
  */

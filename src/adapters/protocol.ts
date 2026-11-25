@@ -96,8 +96,12 @@ export interface ProjectFeatures {
 export interface BillingUsageAllowance {
   /** Retired: always "0". */
   api_events: string;
+  /** Live agents the plan allows across the organization's projects (decimal string; "0" is no cap). Absent from a server that predates the limit. */
+  agents?: string;
   /** Agent requests an hour across the organization's projects (decimal string). */
   requests_per_hour: string;
+  /** Agent requests a minute across the organization's projects (decimal string; "0" is no cap). Absent from a server that predates the limit. */
+  requests_per_minute?: string;
   /** Storage limit in bytes, a hard limit on every plan. */
   storage_bytes: string;
   /** Retired: always "0". */

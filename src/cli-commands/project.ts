@@ -64,7 +64,7 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     "  skipped. Application files are reported as omitted with complete:false and",
     "  an export_application_content_omitted warning, including with --no-media.",
     "  Retain original application archives alongside the export for recovery;",
-    "  rerunning refreshes metadata. Each downloaded file and each page read is one request toward the hourly cap, and",
+    "  rerunning refreshes metadata. Each downloaded file and each page read is one request toward the request cap, and",
     "  media downloads are egress.",
   ].join("\n"));
   project.command("rename").description("Rename this project")

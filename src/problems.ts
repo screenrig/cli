@@ -520,25 +520,26 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
   });
 }
 
-/** The policy name of the organization's hourly request cap in RateLimit-Policy and RateLimit. */
-export const ORG_REQUEST_POLICY = "api-request-org";
+/** The policy names of the organization's request caps, a minute and an hour, in RateLimit-Policy and RateLimit. */
+export const ORG_REQUEST_POLICIES = ["api-request-org-minute", "api-request-org"] as const;
 
 /**
- * A 429 from the organization's hourly request cap is a wait, not a failure: it
- * clears when Retry-After ends, and looping on it only spends the next window.
- * The response names the cap in its RateLimit-Policy; every other 429 (a
- * shorter limit on one route) keeps the server's own words.
+ * A 429 from the organization's request cap, the minute's or the hour's, is a
+ * wait, not a failure: it clears when Retry-After ends, and looping on it only
+ * spends the next window. The response names the cap in its RateLimit-Policy;
+ * every other 429 (a shorter limit on one route) keeps the server's own words.
  */
 export function withRateLimitGuidance(problem: NormalizedProblem, headers: Record<string, string>): NormalizedProblem {
-  if (problem.code !== "rate_limited" || !`${headers["ratelimit-policy"] ?? ""} ${headers["ratelimit"] ?? ""}`.includes(`"${ORG_REQUEST_POLICY}"`)) {
+  const named = `${headers["ratelimit-policy"] ?? ""} ${headers["ratelimit"] ?? ""}`;
+  if (problem.code !== "rate_limited" || !ORG_REQUEST_POLICIES.some((policy) => named.includes(`"${policy}"`))) {
     return problem;
   }
   const wait = typeof problem.retry_after_seconds === "number" ? `${problem.retry_after_seconds} seconds` : "the time Retry-After names";
   return withGuidance(problem, {
-    hint: `A request limit was reached; nothing is charged and screens keep playing. Wait ${wait}, then run the same command once; do not retry in a loop. screenrig billing usage shows the organization's requests an hour. A listen stream (screenrig events follow) and media upload-batch use far fewer requests than polling lists and uploading one file at a time.`,
+    hint: `A request limit was reached; nothing is charged and screens keep playing. Wait ${wait}, then run the same command once; do not retry in a loop. screenrig billing usage shows the organization's requests a minute and an hour. A listen stream (screenrig events follow) and media upload-batch use far fewer requests than polling lists and uploading one file at a time.`,
     next: {
       command: "screenrig billing usage",
-      reason: "Shows the agent requests an hour the organization may make and the storage limit.",
+      reason: "Shows the agent requests a minute and an hour the organization may make, its live agents and the storage limit.",
     },
   });
 }

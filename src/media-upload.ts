@@ -724,7 +724,7 @@ async function storedMediaFilename(
  * one request: the first page of the library (newest first, at most 1000 files),
  * narrowed by the kind, the tag and the folder the upload names. A rerun's file
  * is among the newest; an older copy is not looked for, and the upload goes on.
- * Every request counts toward the organization's hourly cap, so it never walks
+ * Every request counts toward the organization's request cap, so it never walks
  * the whole library. Best effort: any failure means upload.
  */
 async function existingUpload(

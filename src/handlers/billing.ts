@@ -9,9 +9,10 @@ import { clientFor, commandHandler, humanLines, jsonBody, requirePrivateNoStore,
 
 
 /**
- * What this organization's plan allows: stored bytes of the storage limit and
- * the agent requests an hour (`allowance.requests_per_hour`). Requests are never
- * charged, so there is no money or monthly meter here.
+ * What this organization's plan allows: stored bytes of the storage limit, the
+ * agent requests an hour and a minute (`allowance.requests_per_hour`,
+ * `requests_per_minute`) and its live agents (`allowance.agents`). Requests are
+ * never charged, so there is no money or monthly meter here.
  */
 export const handleBillingUsage = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
@@ -23,6 +24,8 @@ export const handleBillingUsage = commandHandler(async (args, runtime, resolved)
   const allowance = {
     storage_bytes: text(body.allowance?.storage_bytes),
     requests_per_hour: text(body.allowance?.requests_per_hour),
+    requests_per_minute: text(body.allowance?.requests_per_minute),
+    agents: text(body.allowance?.agents),
   };
   const data = {
     stored_bytes: text(body.stored_bytes),
@@ -37,6 +40,8 @@ export const handleBillingUsage = commandHandler(async (args, runtime, resolved)
     human: humanLines("Plan limits", [
       ["storage", allowance.storage_bytes ? `${data.stored_bytes ?? "?"} of ${allowance.storage_bytes} bytes` : undefined],
       ["agent_requests_per_hour", allowance.requests_per_hour],
+      ["agent_requests_per_minute", allowance.requests_per_minute],
+      ["live_agents", allowance.agents],
     ]),
   };
 });

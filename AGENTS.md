@@ -112,10 +112,10 @@ Player plays it, so applications are tried before upload.
 - Playlist authoring: existing file or an image the agent made, `media upload`;
   live text, built-in cards; live objects, playlist primitives. Never emit native
   `text`, `box` or `line`. screenRIG generates no images.
-- Requests are never charged. An organization's agent requests are capped per hour
-  (HTTP 429 `rate_limited` with `Retry-After`); a 429 is waited out for that long,
+- Requests are never charged. An organization's agent requests are capped per minute
+  and per hour (HTTP 429 `rate_limited` with `Retry-After`); a 429 is waited out for that long,
   never retried in a loop (`events follow` and `support follow` included). Storage is a
-  plan limit: `quota_exceeded` (413) stops the work. Add no pay, Stripe or x402 commands.
+  plan limit: `quota_exceeded` (413) stops the work. Live agents are one too: `agent_limit_exceeded` (409) is the plan's. Add no pay, Stripe or x402 commands.
 - Optional `log_socket` lives in the 0600 user config; there is no flag or env
   override, and a connect failure never fails the command.
 

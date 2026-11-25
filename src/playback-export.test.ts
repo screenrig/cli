@@ -284,7 +284,7 @@ test("playback list --format csv exports the daily aggregates", async () => {
 test("playback help names the request rule and the CSV output contract", async () => {
   const env = await enrolled();
   const help = await cli(["--human", "playback", "plays", "--help"], memoryBackend(), env);
-  assert.match(help.stdout, /one request toward the organization's\s+hourly cap/);
+  assert.match(help.stdout, /one request toward the organization's\s+request cap/);
   assert.doesNotMatch(help.stdout, /billed|bills/);
   assert.match(help.stdout, /--format <FORMAT>/);
   assert.match(help.stdout, /31 days/);

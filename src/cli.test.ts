@@ -2647,29 +2647,31 @@ test("support follow waits the server's Retry-After after a 429 on connect", asy
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("billing usage shows storage against its limit and the agent requests an hour", async () => {
+test("billing usage shows storage against its limit, the agent requests a minute and an hour, and live agents", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/billing/usage", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: {
       period: "2026-11", usage: { bandwidth_bytes: "10", storage_mcr: "0", api_events: "0" }, stored_bytes: "524288000",
-      allowance: { storage_bytes: "1073741824", requests_per_hour: "500", api_events: "0", storage_mcr_per_gb_month: "0" },
+      allowance: { storage_bytes: "1073741824", requests_per_hour: "300", requests_per_minute: "30", agents: "3", api_events: "0", storage_mcr_per_gb_month: "0" },
     },
   }));
   const json = await withTokenConfig(transport, ["--json", "billing", "usage"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown> };
-  assert.deepEqual(envelope.data, { stored_bytes: "524288000", allowance: { storage_bytes: "1073741824", requests_per_hour: "500" } });
+  assert.deepEqual(envelope.data, { stored_bytes: "524288000", allowance: { storage_bytes: "1073741824", requests_per_hour: "300", requests_per_minute: "30", agents: "3" } });
   assert.doesNotMatch(json.stdout, /api_events|mcr|usage"/);
   const human = await withTokenConfig(transport, ["--human", "billing", "usage"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /^storage: 524288000 of 1073741824 bytes$/m);
-  assert.match(human.stdout, /^agent_requests_per_hour: 500$/m);
+  assert.match(human.stdout, /^agent_requests_per_hour: 300$/m);
+  assert.match(human.stdout, /^agent_requests_per_minute: 30$/m);
+  assert.match(human.stdout, /^live_agents: 3$/m);
   assert.doesNotMatch(human.stdout, /credit|\$|per GB|month/i);
 });
 
-test("billing usage tolerates a server that has not sent requests_per_hour", async () => {
+test("billing usage tolerates a server that has not sent the request or agent limits", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/billing/usage", () => ({
     status: 200,
@@ -2681,7 +2683,7 @@ test("billing usage tolerates a server that has not sent requests_per_hour", asy
   const envelope = JSON.parse(json.stdout) as { data: { allowance: Record<string, string> } };
   assert.deepEqual(envelope.data.allowance, { storage_bytes: "1073741824" });
   const human = await withTokenConfig(transport, ["--human", "billing", "usage"]);
-  assert.doesNotMatch(human.stdout, /agent_requests_per_hour/);
+  assert.doesNotMatch(human.stdout, /agent_requests_per_hour|agent_requests_per_minute|live_agents/);
   assert.match(human.stdout, /storage: 0 of 1073741824 bytes/);
 });
 
@@ -4335,7 +4337,7 @@ test("a 429 says to wait Retry-After once, and a credit header adds no warning",
     status: 429,
     headers: {
       "content-type": "application/problem+json", "retry-after": "1234",
-      ratelimit: '"api-request-org";r=0;t=1234', "ratelimit-policy": '"api-request-org";q=500;w=3600',
+      ratelimit: '"api-request-org";r=0;t=1234', "ratelimit-policy": '"api-request-org";q=300;w=3600',
       "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "true",
     },
     body: { type: "https://screenrig.ai/problems/rate-limited", title: "Too many requests", status: 429, detail: "The organization's agent requests for this hour are spent.", code: "rate_limited" },
@@ -4451,10 +4453,12 @@ test("media upload rerun returns the existing media instead of uploading again, 
   }
 });
 
-test("limits help states the hourly request cap, what is not counted, and the storage limit", () => {
+test("limits help states the request caps a minute and an hour, live agents, what is not counted, and the storage limit", () => {
   const text = LIMITS_HELP;
   assert.match(text, /Requests are never charged/);
-  assert.match(text, /500 on Standard and Plus, 2,000 on Education and Premium, 10,000 on Enterprise/);
+  assert.match(text, /30 and 300 on Standard, 60 and 1,000 on Plus, 200 and 3,000 on\s+Education and Premium, 1,000 and 8,000 on Enterprise/);
+  assert.match(text, /3 on Standard, 10 on Plus, 50 on\s+Education and Premium, 200 on Enterprise/);
+  assert.match(text, /409 agent_limit_exceeded: disconnect an agent nobody\s+uses/);
   assert.match(text, /429 rate_limited with retry_after_seconds/);
   assert.match(text, /never loop/);
   assert.match(text, /Not counted: card data and key\/value writes and deletes/);
