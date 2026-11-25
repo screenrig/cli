@@ -55,7 +55,13 @@ export function screenListQuery(args: ParsedArgs): { query: Record<string, strin
   const tag = screenListTagFromArgs(args);
   const folder = screenListFolderFromArgs(args);
   const facts = screenListFacts(args.flags);
-  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...(folder ? { folder } : {}), ...facts.query }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
+  // The platform filters (health.platform): the server reads them, so every page is searched.
+  const platform: Record<string, string> = {};
+  for (const [flag, key] of [["security-patch-before", "security_patch_before"], ["web-engine", "web_engine"], ["web-engine-below", "web_engine_below"]] as const) {
+    const value = flagString(args.flags, flag);
+    if (value !== undefined) platform[key] = value;
+  }
+  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...(folder ? { folder } : {}), ...facts.query, ...platform }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
 }
 
 /** --folder: a screen folder ID, or root for the screens outside every folder. */

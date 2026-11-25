@@ -199,3 +199,19 @@ test("screen.health_changed renders the battery changes", () => {
   } as never);
   assert.match(line ?? "", /changes="on_battery level_percent=64,plugged_in source=usb"/);
 });
+
+test("screen list passes the platform filters to the server and refuses malformed ones before any request", async () => {
+  const transport = new FakeTransport().on("GET", "/api/screens", () => ({ status: 200, headers: {}, body: { items: [screen("scr_LOBBY", "Lobby", healthy)] } }));
+  const listed = await cli(["--json", "screen", "list", "--security-patch-before", "2026-06-01", "--web-engine", "android-webview", "--web-engine-below", "120"], transport);
+  assert.equal(listed.code, 0, listed.stdout);
+  const query = transport.calls.at(-1)?.query;
+  assert.equal(query?.security_patch_before, "2026-06-01");
+  assert.equal(query?.web_engine, "android-webview");
+  assert.equal(query?.web_engine_below, "120");
+  const before = transport.calls.length;
+  for (const bad of [["--security-patch-before", "2026-02-30"], ["--web-engine", "Chrome"], ["--web-engine-below", "0"]]) {
+    const refused = await cli(["--json", "screen", "list", ...bad], transport);
+    assert.equal(refused.code, 2, bad.join(" "));
+  }
+  assert.equal(transport.calls.length, before);
+});

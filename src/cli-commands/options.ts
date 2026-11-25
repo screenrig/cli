@@ -58,6 +58,20 @@ export function revision(value: string): string {
   return value;
 }
 
+/** --security-patch-before: a real calendar date, YYYY-MM-DD. */
+export function securityPatchDateOption(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) : undefined;
+  if (!match || !date || date.toISOString().slice(0, 10) !== value) throw usageError("--security-patch-before requires a date written YYYY-MM-DD.");
+  return value;
+}
+
+/** --web-engine: an engine name such as android-webview, webview2, wkwebview, qtwebengine or chromium. */
+export function webEngineOption(value: string): string {
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(value)) throw usageError("--web-engine requires an engine name such as android-webview, webview2, wkwebview, qtwebengine or chromium.");
+  return value;
+}
+
 export function screenTagOption(value: string): string {
   return screenTag(value);
 }

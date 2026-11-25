@@ -1,5 +1,5 @@
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
-import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
+import { NOTE_HELP, positiveInteger, reportFormatOption, reportOutputOption, reviewNoteOption, revision, screenTagOption, screenTagListOption, securityPatchDateOption, toastDuration, webEngineOption } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import type { CommandHandler } from "../commands.js";
 import { handleScreenScheduleRestore, handleScreenSchedulePreview, handleScreenScheduleRevisions } from "../handlers/screen-schedule-change.js";
@@ -86,6 +86,9 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--field <NAME=VALUE>", "List only screens whose field NAME holds exactly VALUE (repeatable; every one must match)").argParser(screenFieldFilterOption))
     .addOption(new Option("--near <LAT,LON,KM>", "List only screens located within KM kilometres of the point; screens with no location are left out").argParser(screenNearOption))
     .addOption(new Option("--audience <RULE>", `List only the active screens this rule matches: ${AUDIENCE_RULE_HELP}, @FILE to read it from a file, or - for stdin`).argParser(audienceOption))
+    .option("--security-patch-before <YYYY-MM-DD>", "List only screens whose Player reports a security patch older than this date (Android; the maker's own claim). Screens that report none are left out", securityPatchDateOption)
+    .option("--web-engine <NAME>", "List only screens whose Player renders with this web engine (android-webview, webview2, wkwebview, qtwebengine, chromium, ...)", webEngineOption)
+    .option("--web-engine-below <MAJOR>", "List only screens whose web engine's major version is below this number; pair it with --web-engine", positiveInteger("web-engine-below"))
     .action(bind(handleScreenList));
 
   screen.command("show").description("Inspect a screen")
