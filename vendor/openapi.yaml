@@ -1224,7 +1224,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: startDestinationApproval
-      description: Starts the passkey approval of a webhook's, a notification's or an MCP event subscription's destination. The delivery service issues a single-use challenge bound to the destination's exact address, for the passkeys of the people who may approve the organization's destinations, and the answer carries it as WebAuthn request options. The person must be able to change the resource in the dashboard (a notification that covers other projects, through the organization, as its admin; an MCP event subscription of the session's project, or of any project of an organization they administer) and be an owner or admin of the organization. Every attempt takes fresh options; a challenge is used up when it is presented, accepted or not. Options and complete each admit 60 calls per person and 180 per client address in 10 minutes (rate_limited), apart from the limits of the other proof actions. Dashboard session only, with the session's CSRF header.
+      description: Starts passkey approval for the destination identified by the request's kind and id. The delivery service issues a single-use challenge bound to the destination's exact address, for the passkeys of the people who may approve the organization's destinations, and the answer carries it as WebAuthn request options. The person must be able to change the resource in the dashboard (a notification that covers other projects, through the organization, as its admin; an MCP event subscription of the session's project, or of any project of an organization they administer) and be an owner or admin of the organization. Every attempt takes fresh options; a challenge is used up when it is presented, accepted or not. Options and complete each admit 60 calls per person and 180 per client address in 10 minutes (rate_limited), apart from the limits of the other proof actions. Dashboard session only, with the session's CSRF header.
       security:
         - dashboardSession: []
       requestBody:
@@ -1350,6 +1350,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardPasskey'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/passkeys/enrolment-codes:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: requestDashboardPasskeyEnrolmentCode
+      description: >-
+        A password session under passkey-only sign-in (the organization turned on sign_in.passkey_only, security_controls) with no passkey is held to the passkey enrolment routes, and may start or finish a passkey registration only after it confirms a one-time code mailed to the person's verified address. This mails it: a 256-bit single-use token, valid 15 minutes, in a link of the form /dashboard/#passkey-enrol=CODE that the dashboard reads and sends to POST /api/me/passkeys/enrolment-confirmations. Only the newest mail works. It answers 204 whether or not a mail was sent (a repeat within a minute, or more than five in an hour, sends none), so it cannot be used to mail an address endlessly. A session with nothing to confirm (passkey_enrolment_confirmation_required false) is resource_conflict; a person with no verified address is invalid_request.
+      security:
+        - dashboardSession: []
+      responses:
+        '204':
+          description: The code was mailed, or recently was.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/passkeys/enrolment-confirmations:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    post:
+      operationId: confirmDashboardPasskeyEnrolment
+      description: >-
+        Spends the mailed one-time code and marks this session as having confirmed it, after which POST /api/me/passkeys/options and /complete work for it (until then they answer 403 enrolment_confirmation_required). The code belongs to the person, their verified address and this request's session only: an unknown, spent, expired or another person's code is invalid_request or resource_conflict (expired). Answers the session, whose passkey_enrolment_confirmation_required is then false. Guesses are limited per person and per client address.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: {type: string, minLength: 1, maxLength: 200, description: "The one-time code from the mailed link."}
+      responses:
+        '200':
+          description: The session, with the confirmation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSession'
         default:
           $ref: '#/components/responses/Problem'
   /api/me/passkeys/{id}:
@@ -5752,7 +5796,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). The optional body sets expires_in_s, how long the reboot stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.reboot_requested. A screen that is online is sent the per-screen runtime command player.reboot at once (details reboot_id, reason project, at, expires_at; never delivered after expires_at) and the reboot is recorded in Screen.commands as sent. A screen that is offline holds the reboot as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reboot_id and expires_at, and the command becomes sent. A sent reboot becomes done when a health report carrying uptime_s puts the boot after it was sent. A newer reboot supersedes an older one still queued. A queued reboot past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing. From the moment the reboot is sent until a health report proves it done or ten minutes pass, the screen raises no screen_offline, display_disconnected or crashing notice or alert; a condition that still holds then opens normally. The reboot schedule (PUT /api/screens/{id}/reboot-schedule) issues the same reboot with source schedule.
+      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). The optional body sets expires_in_s, how long the reboot stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.reboot_requested. A screen that is online is sent the per-screen runtime command player.reboot at once (details reboot_id, reason project, at, expires_at; never delivered after expires_at) and the reboot is recorded in Screen.commands as sent. A screen that is offline holds the reboot as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reboot_id and expires_at, and the command becomes sent. A sent reboot becomes done when a health report carrying uptime_s puts the boot after it was sent. A newer reboot supersedes an older one still queued. A queued reboot past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing. From the moment the reboot is sent until a health report proves it done or ten minutes pass, the screen raises no screen_offline, display_disconnected or crashing notice or alert; a condition that still holds then opens normally. The reboot schedule (PUT /api/screens/{id}/reboot-schedule) issues the same reboot with source schedule. A screen whose organization's release ring has maintenance windows (PUT /api/organizations/{org_id}/player-releases) and is outside every window refuses the reboot 409 update_held, with the next window's start in errors[0].next_window_at (an RFC 3339 instant), unless the body carries override true; a scheduled reboot is never held, and a stored policy holds after the plan that set it ends. A fleet reboot action fails the held screens alone with the same problem.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -6050,7 +6094,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Asks the screen's Player to check for the newest Player release now and install it (docs/player- compatibility.md §6.5.1). The result cause is up_to_date when the newest release already runs and updated when a release was installed; a store-managed or device-managed install declares no update capability. The optional body sets expires_in_s, how long the command stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.command_requested. A screen that is online is sent the per-screen runtime command player.update at once (details command_id, command, reason project, at, expires_at; never delivered after expires_at) and the command is recorded in Screen.commands as sent. A screen that is offline holds the command as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same command_id and expires_at, and the command becomes sent. The Player reports how it ended: the command becomes done or failed in Screen.commands with the cause the Player reported (cause, detail), and the project-only screen.command_result is appended. A sent command with no report stays sent. A newer command of the same type supersedes one still queued, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the update capability, else 409 command_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes across clear-cache, restart-app and update; a refused request (command_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+        Asks the screen's Player to check for the newest Player release now and install it (docs/player- compatibility.md §6.5.1). The result cause is up_to_date when the newest release already runs and updated when a release was installed; a store-managed or device-managed install declares no update capability. The optional body sets expires_in_s, how long the command stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.command_requested. A screen that is online is sent the per-screen runtime command player.update at once (details command_id, command, reason project, at, expires_at; never delivered after expires_at) and the command is recorded in Screen.commands as sent. A screen that is offline holds the command as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same command_id and expires_at, and the command becomes sent. The Player reports how it ended: the command becomes done or failed in Screen.commands with the cause the Player reported (cause, detail), and the project-only screen.command_result is appended. A sent command with no report stays sent. A newer command of the same type supersedes one still queued, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the update capability, else 409 command_unsupported and nothing is recorded. An update to a screen whose organization's release ring has maintenance windows (PUT /api/organizations/{org_id}/player-releases) and that is outside every window is refused 409 update_held, with the next window's start in errors[0].next_window_at (an RFC 3339 instant), unless the body carries override true; clear-cache and restart-app are never held, and a fleet update action fails the held screens alone with the same problem. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes across clear-cache, restart-app and update; a refused request (command_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -20383,7 +20427,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. An address at a domain whose organization requires single sign-on is refused with 403 sso_required before any account is looked up, so the answer does not depend on whether a person holds the address; POST /api/sso/starts signs that person in through their identity provider. Password sign-in needs a verified email, so a person who signed themselves up (POST /api/signups) signs in with their passkey, and one who set a password on an unverified address still gets the unauthorized answer. Development auth uses this same password flow.
+      description: Signs in the person identified by verified email and password. Unknown email, no password, and wrong password return the same unauthorized response. Opens the last-used project if still a membership, otherwise the most recent membership, or no project. An address at a domain whose organization requires single sign-on is refused with 403 sso_required before any account is looked up, so the answer does not depend on whether a person holds the address; POST /api/sso/starts signs that person in through their identity provider. An address at a domain whose organization turned on passkey-only sign-in (PUT /api/organizations/{org_id}/security) is refused with 403 forbidden (the detail says the organization requires a passkey) once the person holds a passkey; a person with none signs in with the password, and the session has passkey_enrollment_required true. Password sign-in needs a verified email, so a person who signed themselves up (POST /api/signups) signs in with their passkey, and one who set a password on an unverified address still gets the unauthorized answer. Development auth uses this same password flow.
       requestBody:
         required: true
         content:
@@ -22211,7 +22255,7 @@ paths:
           $ref: '#/components/responses/Problem'
     post:
       operationId: enrollReseller
-      description: An admin of an organization makes it a reseller at once. Enrollment opens on 1 January 2027; before then every caller is answered 409 reseller_conflict, whose detail states the date. The caller must be a signed-in person with a verified email address (cookie sessions only; agents and service clients never hold reseller authority) and an admin of the organization named by organization_id; anyone else gets 404 not_found. The reseller starts at 2000 basis points of list price (20%) effective now and is pending review, boarding up to 10 current customers (customer_limit) until screenRIG reviews it. The organization must be live, not already a reseller, not a customer of a reseller and not on the staff or promo plan (409 reseller_conflict, the detail names the reason). Appends reseller.enrolled to the organization audit.
+      description: An admin of an organization makes it a reseller at once. Enrollment opens on 1 January 2027; before then every caller is answered 409 reseller_conflict, whose detail states the date. The caller must be a signed-in person with a verified email address (cookie sessions only; agents and service clients never hold reseller authority) and an admin of the organization named by organization_id; anyone else gets 404 not_found. The reseller starts at 2000 basis points of list price (20%) effective now and is pending review, boarding up to 10 current customers (customer_limit) until screenRIG reviews it. The organization must be live, not already a reseller, not a customer of a reseller and not on the staff or promo plan (409 reseller_conflict, the detail names the reason); an organization on the Legacy plan may be a reseller. Appends reseller.enrolled to the organization audit.
       security:
         - dashboardSession: []
       requestBody:
@@ -22354,7 +22398,7 @@ paths:
         schema: {type: string, minLength: 1, maxLength: 200}
     put:
       operationId: setDashboardResellerCustomerPlan
-      description: Sets a current customer's plan, which the reseller pays for. standard removes the plan; plus and premium are always allowed, education only for an education-eligible organization. Enterprise, staff and promo are staff-assigned. An upgrade applies at once, a downgrade or removal at the next UTC month boundary, as organization plan changes do (docs/billing-rollup.md). Appends reseller.customer_plan to the organization audit.
+      description: Sets a current customer's plan, which the reseller pays for. standard removes the plan; plus and premium are always allowed, education only for an education-eligible organization. Enterprise, legacy, staff and promo are staff-assigned, and a customer holding one of them cannot be changed here. An upgrade applies at once, a downgrade or removal at the next UTC month boundary, as organization plan changes do (docs/billing-rollup.md). Appends reseller.customer_plan to the organization audit.
       security:
         - dashboardSession: []
       requestBody:
@@ -22483,7 +22527,7 @@ paths:
         schema: {type: string, minLength: 1, maxLength: 200}
     delete:
       operationId: endDashboardOrganizationReseller
-      description: An admin of the organization ends its delegation to its reseller at once. From then the organization pays for itself; its plan, projects and members stay as they are, including memberships reseller admins hold. The overage its wallet accrued while delegated, which the reseller is billed for, is written off in the same change. Appends reseller.customer_ended to the organization audit. An organization with no reseller answers 404 not_found.
+      description: An admin of the organization ends its delegation to its reseller at once. From then the organization pays for itself; its plan, projects and members stay as they are, including memberships reseller admins hold. The overage its wallet accrued while delegated, which the reseller is billed for, is written off in the same change (an organization on the Legacy plan, billed outside screenRIG, accrued none the reseller owes). Appends reseller.customer_ended to the organization audit. An organization with no reseller answers 404 not_found.
       security:
         - dashboardSession: []
       responses:
@@ -23087,6 +23131,132 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
+  /api/organizations/{org_id}/player-releases:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetPlayerReleases
+      description: >-
+        A designated admin reads the organization's Player release policy: release rings that hold a Linux Player and a Raspberry Pi system back under a ceiling, and the maintenance windows that hold updates and reboots to chosen hours. An organization that never set a policy reads revision 0, no rings and a default ring that holds nothing back. The ETag is the quoted revision. A ring's screens are the members it names (a project's screens, narrowed to one screen folder and the folders under it, or to one tag); a screen several rings name belongs to the first of them in rings order, and a screen no ring names belongs to default_ring. player_ceiling means no newer than: a Player of that version or older is never held, a newer release is not installed, and nothing is ever downgraded. os_ceiling is the same for the Raspberry Pi system version. Only the Linux Player and the Raspberry Pi system update themselves from a channel, so only they honour a ceiling and the window hold on their own updates; the browser Player, the TV shells, Android, Apple and Windows are not held by it. Every ring's maintenance windows also hold reboot and update commands sent to its screens on every Player (see the reboot and update operations). Reading is open on every plan; a stored policy keeps applying after a downgrade. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The policy in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerReleasePolicy'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: dashboardOrganizationsSetPlayerReleases
+      description: >-
+        A designated admin replaces the organization's Player release policy. rings (at most 20, in precedence order) and default_ring are both required; the body is the whole policy, and a policy that holds nothing back (no ceiling and no window anywhere) clears it. Each ring has a unique id (a lowercase letter, then up to 31 lowercase letters, digits, hyphens or underscores; default is reserved), a name, members (at most 500 across the rings; every project_id is a live project of this organization and a folder_id a screen folder of it, a member naming neither folder_id nor tag is the whole project, and one naming both is invalid_request), player_ceiling (a YY.MM.N version or null; one below the minimum Player version the service supports is invalid_request, code below_minimum), os_ceiling (a whole number or null) and windows (at most 16). A window is days (distinct weekdays mon to sun), start and end (24-hour HH:MM); it is at least 2 hours long. A window is judged on the wall clock of the screen's own time zone (the zone its manifest carries), at the moment of the check: start is inside and end is outside; an end before the start runs overnight and belongs to the weekday it starts on (friday 22:00-06:00 holds saturday's early hours, and a window listed for saturday does not); a daylight-saving change never lengthens or shortens a window on its own, an hour the clock skips is never seen, an hour it repeats is inside both times, and a window that starts inside a skipped hour opens when the clock resumes. A ring with no windows is always open. If-Match carries the revision and is required (0 before the first change); a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof of kind player_releases_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Setting a policy that holds something back needs the player_releases plan feature (Enterprise; feature_not_in_plan, 402 otherwise); clearing one is always accepted. A change is recorded in the organization audit (organization.player_releases_set), increments the revision, and tells every screen of the organization whose Player declared update.policy to read its manifest again, in the background; a screen that missed it reads the policy at its next manifest read. The same notice goes to those screens once per UTC day while the policy holds something back, so the policy's expiry (7 to 8 days ahead) never lapses under a Player on a healthy stream; moving a screen to another ring (a tag or folder change) is read by it at the next of these. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The policy's revision from GET, optionally quoted; 0 before the first change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayerReleasePolicyUpdate'
+      responses:
+        '200':
+          description: The policy now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerReleasePolicy'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Player release rings and maintenance windows are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/player-releases/status:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetPlayerReleasesStatus
+      description: >-
+        A designated admin reads, for each ring and for the default ring, how many of the organization's active screens it holds, how many of them honour the policy themselves (their Player declared update.policy, so its updater applies the ceiling and the windows), and the same counts by Player kind and version. A Player that cannot be held by a ring (the browser Player, TV shells, Android, Apple, Windows) counts in screens and never in honouring. Counts are read when asked. Open on every plan. People only.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The status.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerReleaseStatus'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/guest-policy:
     servers:
       - url: https://screenrig.ai
@@ -23122,6 +23292,278 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationGuestPolicyResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/agent-controls:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsListAgentControls
+      description: A designated admin lists every agent and service client of the organization's live projects with the controls set on it, sorted by name. An agent is listed once however many of the organization's projects it works in (projects names them); a pending, revoked, cancelled or expired agent and a revoked service client are not listed. id is the agent id, or client:<id> for a service client, and is the principal_id of the routes below. controls is null while nothing is set. Reading is never plan gated. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's agents and service clients with their controls.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentControlsList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/agent-controls/{principal_id}:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: principal_id
+        in: path
+        required: true
+        description: An agent id (agt_...), or client:<id> for a service client, as GET agent-controls lists it.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    put:
+      operationId: dashboardOrganizationsSetAgentControls
+      description: A designated admin sets the controls on one agent or service client of the organization. The body is the whole control and replaces the previous one; it must set at least one of access_ceiling, capabilities and fleet_approval (DELETE clears). The controls apply to the principal in every project of the organization and are read on every request through a cache of at most 20 seconds, so tightening them takes effect on the principal's next request after that, with no token revoked. access_ceiling read or propose holds the principal's access to at most that level, as a project's review requirement does (insufficient_access, with access_limited_by agent). capabilities (a subset of screens, content, playlists, advertising, reports and project; absent, null or empty is no area limit) intersect the areas of the principal's token, in the request check, the MCP tool list and its events, and in AdCP. fleet_approval holds the principal's changes to screens as a Propose caller's are, on POST /api/screens/actions and on every route of the screens area that changes something, one screen at a time included (PATCH /api/screens/{id}, the playlist schedule, takeovers, folders, moves), a change that has a review form (assign, clear_playlist, set_playlist_schedule, clear_playlist_schedule, takeover, takeover_clear) becomes a review (202 pending_review) and every other one is refused with insufficient_access; its campaign creates, changes and deletes become reviews, and a campaign promote or restore is refused. A principal with controls cannot create a service client or widen one (insufficient_access). A held campaign change is a protected_change review with reason agent_controls and is decided by any approver. If-Match carries the controls' revision (0 when the principal has none); a stale one is revision_conflict (412) with current_revision. Setting needs the agent_controls plan feature (Enterprise; feature_not_in_plan, 402, otherwise), checked after the admin and the body. A change that gives the principal more (raising or removing the ceiling, adding an area or removing the area limit, turning fleet_approval off) needs a fresh proof of kind member_access_change bound to principal_id (reauthentication_required, 401, without it); a change that only narrows needs none. A principal that is neither an agent nor a service client of the organization's projects is not_found. Recorded in the organization audit as organization.agent_controls_changed. People only.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The controls' current revision, or 0 when the principal has none.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentControlsUpdate'
+      responses:
+        '200':
+          description: The controls now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: The new revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentControls'
+        '402':
+          description: "feature_not_in_plan - The organization's plan does not include agent_controls (Enterprise). Clearing the controls and reading them are never refused, and a control stored before a downgrade stays enforced."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: dashboardOrganizationsClearAgentControls
+      description: A designated admin removes every control from one agent or service client, never plan gated. Clearing gives the principal back everything its token allows, so it takes the same fresh proof of kind member_access_change as a loosening, sent as {proof} in the body (reauthentication_required, 401, without it). An optional If-Match names the revision to clear (revision_conflict otherwise). A principal with no control answers 204 with no proof. It takes effect on this process at once and on the others within the cache window. Recorded in the organization audit as organization.agent_controls_changed. People only.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: The controls' current revision; without it whatever is stored is cleared.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentControlsClear'
+      responses:
+        '204':
+          description: The principal has no controls.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/agent-controls/{principal_id}/activity:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: principal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetAgentControlsActivity
+      description: A designated admin reads what one agent or service client did across the organization's projects, built from the project events and audit entries that name it and storing nothing of its own. since is an RFC 3339 time no more than 30 days back (default 7 days). changes counts the audit entries the principal wrote by UTC day, action and resource type; refusals counts the requests that were refused (outcome blocked) by day, command and problem code; last_seen_at is the newest event of the principal in the organization's projects, null when none is kept. Each project and source is read in at most five pages of 200; truncated is true when that stopped the report. Reading is never plan gated. People only.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: The principal's activity.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentControlsActivity'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/security:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetSecurity
+      description: >-
+        A designated admin reads the organization's security controls: the IP allowlist and passkey-only sign-in (Enterprise, feature security_controls). An organization that never set any answers every control off at revision 0. The ETag is the revision, which PUT sends as If-Match. client_address is the address this server sees the request come from, for the dashboard to offer it when the admin builds an allowlist. Reading needs no plan feature: the stored controls are enforced, and shown, on every plan. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The security controls.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationSecurity'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: dashboardOrganizationsSetSecurity
+      description: >-
+        A designated admin replaces the organization's security controls. Both members are required: PUT sends the whole policy, and one that matches what is stored changes and writes nothing. If-Match carries the revision from GET and is required (0 for an organization that never set any); a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind security_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. A change increments revision, is recorded in the organization's audit log (organization.security_changed) and is answered with the policy and its ETag.
+
+
+        ip_allowlist.cidrs holds at most 100 IPv4 or IPv6 ranges in CIDR form (203.0.113.0/24, 2001:db8::/32; a bare address is invalid_request), stored masked, deduplicated and sorted. enabled true needs at least 1 range; the ranges are kept while enabled is false. While it is enabled, the organization's dashboard sessions and its bearer credentials (agent, CLI, service client and MCP, tools/list included) are refused with 403 ip_not_allowed, naming the address seen, from any other address. The session's project decides which organization's list holds a dashboard session, and the organization named in the path holds the organization routes. A project request by a bearer is held by the project it selects, and one that lists across projects, /mcp, the identity-wide routes (projects, organizations, service client changes) by every project the token grants. A session whose project is in an allowlisted organization can still list the person's projects (GET /api/projects) and switch to a project of another organization (PUT /api/session/project, held by the organization of the project it opens), and sign out. Players and every runtime and edge route, kiosk feed tokens, SCIM bearer tokens and staff sessions are not held. The refusal is not an authentication failure: the cookie stays and the credential stays valid, so nothing signs in again. PUT refuses an enabled allowlist that leaves out the address the request itself comes from (resource_conflict, 409, naming it, errors[].field ip_allowlist.cidrs). A list that holds no IPv6 range, or no IPv4 range, is accepted, since one request arrives over one family and cannot judge it; the answer's warnings says so for the dashboard to show. An organization locked out all the same is cleared by staff (the staff action organization.clear-ip-allowlist). The change reaches the host that took it at once and every other API host within 30 seconds.
+
+
+        sign_in.passkey_only true refuses password sign-in for the people whose verified email address is at a domain the organization has claimed, the same people Require SSO governs. A person who holds a passkey signs in with it. Turning it on ends every dashboard session bound to the organization's sign-in policy at its next request, the caller's own included, because the change advances the organization's SSO policy revision (policy_revision, and so the ETag of the SSO policy); turning it off ends nothing. A person with no passkey can still sign in with their password, to add one: that session has passkey_enrollment_required true and may use only the enrolment routes, and may start or finish a passkey registration only after it confirms a one-time code mailed to the person's verified address (passkey_enrolment_confirmation_required; POST /api/me/passkeys/enrolment-codes and /enrolment-confirmations). Single sign-on stays whatever the organization's SSO settings say; while Require SSO is in force it decides sign-in and passkey_only changes nothing. A password sign-in it refuses is 403 forbidden. Development servers, which register no passkeys, ignore it.
+
+
+        There is no maximum session length. Setting or widening a control is the security_controls plan feature (Enterprise): enabling the allowlist, adding a range to an enabled one or turning passkey_only on without it is feature_not_in_plan (402). Turning a control off, narrowing the ranges and re-sending what is stored are always accepted, and enforcement reads the stored policy whatever the plan, so a downgrade keeps what was set. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The revision from GET, optionally quoted; 0 when nothing was ever set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationSecurityWrite'
+      responses:
+        '200':
+          description: The security controls now in force.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationSecurity'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Security controls are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/library:
@@ -23645,6 +24087,549 @@ paths:
         '403':
           $ref: '#/components/responses/Problem'
         '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/warehouse-export:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetWarehouseExport
+      description: >-
+        A designated admin reads the organization's warehouse export: the bucket it writes to (endpoint, region, bucket, prefix and the last four characters of the access key id; the secret is never returned), the datasets, the hour and time zone it starts at, when it next runs, the outcome of the last run, the day it last wrote and the approval of its destination. object_prefix is the folder every object lies under. The export is not_found until PUT creates it. The ETag carries the revision. A configured export is readable on every plan. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's warehouse export.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted export revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExport'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: dashboardOrganizationsSetWarehouseExport
+      description: >-
+        A designated admin creates the organization's warehouse export or changes it; an organization holds one. Each day at the chosen hour screenRIG writes the previous UTC day of the selected datasets to the organization's own S3-compatible bucket as gzipped NDJSON (docs/data-export.md): <prefix>/screenrig/v1/<dataset>/dt=YYYY-MM-DD/<project_id>.ndjson.gz for plays, playback, events and audit (audit also org.ndjson.gz), then dt=YYYY-MM-DD/_manifest.json last, which lists every file with its rows, bytes and SHA-256 and the audit chain heads. A day whose manifest exists is complete; a rerun overwrites. If-Match carries the export's revision from GET, or 0 when the organization has none, and is required; a stale value is revision_conflict with current_revision. 201 creates and 200 changes. connection (the bucket and its key) is required to create and is kept when omitted on a change; the secret is handed to the delivery service once and never stored by the backend. A new bucket or key is a new destination: nothing is written until an owner or admin of the organization approves it with their passkey (POST /api/destinations/approval/options with kind warehouse_export and the organization id), whatever the delivery service's approval mode is, and approval.state shows pending until then. hour defaults to 2 and timezone to UTC when the export is created and keeps its value otherwise. proof is required: a fresh passkey or password proof bound to a reauthentication of kind data_export_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Data export is part of the Enterprise plan; an organization whose plan lacks it is refused with feature_not_in_plan (402). An export already configured keeps running after a downgrade; only changes are refused, except a request that changes nothing but enabled to false (pausing the export; it still needs the proof), which is always accepted. datasets is required to create and unchanged when omitted. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The export revision from GET, optionally quoted, or 0 to create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarehouseExportWrite'
+      responses:
+        '200':
+          description: The changed export.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted export revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExport'
+        '201':
+          description: The new export.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted export revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExport'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: dashboardOrganizationsRemoveWarehouseExport
+      description: >-
+        A designated admin removes the organization's warehouse export after fresh proof (the body carries proof, as for PUT). It deletes the export's configuration and run history and the delivery service's copy of the bucket key; objects already written stay in the bucket. Removing is never refused for the plan. not_found when the organization has no export. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataExportProofBody'
+      responses:
+        '204':
+          description: The export is removed.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/warehouse-export/test:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsTestWarehouseExport
+      description: >-
+        A designated admin writes one small object, <prefix>/screenrig/v1/_screenrig_test, to the export's bucket to prove the connection. ok is true with the object's key, bytes and SHA-256 when the bucket took it, and false with error destination_<class> (dns, connect, tls, timeout, access_denied, no_such_bucket or storage) when it did not. A destination no person approved yet is destination_unapproved (409). The test is part of Enterprise's data export (feature_not_in_plan, 402). People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The outcome of the test write.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExportTest'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/warehouse-export/runs:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsListWarehouseExportRuns
+      description: >-
+        A designated admin lists the export's runs, newest first, scheduled and backfilled, each with its day, status (queued, running, succeeded, partial, failed or awaiting_approval), files, rows, bytes, error and, for a partial day, denied_files. Runs are kept 90 days. not_found when the organization has no export. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        '200':
+          description: The runs.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExportRunList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: dashboardOrganizationsCreateWarehouseExportRun
+      description: >-
+        A designated admin queues the export of one finished UTC day within the last 30, to write it again or for the first time (a backfill). The worker writes it like a scheduled day, overwriting its files and writing its manifest last; it moves neither the schedule nor last_day. 202 answers the queued run; GET .../runs shows its progress. A day already queued or running, or ten queued days, is resource_conflict. A day outside the last 30 finished days is invalid_request. Part of Enterprise's data export (feature_not_in_plan, 402). People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarehouseExportRunCreate'
+      responses:
+        '202':
+          description: The queued run.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseExportRun'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/audit-streams:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsListAuditStreams
+      description: >-
+        A designated admin lists the organization's audit streams, oldest first (at most 3). A stream carries the organization's audit log, its own scope and each project's, to Splunk HEC, Datadog or a bucket, from the moment it was created, in sealed order. Each shows its receiver or bucket, the last four characters of its token or key, the outcome of its last pass, the entries delivered, the gaps it skipped and the approval of its destination. Tokens and secrets are never returned. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The organization's audit streams.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStreamList'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: dashboardOrganizationsCreateAuditStream
+      description: >-
+        A designated admin creates an audit stream after fresh proof (a passkey or password proof of kind data_export_change with the organization id as subject_id, or {type: sso}). kind splunk_hec or datadog takes the receiver's https address (port 443 or 8443, public host, with the path of its collector) in endpoint and its token in token; kind s3 takes a bucket connection in s3 and writes an hourly gzipped NDJSON object per audit scope under <prefix>/screenrig/v1/audit-stream/<stream_id>/. Batches to Splunk and Datadog stay under 256 KiB. The token is sealed and never returned; a bucket's secret is handed to the delivery service once. The stream delivers nothing until an owner or admin of the organization approves its destination with their passkey (POST /api/destinations/approval/options with kind audit_stream and the stream id). Entries the delivery service denies because they carry a credential or token are recorded as a gap and skipped. An organization has at most 3 streams (audit_stream_limit_reached). Part of Enterprise's data export (feature_not_in_plan, 402); a stream already created keeps running after a downgrade. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditStreamCreate'
+      responses:
+        '201':
+          description: The new stream.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted stream revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStream'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/audit-streams/{stream_id}:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: stream_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    get:
+      operationId: dashboardOrganizationsGetAuditStream
+      description: >-
+        A designated admin reads one audit stream. The ETag carries the revision. not_found for a stream the organization does not hold. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The stream.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted stream revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStream'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      operationId: dashboardOrganizationsUpdateAuditStream
+      description: >-
+        A designated admin changes a stream's name, whether it runs (enabled) or its token, after fresh proof. If-Match carries the stream's revision and is required; a stale value is revision_conflict with current_revision. A stream's address or bucket never changes: remove it and create another, which waits for its own approval. Part of Enterprise's data export (feature_not_in_plan, 402), except that a request whose only effect is enabled false is never refused for the plan. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The stream revision from GET, optionally quoted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditStreamPatch'
+      responses:
+        '200':
+          description: The changed stream.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ETag:
+              description: Quoted stream revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStream'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: dashboardOrganizationsRemoveAuditStream
+      description: >-
+        A designated admin removes a stream after fresh proof (the body carries proof, as for POST). Its cursors and the delivery service's copy of its destination go with it; nothing already delivered is recalled. Removing is never refused for the plan. People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataExportProofBody'
+      responses:
+        '204':
+          description: The stream is removed.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/audit-streams/{stream_id}/test:
+    servers:
+      - url: https://screenrig.ai
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: stream_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+    post:
+      operationId: dashboardOrganizationsTestAuditStream
+      description: >-
+        A designated admin sends one marked test event to a Splunk or Datadog stream's receiver, or writes <prefix>/screenrig/v1/_screenrig_test to an s3 stream's bucket. ok says whether the receiver or bucket took it; outcome is sent, failed or denied, with status (the receiver's HTTP status) and error when it did not. A destination no person approved yet is destination_unapproved (409). Part of Enterprise's data export (feature_not_in_plan, 402). People only; agents and bearer credentials have no route.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The outcome of the test delivery.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStreamTest'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          description: feature_not_in_plan — Data export is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -29297,8 +30282,8 @@ components:
       description: read (Read only) < propose < manage. Propose reads, contributes (media, notes, comments, support, feedback, screenshots, ad drafts) and turns playlist and screen changes into reviews (docs/reviews.md).
     AccessLimitedBy:
       type: string
-      enum: [project, person]
-      description: Why effective_access is lower than the credential's access. project - the project requires review for agent changes. person - the agent's responsible person is a member who cannot approve reviews.
+      enum: [project, person, agent]
+      description: Why effective_access is lower than the credential's access. project - the project requires review for agent changes. person - the agent's responsible person is a member who cannot approve reviews. agent - the organization's agent controls hold this agent or service client to an access ceiling (AgentControls).
     PlaylistApproval:
       type: object
       additionalProperties: false
@@ -29901,6 +30886,7 @@ components:
       description: "The stored input of a protected_change review, applied through the owning service when a second approver approves. Exactly one of campaign, folder and move is present, as subkind names. Approval replays at base_revision; a campaign or folder that moved on makes the review stale (review_stale)."
       properties:
         subkind: {type: string, enum: [campaign_create, campaign_update, campaign_delete, folder_create, folder_update, folder_delete, folder_unprotect, screens_move]}
+        reason: {type: string, enum: [agent_controls], description: "Present when the change reaches no protected screen and is held because its organization's agent controls hold the agent's fleet and campaign changes for review (fleet_approval). That review is decided by any approver, not a second one."}
         campaign: {$ref: "#/components/schemas/ReviewProtectedCampaign"}
         folder: {$ref: "#/components/schemas/ReviewProtectedFolder"}
         move: {$ref: "#/components/schemas/ReviewProtectedMove"}
@@ -30348,7 +31334,7 @@ components:
           description: The plan the organization holds now (a scheduled plan counts from its effective time), "standard" when it holds no other. Always present. Read-only display; customers do not change organization plans. The staff organization view reports the stored plan_id with previous_plan_id and plan_effective_at instead.
         reseller:
           $ref: '#/components/schemas/ResellerSummary'
-          description: The reseller the organization is delegated to, which is billed for its plan and usage. Absent when it pays for itself. Its admins end the delegation with DELETE /api/organizations/{org_id}/reseller.
+          description: The reseller the organization is delegated to, which is billed for its plan and usage (an organization on the Legacy plan is billed outside screenRIG, and no reseller is billed for it). Absent when it pays for itself. Its admins end the delegation with DELETE /api/organizations/{org_id}/reseller.
         free:
           type: boolean
           description: The organization is a person's, or an unaccepted agent's, one free Standard organization. A plan attached to it leaves it their free one.
@@ -30451,6 +31437,156 @@ components:
           items:
             $ref: '#/components/schemas/OrganizationGuestPolicyDomain'
           description: The admitted domains, sorted; 1 to 20 for mode domains and empty for allow and none.
+    AgentControlsArea:
+      type: string
+      enum: [screens, content, playlists, advertising, reports, project]
+      description: An area of the API an agent credential's capabilities name.
+    AgentControls:
+      type: object
+      additionalProperties: false
+      required: [access_ceiling, capabilities, fleet_approval, revision, updated_at]
+      description: The controls an organization set on one agent or service client. They apply in every project of the organization. A principal with no controls has none of this.
+      properties:
+        access_ceiling:
+          anyOf:
+            - type: string
+              enum: [read, propose]
+            - type: 'null'
+          description: The most access the principal may use, whatever its token allows; null is no ceiling.
+        capabilities:
+          anyOf:
+            - type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/AgentControlsArea'
+            - type: 'null'
+          description: The areas the principal may use, in canonical order; null is no area limit.
+        fleet_approval:
+          type: boolean
+          description: Whether the principal's fleet and campaign changes are held for review.
+        revision:
+          type: integer
+          minimum: 1
+          description: The revision If-Match carries on the next write.
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          description: The person who last wrote the controls.
+    AgentControlsUpdate:
+      type: object
+      additionalProperties: false
+      description: The whole control. At least one of access_ceiling, capabilities (non-empty) and fleet_approval (true) is set.
+      properties:
+        access_ceiling:
+          anyOf:
+            - type: string
+              enum: [read, propose]
+            - type: 'null'
+        capabilities:
+          anyOf:
+            - type: array
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/AgentControlsArea'
+            - type: 'null'
+          description: Absent, null or empty is no area limit.
+        fleet_approval:
+          type: boolean
+        proof:
+          $ref: "#/components/schemas/DashboardProof"
+          description: A fresh proof of kind member_access_change bound to principal_id; required when the change gives the principal more.
+    AgentControlsClear:
+      type: object
+      additionalProperties: false
+      properties:
+        proof:
+          $ref: "#/components/schemas/DashboardProof"
+          description: A fresh proof of kind member_access_change bound to principal_id; required when a control is stored.
+    AgentControlsPrincipal:
+      type: object
+      additionalProperties: false
+      required: [id, kind, name, projects, last_seen_at, controls]
+      properties:
+        id:
+          type: string
+          description: The agent id, or client:<id> for a service client; the principal_id of the control routes.
+        kind:
+          type: string
+          enum: [agent, service_client]
+        name:
+          type: string
+        projects:
+          type: array
+          description: The organization's live projects the principal works in.
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: {type: string}
+              name: {type: string}
+        last_seen_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: When the principal last used a credential in any of those projects.
+        controls:
+          anyOf:
+            - $ref: '#/components/schemas/AgentControls'
+            - type: 'null'
+    AgentControlsList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentControlsPrincipal'
+    AgentControlsActivity:
+      type: object
+      additionalProperties: false
+      required: [principal_id, since, until, last_seen_at, changes, refusals, truncated]
+      properties:
+        principal_id: {type: string}
+        since: {type: string, format: date-time}
+        until: {type: string, format: date-time}
+        last_seen_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        changes:
+          type: array
+          description: The audit entries the principal wrote, newest day first.
+          items:
+            type: object
+            additionalProperties: false
+            required: [day, action, resource_type, count]
+            properties:
+              day: {type: string, format: date, description: "The UTC day."}
+              action: {type: string, description: "The audit action, for example screen.fleet_action."}
+              resource_type: {type: string}
+              count: {type: integer, minimum: 1}
+        refusals:
+          type: array
+          description: The requests that were refused, newest day first.
+          items:
+            type: object
+            additionalProperties: false
+            required: [day, command, problem_code, count]
+            properties:
+              day: {type: string, format: date}
+              command: {type: string, description: "The route-derived command name, for example screens.actions."}
+              problem_code: {type: string}
+              count: {type: integer, minimum: 1}
+        truncated:
+          type: boolean
+          description: True when the page limit stopped the report before the window's end.
     OrganizationLibraryUpdate:
       type: object
       additionalProperties: false
@@ -31026,7 +32162,7 @@ components:
         project_count: {type: integer, minimum: 0}
         screen_count: {type: integer, minimum: 0}
         stored_bytes: {type: integer, minimum: 0}
-        annual_list_cents: {type: integer, minimum: 0, description: "The plan's annual list price for this customer (0 on Standard): the staff quote while the organization holds the plan it was quoted for, else the plan's."}
+        annual_list_cents: {type: integer, minimum: 0, description: "The plan's annual list price for this customer (0 on Standard and Legacy, which is billed outside screenRIG): the staff quote while the organization holds the plan it was quoted for, else the plan's."}
         annual_wholesale_cents: {type: integer, minimum: 0, description: "annual_list_cents less the current spread, rounded half up to the cent."}
     ResellerCustomerPage:
       type: object
@@ -31067,8 +32203,8 @@ components:
         screen_count: {type: integer, minimum: 0}
         stored_bytes: {type: integer, minimum: 0, description: "Stored now, for every month."}
         api_events: {type: integer, minimum: 0, description: Agent requests recorded in the month's usage pool.}
-        plan_annual_list_cents: {type: integer, minimum: 0}
-        plan_annual_wholesale_cents: {type: integer, minimum: 0}
+        plan_annual_list_cents: {type: integer, minimum: 0, description: "0 for a customer on Legacy, which is billed outside screenRIG."}
+        plan_annual_wholesale_cents: {type: integer, minimum: 0, description: "0 for a customer on Legacy."}
     ResellerStatement:
       type: object
       additionalProperties: false
@@ -31392,6 +32528,43 @@ components:
         break_glass_user_ids: {type: array, maxItems: 2, items: {type: string}, description: "Admins who hold a passkey and keep passkey sign-in while SSO is required. Each such sign-in is audited."}
         passkey_admin_ids: {type: array, items: {type: string}, description: "The organization's verified admins who hold a passkey: the people who can be break-glass admins now. While single sign-on is required nobody at its verified domains can add a passkey, so an empty list means no admin can be named."}
         policy_revision: {type: integer, minimum: 0, description: "The revision PUT sends as If-Match. It advances when Require SSO turns on, when the connection's identity changes and when the break-glass admins change."}
+    OrganizationSecurity:
+      type: object
+      additionalProperties: false
+      required: [ip_allowlist, sign_in, revision, client_address, warnings]
+      description: An organization's security controls. Every control is off, at revision 0, until an admin sets one.
+      properties:
+        ip_allowlist: {$ref: "#/components/schemas/OrganizationIPAllowlist"}
+        sign_in: {$ref: "#/components/schemas/OrganizationSecuritySignIn"}
+        revision: {type: integer, minimum: 0, description: "Counts the changes to the controls; the ETag, and what PUT sends as If-Match."}
+        client_address: {type: string, maxLength: 64, description: "The address this server sees the request come from, as the allowlist judges it."}
+        warnings: {type: array, items: {type: string, maxLength: 400}, description: "Plain sentences for the dashboard to show beside an enabled allowlist that holds no IPv6 range or no IPv4 range: people reaching screenRIG over the missing family are refused. A request arrives over one family, so PUT cannot judge it and accepts the list; empty when there is nothing to say."}
+    OrganizationIPAllowlist:
+      type: object
+      additionalProperties: false
+      required: [enabled, cidrs]
+      properties:
+        enabled: {type: boolean, description: "true limits the organization's dashboard sessions and bearer credentials to cidrs."}
+        cidrs:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: {type: string, minLength: 3, maxLength: 64, description: "An IPv4 or IPv6 range in CIDR form, as stored: masked, so 203.0.113.7/24 reads back 203.0.113.0/24."}
+          description: "The allowed ranges, sorted. At least 1 while enabled; kept while enabled is false."
+    OrganizationSecuritySignIn:
+      type: object
+      additionalProperties: false
+      required: [passkey_only]
+      properties:
+        passkey_only: {type: boolean, description: "true refuses password sign-in for the organization's people; a person with no passkey signs in with a password only to add one."}
+    OrganizationSecurityWrite:
+      type: object
+      additionalProperties: false
+      required: [ip_allowlist, sign_in, proof]
+      properties:
+        ip_allowlist: {$ref: "#/components/schemas/OrganizationIPAllowlist"}
+        sign_in: {$ref: "#/components/schemas/OrganizationSecuritySignIn"}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
     SSOPolicyWrite:
       type: object
       additionalProperties: false
@@ -31498,6 +32671,205 @@ components:
       properties:
         enabled: {type: boolean}
         proof: {$ref: "#/components/schemas/DashboardProof"}
+    DataExportProofBody:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    DataExportApproval:
+      type: object
+      additionalProperties: false
+      required: [state]
+      description: "The approval of the export's or stream's destination as the delivery service holds it. Nothing is written or sent until it is approved."
+      properties:
+        state: {type: string, enum: [pending, approved, unknown], description: "unknown when the delivery service did not answer in a second; never read it as approved."}
+        approved_by: {type: string, description: "The user id of the person who approved it."}
+        approved_at: {type: string, format: date-time}
+        next: {type: string, description: "What happens until a person approves it; present while pending."}
+    DataExportConnection:
+      type: object
+      additionalProperties: false
+      required: [endpoint, region, bucket, access_key_id, secret_access_key]
+      description: "An S3-compatible bucket and the key that writes to it. The secret is handed to the delivery service once and is never stored by the backend or returned."
+      properties:
+        endpoint: {type: string, maxLength: 512, description: "The https origin of the S3 API on a public host, port 443 or 8443, lower case, without a path, login or query."}
+        region: {type: string, maxLength: 40, description: "The bucket's region such as us-east-1, or auto."}
+        bucket: {type: string, minLength: 3, maxLength: 63}
+        prefix: {type: string, maxLength: 200, description: "The folder every object is written under, before screenrig/v1/; letters, digits and . _ = - folders separated by slashes. Empty writes at the bucket's root."}
+        access_key_id: {type: string, minLength: 8, maxLength: 128}
+        secret_access_key: {type: string, minLength: 16, maxLength: 256, writeOnly: true}
+    WarehouseExportWrite:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        connection: {$ref: "#/components/schemas/DataExportConnection", description: "Required to create the export. Omitted on a change, the bucket and its key stay as they are."}
+        datasets:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: {type: string, enum: [plays, playback, events, audit]}
+          description: "Required to create the export, unchanged when omitted on a change. plays: every play start of each project; playback: the daily proof-of-play totals; events: each project's durable events (not the Player log); audit: each project's audit log and the organization's own."
+        hour: {type: integer, minimum: 0, maximum: 23, description: "The hour of the day, in timezone, the export starts: it writes the UTC day before. Default 2 on create, unchanged otherwise."}
+        timezone: {type: string, description: "An IANA time zone such as America/Los_Angeles. Default UTC on create, unchanged otherwise."}
+        enabled: {type: boolean, description: "Default true on create, unchanged otherwise. false stops the scheduled runs; backfills still run."}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    WarehouseExport:
+      type: object
+      additionalProperties: false
+      required: [organization_id, endpoint, region, bucket, prefix, object_prefix, key_hint, datasets, hour, timezone, enabled, next_run_at, last_status, last_error, last_day, last_run_at, revision, approval, created_at, updated_at]
+      properties:
+        organization_id: {type: string}
+        endpoint: {type: string, description: "The bucket endpoint's scheme and host."}
+        region: {type: string}
+        bucket: {type: string}
+        prefix: {type: string}
+        object_prefix: {type: string, description: "Where every object lies: <prefix>/screenrig/v1/."}
+        key_hint: {type: string, description: "The last four characters of the access key id."}
+        datasets: {type: array, items: {type: string, enum: [plays, playback, events, audit]}}
+        hour: {type: integer, minimum: 0, maximum: 23}
+        timezone: {type: string}
+        enabled: {type: boolean}
+        next_run_at: {type: string, format: date-time, nullable: true}
+        last_status: {type: string, enum: ["", succeeded, partial, failed, awaiting_approval], description: "The outcome of the last scheduled run; awaiting_approval while the destination waits for a person; partial when the day was written with files withheld (last_error says how many and the rules)."}
+        last_error: {type: string, description: "Why the last run failed, in words; never a key or the data."}
+        last_day: {type: string, description: "The latest UTC day (YYYY-MM-DD) a scheduled run wrote with its manifest."}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        revision: {type: integer, minimum: 1}
+        approval: {$ref: "#/components/schemas/DataExportApproval"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    WarehouseExportTest:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: {type: boolean}
+        key: {type: string, description: "The object written, when ok."}
+        bytes: {type: integer}
+        sha256: {type: string}
+        duration_ms: {type: integer}
+        error: {type: string, description: "destination_<class> or content_denied, when not ok."}
+    WarehouseExportRunCreate:
+      type: object
+      additionalProperties: false
+      required: [day]
+      properties:
+        day: {type: string, format: date, description: "A finished UTC day within the last 30."}
+    WarehouseExportRun:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, day, trigger, status, files, rows, bytes, denied_files, created_at, started_at, finished_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        day: {type: string, format: date}
+        trigger: {type: string, enum: [scheduled, backfill]}
+        status: {type: string, enum: [queued, running, succeeded, partial, failed, awaiting_approval], description: "partial: the day was written with some files withheld because courier found a credential or token in them; denied_files names each, and the manifest marks it withheld. A partial day is final: it is not retried and last_day advances."}
+        requested_by: {type: string, description: "The user id of the admin who queued a backfill."}
+        files: {type: integer, minimum: 0, description: "Data files written, the manifest not counted."}
+        rows: {type: integer, minimum: 0}
+        bytes: {type: integer, minimum: 0, description: "Compressed bytes written."}
+        error: {type: string}
+        denied_files:
+          type: array
+          description: "The files of a partial day courier withheld."
+          items:
+            type: object
+            additionalProperties: false
+            required: [dataset, scope, key, rule]
+            properties:
+              dataset: {type: string, enum: [plays, playback, events, audit]}
+              scope: {type: string, description: "The project id, or the organization id for its own audit file."}
+              key: {type: string}
+              rule: {type: string, description: "The filter rule (rule set and rule); never the content."}
+        created_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time, nullable: true}
+        finished_at: {type: string, format: date-time, nullable: true}
+    WarehouseExportRunList:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs: {type: array, items: {$ref: "#/components/schemas/WarehouseExportRun"}}
+    AuditStreamCreate:
+      type: object
+      additionalProperties: false
+      required: [name, kind, proof]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind: {type: string, enum: [splunk_hec, datadog, s3]}
+        endpoint: {type: string, maxLength: 512, description: "splunk_hec and datadog: the receiver's https address with the path of its collector (for example https://splunk.example.com/services/collector/event), port 443 or 8443 on a public host."}
+        token: {type: string, minLength: 8, maxLength: 512, writeOnly: true, description: "splunk_hec: the HEC token. datadog: the API key. Sealed; never returned."}
+        s3: {$ref: "#/components/schemas/DataExportConnection", description: "s3 only."}
+        enabled: {type: boolean, description: "Default true."}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    AuditStreamPatch:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        enabled: {type: boolean}
+        token: {type: string, minLength: 8, maxLength: 512, writeOnly: true}
+        proof: {$ref: "#/components/schemas/DashboardProof"}
+    AuditStreamGap:
+      type: object
+      additionalProperties: false
+      required: [scope, from_seq, to_seq, reason, at]
+      description: "Audit entries of one scope the stream skipped: the delivery service denied them because they carry a credential or token, or one was too large. The stream moved on; the chain sequences say exactly which entries are missing."
+      properties:
+        scope: {type: string, description: "The organization id or a project id."}
+        from_seq: {type: integer}
+        to_seq: {type: integer}
+        reason: {type: string, description: "content_denied:<rule set>/<rule>, or entry_too_large."}
+        at: {type: string, format: date-time}
+    AuditStream:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, name, kind, enabled, endpoint, key_hint, next_run_at, last_status, last_error, last_run_at, last_delivered_at, delivered_entries, gap_count, gaps, revision, approval, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        name: {type: string}
+        kind: {type: string, enum: [splunk_hec, datadog, s3]}
+        enabled: {type: boolean}
+        endpoint: {type: string, description: "The receiver's address, or the bucket endpoint's scheme and host."}
+        region: {type: string}
+        bucket: {type: string}
+        prefix: {type: string}
+        key_hint: {type: string, description: "The last four characters of the token or access key id."}
+        next_run_at: {type: string, format: date-time, nullable: true}
+        last_status: {type: string, enum: ["", succeeded, failed, awaiting_approval]}
+        last_error: {type: string}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        last_delivered_at: {type: string, format: date-time, nullable: true}
+        delivered_entries: {type: integer, minimum: 0}
+        gap_count: {type: integer, minimum: 0}
+        gaps: {type: array, items: {$ref: "#/components/schemas/AuditStreamGap"}, description: "The latest 20 gaps."}
+        revision: {type: integer, minimum: 1}
+        approval: {$ref: "#/components/schemas/DataExportApproval"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AuditStreamList:
+      type: object
+      additionalProperties: false
+      required: [streams]
+      properties:
+        streams: {type: array, items: {$ref: "#/components/schemas/AuditStream"}}
+    AuditStreamTest:
+      type: object
+      additionalProperties: false
+      required: [ok, outcome]
+      properties:
+        ok: {type: boolean}
+        outcome: {type: string, enum: [sent, failed, denied]}
+        status: {type: integer, description: "The receiver's HTTP status."}
+        error: {type: string}
+        key: {type: string, description: "The object an s3 stream's test wrote."}
+        duration_ms: {type: integer}
     SCIMGroupProjectBinding:
       type: object
       additionalProperties: false
@@ -31995,10 +33367,13 @@ components:
             - organization_member_change
             - project_invitation_create
             - member_access_change
+            - security_change
+            - data_export_change
+            - player_releases_change
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens). kind organization_admins_change requires the organization id (an organization admin naming or inviting admins). kind project_owner_change requires the project id (handing a project to another owner). kind organization_member_change requires the member's user id (an organization admin deleting or removing a home member, or resetting their sign-in). kind project_invitation_create requires the project id (a person inviting someone into the project by email or link). kind member_access_change requires the member's user id, or the agent's id for an agent's screen scope (letting a member approve reviews, or ending a member's screen or upload scope or an agent's screen scope). For these organization and project kinds a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind staff_featuresets is staff only and requires the organization id (replacing its featuresets). kind staff_education_eligible is staff only and requires the organization id (marking it a verified K-12 school or district, or clearing the mark). kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off). kinds identity_provider_change, sso_policy_change and scim_change require the organization id (an organization admin changing its single sign-on connection, its Require SSO policy, or its SCIM settings and tokens). kind organization_admins_change requires the organization id (an organization admin naming or inviting admins). kind project_owner_change requires the project id (handing a project to another owner). kind organization_member_change requires the member's user id (an organization admin deleting or removing a home member, or resetting their sign-in). kind project_invitation_create requires the project id (a person inviting someone into the project by email or link). kind member_access_change requires the member's user id, or the agent's id for an agent's screen scope (letting a member approve reviews, or ending a member's screen or upload scope or an agent's screen scope). kind security_change requires the organization id (an organization admin changing its security controls). kind data_export_change requires the organization id (an organization admin setting up, changing or removing the warehouse export or an audit stream). kind player_releases_change requires the organization id (an organization admin changing its Player release rings and maintenance windows). For these organization and project kinds a session that signed in through single sign-on proves with {type: sso} instead and starts no reauthentication."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -32619,6 +33994,9 @@ components:
           type: boolean
         passkey_enrollment_required:
           type: boolean
+        passkey_only:
+          type: boolean
+          description: The organization requires a passkey to sign in (security controls). password is then false for a person who holds one, and a person with none keeps it only to add one (passkey_enrollment_required).
         organization_id:
           type: string
         policy_revision:
@@ -33458,7 +34836,7 @@ components:
         capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, uniqueItems: true}
         access: {type: string, enum: [read, propose, manage]}
         effective_access: {$ref: "#/components/schemas/AccessLevel"}
-        access_limited_by: {type: string, enum: [project], description: "Present when effective_access is lower than access: the project requires review for agent changes."}
+        access_limited_by: {type: string, enum: [project, agent], description: "Present when effective_access is lower than access: the project requires review for agent changes (project), or the organization's agent controls hold this service client to an access ceiling (agent)."}
         state: {type: string, enum: [active, revoked]}
         created_by: {type: string, description: "user:<id> or agent:<id>; the client belongs to the project, not to its creator."}
         keys: {type: array, items: {$ref: "#/components/schemas/ServiceClientKey"}, maxItems: 2}
@@ -33699,7 +35077,7 @@ components:
           format: date-time
           description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Agent"}}}}
-    AgentSelfStatus: {type: object, additionalProperties: false, required: [agent, connection_ready], properties: {screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of this agent's membership of the project (docs/screen-scope.md). Absent for the whole project."}, person_screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of the person responsible for this agent. The agent acts on the screens both scopes allow."}, access: {$ref: "#/components/schemas/AccessLevel"}, effective_access: {$ref: "#/components/schemas/AccessLevel"}, access_limited_by: {$ref: "#/components/schemas/AccessLimitedBy"}, agent: {$ref: "#/components/schemas/Agent", description: "The agent installation linked to the calling project credential."}, connection_ready: {type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent.}, notes: {$ref: "#/components/schemas/NoteCounts", description: "The project's note counts. For an agent limited to screens they count the notes it can see: those about its own screens, playlists and the project."}}}
+    AgentSelfStatus: {type: object, additionalProperties: false, required: [agent, connection_ready], properties: {screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of this agent's membership of the project (docs/screen-scope.md). Absent for the whole project."}, person_screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "The scope of the person responsible for this agent. The agent acts on the screens both scopes allow."}, access: {$ref: "#/components/schemas/AccessLevel"}, effective_access: {$ref: "#/components/schemas/AccessLevel"}, access_limited_by: {$ref: "#/components/schemas/AccessLimitedBy"}, controls: {anyOf: [{$ref: "#/components/schemas/AgentControls"}, {type: "null"}], description: "The limits this agent's organization set on it (access ceiling, areas, fleet approval), or null while it has none. They apply in every project of the organization and take effect on the next request."}, agent: {$ref: "#/components/schemas/Agent", description: "The agent installation linked to the calling project credential."}, connection_ready: {type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent.}, notes: {$ref: "#/components/schemas/NoteCounts", description: "The project's note counts. For an agent limited to screens they count the notes it can see: those about its own screens, playlists and the project."}}}
     AgentConnection: {type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: {connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_"}, name: {type: string}, agent_type: {type: string}, platform: {type: string}, version: {type: string}, install_source: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}(/[a-z0-9][a-z0-9._-]{0,63})?$", description: "Where the sign-in reported the installation came from (claude/screenrig, npm); absent when it reported none."}, status: {type: string, enum: [pending, approved, connected, denied, expired, cancelled]}, capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these."}, expires_at: {type: string, format: date-time}, created_at: {type: string, format: date-time}, flow: {type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise."}, access: {type: string, enum: [read, propose, manage], description: "The access level a device sign-in asked for."}, client_name: {type: string, description: "The OAuth client of a device sign-in."}, project_hint: {type: string, description: "The project a device sign-in suggested; the approver chooses."}, requested_from: {type: string, description: "The client address that started a device sign-in."}, existing_identity: {type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access."}}}
     AgentDisconnectRequest: {type: object, additionalProperties: false, properties: {allow_last_agent: {type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority.}}}
     ApplicationRename: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected."}}}
@@ -33905,7 +35283,7 @@ components:
           items: {type: string, enum: [all, education, enterprise, enterprise_governance, enterprise_venue, founding, legacy, plus, premium]}
         features:
           type: array
-          description: "Every plan feature, always the same thirty-three in the same order: Plus's nine, Premium's nineteen, then Enterprise's five. Education has exactly Premium's."
+          description: "Every plan feature, always the same thirty-four in the same order: Plus's nine, Premium's nineteen, then Enterprise's six. Education has exactly Premium's."
           items: {$ref: "#/components/schemas/ProjectPlanFeature"}
     ProjectPlanFeature:
       type: object
@@ -33914,7 +35292,7 @@ components:
       properties:
         id:
           type: string
-          enum: [video_walls, alert_routing, reports, media_sync, uploaders, campaigns, weighted_rotation, takeover, play_totals, connectors, screen_scope, data_conditions, cap_alerts, log_exports, direct_campaigns, library, playlist_templates, sso, audit_log, schedule_calendar, playlist_revisions, screen_map, scim, bi_dashboards, alert_paging, live_view, approvals, schedule_import, keyed_data, protected_folders, change_control, momentus, large_walls]
+          enum: [video_walls, alert_routing, reports, media_sync, uploaders, campaigns, weighted_rotation, takeover, play_totals, connectors, screen_scope, data_conditions, cap_alerts, log_exports, direct_campaigns, library, playlist_templates, sso, audit_log, schedule_calendar, playlist_revisions, screen_map, scim, bi_dashboards, alert_paging, live_view, approvals, schedule_import, keyed_data, agent_controls, security_controls, data_export, player_releases, protected_folders, change_control, momentus, large_walls]
         enabled: {type: boolean, description: "Whether the project has the feature now."}
         required_plan: {type: string, enum: [plus, premium, enterprise], description: "The lowest generally sold plan that includes the feature, whether or not the project has it. Education, a plan staff assign to verified K-12 schools, is never named."}
         pack: {type: string, enum: [enterprise_governance, enterprise_venue], description: "Present on the four features sold in an Enterprise pack (change_control and protected_folders in enterprise_governance; large_walls and momentus in enterprise_venue): the pack the feature needs beside required_plan, so an Enterprise organization without the pack does not have it. Absent on every other feature."}
@@ -36344,6 +37722,8 @@ components:
           $ref: "#/components/schemas/ScreenOutage"
         host:
           $ref: "#/components/schemas/HostContext"
+        player_release:
+          $ref: "#/components/schemas/ScreenPlayerRelease"
         host_updated_at:
           type: string
           format: date-time
@@ -36578,6 +37958,7 @@ components:
       properties:
         type: {type: string, enum: [reboot]}
         expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
+        override: {type: boolean, default: false, description: "Send the reboot to screens whose release ring holds it outside its maintenance windows; those fail alone with update_held without it."}
     ScreenActionDisplay:
       type: object
       additionalProperties: false
@@ -36634,6 +38015,7 @@ components:
       properties:
         type: {type: string, enum: [clear_cache, restart_app, update]}
         expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
+        override: {type: boolean, default: false, description: "update only (clear_cache and restart_app refuse the member): send the update to screens whose release ring holds it outside its maintenance windows; those fail alone with update_held without it."}
     ScreenActionVolume:
       type: object
       additionalProperties: false
@@ -37068,11 +38450,100 @@ components:
         reload_id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "details.reload_id of the player.reload event, and the id of the entry in Screen.commands. A Player acts on one reload_id at most once."}
         expires_at: {type: string, format: date-time, description: Instant after which runtime scan must not deliver the reload and a Player ignores it.}
         state: {type: string, enum: [queued, sent], description: "sent: the screen was online and the event went to its Player at once. queued: the screen was offline; the event is appended when it comes online before expires_at."}
+    PlayerReleaseMember:
+      type: object
+      additionalProperties: false
+      required: [project_id]
+      description: Screens a ring holds. With neither folder_id nor tag, every screen of the project.
+      properties:
+        project_id: {type: string, minLength: 1, maxLength: 200, description: "A live project of the organization."}
+        folder_id: {type: string, description: "A screen folder of the project; the screens in it and in every folder under it. Not with tag."}
+        tag: {type: string, description: "A screen tag; the screens carrying it. Not with folder_id."}
+    PlayerReleaseWindow:
+      type: object
+      additionalProperties: false
+      required: [days, start, end]
+      description: One maintenance window, judged on the wall clock of the screen's own time zone. Start is inside, end is outside; an end before start runs overnight and belongs to the weekday it starts on. At least 2 hours long.
+      properties:
+        days: {type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: {type: string, enum: [mon, tue, wed, thu, fri, sat, sun]}, description: "The weekdays the window starts on, returned in week order."}
+        start: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: '24-hour HH:MM.'}
+        end: {type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: '24-hour HH:MM.'}
+    PlayerReleaseRestriction:
+      type: object
+      additionalProperties: false
+      required: [player_ceiling, os_ceiling, windows]
+      properties:
+        player_ceiling: {type: string, nullable: true, pattern: "^[0-9]{2}\\.[0-9]{2}\\.[0-9]+$", description: "YY.MM.N, or null for no ceiling. The Linux Player is never updated to a newer version than this; a Player already newer is not downgraded. Not below the minimum Player version the service supports."}
+        os_ceiling: {type: integer, nullable: true, minimum: 1, maximum: 1000000000, description: "The Raspberry Pi system version no newer than which it is updated, or null."}
+        windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/PlayerReleaseWindow"}, description: "Maintenance windows. Outside every window the ring's Linux Players and Raspberry Pi systems install no update on their own, and reboot and update commands to its screens are refused 409 update_held unless the request carries override true. Empty: always open."}
+    PlayerReleaseRing:
+      allOf:
+        - $ref: "#/components/schemas/PlayerReleaseRestriction"
+        - type: object
+          required: [id, name, members]
+          properties:
+            id: {type: string, pattern: "^[a-z][a-z0-9_-]{0,31}$", description: "Unique in the policy; default is reserved for default_ring."}
+            name: {type: string, minLength: 1, maxLength: 60}
+            members: {type: array, items: {$ref: "#/components/schemas/PlayerReleaseMember"}}
+    PlayerReleasePolicy:
+      type: object
+      additionalProperties: false
+      required: [rings, default_ring, revision, updated_at]
+      properties:
+        rings: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/PlayerReleaseRing"}, description: "In precedence order: a screen several rings name belongs to the first."}
+        default_ring: {$ref: "#/components/schemas/PlayerReleaseRestriction", description: "The ring of every screen no ring names; its id is default."}
+        revision: {type: integer, minimum: 0, description: "0 before the first change; every change increments it. The If-Match of the next change."}
+        updated_at: {type: string, nullable: true, format: date-time}
+    PlayerReleasePolicyUpdate:
+      type: object
+      additionalProperties: false
+      required: [rings, default_ring, proof]
+      properties:
+        rings: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/PlayerReleaseRing"}}
+        default_ring: {$ref: "#/components/schemas/PlayerReleaseRestriction"}
+        proof: {$ref: "#/components/schemas/DashboardProof", description: "Required: a fresh passkey or password proof of kind player_releases_change for the organization id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago."}
+    PlayerReleaseStatusPlayer:
+      type: object
+      additionalProperties: false
+      required: [kind, version, screens, honouring]
+      properties:
+        kind: {type: string, description: "The Player kind (qt, web, android, ...); empty for a screen that has not reported one."}
+        version: {type: string}
+        screens: {type: integer, minimum: 0}
+        honouring: {type: integer, minimum: 0, description: "How many of those screens' Players declared update.policy."}
+    PlayerReleaseStatusRing:
+      type: object
+      additionalProperties: false
+      required: [ring_id, name, screens, honouring, players]
+      properties:
+        ring_id: {type: string, description: "A ring id, or default."}
+        name: {type: string}
+        screens: {type: integer, minimum: 0, description: "Active screens the ring holds."}
+        honouring: {type: integer, minimum: 0, description: "How many of them declared update.policy: their Player's own updater applies the ring's ceiling and windows."}
+        players: {type: array, items: {$ref: "#/components/schemas/PlayerReleaseStatusPlayer"}, description: "By Player kind then version."}
+    PlayerReleaseStatus:
+      type: object
+      additionalProperties: false
+      required: [policy_revision, generated_at, rings]
+      properties:
+        policy_revision: {type: integer, minimum: 0}
+        generated_at: {type: string, format: date-time}
+        rings: {type: array, items: {$ref: "#/components/schemas/PlayerReleaseStatusRing"}, description: "Each ring in rings order, then the default ring last."}
+    ScreenPlayerRelease:
+      type: object
+      additionalProperties: false
+      required: [ring_id, enforced]
+      description: The release ring the screen is in, read with the screen (GET /api/screens/{id} and the results of changes to it, not the lists). Absent when the organization has no policy.
+      properties:
+        ring_id: {type: string, description: "A ring id, or default."}
+        enforced: {type: boolean, description: "True when the ring holds something back (a ceiling or a window) and the screen's Player declared update.policy, so its own updater applies it. A window also holds reboot and update commands whatever the Player."}
+        held_at: {type: string, format: date-time, description: "When the screen's current hold began: the end of the most recent maintenance window of its ring (the last week is searched). Absent inside a window, for a ring without windows, and when none ended in the last week. The next window's start is in the update_held problem."}
     ScreenCommandWrite:
       type: object
       additionalProperties: false
       description: The optional body of POST /api/screens/{id}/reboot, /reload, /clear-cache, /restart-app and /update. An empty body keeps the default.
       properties:
+        override: {type: boolean, default: false, description: "reboot and update only (any other command refuses the member). Sends the command although the screen's release ring holds reboots and updates outside its maintenance windows, which otherwise refuse it 409 update_held. A reboot scheduled by the screen's own reboot schedule is never held."}
         expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400, description: "How long the command stays actionable, in seconds from the request. A queued command is sent only before it expires; a Player ignores one after expires_at."}
     ScreenNetworkWrite:
       type: object
@@ -38134,12 +39605,17 @@ components:
         event_types: {$ref: "#/components/schemas/WebhookEventTypes"}
         enabled: {type: boolean}
         description: {type: string, maxLength: 200, description: An empty string clears the description.}
+    DestinationApprovalKind:
+      type: string
+      enum: [webhook, notification, mcp_subscription, warehouse_export, audit_stream]
+      description: >-
+        webhook: a /api/webhooks webhook; notification: a notification of any channel but email, read through the session's project or its organization; mcp_subscription: an MCP event subscription of the session's project; warehouse_export: an organization's warehouse export, whose id is the organization id (an admin of the organization); audit_stream: one of its audit streams, by the stream id.
     DestinationApprovalTarget:
       type: object
       additionalProperties: false
       required: [kind, id]
       properties:
-        kind: {type: string, enum: [webhook, notification, mcp_subscription], description: "webhook: a /api/webhooks webhook; notification: a notification of any channel but email, read through the session's project or its organization; mcp_subscription: an MCP event subscription of the session's project."}
+        kind: {$ref: '#/components/schemas/DestinationApprovalKind'}
         id: {type: string, minLength: 1, maxLength: 200}
     DestinationApprovalOptions:
       type: object
@@ -38152,7 +39628,7 @@ components:
       additionalProperties: false
       required: [kind, id, credential]
       properties:
-        kind: {type: string, enum: [webhook, notification, mcp_subscription]}
+        kind: {$ref: '#/components/schemas/DestinationApprovalKind'}
         id: {type: string, minLength: 1, maxLength: 200}
         credential: {type: object, additionalProperties: true, description: WebAuthn assertion response serialized from the PublicKeyCredential the authenticator returned.}
     DestinationApprovalResult:
@@ -41238,9 +42714,9 @@ components:
       type: object
       additionalProperties: false
       required: [agent_id, name, agent_type]
-      description: Safe agent principal attribution present only when the event was directly caused by an authenticated agent bearer. It is never authorization.
+      description: Safe agent principal attribution present only when the event was directly caused by an authenticated agent or service client bearer. A service client is agent_id client:<client id> with agent_type service_client and its display name. It is never authorization.
       properties:
-        agent_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?agt_"}
+        agent_id: {type: string, pattern: "^(?:(?:(?:stage|qa|development)_)?agt_|client:)"}
         name: {type: string, maxLength: 80}
         agent_type: {type: string, maxLength: 32}
     DashboardPasskeyRegistration:
@@ -41314,6 +42790,7 @@ components:
         - staff
         - shadow
         - passkey_enrollment_required
+        - passkey_enrolment_confirmation_required
         - email_verification_required
       properties:
         user_id:
@@ -41366,7 +42843,10 @@ components:
           description: "Present when the person is an uploader of the session's project (docs/uploaders.md): the dashboard then offers only the upload view. Read on each request, so a change by the owner shows on the next GET /api/session."
         passkey_enrollment_required:
           type: boolean
-          description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /api/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
+          description: The person's account requires a passkey (every staff member's does, and so does that of a person whose organization turned on passkey-only sign-in, security_controls) and has none. Until one is added, this session may only read GET /api/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
+        passkey_enrolment_confirmation_required:
+          type: boolean
+          description: passkey_enrollment_required is true because the person's organization turned on passkey-only sign-in (security_controls), and this password session has not confirmed the one-time code mailed to the person's verified address. POST /api/me/passkeys/options and /complete answer 403 enrolment_confirmation_required until it does (POST /api/me/passkeys/enrolment-codes mails the code, POST /api/me/passkeys/enrolment-confirmations spends it). Always false for a person whose passkey is required for another reason (staff) and on a development server.
         email_verification_required:
           type: boolean
           description: The person signed up themselves, never verified the address, and the verification deadline (verify_by on GET /api/me/email) has passed. Until the address is verified, this session may only call GET /api/session, GET /api/me, GET /api/me/email, POST /api/me/email/verification, POST /api/me/email/change (and POST /api/me/reauthentications, which starts the passkey proof the change needs), POST /api/logout and POST /api/email/verify; every other dashboard route answers 403 email_verification_required. Agents and service clients are never gated.
@@ -42374,8 +43854,9 @@ components:
         screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "On outside_screen_scope: the screen folders and screens the caller does work on (docs/screen-scope.md). An id outside them and an id that does not exist get the same answer."}
         display: {$ref: "#/components/schemas/ScreenDisplayReported", description: "On screenshot_unavailable for an unavailable or timed-out named capture: latest reported health display, when present. Context at read time, not proof of the capture failure's cause."}
         pack: {type: string, enum: [enterprise_governance, enterprise_venue], description: "On feature_not_in_plan for a feature sold in an Enterprise pack: the pack the feature needs beside required_plan, which is enterprise. The refusal applies to an Enterprise organization that lacks the pack. Absent for every other feature."}
-        access_limited_by: {type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request."}
+        access_limited_by: {type: string, enum: [project, person, agent], description: "On insufficient_access when a cap lowered the credential (docs/reviews.md): project (the project requires review for agent changes), person (the agent's responsible person cannot approve reviews) or agent (the organization's agent controls hold this agent or service client to an access ceiling, or hold its fleet changes for review). Absent when the credential's own level refused the request."}
         next: {$ref: "#/components/schemas/NextAction"}
+        next_window_at: {type: string, format: date-time, description: "On update_held: when the next maintenance window of the screen's release ring opens (RFC 3339 UTC)."}
     RuntimeProblem:
       type: object
       additionalProperties: true
@@ -42561,6 +44042,7 @@ x-problem-codes:
   - browser_link_not_claimed
   - browser_link_project_mismatch
   - origin_not_allowed
+  - brand_header_invalid
   - resource_conflict
   - card_not_found
   - card_invalid
@@ -42623,6 +44105,7 @@ x-problem-codes:
   - organization_admin_limit
   - library_no_screens
   - guest_not_allowed
+  - ip_not_allowed
   - managed_member
   - organization_admin_member
   - member_owns_projects
@@ -42658,6 +44141,7 @@ x-problem-codes:
   - upgrade_required
   - reboot_unsupported
   - command_unsupported
+  - update_held
   - network_unsupported
   - play_page_unsupported
   - identify_unsupported
@@ -42697,6 +44181,7 @@ x-problem-codes:
   - agentid_claim_invalid
   - agentid_already_enrolled
   - account_exists
+  - enrolment_confirmation_required
   - email_verification_required
   - unverified_account_replacement
   - app_store_transaction_invalid
@@ -42706,3 +44191,5 @@ x-problem-codes:
   - approval_rejected
   - approval_unavailable
   - approval_no_passkey
+  - destination_unapproved
+  - audit_stream_limit_reached
