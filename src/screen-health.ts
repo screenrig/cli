@@ -54,6 +54,30 @@ export function networkLines(network: ScreenHealth["network"]): string[] {
   return lines;
 }
 
+/**
+ * The `os`, `build`, `security_patch`, `chip` and `web_engine` lines of a health report's `platform`: what the
+ * screen's Player runs on. A Player that reports none reads `platform: unknown`. The security patch is the device
+ * maker's own claim, so it reads as reported.
+ */
+export function platformLines(platform: ScreenHealth["platform"]): string[] {
+  if (!platform || typeof platform !== "object") return ["platform: unknown"];
+  const lines: string[] = [];
+  const add = (key: string, value: string | undefined) => { if (value) lines.push(`${key}: ${value}`); };
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined);
+  const os = [text(platform.os_name), text(platform.os_version)].filter(Boolean).join(" ");
+  add("os", os === "" ? undefined : number(platform.sdk_int) ? `${os} (API ${platform.sdk_int})` : os);
+  add("build", text(platform.os_build));
+  const patch = text(platform.security_patch);
+  add("security_patch", patch === undefined ? undefined : `${patch} (reported by the device)`);
+  add("chip", [text(platform.soc_manufacturer), text(platform.soc_model)].filter(Boolean).join(" "));
+  const engine = platform.web_engine;
+  if (engine && typeof engine === "object") {
+    add("web_engine", [text(engine.name), text(engine.version), text(engine.package) && `(${engine.package})`].filter(Boolean).join(" "));
+  }
+  add("build_fingerprint", text(platform.build_fingerprint));
+  return lines.length === 0 ? ["platform: unknown"] : lines;
+}
+
 /** The compact `Health` block of `screen show --human`; nothing when the Player never reported. */
 export function healthLines(health: ScreenHealth | undefined): string[] {
   if (!health || typeof health !== "object" || typeof health.reported_at !== "string") return [];
@@ -85,6 +109,7 @@ export function healthLines(health: ScreenHealth | undefined): string[] {
     ].filter(Boolean).join(", "));
   }
   lines.push(...networkLines(health.network));
+  lines.push(...platformLines(health.platform));
   const battery = health.battery;
   if (battery) {
     add("battery", [

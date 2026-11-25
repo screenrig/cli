@@ -2576,7 +2576,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise with the Venue pack (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2634,7 +2634,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise with the Venue pack (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2669,7 +2669,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. Setting a video wall format of 3 displays other than the playlist's own is part of Plus (video_walls); a format of 2 displays is in every plan. A wall format of more than 3 displays other than the playlist's own is part of Enterprise with the Venue pack (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -2887,7 +2887,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Restoring a playlist revision is part of the Premium plan (playlist_revisions); listing and reading revisions are in every plan. Restoring a revision whose format is a wall of more than 3 displays the playlist does not hold now is part of Enterprise (large_walls). Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Restoring a playlist revision is part of the Premium plan (playlist_revisions); listing and reading revisions are in every plan. Restoring a revision whose format is a wall of more than 3 displays the playlist does not hold now is part of Enterprise with the Venue pack (large_walls). Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -3234,6 +3234,9 @@ paths:
         - $ref: '#/components/parameters/ScreenIDsQuery'
         - $ref: '#/components/parameters/ScreenOnlineQuery'
         - $ref: '#/components/parameters/ScreenHealthQuery'
+        - $ref: '#/components/parameters/ScreenSecurityPatchBeforeQuery'
+        - $ref: '#/components/parameters/ScreenWebEngineQuery'
+        - $ref: '#/components/parameters/ScreenWebEngineBelowQuery'
         - $ref: '#/components/parameters/ScreenAttentionQuery'
         - $ref: '#/components/parameters/ScreenTakeoverQuery'
         - $ref: '#/components/parameters/ScreenPlaylistQuery'
@@ -3392,7 +3395,7 @@ paths:
       x-screenrig-access: write
       operationId: updateScreenFolder
       description: >-
-        Renames a folder (name), moves it with everything inside (parent_id, null for the project root) or sets the default playlist its screens without their own show (default_playlist_id, null clears it). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). A move or a default change re-resolves the screens inside within about 15 seconds, and the response's levels name the campaigns and folder defaults those screens gain or lose. A change advances the folder revision and emits screen.folder_updated; the same values are a no-op. If-Match optionally guards the revision. protected true protects the folder and every folder inside it, and false clears it; send it alone (invalid_request otherwise). Only a person who can approve sets it: an agent, a service client or a member who cannot approve gets approver_required. A change appends screen.folder_protection_changed (details folder_id, protected). Clearing protection, and a move or a default playlist change on a folder that holds protected screens, is a protected_change review (202 pending_review) decided by a second approver. A caller limited to screens (docs/screen-scope.md) changes only folders inside its scope: parent_id must name one too (the root is outside_screen_scope), and protected is not its to change on a folder its scope names. protected true is protected folders, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Protection that is set keeps holding changes for a second approver, and asking to remove it is a review on every plan.
+        Renames a folder (name), moves it with everything inside (parent_id, null for the project root) or sets the default playlist its screens without their own show (default_playlist_id, null clears it). A folder cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). A move or a default change re-resolves the screens inside within about 15 seconds, and the response's levels name the campaigns and folder defaults those screens gain or lose. A change advances the folder revision and emits screen.folder_updated; the same values are a no-op. If-Match optionally guards the revision. protected true protects the folder and every folder inside it, and false clears it; send it alone (invalid_request otherwise). Only a person who can approve sets it: an agent, a service client or a member who cannot approve gets approver_required. A change appends screen.folder_protection_changed (details folder_id, protected). Clearing protection, and a move or a default playlist change on a folder that holds protected screens, is a protected_change review (202 pending_review) decided by a second approver. A caller limited to screens (docs/screen-scope.md) changes only folders inside its scope: parent_id must name one too (the root is outside_screen_scope), and protected is not its to change on a folder its scope names. protected true is protected folders, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402). Protection that is set keeps holding changes for a second approver, and asking to remove it is a review on every plan.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3420,7 +3423,7 @@ paths:
         '202':
           $ref: '#/components/responses/PendingReview'
         '402':
-          description: feature_not_in_plan — Protected folders are part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          description: feature_not_in_plan — Protected folders are part of the Enterprise plan with the Governance pack; the problem names the feature, the plan the account is on and required_plan.
           content:
             application/problem+json:
               schema:
@@ -3861,7 +3864,7 @@ paths:
         - RateLimit-Policy
         - RateLimit
       description: >-
-        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover) and is refused with feature_not_in_plan (402) before any screen is touched on a project whose plan lacks it; takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule and volume on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). A dashboard session takes only takeover and takeover_clear here (any other action.type is invalid_request), and only as the project owner or a member who can approve (approver_required otherwise); it acts with Manage access, the person as actor and proposer.
+        Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover) and is refused with feature_not_in_plan (402) before any screen is touched on a project whose plan lacks it; takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags, remove_tags, toast, display, display_clear, set_display_schedule, clear_display_schedule and volume on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402). A dashboard session takes only takeover and takeover_clear here (any other action.type is invalid_request), and only as the project owner or a member who can approve (approver_required otherwise); it acts with Manage access, the person as actor and proposer.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3994,7 +3997,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Screen'
         '402':
-          description: 'feature_not_in_plan — A wall of 2 outputs or fewer is open on every plan. A wall of 3 outputs other than the screen''s own is part of Plus (video_walls), null clears a wall in every plan. A wall of more than 3 outputs other than the screen''s own is part of Enterprise (large_walls). The problem names the feature, the project''s plan and required_plan.'
+          description: 'feature_not_in_plan — A wall of 2 outputs or fewer is open on every plan. A wall of 3 outputs other than the screen''s own is part of Plus (video_walls), null clears a wall in every plan. A wall of more than 3 outputs other than the screen''s own is part of Enterprise with the Venue pack (large_walls). The problem names the feature, the project''s plan and required_plan.'
           content:
             application/problem+json:
               schema:
@@ -4975,7 +4978,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-org 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level. A new entry with paused true (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Entries already stored may stay paused, and pausing a stored entry is open on every plan.'
+      description: 'Replaces the screen''s playlist schedule. The server evaluates it, never the Player: the first entry whose rule matches the screen''s civil time (screenrig.schedule/v1 windows and from/until, in the screen timezone, including daylight-saving transitions and windows that cross midnight) is the effective playlist; when none matches, the assigned playlist_id is. A takeover still wins over every entry. The screen must have an assigned default playlist_id (invalid_request otherwise), so there is always something to fall back to. Every referenced playlist is validated against the screen exactly as an assignment is (owned, ready references, and a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch), so a playlist the screen would refuse is refused here; the check writes the playlist document, so a concurrent playlist delete conflicts instead of racing it. If a scheduled playlist later cannot be shown (for example its content no longer resolves), its entries are skipped at evaluation and screen.playlist_unavailable (warning, details playlist_id, entry_ids, code) is appended. When the effective playlist changes the manifest is re-minted from it and the Player is signalled with screen.manifest_changed, as for an assignment, and screen.playlist_switched is appended. The screen revision is bumped (If-Match guards it) and screen.updated is appended with details.playlist_schedule_entries. An archived screen answers screen_archived; its schedule, takeover, and default stay referenced (they block playlist delete) and are re-resolved when it is unarchived. Rate limits: screen-control-org 600, screen-control-screen 20, and screen-control-ip 60 per minute, shared with DELETE and the takeover routes. On a protected screen the schedule is a review decided by a second approver (202 pending_review) at every access level. A new entry with paused true (a draft) is schedule change control, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402). Entries already stored may stay paused, and pausing a stored entry is open on every plan.'
       security:
         - projectBearer: []
       parameters:
@@ -5019,7 +5022,7 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '402':
-          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 3 or beyond of a video wall (displays) other than the screen's stored entry is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Schedule change control is part of the Enterprise plan with the Governance pack; the problem names the feature, the plan the account is on and required_plan. An entry that locks a playlist to display 3 or beyond of a video wall (displays) other than the screen's stored entry is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -6936,7 +6939,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createCampaign
-      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; from, until and windows are read in each screen''s effective_timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. An organization has at most 100 campaigns across its projects (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders, part of the Enterprise plan, and paused true on a new campaign (a draft) is schedule change control, part of the Enterprise plan; a project whose plan lacks either is refused with feature_not_in_plan (402).'
+      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; from, until and windows are read in each screen''s effective_timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. An organization has at most 100 campaigns across its projects (campaign_limit_reached). Appends campaign.created. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders, part of the Enterprise plan with the Governance pack, and paused true on a new campaign (a draft) is schedule change control, part of the Enterprise plan with the Governance pack; a project whose plan lacks either is refused with feature_not_in_plan (402).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -6966,7 +6969,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) and schedule change control (a paused draft) are part of the Enterprise plan. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) and schedule change control (a paused draft) are part of the Enterprise plan with the Governance pack. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -7044,7 +7047,7 @@ paths:
       x-screenrig-access: write
       operationId: updateCampaign
       description: >-
-        Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. A paused campaign is a draft: it is on no screen's stack, and a write that leaves it paused re-resolves no screen. Publishing it for a test is this PATCH with paused false and an audience that is a test folder or a few screens; POST /api/campaigns/{id}/promote then copies that audience onto the real one. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision. Each write is stored in the campaign's history (GET /api/campaigns/{id}/revisions). campaign.updated. If-Match guards the revision. reserved sets or clears the reserved flag (a reserved campaign is changed, paused or un-reserved only by a person who can approve: reserved_item otherwise); a flip appends campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) changes a campaign only when its stored and new audience are inside its scope (outside_screen_scope; otherwise it is read-only to them). A campaign that reaches a protected screen is a protected_change review decided by a second approver (202 pending_review). reserved true on a campaign that is not reserved is protected folders, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Pausing a campaign, clearing its reserved flag and a body that keeps what is stored are open on every plan; resuming it and every other change need campaigns, which the Plus plan includes.
+        Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. A paused campaign is a draft: it is on no screen's stack, and a write that leaves it paused re-resolves no screen. Publishing it for a test is this PATCH with paused false and an audience that is a test folder or a few screens; POST /api/campaigns/{id}/promote then copies that audience onto the real one. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision. Each write is stored in the campaign's history (GET /api/campaigns/{id}/revisions). campaign.updated. If-Match guards the revision. reserved sets or clears the reserved flag (a reserved campaign is changed, paused or un-reserved only by a person who can approve: reserved_item otherwise); a flip appends campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) changes a campaign only when its stored and new audience are inside its scope (outside_screen_scope; otherwise it is read-only to them). A campaign that reaches a protected screen is a protected_change review decided by a second approver (202 pending_review). reserved true on a campaign that is not reserved is protected folders, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402). Pausing a campaign, clearing its reserved flag and a body that keeps what is stored are open on every plan; resuming it and every other change need campaigns, which the Plus plan includes.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -7069,7 +7072,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Campaign'
         '402':
-          description: "feature_not_in_plan — Changing or resuming a campaign is part of the Plus plan (campaigns); pausing it, clearing its reserved flag and a body that keeps what is stored stay open in every plan. Protected folders (reserved true) are part of the Enterprise plan. Setting a displays lock to display 3 or beyond other than the campaign's own is part of Plus (video_walls); a lock to display 2 or lower and null are open in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Changing or resuming a campaign is part of the Plus plan (campaigns); pausing it, clearing its reserved flag and a body that keeps what is stored stay open in every plan. Protected folders (reserved true) are part of the Enterprise plan with the Governance pack. Setting a displays lock to display 3 or beyond other than the campaign's own is part of Plus (video_walls); a lock to display 2 or lower and null are open in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -7189,7 +7192,7 @@ paths:
       x-screenrig-access: write
       operationId: promoteCampaign
       description: >-
-        Publishes a test. A test publish is a PATCH of a draft with paused false and an audience that is a test folder or a few screens; promote then copies the audience of revision (the draft's own, paused, revision) onto the campaign in one write (change promoted, restored_from the revision copied) and every screen of the old and the new audience re-resolves. Refused (invalid_request, naming revision) when that revision was not paused, since it is not a draft, and when the campaign is paused now, since there is no test to promote. If-Match is required and names the current revision. A revision whose audience is the current one changes nothing. The same access as PATCH. Promote is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402). Revision history and previews are open on every plan; restoring a campaign revision needs campaigns, which the Plus plan includes.
+        Publishes a test. A test publish is a PATCH of a draft with paused false and an audience that is a test folder or a few screens; promote then copies the audience of revision (the draft's own, paused, revision) onto the campaign in one write (change promoted, restored_from the revision copied) and every screen of the old and the new audience re-resolves. Refused (invalid_request, naming revision) when that revision was not paused, since it is not a draft, and when the campaign is paused now, since there is no test to promote. If-Match is required and names the current revision. A revision whose audience is the current one changes nothing. The same access as PATCH. Promote is schedule change control, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402). Revision history and previews are open on every plan; restoring a campaign revision needs campaigns, which the Plus plan includes.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -7214,7 +7217,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Campaign'
         '402':
-          description: feature_not_in_plan — Schedule change control is part of the Enterprise plan; the problem names the feature, the plan the account is on and required_plan.
+          description: feature_not_in_plan — Schedule change control is part of the Enterprise plan with the Governance pack; the problem names the feature, the plan the account is on and required_plan.
           content:
             application/problem+json:
               schema:
@@ -13334,7 +13337,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A config.key_template, room_key_prefix or area_key_prefix keys the documents per screen, which is per-screen keyed data (keyed_data, Premium); a source with no key is in every plan."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise with the Venue pack); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A config.key_template, room_key_prefix or area_key_prefix keys the documents per screen, which is per-screen keyed data (keyed_data, Premium); a source with no key is in every plan."
           content:
             application/problem+json:
               schema:
@@ -13387,7 +13390,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise with the Venue pack); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan."
           content:
             application/problem+json:
               schema:
@@ -13480,7 +13483,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '402':
-          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A change that only replaces secrets, alone or with enabled false, is always allowed, so a source whose token expired stays current. A config that sets a key_template, room_key_prefix or area_key_prefix the source does not hold with that value needs per-screen keyed data (keyed_data, Premium); keeping the stored key, clearing it, refreshing and deleting the source are in every plan."
+          description: "feature_not_in_plan — a Square, Shopify, Microsoft 365 or Google Workspace room source needs connected sources (Premium) and a Momentus source needs the Momentus source (Enterprise with the Venue pack); the problem names the feature and required_plan. Calendars by address, Google Sheets, CSV and JSON sources are in every plan. A change that only replaces secrets, alone or with enabled false, is always allowed, so a source whose token expired stays current. A config that sets a key_template, room_key_prefix or area_key_prefix the source does not hold with that value needs per-screen keyed data (keyed_data, Premium); keeping the stored key, clearing it, refreshing and deleting the source are in every plan."
           content:
             application/problem+json:
               schema:
@@ -21428,6 +21431,40 @@ paths:
                 $ref: '#/components/schemas/BillingPortalSession'
         default:
           $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/billing/plan-checkouts:
+    servers:
+      - url: https://screenrig.ai
+    post:
+      operationId: createOrganizationPlanCheckout
+      description: 'Buys a year of Plus or Premium by card, self-serve (docs/billing-service.md, Self-serve plan Checkout). Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF; the actor, billing email and return URLs are server-owned. 201 answers the hosted Checkout url to open: it is a short-lived capability, never log or cache it. 200 status upgraded means an active card Plus subscription was swapped to Premium, charged to the saved card, and there is nothing to open. Clicks on one plan within 30 minutes share one Checkout. Refused with 404 feature_unavailable when card payments are not configured, or in production before 1 January 2027; 409 billed_by_reseller when a reseller pays for the organization; 409 resource_conflict when the organization holds the plan or a higher one, or holds Education, Enterprise or Legacy (set up by staff), or its subscription is invoiced, inactive or mid-purchase; 402 payment_required when the saved card declined an upgrade; 500 dependency_unavailable when the card provider is unavailable. Response is private and no-store.'
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingPlanCheckoutRequest'
+      responses:
+        '201':
+          description: A hosted Checkout to open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPlanCheckoutSession'
+        '200':
+          description: The Plus subscription was swapped to Premium.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPlanUpgraded'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/billing/auto-top-up:
     servers:
       - url: https://screenrig.ai
@@ -21770,7 +21807,7 @@ paths:
       security:
         - projectBearer: []
         - dashboardSession: []
-      description: Availability and hours for any active project. chat_allowed is true for every active project, including Standard. human_available is true when a person can join the chat on request (Education, Premium and Enterprise); Standard and Plus get documentation and AI support. staffed says whether staff are in their hours now. Luna answers right away on every plan.
+      description: Availability and hours for any active project. chat_allowed is true for every active project, including Standard. human_available is true when a person can join the chat on request (Enterprise and Legacy); Standard, Plus, Education and Premium get documentation and AI support. staffed says whether staff are in their hours now. Luna answers right away on every plan.
       responses:
         '200':
           description: Support result.
@@ -24877,7 +24914,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlaylistV2'
         '402':
-          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Declaring fields, locking a primitive or changing a playlist that declares fields is a playlist template, and the project's plan does not include them; required_plan names the plan that does. Creating a playlist from a template needs no playlist templates; the pages and format it makes are judged as any create's. A format of 3 displays (a video wall) is part of Plus (video_walls); a format of 2 displays, a region format and a playlist with no format are in every plan. A format of more than 3 displays is part of Enterprise with the Venue pack (large_walls). Setting a rotation weight (selector.weights) an item does not already hold is part of Plus (weighted_rotation), and giving a page a visibility.data condition it does not already hold is part of Premium (data_conditions); equal rotation, time windows, keeping or clearing stored weights and conditions are in every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -24909,6 +24946,9 @@ paths:
         - $ref: '#/components/parameters/ScreenIDsQuery'
         - $ref: '#/components/parameters/ScreenOnlineQuery'
         - $ref: '#/components/parameters/ScreenHealthQuery'
+        - $ref: '#/components/parameters/ScreenSecurityPatchBeforeQuery'
+        - $ref: '#/components/parameters/ScreenWebEngineQuery'
+        - $ref: '#/components/parameters/ScreenWebEngineBelowQuery'
         - $ref: '#/components/parameters/ScreenAttentionQuery'
         - $ref: '#/components/parameters/ScreenTakeoverQuery'
         - $ref: '#/components/parameters/ScreenPlaylistQuery'
@@ -25457,7 +25497,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover; feature_not_in_plan, 402, otherwise); takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes; a project whose plan lacks it is refused with feature_not_in_plan (402).
+      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions, events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results. The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations. HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay without repeating their effects. Large actions are paced against the existing 600-per-minute organization budgets for reload, toast, takeover, playlist schedules, reboot, display, display schedules and volume; organization exhaustion pauses the action instead of refusing the fleet. Per-screen exhaustion fails that screen alone. An assign, takeover or set_playlist_schedule step that binds a playlist with a format to a screen whose wall has another shape fails that screen alone with 409 playlist_format_mismatch. Assign and tag changes have no message budget. An assign whose playlist has an iframe src or application params that read a screen token some screen of the page lacks adds a screen_fact_missing warning to that page (warnings, PlaylistWarning). Partial failure is a normal result. Each request counts as one of the hourly agent requests of the organization. Requests use a bounded byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused before any screen is touched. selector or action is refused before any screen is touched. A takeover action is part of the Plus plan (takeover; feature_not_in_plan, 402, otherwise); takeover_clear is open on every plan. A caller limited to screens (docs/screen-scope.md) selects by screen_ids or by folder, every screen inside its scope; a tag selector, a screen outside the scope or an unknown one refuses the whole action (outside_screen_scope) before anything is pinned or proposed. Assign, takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule that reach a protected screen become a review decided by a second approver (202 pending_review) at every access level; set_tags, add_tags and remove_tags on a protected screen are protected_target (409). A set_playlist_schedule action with a paused entry (a draft) is schedule change control, which the Enterprise plan includes with the Governance pack; a project whose plan lacks it is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -25635,7 +25675,7 @@ paths:
       x-screenrig-access: write
       operationId: createCampaignInProject
       description: >-
-        createCampaign for the project named in the path. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders, part of the Enterprise plan, and paused true on a new campaign (a draft) is schedule change control, part of the Enterprise plan; a project whose plan lacks either is refused with feature_not_in_plan (402).
+        createCampaign for the project named in the path. reserved true reserves the campaign, and only a person who can approve sets it (reserved_item for an agent, a service client or anyone else), appending campaign.reserved_changed. A caller limited to screens (docs/screen-scope.md) creates a campaign only for an audience inside its scope (folder and screen_id leaves; no tag, no every screen), else outside_screen_scope, and only as a person who can approve (approver_required). A campaign whose audience reaches a protected screen is a protected_change review decided by a second approver (202 pending_review) at every access level. reserved true is protected folders, part of the Enterprise plan with the Governance pack, and paused true on a new campaign (a draft) is schedule change control, part of the Enterprise plan with the Governance pack; a project whose plan lacks either is refused with feature_not_in_plan (402).
       security:
         - projectBearer: []
       parameters:
@@ -25660,7 +25700,7 @@ paths:
         '202':
           $ref: '#/components/responses/PendingReview'
         '402':
-          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) and schedule change control (a paused draft) are part of the Enterprise plan. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
+          description: "feature_not_in_plan — Campaigns are part of the Plus plan. Protected folders (reserved) and schedule change control (a paused draft) are part of the Enterprise plan with the Governance pack. A campaign that locks a playlist to display 3 or beyond of a video wall (displays) is part of Plus; a lock to display 2 or lower is open on every plan. The problem names the feature, the project's plan and required_plan."
           content:
             application/problem+json:
               schema:
@@ -28049,7 +28089,7 @@ paths:
       operationId: supportStatusInProject
       security:
         - projectBearer: []
-      description: Availability and hours for any active project. chat_allowed is true for every active project, including Standard. human_available is true when a person can join the chat on request (Education, Premium and Enterprise); Standard and Plus get documentation and AI support. staffed says whether staff are in their hours now. Luna answers right away on every plan.
+      description: Availability and hours for any active project. chat_allowed is true for every active project, including Standard. human_available is true when a person can join the chat on request (Enterprise and Legacy); Standard, Plus, Education and Premium get documentation and AI support. staffed says whether staff are in their hours now. Luna answers right away on every plan.
       responses:
         '200':
           description: Support result.
@@ -29081,6 +29121,9 @@ components:
     ScreenAdvertisingQuery: {name: advertising, in: query, required: false, schema: {type: string, enum: [none]}, description: "none keeps the active screens that have no advertising inventory row of the project's network (opted in or not). The list leaves out the IDs of every inventory row, so its cost grows with the inventory, not the fleet. Anything else is invalid_request naming advertising."}
     ScreenAttentionQuery: {name: attention, in: query, required: false, schema: {type: boolean}, description: "true keeps the screens that need attention, false the others, judged from what the server stores: an active screen with an open reconnect offer, a suspension, a current display_disconnected, hot or crashing health count (as health judges it; stale is not attention) or a storage shortfall. The dashboard's manifest upgrade states (upgrade failed, blocked, partial content, retry overdue) are worked out on each read and are not judged here. Anything but true or false is invalid_request naming attention."}
     ScreenTakeoverQuery: {name: takeover, in: query, required: false, schema: {type: string, enum: ["true"]}, description: "true keeps the screens with a takeover in force: a takeover whose until is null or still ahead. One whose until has passed is ended by the boundary worker within 60 seconds and is not listed meanwhile. Anything else is invalid_request naming takeover."}
+    ScreenSecurityPatchBeforeQuery: {name: security_patch_before, in: query, required: false, schema: {type: string, format: date}, description: "Keeps the screens whose latest health report names a platform.security_patch (Android) earlier than this date, YYYY-MM-DD. A screen that reports none never matches. Anything else is invalid_request naming security_patch_before."}
+    ScreenWebEngineQuery: {name: web_engine, in: query, required: false, schema: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$"}, description: "Keeps the screens whose latest health report names this platform.web_engine.name (android-webview, webview2, wkwebview, qtwebengine, chromium, ...). Pair it with web_engine_below: engines number their versions differently."}
+    ScreenWebEngineBelowQuery: {name: web_engine_below, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000000000}, description: "Keeps the screens whose latest health report names a web engine whose major version (the first component of platform.web_engine.version) is below this number. A screen that reports no engine version never matches. Anything else is invalid_request naming web_engine_below."}
     ScreenHealthQuery: {name: health, in: query, required: false, schema: {type: string, enum: [display_disconnected, hot, crashing, stale]}, description: "Keeps the active screens of one health count, judged as GET /api/summary's health counts judge the stored state: display_disconnected, hot and crashing need a stored online state and a report at most 35 minutes old, stale a stored online state and an older report. A screen whose lease just ended may still list until the presence sweep records it, as for online. Anything else is invalid_request naming health."}
     MediaSearchQuery: {name: q, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Keeps the files whose name as a person sees it (source_filename when the upload was converted, else filename) contains the text, the converted files whose stored filename contains it, both ignoring case and read literally (no wildcards), the files carrying a tag equal to the text, and the file whose ID the text is. Each file is listed once, in the list's order. At most 100 characters without control characters, else invalid_request naming q. Without sort the list is in name order; any sort combines with it."}
     MediaListSort: {name: sort, in: query, required: false, schema: {type: string, enum: [name, "-name", created, "-created", size, "-size", duration, "-duration"]}, description: "The order of the files, each then by ID; a leading - reverses it. name orders by the name a person sees, ignoring case and reading a run of digits as a number. created is oldest first (-created is newest first, the default). size orders by stored bytes, smallest first. duration orders by the stored duration of a video or an audio file, shortest first; a file without one (an image, or a file whose duration was not read) comes first, and last with -duration. Omitted is newest first, or name when q is given. Anything else is invalid_request naming sort."}
@@ -33850,8 +33893,8 @@ components:
       properties:
         featuresets:
           type: array
-          description: "The featureset tags the project and its organization hold, sorted: founding, plus, premium, education, enterprise or all. Empty when it holds none; the plan's own featureset is not listed. A tag also widens limits to the plan it names."
-          items: {type: string, enum: [all, education, enterprise, founding, plus, premium]}
+          description: "The featureset tags the project and its organization hold, sorted: founding, plus, premium, education, enterprise, enterprise_governance, enterprise_venue, legacy or all. Legacy: a plan staff assign to migrated accounts; never sold. enterprise_governance and enterprise_venue are the Enterprise packs staff grant to an organization. Empty when it holds none; the plan's own featureset is not listed. A tag also widens limits to the plan it names (the packs widen none)."
+          items: {type: string, enum: [all, education, enterprise, enterprise_governance, enterprise_venue, founding, legacy, plus, premium]}
         features:
           type: array
           description: "Every plan feature, always the same thirty-three in the same order: Plus's nine, Premium's nineteen, then Enterprise's five. Education has exactly Premium's."
@@ -33866,6 +33909,7 @@ components:
           enum: [video_walls, alert_routing, reports, media_sync, uploaders, campaigns, weighted_rotation, takeover, play_totals, bi_dashboards, connectors, screen_scope, data_conditions, alert_paging, live_view, approvals, cap_alerts, log_exports, direct_campaigns, library, playlist_templates, sso, audit_log, schedule_import, schedule_calendar, playlist_revisions, keyed_data, screen_map, protected_folders, scim, change_control, momentus, large_walls]
         enabled: {type: boolean, description: "Whether the project has the feature now."}
         required_plan: {type: string, enum: [plus, premium, enterprise], description: "The lowest generally sold plan that includes the feature, whether or not the project has it. Education, a plan staff assign to verified K-12 schools, is never named."}
+        pack: {type: string, enum: [enterprise_governance, enterprise_venue], description: "Present on the four features sold in an Enterprise pack (change_control and protected_folders in enterprise_governance; large_walls and momentus in enterprise_venue): the pack the feature needs beside required_plan, so an Enterprise organization without the pack does not have it. Absent on every other feature."}
     ProjectPlanLimits:
       type: object
       additionalProperties: false
@@ -33994,6 +34038,22 @@ components:
     EmptyPaymentRequest:
       type: object
       additionalProperties: false
+    BillingPlanCheckoutRequest:
+      type: object
+      additionalProperties: false
+      required: [plan]
+      properties:
+        plan: {type: string, enum: [plus, premium]}
+    BillingPlanCheckoutSession:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string, description: Short-lived hosted Checkout capability. Never log or cache it.}
+    BillingPlanUpgraded:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [upgraded]}
     BillingPortalSession:
       type: object
       required: [url]
@@ -36728,7 +36788,7 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        The video output of a Player that declares the host capability display_output.mode. mode is the mode in force (auto or a mode such as 3840x2160x60p) and modes the modes it can set now, at most 256, each a mode string; an entry that is not one is dropped. The backend checks a requested display.output.mode against modes (a non-empty list). Absent when the Player does not report it; each observation replaces the whole value.
+        The video output of the Player's display. mode is the mode in force: auto, a mode such as 3840x2160x60p, or the size alone (3840x2160) when the Player can read its display's resolution but not the refresh rate; any Player may report mode, with or without the host capability display_output.mode. modes are the modes a Player that declares display_output.mode can set now, at most 256, each a mode string; an entry that is not one is dropped. The backend checks a requested display.output.mode against modes (a non-empty list). Absent when the Player does not report it; each observation replaces the whole value.
       properties:
         mode: {type: string, maxLength: 24}
         modes: {type: array, maxItems: 256, items: {type: string, maxLength: 24}}
@@ -37994,8 +38054,8 @@ components:
     MediaTagList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, description: "The tags, most files first, then by tag.", items: {type: object, additionalProperties: false, required: [tag, files], properties: {tag: {type: string}, files: {type: integer, minimum: 1, description: "How many of the selected ready files carry the tag."}}}}}}
     MediaList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/Media"}, description: "Ready media items of the project, newest first."}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}, total: {type: integer, minimum: 0, description: "How many rows the list holds across all its pages under the same filters. Present on the first page (a request without after) and absent on later pages."}}}
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
-    SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "human_available", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "human_available": {"type": "boolean", "description": "A person can join this chat on request: Education, Premium and Enterprise. Standard and Plus get documentation and AI support."}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0, "description": "Always 0: Luna answers right away on every plan. Removed in a later release."}, "docs_url": {"type": "string"}}}
-    SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Ask for a person, which pauses Luna and waits for staff. It counts only where a person can join (human_available: Education, Premium and Enterprise); on Standard and Plus it is ignored and Luna answers."}}}
+    SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "human_available", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "human_available": {"type": "boolean", "description": "A person can join this chat on request: Enterprise and Legacy. Standard, Plus, Education and Premium get documentation and AI support."}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0, "description": "Always 0: Luna answers right away on every plan. Removed in a later release."}, "docs_url": {"type": "string"}}}
+    SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Ask for a person, which pauses Luna and waits for staff. It counts only where a person can join (human_available: Enterprise and Legacy); on Standard and Plus it is ignored and Luna answers."}}}
     SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff", "closed"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}, "closed": {"type": "boolean", "description": "Ended by the customer or resolved by staff. History remains readable; staff can reopen."}}}
     SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai", "system"]}, "author": {"type": "string"}, "avatar_url": {"type": "string", "format": "uri", "description": "Optional trusted Slack avatar for a staff reply. Use the screenRIG logo when absent."}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
     SupportSubmission: {"type": "object", "additionalProperties": false, "required": ["conversation", "message"], "properties": {"conversation": {"$ref": "#/components/schemas/SupportConversation"}, "message": {"$ref": "#/components/schemas/SupportMessage"}}}
@@ -41567,6 +41627,28 @@ components:
             throttled: {type: boolean}
             under_voltage_since_boot: {type: boolean}
             throttled_since_boot: {type: boolean}
+        platform:
+          type: object
+          additionalProperties: true
+          description: "The platform the Player runs on, so a project can find screens on unpatched or out-of-date platforms. Send what the platform exposes, in every report. It names a build every unit of that build shares: never put a serial, MAC, DUID or other device identifier here. Each member is read on its own: one of the wrong JSON type or outside its grammar is dropped alone and never refuses the report; a value that is not an object drops the member."
+          properties:
+            os_name: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: android, macos, tvos, ios, windows, linux, chromeos, tizen, brightsign, browser (a standalone browser that cannot name its operating system). Another value in the pattern is kept as sent."}
+            os_version: {type: string, minLength: 1, maxLength: 32, description: "The operating system version as the platform names it: Android Build.VERSION.RELEASE, macOS 15.1, Windows display version 24H2, os-release VERSION_ID, Tizen 6.5, BrightOS 9.0.189. Printable ASCII without leading or trailing spaces, as every text member here."}
+            os_build: {type: string, minLength: 1, maxLength: 80, description: "The build: Android Build.ID, macOS 24B83, Windows CurrentBuild.UBR (26100.2314), the Linux kernel release, or the TV or signage firmware string."}
+            security_patch: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", description: "Android Build.VERSION.SECURITY_PATCH (API 23+). A value that is not a real date (empty or non-ISO on some Fire OS and AOSP builds) is dropped; the Player leaves it out."}
+            sdk_int: {type: integer, minimum: 1, maximum: 1000, description: Android API level (Build.VERSION.SDK_INT).}
+            build_fingerprint: {type: string, minLength: 1, maxLength: 256, description: Android Build.FINGERPRINT.}
+            soc_manufacturer: {type: string, minLength: 1, maxLength: 80, description: "The chip's maker (Android 12+ Build.SOC_MANUFACTURER)."}
+            soc_model: {type: string, minLength: 1, maxLength: 80, description: "The chip or board (Android 12+ Build.SOC_MODEL, the device-tree model of an ARM board, the Mac's CPU brand)."}
+            web_engine:
+              type: object
+              additionalProperties: true
+              required: [name]
+              description: The engine that renders web content. Without a valid name the member is dropped; a bad version or package drops alone.
+              properties:
+                name: {type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "android-webview, webview2, wkwebview, qtwebengine, chromium, or the browser engine a standalone browser runs (chrome, edge, safari, firefox, ...)."}
+                version: {type: string, pattern: '^[0-9]{1,9}(?:\.[0-9]{1,9}){0,4}$', maxLength: 49, description: "The engine's dotted numeric version; for a Chromium-based engine its Chromium version."}
+                package: {type: string, maxLength: 128, pattern: "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$", description: "Android: the package that provides the WebView (com.google.android.webview)."}
         crashes_24h: {type: integer, minimum: 0, maximum: 1000000, description: Player crashes in the rolling last 24 hours.}
         renderer_restarts_24h: {type: integer, minimum: 0, maximum: 1000000, description: Renderer or web-view restarts in the rolling last 24 hours.}
     ScreenHealth:
@@ -41597,8 +41679,23 @@ components:
             interfaces: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/ScreenHealthInterface"}}
         battery: {type: object, additionalProperties: false, properties: {level_percent: {type: number, minimum: 0, maximum: 100}, charging: {type: boolean}, source: {type: string, enum: [ac, usb, wireless, dock, none]}, temperature_c: {type: number}}}
         power: {type: object, additionalProperties: false, properties: {under_voltage: {type: boolean}, throttled: {type: boolean}, under_voltage_since_boot: {type: boolean}, throttled_since_boot: {type: boolean}}}
+        platform: {$ref: "#/components/schemas/ScreenHealthPlatform"}
         crashes_24h: {type: integer, minimum: 0}
         renderer_restarts_24h: {type: integer, minimum: 0}
+    ScreenHealthPlatform:
+      type: object
+      additionalProperties: false
+      description: "The platform the screen's Player last reported (RuntimeHealthWrite platform): operating system, build, Android security patch level and API level, chip and web engine. Absent on a Player that does not report it, which reads as unknown. It names a build, never a device. List the screens behind a patch level or engine version with the security_patch_before, web_engine and web_engine_below screen list filters."
+      properties:
+        os_name: {type: string}
+        os_version: {type: string}
+        os_build: {type: string}
+        security_patch: {type: string, format: date}
+        sdk_int: {type: integer}
+        build_fingerprint: {type: string}
+        soc_manufacturer: {type: string}
+        soc_model: {type: string}
+        web_engine: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string}, version: {type: string}, package: {type: string}}}
     ScreenHealthInterface:
       type: object
       additionalProperties: false
@@ -42262,6 +42359,7 @@ components:
         upload_scope: {$ref: "#/components/schemas/UploadScope", description: "On outside_upload_scope: the playlists and media folders the caller does work in (docs/uploaders.md). An id outside them and an id that does not exist get the same answer."}
         screen_scope: {$ref: "#/components/schemas/ScreenScope", description: "On outside_screen_scope: the screen folders and screens the caller does work on (docs/screen-scope.md). An id outside them and an id that does not exist get the same answer."}
         display: {$ref: "#/components/schemas/ScreenDisplayReported", description: "On screenshot_unavailable for an unavailable or timed-out named capture: latest reported health display, when present. Context at read time, not proof of the capture failure's cause."}
+        pack: {type: string, enum: [enterprise_governance, enterprise_venue], description: "On feature_not_in_plan for a feature sold in an Enterprise pack: the pack the feature needs beside required_plan, which is enterprise. The refusal applies to an Enterprise organization that lacks the pack. Absent for every other feature."}
         access_limited_by: {type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request."}
         next: {$ref: "#/components/schemas/NextAction"}
     RuntimeProblem:

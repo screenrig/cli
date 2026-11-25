@@ -644,8 +644,23 @@ export interface ScreenHealth {
   };
   /** Present only when the device reports a battery. source none means it runs on the battery (unplugged). */
   battery?: ScreenBattery;
+  /** The platform the Player reports: operating system, build, Android security patch and API level, chip, web engine. */
+  platform?: ScreenHealthPlatform;
   crashes_24h?: number;
   renderer_restarts_24h?: number;
+}
+
+/** Screen.health.platform. security_patch is the device maker's own claim; absent members were not reported. */
+export interface ScreenHealthPlatform {
+  os_name?: string;
+  os_version?: string;
+  os_build?: string;
+  security_patch?: string;
+  sdk_int?: number;
+  build_fingerprint?: string;
+  soc_manufacturer?: string;
+  soc_model?: string;
+  web_engine?: { name: string; version?: string; package?: string };
 }
 
 /** Screen.health.network.interfaces[]: an interface's IPv4 and global or unique-local IPv6 addresses. */

@@ -63,6 +63,7 @@ test("healthLines prints a compact block and marks a stale report", () => {
     "temperature: 61.5 °C",
     "display: connected, power on",
     "network: wifi, -58 dBm",
+    "platform: unknown",
     "last 24h: 0 crashes, 1 renderer restarts",
   ]);
   const troubled = healthLines({ reported_at: "2026-09-25T09:00:00Z", stale: true, temperature_c: 83, display: { connected: false }, crashes_24h: 4 });
@@ -70,6 +71,23 @@ test("healthLines prints a compact block and marks a stale report", () => {
   assert.ok(troubled.includes("temperature: 83.0 °C (hot)"));
   assert.ok(troubled.includes("attention: display disconnected, hot 83°C, crashing 4/24h"));
   assert.deepEqual(healthLines(undefined), []);
+});
+
+test("healthLines prints the platform the Player reports", () => {
+  const lines = healthLines({
+    ...healthy,
+    platform: {
+      os_name: "android", os_version: "12", os_build: "STTE.230319.008", sdk_int: 31, security_patch: "2026-09-05",
+      soc_manufacturer: "Amlogic", soc_model: "S905D3",
+      web_engine: { name: "android-webview", version: "130.0.6723.103", package: "com.google.android.webview" },
+    },
+  });
+  assert.ok(lines.includes("os: android 12 (API 31)"));
+  assert.ok(lines.includes("build: STTE.230319.008"));
+  assert.ok(lines.includes("security_patch: 2026-09-05 (reported by the device)"));
+  assert.ok(lines.includes("chip: Amlogic S905D3"));
+  assert.ok(lines.includes("web_engine: android-webview 130.0.6723.103 (com.google.android.webview)"));
+  assert.ok(!lines.includes("platform: unknown"));
 });
 
 test("healthLines prints the host name and each interface's local addresses", () => {
