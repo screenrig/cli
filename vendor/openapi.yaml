@@ -852,7 +852,7 @@ paths:
         description: Backend-owned project dashboard origin
     post:
       operationId: acceptDashboardInvitation
-      description: Accepts an invitation transactionally and mints a fresh person session, deleting the old session when present. Link create_login requires the verified __Host-screenrig-signup cookie for this invitation. signed_in requires a dashboard session and recent sign-in or fresh proof; email delivery requires a matching verified email, or the unverified address of the signed-in person, which accepting verifies. An address a live person already holds, verified or not, returns resource_conflict for create_login. A reset signs in the person who holds a verified address. A reset of an unverified address requires replace_unverified_account true (the inspection reports replaces_unverified_account) and otherwise answers 409 unverified_account_replacement and consumes nothing; with it, the reset creates a new verified person with the credential it registers, named by display_name or, when absent, from the address, with a new organization and project, and signs that person in; the unverified person is deleted (their sessions, passkeys and agents end) and the projects and organizations they made stay, without them and no longer matching the address as their contact, so no later reset re-sends them an enrollment invitation. The response names the new project. A session whose email verification is required (email_verification_required on GET /api/session) accepts only an emailed invitation naming its own address and receives 403 email_verification_required for any other. An organization_admin invitation adds the person to the organization's admins and opens no project; it returns organization_admin_limit when the organization already has 20 admins and stays outstanding, and resource_conflict when the organization was deleted. An organization_member invitation sets the person's home organization to the inviting organization, from any previous home, and grants no project membership; it returns managed_elsewhere (409) when another organization manages the person, and resource_conflict when the organization was deleted. An organization_admin invitation sets the home organization only for a person with none. A project_member invitation re-checks the organization's guest policy and returns guest_not_allowed (403) when the person would be an external guest the policy refuses; a project invitation never changes anyone's home organization. A refused invitation stays outstanding.
+      description: Accepts an invitation transactionally and mints a fresh person session, deleting the old session when present. Link create_login requires the verified __Host-screenrig-signup cookie for this invitation. signed_in requires a dashboard session and recent sign-in or fresh proof. When signed_in acceptance requires reauthentication and the person submits proof, the request also uses the shared dashboard proof limits. Email delivery requires a matching verified email, or the unverified address of the signed-in person, which accepting verifies. An address a live person already holds, verified or not, returns resource_conflict for create_login. A reset signs in the person who holds a verified address. A reset of an unverified address requires replace_unverified_account true (the inspection reports replaces_unverified_account) and otherwise answers 409 unverified_account_replacement and consumes nothing; with it, the reset creates a new verified person with the credential it registers, named by display_name or, when absent, from the address, with a new organization and project, and signs that person in; the unverified person is deleted (their sessions, passkeys and agents end) and the projects and organizations they made stay, without them and no longer matching the address as their contact, so no later reset re-sends them an enrollment invitation. The response names the new project. A session whose email verification is required (email_verification_required on GET /api/session) accepts only an emailed invitation naming its own address and receives 403 email_verification_required for any other. An organization_admin invitation adds the person to the organization's admins and opens no project; it returns organization_admin_limit when the organization already has 20 admins and stays outstanding, and resource_conflict when the organization was deleted. An organization_member invitation sets the person's home organization to the inviting organization, from any previous home, and grants no project membership; it returns managed_elsewhere (409) when another organization manages the person, and resource_conflict when the organization was deleted. An organization_admin invitation sets the home organization only for a person with none. A project_member invitation re-checks the organization's guest policy and returns guest_not_allowed (403) when the person would be an external guest the policy refuses; a project invitation never changes anyone's home organization. A refused invitation stays outstanding.
       security:
         - {}
         - invitationSignup: []
@@ -887,6 +887,14 @@ paths:
         - name: invitation-accept-ip
           quota: 30
           windowSeconds: 600
+        - name: dashboard-proof-person
+          quota: 10
+          windowSeconds: 600
+          condition: signed_in_reauthentication_proof
+        - name: dashboard-proof-ip
+          quota: 30
+          windowSeconds: 600
+          condition: signed_in_reauthentication_proof
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
@@ -8765,7 +8773,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getScreenScreenshot
-      description: Returns the current ready still WebP for the named screen. Optional capture_id must match that ready slot. A named capture_id that expired with no upload is screenshot_unavailable. A named capture_id replaced by a later request is resource_conflict. Image bytes are never a signed URL or object key. Range is not accepted. Screen messages do not count toward the hourly agent requests of the organization. The ETag is the strong SHA-256 of the stored WebP. A dashboard session response is private, no-cache, and a dashboard If-None-Match that matches the current image, checked after the screen and capture resolve in the session's project, returns 304 without opening the stored bytes. A project bearer response stays private, no-store.
+      description: Returns the current ready still WebP for the named screen. Optional capture_id must match that ready slot. A named capture_id that expired with no upload is screenshot_unavailable. A named capture_id replaced by a later request is resource_conflict. Image bytes are never a signed URL or object key. Range is not accepted. Screen messages do not count toward the hourly agent requests of the organization. The ETag is the strong SHA-256 of the stored WebP. The response is private, no-cache, and an If-None-Match that matches the current image (a strong or weak form, one of a comma list, or *), checked after the screen and capture resolve in the caller's project, returns 304 without opening the stored bytes.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8777,7 +8785,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Strong ETag of a screenshot this route returned. Honored for a dashboard session.
+          description: ETag of a screenshot this route returned.
       responses:
         '200':
           description: Current ready still WebP.
@@ -8811,7 +8819,7 @@ paths:
                 type: string
                 format: binary
         '304':
-          description: Dashboard session only. The current image's ETag matches If-None-Match. No body is produced and object storage is not read. The capture headers name the current capture, which can differ from the stored response's when a later capture encoded to the same bytes.
+          description: The current image's ETag matches If-None-Match. No body is produced and object storage is not read. The capture headers name the current capture, which can differ from the stored response's when a later capture encoded to the same bytes.
           headers:
             ETag:
               schema:
@@ -23541,7 +23549,7 @@ paths:
     put:
       operationId: dashboardOrganizationsSetSSOPolicy
       description: >-
-        A designated admin turns Require SSO on or off and names the break-glass admins. required true refuses password and passkey sign-in for the organization's verified domains (sso_required) and needs a verified domain and ready_to_require on the connection, otherwise resource_conflict; it bumps policy_revision. required false does not lift the requirement at once: it schedules the removal for 72 hours after the request (enforcement_ends_at) and emails every admin, and DELETE .../sso-policy/removal cancels it. break_glass_user_ids names at most 2 designated admins who hold a passkey, otherwise invalid_request; they keep passkey sign-in while SSO is required, and each such sign-in is audited. If-Match carries policy_revision and is required; a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind sso_policy_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Returns the policy with its ETag. People only; agents and bearer credentials have no route. Setting required true is single sign-on, which the Premium plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). required false is always accepted, and Require SSO that is on stays enforced until it is turned off.
+        A designated admin turns Require SSO on or off and names the break-glass admins. required true refuses password and passkey sign-in for the organization's verified domains (sso_required) and needs a verified domain and ready_to_require on the connection, otherwise resource_conflict; it bumps policy_revision. required false does not lift the requirement at once: it schedules the removal for 72 hours after the request (enforcement_ends_at) and emails every admin, and DELETE .../sso-policy/removal cancels it. break_glass_user_ids names at most 2 designated admins who hold a passkey, otherwise invalid_request, and at least 1 when required is true, so an identity-provider outage never locks the whole domain out; they keep passkey sign-in while SSO is required, and each such sign-in is audited. If-Match carries policy_revision and is required; a stale value is revision_conflict with current_revision. proof is required: a fresh passkey or password proof bound to a reauthentication of kind sso_policy_change with the organization id as subject_id, or {type: sso} from a session that signed in through single sign-on at most 10 minutes ago. Returns the policy with its ETag. People only; agents and bearer credentials have no route. Setting required true is single sign-on, which the Premium plan includes; an organization whose plan lacks it is refused with feature_not_in_plan (402). required false is always accepted, and Require SSO that is on stays enforced until it is turned off.
       security:
         - dashboardSession: []
       parameters:
@@ -29023,7 +29031,7 @@ components:
   headers:
     ProjectBytesCacheControl:
       description: >-
-        Set by the credential. A project bearer gets private, no-store, and nothing is stored. A dashboard session gets private, no-cache: the bytes behind a media ID, a capture or a review never change, so the browser keeps one copy and revalidates it with If-None-Match on every use. Authorization runs before the ETag is compared, so a revalidation never reaches bytes the session cannot read, and a 304 carries no body and records no egress. Problems are no-store.
+        Set by the credential. A project bearer gets private, no-store, and nothing is stored, except on a screenshot, which a project bearer revalidates as a dashboard session does. A dashboard session gets private, no-cache: the bytes behind a media ID, a capture or a review never change, so the browser keeps one copy and revalidates it with If-None-Match on every use. Authorization runs before the ETag is compared, so a revalidation never reaches bytes the session cannot read, and a 304 carries no body and records no egress. Problems are no-store.
       schema: {type: string, enum: ["private, no-store", "private, no-cache"]}
     RateLimitPolicy:
       description: >-
@@ -31390,7 +31398,7 @@ components:
       required: [required, break_glass_user_ids, proof]
       properties:
         required: {type: boolean, description: "true requires single sign-on. false schedules the removal for 72 hours after the request and emails every admin."}
-        break_glass_user_ids: {type: array, maxItems: 2, items: {type: string, minLength: 1, maxLength: 200}, description: "At most 2 designated admins who hold a passkey. The list replaces the stored one."}
+        break_glass_user_ids: {type: array, maxItems: 2, items: {type: string, minLength: 1, maxLength: 200}, description: "At most 2 designated admins who hold a passkey, and at least 1 when required is true. The list replaces the stored one."}
         proof: {$ref: "#/components/schemas/DashboardProof"}
     IdentityProvider:
       type: object
